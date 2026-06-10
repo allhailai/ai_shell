@@ -1,0 +1,80 @@
+/* ── Utility Classes ──────────────────────────────────────────────────
+   Minimal set of utilities for common patterns.
+   Plugins may use these but should not depend on them exclusively.
+   ──────────────────────────────────────────────────────────────────── */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.scrollable {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.scrollable-y {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.grid-stack {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Custom scrollbar for dark theme */
+.scrollable::-webkit-scrollbar,
+.scrollable-y::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollable::-webkit-scrollbar-track,
+.scrollable-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollable::-webkit-scrollbar-thumb,
+.scrollable-y::-webkit-scrollbar-thumb {
+  background: var(--color-border-secondary);
+  border-radius: var(--radius-full);
+}
+
+.scrollable::-webkit-scrollbar-thumb:hover,
+.scrollable-y::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}

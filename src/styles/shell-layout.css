@@ -1,0 +1,73 @@
+/* ── Shell Layout (CSS Grid) ──────────────────────────────────────────
+   5-area grid: topbar, left nav, canvas, bottom panel, right panel.
+   Layout state is driven by data-* attributes on .shell.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shell {
+  display: grid;
+  grid-template-rows: var(--topbar-height) minmax(0, 1fr);
+  grid-template-columns: var(--left-nav-width) minmax(0, 1fr);
+  grid-template-areas:
+    "topbar  topbar"
+    "leftnav canvas";
+  height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* ── Left nav collapsed ── */
+
+.shell[data-nav="collapsed"] {
+  grid-template-columns: var(--left-nav-collapsed) minmax(0, 1fr);
+}
+
+/* ── Right panel open ── */
+
+.shell[data-right-panel] {
+  grid-template-columns: var(--left-nav-width) minmax(0, 1fr) var(--right-panel-width);
+  grid-template-areas:
+    "topbar  topbar  topbar"
+    "leftnav canvas  rightpanel";
+}
+
+.shell[data-nav="collapsed"][data-right-panel] {
+  grid-template-columns: var(--left-nav-collapsed) minmax(0, 1fr) var(--right-panel-width);
+}
+
+/* ── Canvas Area (contains main content + bottom panel) ── */
+
+.shell-canvas-area {
+  grid-area: canvas;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shell-canvas-area[data-bottom-panel] {
+  grid-template-rows: minmax(0, 1fr) var(--bottom-panel-height);
+}
+
+/* ── Main Canvas ── */
+
+.shell-canvas {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* Canvas scrollbar */
+.shell-canvas::-webkit-scrollbar {
+  width: 6px;
+}
+.shell-canvas::-webkit-scrollbar-track {
+  background: transparent;
+}
+.shell-canvas::-webkit-scrollbar-thumb {
+  background: var(--color-border-secondary);
+  border-radius: var(--radius-full);
+}
