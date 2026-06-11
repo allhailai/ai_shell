@@ -12,3 +12,4 @@
 
 /* ── App styles ── */
 @import "./apps/hello-world/hello-world.css";
+@import "./apps/arcade/arcade.css";

@@ -9,8 +9,10 @@
 
 import type { AppManifest } from "../types/app";
 import { helloWorldApp } from "./hello-world/manifest";
+import { arcadeApp } from "./arcade/manifest";
 
 /** All registered applications. Add new app imports here. */
 export const apps: AppManifest[] = [
   helloWorldApp,
+  arcadeApp,
 ];
