@@ -1,31 +1,22 @@
-import { useMemo } from "react";
 import { useShellStore } from "../shell/store";
 import { usePanelResize } from "../shell/hooks";
 import { getPanelParams } from "../shell/urlState";
-import type { PluginManifest, PanelRegistration } from "../types/plugin";
+import type { AppManifest } from "../types/app";
 
 /**
  * Bottom panel surface.
  * Same pattern as RightPanel but with vertical resize.
  */
-export function BottomPanel({ plugins }: { plugins: PluginManifest[] }) {
+export function BottomPanel({ activeApp }: { activeApp: AppManifest | null }) {
   const panelId = useShellStore((s) => s.bottomPanelId);
   const height = useShellStore((s) => s.bottomPanelHeight);
   const setHeight = useShellStore((s) => s.setBottomPanelHeight);
   const closePanel = useShellStore((s) => s.closeBottomPanel);
 
-  // Find the panel registration across all plugins
-  const registration = useMemo((): PanelRegistration | null => {
-    if (!panelId) return null;
-    for (const plugin of plugins) {
-      const panel = plugin.panels?.bottom?.find((p) => p.id === panelId);
-      if (panel) return panel;
-    }
-    return null;
-  }, [panelId, plugins]);
+  const registration = activeApp?.bottomPanel ?? null;
 
   const minSize = registration?.minSize ?? 120;
-  const maxSize = registration?.maxSize ?? 500;
+  const maxSize = registration?.maxSize ?? Math.round(window.innerHeight * 0.8);
 
   const resizeHandlers = usePanelResize({
     axis: "vertical",

@@ -1,32 +1,22 @@
-import { useMemo } from "react";
 import { useShellStore } from "../shell/store";
 import { usePanelResize } from "../shell/hooks";
 import { getPanelParams } from "../shell/urlState";
-import type { PluginManifest, PanelRegistration } from "../types/plugin";
+import type { AppManifest } from "../types/app";
 
 /**
  * Right panel surface.
- * Looks up the active panel ID from the store, finds the matching
- * PanelRegistration from the plugin registry, and renders it.
+ * Renders the active app's right panel registration if the panel is open.
  */
-export function RightPanel({ plugins }: { plugins: PluginManifest[] }) {
+export function RightPanel({ activeApp }: { activeApp: AppManifest | null }) {
   const panelId = useShellStore((s) => s.rightPanelId);
   const width = useShellStore((s) => s.rightPanelWidth);
   const setWidth = useShellStore((s) => s.setRightPanelWidth);
   const closePanel = useShellStore((s) => s.closeRightPanel);
 
-  // Find the panel registration across all plugins
-  const registration = useMemo((): PanelRegistration | null => {
-    if (!panelId) return null;
-    for (const plugin of plugins) {
-      const panel = plugin.panels?.right?.find((p) => p.id === panelId);
-      if (panel) return panel;
-    }
-    return null;
-  }, [panelId, plugins]);
+  const registration = activeApp?.rightPanel ?? null;
 
   const minSize = registration?.minSize ?? 280;
-  const maxSize = registration?.maxSize ?? 600;
+  const maxSize = registration?.maxSize ?? Math.round(window.innerWidth * 0.6);
 
   const resizeHandlers = usePanelResize({
     axis: "horizontal",

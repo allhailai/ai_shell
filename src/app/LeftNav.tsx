@@ -1,136 +1,129 @@
-import type { PluginManifest } from "../types/plugin";
+import type { AppManifest } from "../types/app";
 import { useShellStore } from "../shell/store";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback } from "react";
 
 /**
  * Left navigation panel.
- * Renders plugin pages as nav items, grouped or flat based on manifest.
+ *
+ * Three modes:
+ * 1. No active app → shows a list of available apps (launcher nav)
+ * 2. Active app with `leftNav` → renders the app's left nav component
+ * 3. Active app without `leftNav` → shows only a home button
  */
-export function LeftNav({ plugins }: { plugins: PluginManifest[] }) {
-  const activePluginId = useShellStore((s) => s.activePluginId);
+export function LeftNav({
+  apps,
+  activeApp,
+}: {
+  apps: AppManifest[];
+  activeApp: AppManifest | null;
+}) {
   const collapsed = useShellStore((s) => s.leftNavCollapsed);
 
-  // Group plugins: ungrouped first, then grouped
-  const { ungrouped, groups } = useMemo(() => {
-    const ungrouped: PluginManifest[] = [];
-    const groupMap = new Map<string, PluginManifest[]>();
+  if (!activeApp) {
+    // Mode 1: Launcher nav — show app list
+    return (
+      <nav className="left-nav" aria-label="Application navigation">
+        <div className="left-nav-content scrollable-y">
+          {apps.map((app) => (
+            <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+          ))}
+        </div>
+      </nav>
+    );
+  }
 
-    for (const plugin of plugins) {
-      if (plugin.group) {
-        const list = groupMap.get(plugin.group) ?? [];
-        list.push(plugin);
-        groupMap.set(plugin.group, list);
-      } else {
-        ungrouped.push(plugin);
-      }
-    }
+  if (activeApp.leftNav) {
+    // Mode 2: App-provided left nav
+    const AppNav = activeApp.leftNav;
+    return (
+      <nav className="left-nav" aria-label={`${activeApp.name} navigation`}>
+        <div className="left-nav-content scrollable-y">
+          {/* Home button at the top */}
+          <HomeNavItem collapsed={collapsed} />
+          <div className="nav-divider" />
+          <AppNav />
+        </div>
+      </nav>
+    );
+  }
 
-    // Sort within groups by order
-    const groups = [...groupMap.entries()].map(([name, items]) => ({
-      name,
-      items: items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    }));
-
-    return { ungrouped: ungrouped.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), groups };
-  }, [plugins]);
-
+  // Mode 3: No app nav — just a home button
   return (
-    <nav className="left-nav" aria-label="Module navigation">
+    <nav className="left-nav" aria-label="Navigation">
       <div className="left-nav-content scrollable-y">
-        {/* Ungrouped items */}
-        {ungrouped.map((plugin) => (
-          <NavItem
-            key={plugin.id}
-            plugin={plugin}
-            active={activePluginId === plugin.id}
-            collapsed={collapsed}
-          />
-        ))}
-
-        {/* Grouped items */}
-        {groups.map((group) => (
-          <NavGroup key={group.name} name={group.name} collapsed={collapsed}>
-            {group.items.map((plugin) => (
-              <NavItem
-                key={plugin.id}
-                plugin={plugin}
-                active={activePluginId === plugin.id}
-                collapsed={collapsed}
-              />
-            ))}
-          </NavGroup>
-        ))}
+        <HomeNavItem collapsed={collapsed} />
       </div>
     </nav>
   );
 }
 
-function NavGroup({
-  name,
-  collapsed,
-  children,
-}: {
-  name: string;
-  collapsed: boolean;
-  children: ReactNode;
-}) {
-  if (collapsed) {
-    // In collapsed mode, don't show group labels — just render children
-    return <>{children}</>;
-  }
-
-  return (
-    <div className="nav-group">
-      <div className="nav-group-label">
-        <span>{name}</span>
-      </div>
-      <div className="nav-group-items">{children}</div>
-    </div>
-  );
-}
-
-function NavItem({
-  plugin,
-  active,
+/**
+ * Nav item that launches an app from the landing nav.
+ */
+function AppNavItem({
+  app,
   collapsed,
 }: {
-  plugin: PluginManifest;
-  active: boolean;
+  app: AppManifest;
   collapsed: boolean;
 }) {
-  const setActivePlugin = useShellStore((s) => s.setActivePlugin);
-
+  const setActiveApp = useShellStore((s) => s.setActiveApp);
   const handleClick = useCallback(() => {
-    setActivePlugin(plugin.id);
-  }, [plugin.id, setActivePlugin]);
+    setActiveApp(app.id);
+  }, [app.id, setActiveApp]);
 
-  const Icon = plugin.icon;
+  const Icon = app.icon;
 
   return (
     <button
-      className={`nav-item${active ? " active" : ""}`}
+      className="nav-item"
       onClick={handleClick}
-      title={collapsed ? plugin.name : undefined}
-      aria-current={active ? "page" : undefined}
+      title={collapsed ? app.name : undefined}
       type="button"
     >
       <span className="nav-item-icon">
-        {Icon ? (
-          <Icon size={18} />
-        ) : (
-          <DefaultPluginIcon />
-        )}
+        {Icon ? <Icon size={18} /> : <DefaultAppIcon />}
       </span>
-      <span className="nav-item-label">{plugin.name}</span>
+      <span className="nav-item-label">{app.name}</span>
     </button>
   );
 }
 
-function DefaultPluginIcon() {
+/**
+ * Home button that navigates back to the landing page.
+ */
+function HomeNavItem({ collapsed }: { collapsed: boolean }) {
+  const goHome = useShellStore((s) => s.goHome);
+
+  return (
+    <button
+      className="nav-item nav-item-home"
+      onClick={goHome}
+      title={collapsed ? "Home" : undefined}
+      type="button"
+    >
+      <span className="nav-item-icon">
+        <HomeIcon />
+      </span>
+      <span className="nav-item-label">Home</span>
+    </button>
+  );
+}
+
+function DefaultAppIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="3" />
       <path d="M9 12h6M12 9v6" />
+    </svg>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   );
 }

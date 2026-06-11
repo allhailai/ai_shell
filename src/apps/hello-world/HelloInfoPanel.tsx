@@ -6,7 +6,7 @@ import { commandBus } from "../../shell/commandBus";
  * Demonstrates reading the shell store from a panel component.
  */
 export function HelloInfoPanel(_props: { params?: Record<string, string> }) {
-  const activePluginId = useShellStore((s) => s.activePluginId);
+  const activeAppId = useShellStore((s) => s.activeAppId);
   const leftNavCollapsed = useShellStore((s) => s.leftNavCollapsed);
   const rightPanelWidth = useShellStore((s) => s.rightPanelWidth);
   const bottomPanelId = useShellStore((s) => s.bottomPanelId);
@@ -26,7 +26,7 @@ export function HelloInfoPanel(_props: { params?: Record<string, string> }) {
       <div className="hello-info-section">
         <h4 className="hello-info-section-title">Layout State</h4>
         <div className="hello-info-grid">
-          <InfoRow label="Active Plugin" value={activePluginId ?? "none"} />
+          <InfoRow label="Active App" value={activeAppId ?? "none"} />
           <InfoRow label="Left Nav" value={leftNavCollapsed ? "collapsed" : "expanded"} />
           <InfoRow label="Right Panel Width" value={`${Math.round(rightPanelWidth)}px`} />
           <InfoRow label="Bottom Panel" value={bottomPanelId ?? "closed"} />

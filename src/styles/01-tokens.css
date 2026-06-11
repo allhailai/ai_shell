@@ -111,10 +111,10 @@
   --left-nav-collapsed:   56px;
   --right-panel-width:    380px;
   --right-panel-min:      280px;
-  --right-panel-max:      600px;
+  --right-panel-max:      60%; /* computed dynamically in JS */
   --bottom-panel-height:  240px;
   --bottom-panel-min:     120px;
-  --bottom-panel-max:     500px;
+  --bottom-panel-max:     80%; /* computed dynamically in JS */
 
   /* ── Glass ────────────────────────────────────────────────────────── */
   --glass-bg:        hsla(228, 15%, 10%, 0.8);

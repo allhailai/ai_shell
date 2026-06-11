@@ -2,7 +2,7 @@ import { useShellStore } from "../../shell/store";
 import { useCallback } from "react";
 
 /**
- * About sub-page — demonstrates plugin sub-routing.
+ * About sub-page — demonstrates app sub-routing.
  */
 export function AboutPage() {
   const navigateBack = useCallback(() => {
@@ -10,7 +10,7 @@ export function AboutPage() {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
 
-  const activePluginId = useShellStore((s) => s.activePluginId);
+  const activeAppId = useShellStore((s) => s.activeAppId);
 
   return (
     <div className="hello-page">
@@ -22,10 +22,10 @@ export function AboutPage() {
             <line x1="12" y1="8" x2="12.01" y2="8" />
           </svg>
         </div>
-        <h1 className="hello-title">About This Plugin</h1>
+        <h1 className="hello-title">About This App</h1>
         <p className="hello-description">
-          This is a sub-page of the Hello World plugin, rendered at <code>/hello/about</code>.
-          It demonstrates how plugins own their own sub-routes within the chassis.
+          This is a sub-page of the Hello World app, rendered at <code>/hello/about</code>.
+          It demonstrates how apps own their own sub-routes within the chassis.
         </p>
       </div>
 
@@ -33,8 +33,8 @@ export function AboutPage() {
         <h2 className="hello-section-title">Current State</h2>
         <div className="hello-state-grid">
           <div className="hello-state-item">
-            <span className="hello-state-label">Active Plugin</span>
-            <span className="hello-state-value">{activePluginId ?? "—"}</span>
+            <span className="hello-state-label">Active App</span>
+            <span className="hello-state-value">{activeAppId ?? "—"}</span>
           </div>
           <div className="hello-state-item">
             <span className="hello-state-label">Current Path</span>

@@ -1,30 +1,33 @@
 import { useShellStore } from "../shell/store";
-import type { PluginManifest } from "../types/plugin";
+import type { AppManifest } from "../types/app";
 
 /**
- * Top bar with brand, breadcrumb, and action buttons.
+ * Top bar with brand, breadcrumb, app header items, and action buttons.
  */
-export function Topbar({ plugins }: { plugins: PluginManifest[] }) {
-  const activePluginId = useShellStore((s) => s.activePluginId);
+export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
   const collapsed = useShellStore((s) => s.leftNavCollapsed);
   const toggleLeftNav = useShellStore((s) => s.toggleLeftNav);
+  const goHome = useShellStore((s) => s.goHome);
   const rightPanelId = useShellStore((s) => s.rightPanelId);
   const bottomPanelId = useShellStore((s) => s.bottomPanelId);
   const closeRightPanel = useShellStore((s) => s.closeRightPanel);
   const closeBottomPanel = useShellStore((s) => s.closeBottomPanel);
 
-  const activePlugin = plugins.find((p) => p.id === activePluginId);
+  const hasRightPanel = !!activeApp?.rightPanel;
+  const hasBottomPanel = !!activeApp?.bottomPanel;
 
-  // Collect all panels across plugins for toggle buttons
-  const allRightPanels = plugins.flatMap((p) => p.panels?.right ?? []);
-  const allBottomPanels = plugins.flatMap((p) => p.panels?.bottom ?? []);
-  const hasRightPanels = allRightPanels.length > 0;
-  const hasBottomPanels = allBottomPanels.length > 0;
+  // Render app-provided header items
+  const AppHeaderItems = activeApp?.headerItems;
 
   return (
     <header className="shell-topbar">
-      {/* Brand */}
-      <div className="topbar-brand">
+      {/* Brand — clickable to go home */}
+      <button
+        className="topbar-brand"
+        onClick={goHome}
+        type="button"
+        title="Back to applications"
+      >
         <div className="topbar-logo">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -33,7 +36,7 @@ export function Topbar({ plugins }: { plugins: PluginManifest[] }) {
           </svg>
         </div>
         <span className="topbar-title">AIShell</span>
-      </div>
+      </button>
 
       {/* Nav toggle */}
       <button
@@ -62,21 +65,28 @@ export function Topbar({ plugins }: { plugins: PluginManifest[] }) {
 
       {/* Breadcrumb */}
       <div className="topbar-breadcrumb">
-        {activePlugin ? (
+        {activeApp ? (
           <>
-            <span className="topbar-breadcrumb-active">{activePlugin.name}</span>
+            <span className="topbar-breadcrumb-active">{activeApp.name}</span>
           </>
         ) : (
-          <span>Home</span>
+          <span>Applications</span>
         )}
       </div>
 
+      {/* App header items (injected by active app) */}
+      {AppHeaderItems && (
+        <div className="topbar-app-items">
+          <AppHeaderItems />
+        </div>
+      )}
+
       {/* Actions */}
       <div className="topbar-actions">
-        {hasBottomPanels && (
+        {hasBottomPanel && (
           <button
             className={`topbar-action-button${bottomPanelId ? " active" : ""}`}
-            onClick={() => bottomPanelId ? closeBottomPanel() : useShellStore.getState().openBottomPanel(allBottomPanels[0].id)}
+            onClick={() => bottomPanelId ? closeBottomPanel() : useShellStore.getState().openBottomPanel(activeApp!.bottomPanel!.id)}
             aria-pressed={!!bottomPanelId}
             title={bottomPanelId ? "Close bottom panel" : "Open bottom panel"}
             type="button"
@@ -89,10 +99,10 @@ export function Topbar({ plugins }: { plugins: PluginManifest[] }) {
           </button>
         )}
 
-        {hasRightPanels && (
+        {hasRightPanel && (
           <button
             className={`topbar-action-button${rightPanelId ? " active" : ""}`}
-            onClick={() => rightPanelId ? closeRightPanel() : useShellStore.getState().openRightPanel(allRightPanels[0].id)}
+            onClick={() => rightPanelId ? closeRightPanel() : useShellStore.getState().openRightPanel(activeApp!.rightPanel!.id)}
             aria-pressed={!!rightPanelId}
             title={rightPanelId ? "Close right panel" : "Open right panel"}
             type="button"

@@ -1,6 +1,6 @@
 /* ── Shell React Hooks ────────────────────────────────────────────────
-   Convenience hooks for plugins to interact with the shell.
-   Import from "../../shell/hooks" in plugin code.
+   Convenience hooks for apps to interact with the shell.
+   Import from "../../shell/hooks" in app code.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

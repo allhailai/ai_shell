@@ -1,7 +1,7 @@
 /* ── Shell Store (Tier 1 Communication) ──────────────────────────────
    Use the Shell Store for STATE that UI components subscribe to and
    re-render on. This includes layout geometry, which panels are open,
-   active module, and theme.
+   active application, and theme.
 
    WHEN TO USE TIER 1:
    - "What is the current state of the UI?" → Tier 1
@@ -16,6 +16,29 @@
 
 import { create } from "zustand";
 
+/* ── User Preferences (localStorage) ─────────────────────────────── */
+
+const PREFS_KEY = "aishell:user-prefs";
+
+interface UserPrefs {
+  pinnedApps: string[];
+  hiddenApps: string[];
+}
+
+function loadPrefs(): UserPrefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (raw) return JSON.parse(raw) as UserPrefs;
+  } catch { /* ignore parse errors */ }
+  return { pinnedApps: [], hiddenApps: [] };
+}
+
+function savePrefs(prefs: UserPrefs): void {
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}
+
+/* ── Store Shape ─────────────────────────────────────────────────── */
+
 export interface ShellState {
   // ── Layout ──
   leftNavCollapsed: boolean;
@@ -25,10 +48,14 @@ export interface ShellState {
   bottomPanelHeight: number;
 
   // ── Navigation ──
-  activePluginId: string | null;
+  activeAppId: string | null;
 
   // ── Theme ──
   theme: "dark" | "light";
+
+  // ── User Preferences (pinned / hidden apps) ──
+  pinnedApps: string[];
+  hiddenApps: string[];
 
   // ── Actions ──
   setLeftNavCollapsed: (collapsed: boolean) => void;
@@ -41,40 +68,82 @@ export interface ShellState {
   closeBottomPanel: () => void;
   toggleBottomPanel: (panelId: string) => void;
   setBottomPanelHeight: (height: number) => void;
-  setActivePlugin: (pluginId: string | null) => void;
+  setActiveApp: (appId: string | null) => void;
+  goHome: () => void;
   toggleTheme: () => void;
+
+  // ── Preference actions ──
+  togglePinApp: (appId: string) => void;
+  toggleHideApp: (appId: string) => void;
 }
 
-export const useShellStore = create<ShellState>((set) => ({
-  // ── Initial state ──
-  leftNavCollapsed: false,
-  rightPanelId: null,
-  rightPanelWidth: 380,
-  bottomPanelId: null,
-  bottomPanelHeight: 240,
-  activePluginId: null,
-  theme: "dark",
+export const useShellStore = create<ShellState>((set, get) => {
+  const prefs = loadPrefs();
 
-  // ── Layout actions ──
-  setLeftNavCollapsed: (collapsed) => set({ leftNavCollapsed: collapsed }),
-  toggleLeftNav: () => set((s) => ({ leftNavCollapsed: !s.leftNavCollapsed })),
+  return {
+    // ── Initial state ──
+    leftNavCollapsed: false,
+    rightPanelId: null,
+    rightPanelWidth: 380,
+    bottomPanelId: null,
+    bottomPanelHeight: 240,
+    activeAppId: null,
+    theme: "dark",
+    pinnedApps: prefs.pinnedApps,
+    hiddenApps: prefs.hiddenApps,
 
-  openRightPanel: (panelId) => set({ rightPanelId: panelId }),
-  closeRightPanel: () => set({ rightPanelId: null }),
-  toggleRightPanel: (panelId) =>
-    set((s) => ({ rightPanelId: s.rightPanelId === panelId ? null : panelId })),
-  setRightPanelWidth: (width) => set({ rightPanelWidth: width }),
+    // ── Layout actions ──
+    setLeftNavCollapsed: (collapsed) => set({ leftNavCollapsed: collapsed }),
+    toggleLeftNav: () => set((s) => ({ leftNavCollapsed: !s.leftNavCollapsed })),
 
-  openBottomPanel: (panelId) => set({ bottomPanelId: panelId }),
-  closeBottomPanel: () => set({ bottomPanelId: null }),
-  toggleBottomPanel: (panelId) =>
-    set((s) => ({ bottomPanelId: s.bottomPanelId === panelId ? null : panelId })),
-  setBottomPanelHeight: (height) => set({ bottomPanelHeight: height }),
+    openRightPanel: (panelId) => set({ rightPanelId: panelId }),
+    closeRightPanel: () => set({ rightPanelId: null }),
+    toggleRightPanel: (panelId) =>
+      set((s) => ({ rightPanelId: s.rightPanelId === panelId ? null : panelId })),
+    setRightPanelWidth: (width) => set({ rightPanelWidth: width }),
 
-  // ── Navigation ──
-  setActivePlugin: (pluginId) => set({ activePluginId: pluginId }),
+    openBottomPanel: (panelId) => set({ bottomPanelId: panelId }),
+    closeBottomPanel: () => set({ bottomPanelId: null }),
+    toggleBottomPanel: (panelId) =>
+      set((s) => ({ bottomPanelId: s.bottomPanelId === panelId ? null : panelId })),
+    setBottomPanelHeight: (height) => set({ bottomPanelHeight: height }),
 
-  // ── Theme ──
-  toggleTheme: () =>
-    set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
-}));
+    // ── Navigation ──
+    setActiveApp: (appId) => set({ activeAppId: appId }),
+    goHome: () => set({
+      activeAppId: null,
+      rightPanelId: null,
+      bottomPanelId: null,
+    }),
+
+    // ── Theme ──
+    toggleTheme: () =>
+      set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
+
+    // ── Preference actions ──
+    togglePinApp: (appId) => {
+      const s = get();
+      const isPinned = s.pinnedApps.includes(appId);
+      const pinnedApps = isPinned
+        ? s.pinnedApps.filter((id) => id !== appId)
+        : [...s.pinnedApps, appId];
+      savePrefs({ pinnedApps, hiddenApps: s.hiddenApps });
+      set({ pinnedApps });
+    },
+
+    toggleHideApp: (appId) => {
+      const s = get();
+      const isHidden = s.hiddenApps.includes(appId);
+      const hiddenApps = isHidden
+        ? s.hiddenApps.filter((id) => id !== appId)
+        : [...s.hiddenApps, appId];
+      // If hiding, also unpin
+      let pinnedApps = s.pinnedApps;
+      if (!isHidden) {
+        pinnedApps = pinnedApps.filter((id) => id !== appId);
+      }
+      savePrefs({ pinnedApps, hiddenApps });
+      set({ pinnedApps, hiddenApps });
+    },
+  };
+});

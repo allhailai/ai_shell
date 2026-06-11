@@ -1,9 +1,8 @@
 import { useRightPanel, useBottomPanel, useCommandBus } from "../../shell/hooks";
-import { useShellStore } from "../../shell/store";
 import { useCallback, useState } from "react";
 
 /**
- * Hello World demo plugin — main page.
+ * Hello World demo app — main page.
  * Demonstrates: panel toggles, command bus invocation, sub-route linking, URL state.
  */
 export function HelloPage() {
@@ -24,7 +23,6 @@ export function HelloPage() {
   }, [bus, greetName]);
 
   const navigateToAbout = useCallback(() => {
-    useShellStore.getState().setActivePlugin("hello");
     // Update path for sub-route
     window.history.pushState(null, "", "/hello/about" + window.location.search);
     // Force re-render by dispatching popstate
@@ -40,9 +38,9 @@ export function HelloPage() {
             <line x1="12" y1="2" x2="12" y2="12" />
           </svg>
         </div>
-        <h1 className="hello-title">Hello World Plugin</h1>
+        <h1 className="hello-title">Hello World App</h1>
         <p className="hello-description">
-          This demo plugin exercises every AIShell chassis capability: canvas pages,
+          This demo app exercises every AIShell chassis capability: canvas pages,
           sub-routes, right panel, bottom panel, and the command bus.
         </p>
       </div>
@@ -109,7 +107,7 @@ export function HelloPage() {
       <div className="hello-section">
         <h2 className="hello-section-title">Sub-Route Navigation</h2>
         <p className="hello-section-description">
-          Navigate to the About sub-page to see plugin sub-routing in action.
+          Navigate to the About sub-page to see app sub-routing in action.
         </p>
         <button className="hello-button" onClick={navigateToAbout} type="button">
           Go to About Page →

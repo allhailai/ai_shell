@@ -3,14 +3,14 @@
    The URL is the source of truth on initial load.
 
    URL schema:
-     /:pluginId                    → active plugin, default route
-     /:pluginId/:subRoute*         → plugin sub-routes (splat)
-     ?rp=<panelId>                 → right panel open
-     ?bp=<panelId>                 → bottom panel open
-     ?rp.<key>=<value>             → right panel scoped state
-     ?bp.<key>=<value>             → bottom panel scoped state
-     ?rpw=<px>                     → right panel width
-     ?bph=<px>                     → bottom panel height
+     /:appId                      → active application, default view
+     /:appId/:subRoute*           → app sub-routes (splat)
+     ?rp=<panelId>                → right panel open
+     ?bp=<panelId>                → bottom panel open
+     ?rp.<key>=<value>            → right panel scoped state
+     ?bp.<key>=<value>            → bottom panel scoped state
+     ?rpw=<px>                    → right panel width
+     ?bph=<px>                    → bottom panel height
      &nav=collapsed               → left nav collapsed
    ──────────────────────────────────────────────────────────────────── */
 
@@ -22,11 +22,11 @@ import { useShellStore, type ShellState } from "./store";
 export function hydrateStoreFromUrl(): void {
   const params = new URLSearchParams(window.location.search);
   const pathSegments = window.location.pathname.split("/").filter(Boolean);
-  const pluginId = pathSegments[0] ?? null;
+  const appId = pathSegments[0] ?? null;
 
   const store = useShellStore.getState();
 
-  if (pluginId) store.setActivePlugin(pluginId);
+  if (appId) store.setActiveApp(appId);
 
   const rp = params.get("rp");
   if (rp) store.openRightPanel(rp);
@@ -53,7 +53,7 @@ export function hydrateStoreFromUrl(): void {
 
 // ── Store → URL (reactive sync) ──
 
-/** Build query string from shell state. Preserves plugin-scoped params. */
+/** Build query string from shell state. Preserves app-scoped params. */
 function buildSearchParams(state: ShellState): URLSearchParams {
   const params = new URLSearchParams(window.location.search);
 
@@ -87,17 +87,17 @@ export function startUrlSync(): () => void {
   const unsubStore = useShellStore.subscribe((state, prevState) => {
     if (isInternalUpdate) return;
 
-    // Determine if this is a "navigation" (plugin change) or a "layout adjustment"
-    const isNavigation = state.activePluginId !== prevState.activePluginId;
+    // Determine if this is a "navigation" (app change) or a "layout adjustment"
+    const isNavigation = state.activeAppId !== prevState.activeAppId;
     const search = buildSearchParams(state);
     const searchStr = search.toString();
     const query = searchStr ? `?${searchStr}` : "";
 
-    // Build the path from the active plugin
+    // Build the path from the active app
     const currentPath = window.location.pathname;
     let path = currentPath;
     if (isNavigation) {
-      path = state.activePluginId ? `/${state.activePluginId}` : "/";
+      path = state.activeAppId ? `/${state.activeAppId}` : "/";
     }
 
     const newUrl = `${path}${query}`;
@@ -127,7 +127,7 @@ export function startUrlSync(): () => void {
   };
 }
 
-// ── Plugin panel params helper ──
+// ── App panel params helper ──
 
 /**
  * Extract namespaced params for a panel from the current URL.

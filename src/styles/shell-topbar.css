@@ -23,7 +23,16 @@
   padding-right: var(--space-4);
   border-right: 1px solid var(--color-border-primary);
   min-width: calc(var(--left-nav-width) - var(--space-4) * 2);
-  transition: min-width var(--transition-normal);
+  transition: min-width var(--transition-normal), opacity var(--transition-fast);
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+}
+
+.topbar-brand:hover {
+  opacity: 0.8;
 }
 
 .shell[data-nav="collapsed"] .topbar-brand {
@@ -99,6 +108,15 @@
 .topbar-breadcrumb-active {
   color: var(--color-text-primary);
   font-weight: var(--weight-medium);
+}
+
+/* ── App Header Items (injected by active app) ── */
+
+.topbar-app-items {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 /* ── Actions ── */

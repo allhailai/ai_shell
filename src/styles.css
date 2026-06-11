@@ -1,5 +1,5 @@
 /* ── AIShell CSS Barrel ───────────────────────────────────────────────
-   Import order matters: reset → tokens → utilities → shell → plugins
+   Import order matters: reset → tokens → utilities → shell → apps
    ──────────────────────────────────────────────────────────────────── */
 
 @import "./styles/00-reset.css";
@@ -8,6 +8,7 @@
 @import "./styles/shell-layout.css";
 @import "./styles/shell-topbar.css";
 @import "./styles/shell-panels.css";
+@import "./styles/landing-page.css";
 
-/* ── Plugin styles ── */
-@import "./plugins/hello-world/hello-world.css";
+/* ── App styles ── */
+@import "./apps/hello-world/hello-world.css";

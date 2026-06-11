@@ -1,6 +1,5 @@
 import { useMemo, type ReactNode } from "react";
 import { useShellStore } from "../shell/store";
-import type { PluginManifest } from "../types/plugin";
 
 /**
  * Canvas area containing the main content and optional bottom panel.
@@ -12,7 +11,6 @@ export function CanvasArea({
 }: {
   children: ReactNode;
   bottomPanel: ReactNode;
-  plugins: PluginManifest[];
 }) {
   const bottomPanelId = useShellStore((s) => s.bottomPanelId);
   const bottomPanelHeight = useShellStore((s) => s.bottomPanelHeight);
