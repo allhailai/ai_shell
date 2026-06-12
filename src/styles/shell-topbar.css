@@ -40,6 +40,25 @@
   border-right-color: transparent;
 }
 
+/* When an app is active, the brand shows the app's icon + name (non-clickable) */
+.topbar-brand-app {
+  cursor: default;
+}
+
+.topbar-brand-app:hover {
+  opacity: 1;
+}
+
+.topbar-app-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-primary);
+}
+
 .topbar-logo {
   width: 24px;
   height: 24px;

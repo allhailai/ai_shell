@@ -21,22 +21,31 @@ export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
 
   return (
     <header className="shell-topbar">
-      {/* Brand — clickable to go home */}
-      <button
-        className="topbar-brand"
-        onClick={goHome}
-        type="button"
-        title="Back to applications"
-      >
-        <div className="topbar-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
+      {/* Brand — shows app identity when active, AIShell branding on landing */}
+      {activeApp ? (
+        <div className="topbar-brand topbar-brand-app">
+          <span className="topbar-app-icon">
+            {activeApp.icon ? <activeApp.icon size={20} /> : <DefaultTopbarIcon />}
+          </span>
+          <span className="topbar-title">{activeApp.name}</span>
         </div>
-        <span className="topbar-title">AIShell</span>
-      </button>
+      ) : (
+        <button
+          className="topbar-brand"
+          onClick={goHome}
+          type="button"
+          title="AIShell"
+        >
+          <div className="topbar-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <span className="topbar-title">AIShell</span>
+        </button>
+      )}
 
       {/* Nav toggle */}
       <button
@@ -63,16 +72,12 @@ export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
         </svg>
       </button>
 
-      {/* Breadcrumb */}
-      <div className="topbar-breadcrumb">
-        {activeApp ? (
-          <>
-            <span className="topbar-breadcrumb-active">{activeApp.name}</span>
-          </>
-        ) : (
+      {/* Breadcrumb — only shown on landing page */}
+      {!activeApp && (
+        <div className="topbar-breadcrumb">
           <span>Applications</span>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* App header items (injected by active app) */}
       {AppHeaderItems && (
@@ -116,5 +121,14 @@ export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
         )}
       </div>
     </header>
+  );
+}
+
+function DefaultTopbarIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <path d="M9 12h6M12 9v6" />
+    </svg>
   );
 }
