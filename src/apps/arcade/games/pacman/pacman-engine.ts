@@ -541,40 +541,42 @@ export function tick(state: PacmanState): PacmanState {
   };
 
   // ── Collision detection ─────────────────────────────────────────
-  s = {
-    ...s,
-    ghosts: s.ghosts.map((ghost) => {
-      if (ghost.row === s.pacRow && ghost.col === s.pacCol) {
-        if (ghost.mode === "frightened") {
-          s.ghostsEatenCombo++;
-          s.score += 200 * Math.pow(2, s.ghostsEatenCombo - 1);
-          return { ...ghost, mode: "eaten" as GhostMode };
-        } else if (ghost.mode !== "eaten") {
-          // Pac-Man dies
-          s.lives--;
-          if (s.lives <= 0) {
-            s.gameOver = true;
-          } else {
-            // Reset positions
-            s.pacRow = 15;
-            s.pacCol = 10;
-            s.pacDir = "left";
-            s.pacNextDir = "left";
-            s.frightenedTimer = 0;
-            s.ghostsEatenCombo = 0;
-            s = { ...s, ghosts: createGhosts() };
-          }
-          return ghost;
-        }
-      }
-      return ghost;
-    }),
-  };
+  // Check each ghost for overlap with Pac-Man.
+  // Must be done as a separate pass — NOT inside ghosts.map() — because
+  // death resets all ghost positions (createGhosts), which would conflict
+  // with the map's return values.
 
-  // Calculate level from score for display
-  const newLevel = s.level;
-  if (s.level !== newLevel) {
-    s.level = newLevel;
+  let died = false;
+  const updatedGhosts = s.ghosts.map((ghost) => {
+    if (ghost.row === s.pacRow && ghost.col === s.pacCol) {
+      if (ghost.mode === "frightened") {
+        s.ghostsEatenCombo++;
+        s.score += 200 * Math.pow(2, s.ghostsEatenCombo - 1);
+        return { ...ghost, mode: "eaten" as GhostMode };
+      } else if (ghost.mode !== "eaten") {
+        died = true;
+      }
+    }
+    return ghost;
+  });
+
+  if (died) {
+    s.lives--;
+    if (s.lives <= 0) {
+      s.gameOver = true;
+      s.ghosts = updatedGhosts;
+    } else {
+      // Reset positions — fresh ghosts, Pac-Man back to start
+      s.pacRow = 15;
+      s.pacCol = 10;
+      s.pacDir = "left";
+      s.pacNextDir = "left";
+      s.frightenedTimer = 0;
+      s.ghostsEatenCombo = 0;
+      s.ghosts = createGhosts();
+    }
+  } else {
+    s.ghosts = updatedGhosts;
   }
 
   return s;
