@@ -8,6 +8,7 @@ import {
   TILE_SIZE,
   TILE,
   COLORS,
+  DEATH_ANIM_LENGTH,
   getTickInterval,
   setDirection,
   tick,
@@ -252,49 +253,51 @@ function render(canvas: HTMLCanvasElement | null, state: PacmanState) {
     }
   }
 
-  // Draw ghosts
-  for (const ghost of state.ghosts) {
-    const gx = ghost.col * T + T / 2;
-    const gy = ghost.row * T + T / 2;
-    const radius = T / 2 - 2;
+  // Draw ghosts (hidden during death animation)
+  if (!state.dying) {
+    for (const ghost of state.ghosts) {
+      const gx = ghost.col * T + T / 2;
+      const gy = ghost.row * T + T / 2;
+      const radius = T / 2 - 2;
 
-    let fillColor: string;
-    if (ghost.mode === "eaten") {
-      fillColor = COLORS.eaten;
-    } else if (ghost.mode === "frightened") {
-      // Flash when about to end
-      fillColor = state.frightenedTimer < 120 && state.tickCount % 10 < 5
-        ? COLORS.frightenedFlash
-        : COLORS.frightened;
-    } else {
-      fillColor = ghost.color;
-    }
-
-    ctx.fillStyle = fillColor;
-
-    if (ghost.mode === "eaten") {
-      // Just draw eyes
-      drawGhostEyes(ctx, gx, gy, radius, ghost.dir);
-    } else {
-      // Ghost body: dome top + wavy bottom
-      ctx.beginPath();
-      ctx.arc(gx, gy - 1, radius, Math.PI, 0);
-      // Wavy bottom
-      const bottom = gy + radius - 1;
-      const waveAmp = 3;
-      const waveOffset = (state.tickCount % 12) < 6 ? 0 : waveAmp;
-      ctx.lineTo(gx + radius, bottom);
-      for (let i = 0; i < 3; i++) {
-        const wx = gx + radius - (i * 2 + 1) * (radius / 3);
-        const wy = bottom + ((i + (waveOffset ? 1 : 0)) % 2 === 0 ? -waveAmp : 0);
-        ctx.lineTo(wx, wy);
+      let fillColor: string;
+      if (ghost.mode === "eaten") {
+        fillColor = COLORS.eaten;
+      } else if (ghost.mode === "frightened") {
+        // Flash when about to end
+        fillColor = state.frightenedTimer < 120 && state.tickCount % 10 < 5
+          ? COLORS.frightenedFlash
+          : COLORS.frightened;
+      } else {
+        fillColor = ghost.color;
       }
-      ctx.lineTo(gx - radius, bottom);
-      ctx.closePath();
-      ctx.fill();
 
-      // Eyes
-      drawGhostEyes(ctx, gx, gy, radius, ghost.dir);
+      ctx.fillStyle = fillColor;
+
+      if (ghost.mode === "eaten") {
+        // Just draw eyes
+        drawGhostEyes(ctx, gx, gy, radius, ghost.dir);
+      } else {
+        // Ghost body: dome top + wavy bottom
+        ctx.beginPath();
+        ctx.arc(gx, gy - 1, radius, Math.PI, 0);
+        // Wavy bottom
+        const bottom = gy + radius - 1;
+        const waveAmp = 3;
+        const waveOffset = (state.tickCount % 12) < 6 ? 0 : waveAmp;
+        ctx.lineTo(gx + radius, bottom);
+        for (let i = 0; i < 3; i++) {
+          const wx = gx + radius - (i * 2 + 1) * (radius / 3);
+          const wy = bottom + ((i + (waveOffset ? 1 : 0)) % 2 === 0 ? -waveAmp : 0);
+          ctx.lineTo(wx, wy);
+        }
+        ctx.lineTo(gx - radius, bottom);
+        ctx.closePath();
+        ctx.fill();
+
+        // Eyes
+        drawGhostEyes(ctx, gx, gy, radius, ghost.dir);
+      }
     }
   }
 
@@ -303,25 +306,82 @@ function render(canvas: HTMLCanvasElement | null, state: PacmanState) {
   const py = state.pacRow * T + T / 2;
   const pacRadius = T / 2 - 2;
 
-  ctx.fillStyle = COLORS.pacman;
-  ctx.beginPath();
+  if (state.dying) {
+    // ── Death Animation ────────────────────────────────────────────
+    // Phase 1 (frames 0-15): brief freeze — full Pac-Man shown
+    // Phase 2 (frames 16-74): spin + collapse — mouth opens wider as body shrinks
+    // Phase 3 (frames 75-89): blink out
+    const t = state.deathTimer;
 
-  if (state.pacMouthOpen) {
-    const mouthAngle = 0.3;
-    let startAngle: number;
-    switch (state.pacDir) {
-      case "right": startAngle = mouthAngle; break;
-      case "left": startAngle = Math.PI + mouthAngle; break;
-      case "up": startAngle = -Math.PI / 2 + mouthAngle; break;
-      case "down": startAngle = Math.PI / 2 + mouthAngle; break;
+    if (t < 16) {
+      // Freeze phase — draw normal open-mouth Pac-Man
+      ctx.fillStyle = COLORS.pacman;
+      ctx.beginPath();
+      ctx.arc(px, py, pacRadius, 0.3, Math.PI * 2 - 0.3);
+      ctx.lineTo(px, py);
+      ctx.fill();
+    } else if (t < 75) {
+      // Spin + collapse phase
+      const progress = (t - 16) / (75 - 16); // 0 → 1
+      // Rotate: start facing current direction, spin ~1.5 full rotations
+      const baseAngle = (() => {
+        switch (state.pacDir) {
+          case "right": return 0;
+          case "down":  return Math.PI / 2;
+          case "left":  return Math.PI;
+          case "up":    return -Math.PI / 2;
+        }
+      })();
+      const rotation = baseAngle + progress * Math.PI * 3;
+      // Mouth opens wider as body shrinks: gap goes from 0.3 to PI
+      const mouthGap = 0.3 + progress * (Math.PI - 0.3);
+      // Radius shrinks to 0
+      const r = pacRadius * (1 - progress);
+
+      if (r > 0.5) {
+        ctx.fillStyle = COLORS.pacman;
+        ctx.beginPath();
+        ctx.arc(px, py, r, rotation + mouthGap, rotation + Math.PI * 2 - mouthGap);
+        ctx.lineTo(px, py);
+        ctx.fill();
+      }
+    } else {
+      // Blink out phase — small cross/spark that fades
+      const blinkProgress = (t - 75) / (DEATH_ANIM_LENGTH - 75);
+      if (Math.floor(t / 3) % 2 === 0 && blinkProgress < 0.8) {
+        const sparkSize = 4 * (1 - blinkProgress);
+        ctx.strokeStyle = COLORS.pacman;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px - sparkSize, py);
+        ctx.lineTo(px + sparkSize, py);
+        ctx.moveTo(px, py - sparkSize);
+        ctx.lineTo(px, py + sparkSize);
+        ctx.stroke();
+      }
     }
-    ctx.arc(px, py, pacRadius, startAngle, startAngle + (Math.PI * 2 - mouthAngle * 2));
-    ctx.lineTo(px, py);
   } else {
-    ctx.arc(px, py, pacRadius, 0, Math.PI * 2);
-  }
+    // Normal Pac-Man rendering
+    ctx.fillStyle = COLORS.pacman;
+    ctx.beginPath();
 
-  ctx.fill();
+    if (state.pacMouthOpen) {
+      const mouthAngle = 0.3;
+      let startAngle: number;
+      switch (state.pacDir) {
+        case "right": startAngle = mouthAngle; break;
+        case "left": startAngle = Math.PI + mouthAngle; break;
+        case "up": startAngle = -Math.PI / 2 + mouthAngle; break;
+        case "down": startAngle = Math.PI / 2 + mouthAngle; break;
+      }
+      ctx.arc(px, py, pacRadius, startAngle, startAngle + (Math.PI * 2 - mouthAngle * 2));
+      ctx.lineTo(px, py);
+    } else {
+      ctx.arc(px, py, pacRadius, 0, Math.PI * 2);
+    }
+
+    ctx.fill();
+  }
 }
 
 function drawGhostEyes(

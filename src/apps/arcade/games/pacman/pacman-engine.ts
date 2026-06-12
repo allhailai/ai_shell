@@ -77,7 +77,14 @@ export interface PacmanState {
   gameOver: boolean;
   tickCount: number;
   moveTimer: number;
+  /** True while the death animation is playing. */
+  dying: boolean;
+  /** Frame counter for the death animation (0 = not dying). */
+  deathTimer: number;
 }
+
+/** Total frames for the death animation. */
+export const DEATH_ANIM_LENGTH = 90; // ~1.5 seconds at 60fps
 
 // ── Level Layout ────────────────────────────────────────────────────
 // 1=wall, 2=dot, 3=power pellet, 0=empty
@@ -157,6 +164,8 @@ export function createInitialState(): PacmanState {
     gameOver: false,
     tickCount: 0,
     moveTimer: 0,
+    dying: false,
+    deathTimer: 0,
   };
 }
 
@@ -382,6 +391,29 @@ export function tick(state: PacmanState): PacmanState {
 
   let s = { ...state, tickCount: state.tickCount + 1 };
 
+  // ── Death animation phase ──────────────────────────────────────
+  // While dying, freeze all gameplay — just advance the death timer.
+  if (s.dying) {
+    s.deathTimer++;
+    if (s.deathTimer >= DEATH_ANIM_LENGTH) {
+      // Animation finished — reset or game over
+      s.dying = false;
+      s.deathTimer = 0;
+      if (s.lives <= 0) {
+        s.gameOver = true;
+      } else {
+        s.pacRow = 15;
+        s.pacCol = 10;
+        s.pacDir = "left";
+        s.pacNextDir = "left";
+        s.frightenedTimer = 0;
+        s.ghostsEatenCombo = 0;
+        s.ghosts = createGhosts();
+      }
+    }
+    return s;
+  }
+
   // ── Mouth animation ─────────────────────────────────────────────
   s.pacMouthTimer++;
   if (s.pacMouthTimer >= 4) {
@@ -560,23 +592,13 @@ export function tick(state: PacmanState): PacmanState {
     return ghost;
   });
 
+  s.ghosts = updatedGhosts;
+
   if (died) {
+    // Start death animation — lives deducted now, reset happens after animation
     s.lives--;
-    if (s.lives <= 0) {
-      s.gameOver = true;
-      s.ghosts = updatedGhosts;
-    } else {
-      // Reset positions — fresh ghosts, Pac-Man back to start
-      s.pacRow = 15;
-      s.pacCol = 10;
-      s.pacDir = "left";
-      s.pacNextDir = "left";
-      s.frightenedTimer = 0;
-      s.ghostsEatenCombo = 0;
-      s.ghosts = createGhosts();
-    }
-  } else {
-    s.ghosts = updatedGhosts;
+    s.dying = true;
+    s.deathTimer = 0;
   }
 
   return s;
