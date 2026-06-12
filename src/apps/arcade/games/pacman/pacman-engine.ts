@@ -229,10 +229,10 @@ function distSq(r1: number, c1: number, r2: number, c2: number): number {
   return (r1 - r2) ** 2 + (c1 - c2) ** 2;
 }
 
-function chooseGhostDirection(ghost: Ghost, board: number[][]): Direction {
-  const [targetRow, targetCol] = getGhostTarget(ghost, { board } as PacmanState);
+function chooseGhostDirection(ghost: Ghost, state: PacmanState): Direction {
+  const [targetRow, targetCol] = getGhostTarget(ghost, state);
   const possibleDirs: Direction[] = (["up", "down", "left", "right"] as Direction[]).filter(
-    (d) => d !== OPPOSITE[ghost.dir] && canMove(board, ghost.row, ghost.col, d),
+    (d) => d !== OPPOSITE[ghost.dir] && canMove(state.board, ghost.row, ghost.col, d),
   );
 
   if (possibleDirs.length === 0) {
@@ -470,7 +470,7 @@ export function tick(state: PacmanState): PacmanState {
       );
 
       if (possibleMoves.length > 1 || !canMove(s.board, g.row, g.col, g.dir)) {
-        g.dir = chooseGhostDirection({ ...g }, s.board);
+        g.dir = chooseGhostDirection({ ...g }, s);
       }
 
       if (canMove(s.board, g.row, g.col, g.dir)) {
