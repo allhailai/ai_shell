@@ -1,3 +1,4 @@
+import type React from "react";
 import { useShellStore } from "../shell/store";
 import type { AppManifest } from "../types/app";
 
@@ -23,10 +24,13 @@ export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
     <header className="shell-topbar">
       {/* Brand — shows app identity when active, AIShell branding on landing */}
       {activeApp ? (
-        <div className="topbar-brand topbar-brand-app">
-          <span className="topbar-app-icon">
-            {activeApp.icon ? <activeApp.icon size={20} /> : <DefaultTopbarIcon />}
-          </span>
+        <div
+          className="topbar-brand topbar-brand-app"
+          style={activeApp.accentColor ? { "--app-accent": activeApp.accentColor } as React.CSSProperties : undefined}
+        >
+          <div className="topbar-app-icon">
+            {activeApp.icon ? <activeApp.icon size={18} /> : <DefaultTopbarIcon />}
+          </div>
           <span className="topbar-title">{activeApp.name}</span>
         </div>
       ) : (

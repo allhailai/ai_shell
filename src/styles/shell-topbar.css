@@ -50,13 +50,16 @@
 }
 
 .topbar-app-icon {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--app-accent, var(--color-accent)), color-mix(in oklch, var(--app-accent, var(--color-accent)), hsl(280 70% 60%) 40%));
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--color-text-primary);
+  color: white;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--app-accent, var(--color-accent)) 25%, transparent);
 }
 
 .topbar-logo {
