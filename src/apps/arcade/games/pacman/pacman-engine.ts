@@ -261,6 +261,74 @@ function chooseGhostDirection(ghost: Ghost, state: PacmanState): Direction {
   return bestDir;
 }
 
+// ── BFS pathfinding for eaten ghosts ────────────────────────────────
+
+const PEN_ROW = 9;
+const PEN_COL = 10;
+
+/**
+ * BFS to find the first step direction from (startRow, startCol) toward the ghost pen.
+ * Eaten ghosts are just eyes — they can pass through the ghost pen gate area
+ * (rows 8-11, cols 6-14) which includes tiles that are normally walls for gameplay.
+ */
+function bfsDirectionToPen(board: number[][], startRow: number, startCol: number): Direction | null {
+  if (startRow === PEN_ROW && startCol === PEN_COL) return null;
+
+  // For eaten ghosts, we consider pen-interior tiles walkable too
+  function isEatenWalkable(r: number, c: number): boolean {
+    // Tunnel wrapping
+    if (c < 0 || c >= COLS) return r === 9;
+    if (r < 0 || r >= board.length) return false;
+    // Ghost pen interior (rows 8-11, cols 6-14) is always walkable for eaten ghosts
+    if (r >= 8 && r <= 11 && c >= 6 && c <= 14) return true;
+    return board[r][c] !== WALL;
+  }
+
+  type BfsNode = { row: number; col: number; firstDir: Direction };
+  const visited = new Set<number>();
+  visited.add(startRow * COLS + startCol);
+
+  const queue: BfsNode[] = [];
+
+  // Seed with all walkable neighbors
+  for (const dir of ["up", "down", "left", "right"] as Direction[]) {
+    const [dr, dc] = DIR_VECTORS[dir];
+    const nr = startRow + dr;
+    const nc = wrapCol(startCol + dc);
+    if (isEatenWalkable(nr, nc)) {
+      const key = nr * COLS + nc;
+      if (!visited.has(key)) {
+        visited.add(key);
+        queue.push({ row: nr, col: nc, firstDir: dir });
+      }
+    }
+  }
+
+  // BFS
+  let head = 0;
+  while (head < queue.length) {
+    const node = queue[head++];
+    if (node.row === PEN_ROW && node.col === PEN_COL) {
+      return node.firstDir;
+    }
+    for (const dir of ["up", "down", "left", "right"] as Direction[]) {
+      const [dr, dc] = DIR_VECTORS[dir];
+      const nr = node.row + dr;
+      const nc = wrapCol(node.col + dc);
+      if (isEatenWalkable(nr, nc)) {
+        const key = nr * COLS + nc;
+        if (!visited.has(key)) {
+          visited.add(key);
+          queue.push({ row: nr, col: nc, firstDir: node.firstDir });
+        }
+      }
+    }
+  }
+
+  // Fallback — shouldn't happen in a connected maze
+  return "up";
+}
+
 // ── Ghost mode timing (scatter/chase cycle) ─────────────────────────
 
 const MODE_DURATIONS = [
@@ -440,28 +508,17 @@ export function tick(state: PacmanState): PacmanState {
       if (g.moveTimer < interval) return g;
       g.moveTimer = 0;
 
-      // Eaten ghosts return to pen
+      // Eaten ghosts return to pen via BFS pathfinding
       if (g.mode === "eaten") {
-        if (g.row === 9 && g.col === 10) {
+        if (g.row === PEN_ROW && g.col === PEN_COL) {
           return { ...g, mode: s.modePhase % 2 === 0 ? "scatter" as GhostMode : "chase" as GhostMode };
         }
-        // Move toward pen
-        const targetR = 9, targetC = 10;
-        const dirs: Direction[] = (["up", "down", "left", "right"] as Direction[]).filter(
-          (d) => canMove(s.board, g.row, g.col, d),
-        );
-        let bestDir = g.dir;
-        let bestDist = Infinity;
-        for (const d of dirs) {
-          const [dr, dc] = DIR_VECTORS[d];
-          const dist = distSq(g.row + dr, g.col + dc, targetR, targetC);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestDir = d;
-          }
+        const nextDir = bfsDirectionToPen(s.board, g.row, g.col);
+        if (nextDir) {
+          const [dr, dc] = DIR_VECTORS[nextDir];
+          return { ...g, row: g.row + dr, col: wrapCol(g.col + dc), dir: nextDir };
         }
-        const [dr, dc] = DIR_VECTORS[bestDir];
-        return { ...g, row: g.row + dr, col: wrapCol(g.col + dc), dir: bestDir };
+        return g;
       }
 
       // At intersection, choose new direction
