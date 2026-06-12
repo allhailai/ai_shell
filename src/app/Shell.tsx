@@ -2,6 +2,7 @@ import { useEffect, useMemo, type CSSProperties } from "react";
 import { useShellStore } from "../shell/store";
 import { hydrateStoreFromUrl, startUrlSync } from "../shell/urlState";
 import { commandBus } from "../shell/commandBus";
+import { AuthProvider, useAuth } from "../shell/authContext";
 import { apps } from "../apps/registry";
 import { Topbar } from "./Topbar";
 import { LeftNav } from "./LeftNav";
@@ -9,13 +10,38 @@ import { CanvasArea } from "./CanvasArea";
 import { RightPanel } from "./RightPanel";
 import { BottomPanel } from "./BottomPanel";
 import { LandingPage } from "./LandingPage";
+import { LoginPage } from "./LoginPage";
 
 /**
  * Root shell component.
- * Composes the full layout: topbar, left nav, canvas, panels.
- * Manages URL sync and app command registration lifecycle.
+ * Wraps everything with AuthProvider for authentication state.
  */
 export function Shell() {
+  return (
+    <AuthProvider>
+      <ShellInner />
+    </AuthProvider>
+  );
+}
+
+/**
+ * Loading screen shown during initial auth check.
+ */
+function LoadingScreen() {
+  return (
+    <div className="shell-loading">
+      <div className="shell-loading-spinner" />
+    </div>
+  );
+}
+
+/**
+ * Inner shell component.
+ * Handles auth gating, URL sync, and layout composition.
+ */
+function ShellInner() {
+  const { user, mode, isLoading } = useAuth();
+
   // Hydrate store from URL on first mount
   useEffect(() => {
     hydrateStoreFromUrl();
@@ -76,7 +102,7 @@ export function Shell() {
     };
   }, []);
 
-  // Read layout state
+  // Read layout state (hooks must be called unconditionally)
   const leftNavCollapsed = useShellStore((s) => s.leftNavCollapsed);
   const activeAppId = useShellStore((s) => s.activeAppId);
   const rightPanelId = useShellStore((s) => s.rightPanelId);
@@ -96,6 +122,14 @@ export function Shell() {
     }
     return vars as CSSProperties;
   }, [rightPanelId, rightPanelWidth]);
+
+  // ── Auth gating (after all hooks) ───────────────────────────────
+
+  // Show loading during initial auth check
+  if (isLoading) return <LoadingScreen />;
+
+  // Server mode: show login page if not authenticated
+  if (!user && mode === "server") return <LoginPage />;
 
   // Determine the main content
   const MainContent = activeApp?.mainContent;

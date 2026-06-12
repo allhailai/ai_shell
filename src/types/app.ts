@@ -105,4 +105,47 @@ export interface AppManifest {
 
   /** Commands this app registers on the command bus. */
   commands?: CommandRegistration[];
+
+  // ── Secrets ───────────────────────────────────────────────────────
+
+  /**
+   * Secrets this app needs. The shell manages secure storage;
+   * the app declares what it needs and uses the useSecrets hooks to read.
+   *
+   * Example:
+   * ```ts
+   * secrets: [
+   *   { key: "api_key", label: "API Key", scope: "app", required: true },
+   *   { key: "openai_org", label: "OpenAI Org", scope: "global" },
+   * ]
+   * ```
+   */
+  secrets?: SecretDeclaration[];
+}
+
+/**
+ * A secret that an application declares it needs.
+ *
+ * The shell provides centralized UI to acquire and manage these secrets.
+ * Applications read values at runtime via useAppSecret(), useGlobalSecret(),
+ * or useUserSecret() hooks.
+ */
+export interface SecretDeclaration {
+  /** Secret key identifier (e.g., "api_key"). */
+  key: string;
+  /** Human-readable label shown in the settings UI. */
+  label: string;
+  /** Help text / description shown in the settings UI. */
+  description?: string;
+  /**
+   * Which scope this secret lives in:
+   * - "global": Shared by all apps, all users (admin-writable).
+   * - "app": Scoped to this application only.
+   * - "user": Per-user secret (each user has their own value).
+   */
+  scope: "global" | "app" | "user";
+  /** If true, the shell shows a warning when this secret is missing. */
+  required?: boolean;
+  /** If true (default), the value is masked in the UI. */
+  sensitive?: boolean;
 }

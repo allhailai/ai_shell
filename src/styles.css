@@ -9,6 +9,7 @@
 @import "./styles/shell-topbar.css";
 @import "./styles/shell-panels.css";
 @import "./styles/landing-page.css";
+@import "./styles/login-page.css";
 
 /* ── App styles ── */
 @import "./apps/hello-world/hello-world.css";
