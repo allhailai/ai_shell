@@ -8,7 +8,7 @@
 
 The Arcade is a **retro game hosting application** within AIShell. It provides a game launcher, pause/resume lifecycle, localStorage-based state persistence, and a top-100 high score leaderboard with initials entry. Games are pluggable — each game implements a `GameDefinition` interface and is registered in a central array.
 
-**Current games**: Tetris, Galaga
+**Current games**: Tetris, Galaga, Pac-Man
 
 ---
 
@@ -34,10 +34,14 @@ src/apps/arcade/
     │   ├── index.tsx        # GameDefinition export + icon
     │   ├── tetris-engine.ts # Pure game logic (no React, no DOM)
     │   └── TetrisGame.tsx   # Canvas renderer + React wrapper
-    └── galaga/
+    ├── galaga/
+    │   ├── index.tsx        # GameDefinition export + icon
+    │   ├── galaga-engine.ts # Pure game logic (no React, no DOM)
+    │   └── GalagaGame.tsx   # Canvas renderer + React wrapper
+    └── pacman/
         ├── index.tsx        # GameDefinition export + icon
-        ├── galaga-engine.ts # Pure game logic (no React, no DOM)
-        └── GalagaGame.tsx   # Canvas renderer + React wrapper
+        ├── pacman-engine.ts # Pure game logic (no React, no DOM)
+        └── PacmanGame.tsx   # Canvas renderer + React wrapper
 ```
 
 ---
@@ -114,7 +118,26 @@ const state = useSyncExternalStore(subscribe, getSnapshot);
 
 ---
 
-## Level 4 — Persistence (`storage.ts`)
+## Level 4 — URL Deep-Linking
+
+The arcade syncs its active game to the URL sub-route:
+
+```
+/arcade              → game launcher
+/arcade/tetris       → playing Tetris
+/arcade/galaga       → playing Galaga
+/arcade/pacman       → playing Pac-Man
+```
+
+- On mount, reads `window.location.pathname` to initialize the active game
+- Selecting a game → `pushState("/arcade/<gameId>")`
+- Quitting → `pushState("/arcade")`
+- `popstate` listener handles browser back/forward
+- URL is validated against the `ARCADE_GAMES` registry (invalid game IDs fall back to launcher)
+
+---
+
+## Level 5 — Persistence (`storage.ts`)
 
 ### Game State
 
@@ -144,7 +167,7 @@ const state = useSyncExternalStore(subscribe, getSnapshot);
 
 ---
 
-## Level 5 — Game Implementation Pattern
+## Level 6 — Game Implementation Pattern
 
 Every game follows a **Pure Engine + React Renderer** split:
 
@@ -184,7 +207,7 @@ mkdir -p src/apps/arcade/games/my-game
 
 ---
 
-## Level 6 — Game Shell Lifecycle
+## Level 7 — Game Shell Lifecycle
 
 ```
 User clicks game card in GameLauncher
@@ -211,7 +234,7 @@ GameShell mounts with initial state
 
 ---
 
-## Level 7 — Game-Specific Details
+## Level 8 — Game-Specific Details
 
 ### Tetris
 
@@ -231,6 +254,15 @@ GameShell mounts with initial state
 - **Player**: 3 lives, 60-frame respawn invincibility with blink effect
 - **Canvas**: 480 × 640 pixels, scrolling star field background
 
+### Pac-Man
+
+- **Engine**: Classic 21×23 tile maze with 4 ghost AI personalities
+- **Ghost AI**: Blinky (direct chase), Pinky (ambush 4 ahead), Inky (flanking), Clyde (patrol/chase)
+- **Modes**: Scatter/chase cycling on timers, frightened mode from power pellets
+- **Speed scaling**: Movement intervals decrease with level (Level 1 relaxed, Level 6+ max speed)
+- **Features**: Tunnel wrapping, ghost eating combos (200/400/800/1600), 3 lives, level progression
+- **Canvas**: 504 × 552 pixels, animated ghost bodies with wavy bottom, mouth animation, pulsating power pellets
+
 ---
 
 ## Appendix — CSS Namespacing
@@ -245,3 +277,4 @@ All Arcade styles live in `arcade.css` and use these prefixes:
 | `.high-score-*` | Leaderboard and initials entry |
 | `.tetris-*` | Tetris game-specific |
 | `.galaga-*` | Galaga game-specific |
+| `.pacman-*` | Pac-Man game-specific |

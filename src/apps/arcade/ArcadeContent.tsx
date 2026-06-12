@@ -60,13 +60,48 @@ function useArcadeState(): ArcadeState {
 
 export { ARCADE_GAMES, subscribeArcade, getArcadeSnapshot, setArcadeState };
 
+/* ── URL Deep-Linking Helpers ───────────────────────────────────────
+   The arcade syncs its active game to the URL sub-route:
+     /arcade          → game launcher
+     /arcade/tetris   → playing Tetris
+     /arcade/pacman   → playing Pac-Man
+   On refresh, the URL is read to restore the active view.
+   ──────────────────────────────────────────────────────────────── */
+
+/** Read the game sub-route from the current URL. */
+function getGameIdFromUrl(): string | null {
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  // segments[0] = "arcade", segments[1] = gameId (optional)
+  const gameId = segments[1] ?? null;
+  if (gameId && ARCADE_GAMES.some((g) => g.id === gameId)) return gameId;
+  return null;
+}
+
+/** Push a new URL sub-route for the selected game. */
+function pushGameRoute(gameId: string | null): void {
+  const path = gameId ? `/arcade/${gameId}` : "/arcade";
+  const search = window.location.search;
+  const newUrl = `${path}${search}`;
+  if (newUrl !== `${window.location.pathname}${search}`) {
+    window.history.pushState(null, "", newUrl);
+  }
+}
+
 /**
  * Main content component for the Arcade app.
  * Routes between the game launcher and the active game.
+ * Syncs active game to the URL for deep-linking.
  */
 export function ArcadeContent() {
-  const state = useArcadeState();
-  const [localGameId, setLocalGameId] = useState<string | null>(state.activeGameId);
+
+  // Initialize from URL sub-route on mount
+  const [localGameId, setLocalGameId] = useState<string | null>(() => {
+    const urlGameId = getGameIdFromUrl();
+    if (urlGameId) {
+      setArcadeState({ activeGameId: urlGameId, isPaused: false, score: 0, level: 0 });
+    }
+    return urlGameId;
+  });
   const [localPaused, setLocalPaused] = useState(false);
 
   const activeGame = useMemo(
@@ -85,6 +120,18 @@ export function ArcadeContent() {
     return () => window.removeEventListener("arcade:navigate", handler);
   }, []);
 
+  // Listen for browser back/forward to sync sub-route
+  useEffect(() => {
+    const handler = () => {
+      const gameId = getGameIdFromUrl();
+      setLocalGameId(gameId);
+      setLocalPaused(false);
+      setArcadeState({ activeGameId: gameId, isPaused: false, score: 0, level: 0 });
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
   // Sync pause state from header button
   useEffect(() => {
     const handler = () => {
@@ -99,12 +146,14 @@ export function ArcadeContent() {
     setLocalGameId(gameId);
     setLocalPaused(false);
     setArcadeState({ activeGameId: gameId, isPaused: false, score: 0, level: 0 });
+    pushGameRoute(gameId);
   }, []);
 
   const handleQuit = useCallback(() => {
     setLocalGameId(null);
     setLocalPaused(false);
     setArcadeState({ activeGameId: null, isPaused: false, score: 0, level: 0 });
+    pushGameRoute(null);
   }, []);
 
   const handlePauseChange = useCallback((paused: boolean) => {
@@ -150,11 +199,13 @@ export function ArcadeNavWrapper() {
 
   const handleSelectGame = useCallback((gameId: string) => {
     setArcadeState({ activeGameId: gameId, isPaused: false, score: 0, level: 0 });
+    pushGameRoute(gameId);
     window.dispatchEvent(new CustomEvent("arcade:navigate", { detail: gameId }));
   }, []);
 
   const handleBackToLauncher = useCallback(() => {
     setArcadeState({ activeGameId: null, isPaused: false, score: 0, level: 0 });
+    pushGameRoute(null);
     window.dispatchEvent(new CustomEvent("arcade:navigate", { detail: null }));
   }, []);
 

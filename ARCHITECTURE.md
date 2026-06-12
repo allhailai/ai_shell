@@ -113,6 +113,8 @@ export const apps: AppManifest[] = [helloWorldApp, arcadeApp];
 - App sub-routes are handled by the **app's own `mainContent`** (not the shell)
 - URL query params: `?rp=<panelId>`, `?bp=<panelId>`, `?rpw=<px>`, `?bph=<px>`, `?nav=collapsed`
 
+> **⚠️ MANDATORY**: Every application MUST maintain deep-linkable URL state. Sub-views must sync to the URL via `pushState`/`popstate` so that refresh, back/forward, and sharing work. See [`APP_DEVELOPMENT_GUIDE.md`](APP_DEVELOPMENT_GUIDE.md) for the required pattern.
+
 ---
 
 ## Level 3 — Communication Architecture
@@ -257,6 +259,8 @@ Stored in `localStorage` under key `aishell:user-prefs`:
 
 ## Appendix — How to Create a New Application
 
+> **Read [`APP_DEVELOPMENT_GUIDE.md`](APP_DEVELOPMENT_GUIDE.md) for the full, authoritative guide.** The summary below covers the basics.
+
 ```bash
 # 1. Create the app directory
 mkdir -p src/apps/my-app
@@ -282,7 +286,8 @@ EOF
 
 # 4. (Optional) Add CSS: create my-app.css, add @import to src/styles.css
 
-# 5. (Optional) Create ARCHITECTURE.md for the app
+# 5. REQUIRED: Create ARCHITECTURE.md for the app
+# 6. REQUIRED: Implement URL deep-linking (pushState/popstate)
 ```
 
-Each application should include its own `ARCHITECTURE.md` following this same progressive disclosure pattern. See [`src/apps/hello-world/ARCHITECTURE.md`](src/apps/hello-world/ARCHITECTURE.md) and [`src/apps/arcade/ARCHITECTURE.md`](src/apps/arcade/ARCHITECTURE.md) for examples.
+Each application **must** include its own `ARCHITECTURE.md` following the progressive disclosure pattern and **must** implement URL deep-linking. See [`APP_DEVELOPMENT_GUIDE.md`](APP_DEVELOPMENT_GUIDE.md) for detailed requirements and examples.

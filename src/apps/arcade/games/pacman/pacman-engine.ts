@@ -282,14 +282,32 @@ export function setDirection(state: PacmanState, dir: Direction): PacmanState {
 
 // ── Tick ─────────────────────────────────────────────────────────────
 
-const PAC_MOVE_INTERVAL = 3; // Pac-Man moves every N ticks (lower = faster)
-const GHOST_MOVE_INTERVAL = 4; // Ghosts move every N ticks
-const GHOST_FRIGHTENED_INTERVAL = 6; // Slower when frightened
-const GHOST_EATEN_INTERVAL = 2; // Faster when eaten
+/**
+ * Movement intervals scale with level — higher level = faster movement.
+ * Level 1 is relaxed; by level 8+ it's at max speed.
+ */
+function getPacMoveInterval(level: number): number {
+  // Level 1: 7 ticks, Level 2: 6, Level 3: 6, Level 4: 5, ..., Level 8+: 3
+  return Math.max(3, 8 - level);
+}
+
+function getGhostMoveInterval(level: number): number {
+  // Level 1: 9 ticks, Level 2: 8, ..., Level 6+: 4
+  return Math.max(4, 10 - level);
+}
+
+function getGhostFrightenedInterval(level: number): number {
+  // Frightened ghosts are always slower than normal, but still scale a bit
+  // Level 1: 12, Level 5+: 8
+  return Math.max(8, 13 - level);
+}
+
+const GHOST_EATEN_INTERVAL = 2; // Eaten ghosts always zip back fast
 
 export function getTickInterval(_level: number): number {
   return 1000 / 60; // 60 FPS
 }
+
 
 export function tick(state: PacmanState): PacmanState {
   if (state.gameOver) return state;
@@ -337,7 +355,7 @@ export function tick(state: PacmanState): PacmanState {
 
   // ── Move Pac-Man ────────────────────────────────────────────────
   s.moveTimer++;
-  if (s.moveTimer >= PAC_MOVE_INTERVAL) {
+  if (s.moveTimer >= getPacMoveInterval(s.level)) {
     s.moveTimer = 0;
 
     // Try desired direction first
@@ -413,10 +431,10 @@ export function tick(state: PacmanState): PacmanState {
         return g;
       }
 
-      // Movement speed
-      const interval = g.mode === "frightened" ? GHOST_FRIGHTENED_INTERVAL :
+      // Movement speed — scales with level
+      const interval = g.mode === "frightened" ? getGhostFrightenedInterval(s.level) :
                         g.mode === "eaten" ? GHOST_EATEN_INTERVAL :
-                        GHOST_MOVE_INTERVAL;
+                        getGhostMoveInterval(s.level);
 
       g.moveTimer++;
       if (g.moveTimer < interval) return g;
