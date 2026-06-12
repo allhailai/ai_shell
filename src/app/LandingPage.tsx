@@ -20,7 +20,10 @@ export function LandingPage({ apps }: { apps: AppManifest[] }) {
   const { visibleApps, hiddenAppsList } = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
 
-    const filtered = apps.filter((app) => {
+    // System apps are never shown on the landing page
+    const nonSystemApps = apps.filter((app) => !app.system);
+
+    const filtered = nonSystemApps.filter((app) => {
       if (!query) return true;
       return (
         app.name.toLowerCase().includes(query) ||

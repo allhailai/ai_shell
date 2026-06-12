@@ -68,6 +68,14 @@ export interface AppManifest {
   /** Accent color for the landing page card (CSS value, e.g. "hsl(200, 80%, 55%)"). */
   accentColor?: string;
 
+  /**
+   * If true, this is a system app (e.g., Admin/Settings).
+   * System apps are:
+   * - Hidden from the landing page card grid
+   * - Rendered at the bottom of the left nav with a separator
+   */
+  system?: boolean;
+
   // ── UI Region Components ──────────────────────────────────────────
 
   /**

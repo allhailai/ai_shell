@@ -1,6 +1,6 @@
 import type { AppManifest } from "../types/app";
 import { useShellStore } from "../shell/store";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 /**
  * Left navigation panel.
@@ -9,6 +9,8 @@ import { useCallback } from "react";
  * 1. No active app → shows a list of available apps (launcher nav)
  * 2. Active app with `leftNav` → renders the app's left nav component
  * 3. Active app without `leftNav` → shows only a home button
+ *
+ * System apps (system: true) are always rendered at the bottom with a separator.
  */
 export function LeftNav({
   apps,
@@ -19,14 +21,37 @@ export function LeftNav({
 }) {
   const collapsed = useShellStore((s) => s.leftNavCollapsed);
 
+  const { regularApps, systemApps } = useMemo(() => {
+    const regular: AppManifest[] = [];
+    const system: AppManifest[] = [];
+    for (const app of apps) {
+      if (app.system) {
+        system.push(app);
+      } else {
+        regular.push(app);
+      }
+    }
+    return { regularApps: regular, systemApps: system };
+  }, [apps]);
+
   if (!activeApp) {
     // Mode 1: Launcher nav — show app list
     return (
       <nav className="left-nav" aria-label="Application navigation">
         <div className="left-nav-content scrollable-y">
-          {apps.map((app) => (
-            <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-          ))}
+          <div className="left-nav-top">
+            {regularApps.map((app) => (
+              <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+            ))}
+          </div>
+          {systemApps.length > 0 && (
+            <div className="left-nav-bottom">
+              <div className="nav-divider" />
+              {systemApps.map((app) => (
+                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+              ))}
+            </div>
+          )}
         </div>
       </nav>
     );
@@ -38,10 +63,20 @@ export function LeftNav({
     return (
       <nav className="left-nav" aria-label={`${activeApp.name} navigation`}>
         <div className="left-nav-content scrollable-y">
-          {/* Home button at the top */}
-          <HomeNavItem collapsed={collapsed} />
-          <div className="nav-divider" />
-          <AppNav />
+          <div className="left-nav-top">
+            {/* Home button at the top */}
+            <HomeNavItem collapsed={collapsed} />
+            <div className="nav-divider" />
+            <AppNav />
+          </div>
+          {systemApps.length > 0 && (
+            <div className="left-nav-bottom">
+              <div className="nav-divider" />
+              {systemApps.map((app) => (
+                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+              ))}
+            </div>
+          )}
         </div>
       </nav>
     );
@@ -51,7 +86,17 @@ export function LeftNav({
   return (
     <nav className="left-nav" aria-label="Navigation">
       <div className="left-nav-content scrollable-y">
-        <HomeNavItem collapsed={collapsed} />
+        <div className="left-nav-top">
+          <HomeNavItem collapsed={collapsed} />
+        </div>
+        {systemApps.length > 0 && (
+          <div className="left-nav-bottom">
+            <div className="nav-divider" />
+            {systemApps.map((app) => (
+              <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+            ))}
+          </div>
+        )}
       </div>
     </nav>
   );
@@ -68,15 +113,17 @@ function AppNavItem({
   collapsed: boolean;
 }) {
   const setActiveApp = useShellStore((s) => s.setActiveApp);
+  const activeAppId = useShellStore((s) => s.activeAppId);
   const handleClick = useCallback(() => {
     setActiveApp(app.id);
   }, [app.id, setActiveApp]);
 
   const Icon = app.icon;
+  const isActive = activeAppId === app.id;
 
   return (
     <button
-      className="nav-item"
+      className={`nav-item${isActive ? " active" : ""}`}
       onClick={handleClick}
       title={collapsed ? app.name : undefined}
       type="button"
@@ -127,3 +174,4 @@ function HomeIcon() {
     </svg>
   );
 }
+

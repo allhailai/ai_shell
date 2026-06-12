@@ -24,7 +24,19 @@
   overflow-x: hidden;
   padding: var(--space-2) var(--space-2);
   overscroll-behavior-y: contain;
+  display: flex;
+  flex-direction: column;
 }
+
+.left-nav-top {
+  flex: 1 1 auto;
+}
+
+.left-nav-bottom {
+  flex-shrink: 0;
+  padding-bottom: var(--space-1);
+}
+
 
 .left-nav-content::-webkit-scrollbar {
   width: 4px;
