@@ -743,3 +743,109 @@
   font-family: var(--font-mono);
   line-height: 1.6;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PAC-MAN
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.pacman-container {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.pacman-board-wrapper {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 0 32px hsla(240, 80%, 40%, 0.2), var(--shadow-lg);
+}
+
+.pacman-canvas {
+  display: block;
+}
+
+/* ── Sidebar ── */
+
+.pacman-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 100px;
+}
+
+.pacman-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+}
+
+.pacman-sidebar-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pacman-sidebar-value {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.pacman-lives {
+  display: flex;
+  gap: var(--space-1);
+  padding-top: 2px;
+}
+
+.pacman-life-icon {
+  color: hsl(50, 95%, 55%);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ── Pac-Man Pause Button ── */
+
+.pacman-pause-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.pacman-pause-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
+}
+
+.pacman-pause-btn-resume {
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
+}
+
+.pacman-pause-btn-resume:hover {
+  background: var(--color-accent);
+  color: white;
+}
+

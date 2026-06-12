@@ -9,11 +9,13 @@ import { useSyncExternalStore } from "react";
 // Games registry — import all game definitions here
 import { tetrisGame } from "./games/tetris";
 import { galagaGame } from "./games/galaga";
+import { pacmanGame } from "./games/pacman";
 
 /** All available games in the arcade. */
 const ARCADE_GAMES: GameDefinition[] = [
   tetrisGame as GameDefinition,
   galagaGame as GameDefinition,
+  pacmanGame as GameDefinition,
 ];
 
 /* ── Shared State ─────────────────────────────────────────────────
