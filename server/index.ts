@@ -22,6 +22,8 @@ import { registerAuthRoutes } from "./routes/authRoutes.js";
 import { createKeychainBackend } from "./services/keychainBackend.js";
 import { createSecretService } from "./services/secretService.js";
 import { registerSecretRoutes } from "./routes/secretRoutes.js";
+import { registerDbHelperRoutes } from "./routes/dbHelperRoutes.js";
+import { registerDbExplorerRoutes } from "./routes/dbExplorerRoutes.js";
 
 export type ShellMode = "standalone" | "server";
 
@@ -184,6 +186,8 @@ const secretService = createSecretService({
 });
 
 registerSecretRoutes(app, { secretService, authMiddleware, httpError, mode: SHELL_MODE });
+registerDbHelperRoutes(app, { secretService, authMiddleware, httpError });
+registerDbExplorerRoutes(app, { secretService, authMiddleware, httpError });
 
 // ── Error handler ───────────────────────────────────────────────────
 

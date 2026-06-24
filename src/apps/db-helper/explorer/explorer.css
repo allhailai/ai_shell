@@ -1,0 +1,829 @@
+/* ── Explorer Styles ──────────────────────────────────────────────────
+   All classes namespaced with .dbh-exp-* to prevent collisions.
+   Uses shell design tokens exclusively.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Root Layout ─────────────────────────────────────────────────────── */
+
+.dbh-exp-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Left Nav (shell panel) ───────────────────────────────────────────── */
+
+.dbh-exp-leftnav {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.dbh-exp-leftnav-conn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-leftnav-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dbh-exp-conn-select-full {
+  width: 100%;
+  max-width: none;
+}
+
+.dbh-exp-leftnav-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.dbh-exp-leftnav-tree {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dbh-exp-leftnav-hint {
+  padding: var(--space-4) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  line-height: var(--leading-relaxed);
+}
+
+.dbh-exp-conn-select {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: var(--space-8);
+}
+
+.dbh-exp-conn-select:focus {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 3px hsla(220, 90%, 56%, 0.15);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+
+.dbh-exp-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-header-conn-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-header-conn-detail {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-header-breadcrumb {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-accent-text);
+  white-space: nowrap;
+}
+
+/* ── Tab Bar ─────────────────────────────────────────────────────────── */
+
+.dbh-exp-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+  padding-left: var(--space-4);
+}
+
+.dbh-exp-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dbh-exp-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-tab-active {
+  color: var(--color-accent-text);
+  border-bottom-color: var(--color-accent);
+}
+
+/* ── Content ─────────────────────────────────────────────────────────── */
+
+.dbh-exp-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dbh-exp-empty-canvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  padding: var(--space-8);
+}
+
+/* ── Schema Tree (Left Nav) ──────────────────────────────────────────── */
+
+.dbh-exp-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: var(--text-sm);
+}
+
+.dbh-exp-tree-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.dbh-exp-tree-search {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.dbh-exp-tree-search-input {
+  width: 100%;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.dbh-exp-tree-search-input:focus {
+  border-color: var(--color-border-focus);
+}
+
+.dbh-exp-tree-search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-tree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+
+.dbh-exp-tree-system-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+/* ── Schema Node ─────────────────────────────────────────────────────── */
+
+.dbh-exp-schema-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background var(--transition-fast);
+}
+
+.dbh-exp-schema-header:hover {
+  background: var(--color-bg-hover);
+}
+
+.dbh-exp-chevron {
+  font-size: 10px;
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+  width: 12px;
+}
+
+.dbh-exp-chevron-open {
+  transform: rotate(90deg);
+}
+
+.dbh-exp-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.dbh-exp-schema-name {
+  flex: 1;
+  text-align: left;
+}
+
+.dbh-exp-schema-count {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-normal);
+}
+
+/* ── Table Items ─────────────────────────────────────────────────────── */
+
+.dbh-exp-table-list {
+  padding-left: var(--space-3);
+}
+
+.dbh-exp-table-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 3px var(--space-3) 3px var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  text-align: left;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.dbh-exp-table-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-table-item-active {
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+}
+
+.dbh-exp-table-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dbh-exp-table-loading,
+.dbh-exp-table-empty {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Data Grid ───────────────────────────────────────────────────────── */
+
+.dbh-exp-datagrid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.dbh-exp-datagrid-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-datagrid-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-datagrid-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Table ────────────────────────────────────────────────────────────── */
+
+.dbh-exp-table-wrap {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.dbh-exp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-th {
+  position: sticky;
+  top: 0;
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-secondary);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  z-index: var(--z-base);
+}
+
+.dbh-exp-th:hover {
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-th-sorted {
+  color: var(--color-accent-text);
+}
+
+.dbh-exp-th-row {
+  width: 40px;
+  text-align: right;
+  color: var(--color-text-tertiary);
+  cursor: default;
+}
+
+.dbh-exp-sort-indicator {
+  color: var(--color-accent);
+}
+
+.dbh-exp-tr {
+  border-bottom: 1px solid var(--color-border-primary);
+  transition: background var(--transition-fast);
+}
+
+.dbh-exp-tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.dbh-exp-td {
+  padding: var(--space-1) var(--space-3);
+  white-space: nowrap;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-primary);
+}
+
+.dbh-exp-td-row {
+  text-align: right;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+/* ── Cell types ──────────────────────────────────────────────────────── */
+
+.dbh-exp-null {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  background: var(--color-bg-tertiary);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.dbh-exp-bool {
+  color: var(--color-warning);
+}
+
+.dbh-exp-json {
+  color: var(--color-info);
+}
+
+/* ── Pagination ──────────────────────────────────────────────────────── */
+
+.dbh-exp-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-pagination-info {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-pagination-btns {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ── Structure View ──────────────────────────────────────────────────── */
+
+.dbh-exp-structure {
+  padding: var(--space-4);
+}
+
+.dbh-exp-structure-section {
+  margin-top: var(--space-6);
+}
+
+.dbh-exp-structure-section:first-child {
+  margin-top: 0;
+}
+
+.dbh-exp-structure-heading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dbh-exp-structure-count {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+.dbh-exp-type {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent-text);
+}
+
+.dbh-exp-default {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-nullable-yes {
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-nullable-no {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.dbh-exp-badge {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dbh-exp-badge-primary {
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+}
+
+.dbh-exp-badge-unique {
+  background: var(--color-success-muted);
+  color: var(--color-success);
+}
+
+/* ── SQL Editor ──────────────────────────────────────────────────────── */
+
+.dbh-exp-sql {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.dbh-exp-sql-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-sql-status {
+  flex: 1;
+  text-align: right;
+}
+
+.dbh-exp-sql-status-running {
+  font-size: var(--text-xs);
+  color: var(--color-info);
+}
+
+.dbh-exp-sql-status-done {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-sql-shortcut {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-sql-editor {
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.dbh-exp-sql-editor .cm-editor {
+  max-height: 300px;
+}
+
+.dbh-exp-sql-error {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-danger-muted);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--color-border-primary);
+  word-break: break-word;
+}
+
+.dbh-exp-sql-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dbh-exp-sql-message {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
+}
+
+.dbh-exp-sql-nonselect {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-success);
+}
+
+.dbh-exp-sql-nonselect-icon {
+  font-weight: var(--weight-bold);
+}
+
+/* ── Query History ───────────────────────────────────────────────────── */
+
+.dbh-exp-sql-history-wrap {
+  position: relative;
+}
+
+.dbh-exp-sql-history-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-overlay);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-height: 300px;
+  width: 400px;
+  overflow-y: auto;
+  margin-top: var(--space-1);
+}
+
+.dbh-exp-sql-history-empty {
+  padding: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+.dbh-exp-sql-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border-primary);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--transition-fast);
+}
+
+.dbh-exp-sql-history-item:last-child {
+  border-bottom: none;
+}
+
+.dbh-exp-sql-history-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* ── Export Menu ──────────────────────────────────────────────────────── */
+
+.dbh-exp-export {
+  position: relative;
+}
+
+.dbh-exp-export-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-overlay);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  min-width: 220px;
+  margin-top: var(--space-1);
+  overflow: hidden;
+}
+
+.dbh-exp-export-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border-primary);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.dbh-exp-export-item:last-child {
+  border-bottom: none;
+}
+
+.dbh-exp-export-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.dbh-exp-export-hint {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Info Panel (Right) ──────────────────────────────────────────────── */
+
+.dbh-exp-info-panel {
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.dbh-exp-info-empty {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+}
+
+.dbh-exp-info-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-info-schema {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.dbh-exp-info-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.dbh-exp-info-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.dbh-exp-info-stat-value {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-info-stat-label {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dbh-exp-info-section {
+  margin-top: var(--space-4);
+}
+
+.dbh-exp-info-section-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dbh-exp-info-col-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dbh-exp-info-col {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+}
+
+.dbh-exp-info-col-name {
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.dbh-exp-info-col-type {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
