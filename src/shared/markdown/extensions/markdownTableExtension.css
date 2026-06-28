@@ -1,0 +1,67 @@
+/* ── Markdown Table Extension Styles ──────────────────────────────────
+   Styles for the rich table rendering in the shared markdown editor.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-table-wrapper {
+  margin: var(--space-2) 0;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.shared-md-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.shared-md-table th,
+.shared-md-table td {
+  min-width: 120px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  border-right: 1px solid var(--color-border-primary);
+  text-align: left;
+  vertical-align: top;
+}
+
+.shared-md-table th {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shared-md-table td {
+  color: var(--color-text-primary);
+}
+
+.shared-md-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.shared-md-table th:last-child,
+.shared-md-table td:last-child {
+  border-right: 0;
+}
+
+.shared-md-table tr:hover td {
+  background: var(--color-bg-hover);
+}
+
+.shared-md-table-hidden-line {
+  height: 0;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.shared-md-table-hidden-source {
+  display: none;
+}

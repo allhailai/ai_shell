@@ -1,0 +1,47 @@
+/* ── Live Preview Extension Styles ────────────────────────────────────
+   Styles for the Obsidian-style live preview in the shared markdown editor.
+   Uses AI Shell design tokens.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Headings */
+.cm-live-heading-1 { font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
+.cm-live-heading-2 { font-size: var(--text-xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); }
+.cm-live-heading-3 { font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: var(--leading-snug); }
+.cm-live-heading-4 { font-size: var(--text-md); font-weight: var(--weight-semibold); line-height: var(--leading-snug); }
+.cm-live-heading-5 { font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.cm-live-heading-6 { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-text-secondary); }
+
+/* Inline styles */
+.cm-live-bold { font-weight: var(--weight-bold); }
+.cm-live-italic { font-style: italic; }
+.cm-live-strikethrough { text-decoration: line-through; color: var(--color-text-tertiary); }
+
+.cm-live-inline-code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--color-accent-text);
+}
+
+/* Blockquote */
+.cm-live-blockquote-line {
+  border-left: 3px solid var(--color-accent);
+  padding-left: var(--space-4);
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* List bullets */
+.cm-live-list-bullet {
+  color: var(--color-accent);
+  font-weight: var(--weight-bold);
+}
+
+/* Horizontal rule */
+.cm-live-hr-line {
+  border-bottom: 1px solid var(--color-border-secondary);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
+}

@@ -1,5 +1,5 @@
 /* ── AIShell CSS Barrel ───────────────────────────────────────────────
-   Import order matters: reset → tokens → utilities → shell → apps
+   Import order matters: reset → tokens → utilities → shell → shared → apps
    ──────────────────────────────────────────────────────────────────── */
 
 @import "./styles/00-reset.css";
@@ -11,8 +11,17 @@
 @import "./styles/landing-page.css";
 @import "./styles/login-page.css";
 
+/* ── Shared component styles ── */
+@import "./shared/markdown/MarkdownEditor.css";
+@import "./shared/markdown/extensions/livePreviewExtension.css";
+@import "./shared/markdown/extensions/mermaidExtension.css";
+@import "./shared/markdown/extensions/markdownTableExtension.css";
+@import "./shared/folder-picker/FolderPicker.css";
+
 /* ── App styles ── */
 @import "./apps/hello-world/hello-world.css";
 @import "./apps/arcade/arcade.css";
 @import "./apps/admin/admin.css";
 @import "./apps/db-helper/db-helper.css";
+@import "./apps/codascope/codascope.css";
+

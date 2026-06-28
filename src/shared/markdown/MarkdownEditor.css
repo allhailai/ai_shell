@@ -1,0 +1,231 @@
+/* ── Shared Markdown Editor Styles ────────────────────────────────────
+   Styles for the CodeMirror 6 markdown editor.
+   Uses AI Shell design tokens and .shared-md-* namespace.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-editor-shell {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.shared-md-editor-shell > div,
+.shared-md-editor-shell .cm-theme {
+  height: 100%;
+  min-height: 0;
+}
+
+.shared-md-editor-shell .cm-editor {
+  height: 100%;
+  min-height: 0;
+  outline: none;
+}
+
+.shared-md-editor-shell .cm-scroller {
+  height: 100%;
+  overflow: auto;
+}
+
+.shared-md-editor-shell .cm-content {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.shared-md-editor-shell .cm-focused {
+  outline: none;
+}
+
+/* ── Shared Markdown Viewer Styles ───────────────────────────────────
+   Styles for the read-only ReactMarkdown viewer.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-viewer {
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  overflow-y: auto;
+}
+
+.shared-md-viewer h1,
+.shared-md-viewer h2,
+.shared-md-viewer h3,
+.shared-md-viewer h4,
+.shared-md-viewer h5,
+.shared-md-viewer h6 {
+  margin: var(--space-6) 0 var(--space-3);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  color: var(--color-text-primary);
+}
+
+.shared-md-viewer h1 { font-size: var(--text-2xl); }
+.shared-md-viewer h2 { font-size: var(--text-xl); border-bottom: 1px solid var(--color-border-primary); padding-bottom: var(--space-2); }
+.shared-md-viewer h3 { font-size: var(--text-lg); }
+.shared-md-viewer h4 { font-size: var(--text-md); }
+.shared-md-viewer h5 { font-size: var(--text-base); }
+.shared-md-viewer h6 { font-size: var(--text-sm); color: var(--color-text-secondary); }
+
+.shared-md-viewer p {
+  margin: 0 0 var(--space-4);
+}
+
+.shared-md-viewer a {
+  color: var(--color-accent-text);
+  text-decoration: none;
+}
+
+.shared-md-viewer a:hover {
+  text-decoration: underline;
+}
+
+.shared-md-viewer strong {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.shared-md-viewer em {
+  font-style: italic;
+}
+
+.shared-md-viewer code {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--color-accent-text);
+}
+
+.shared-md-viewer pre {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  overflow-x: auto;
+}
+
+.shared-md-viewer pre code {
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.shared-md-viewer blockquote {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-bg-tertiary);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--color-text-secondary);
+}
+
+.shared-md-viewer blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.shared-md-viewer ul,
+.shared-md-viewer ol {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-6);
+}
+
+.shared-md-viewer li {
+  margin-bottom: var(--space-1);
+}
+
+.shared-md-viewer li > ul,
+.shared-md-viewer li > ol {
+  margin-bottom: 0;
+}
+
+.shared-md-viewer hr {
+  margin: var(--space-6) 0;
+  border: none;
+  border-top: 1px solid var(--color-border-primary);
+}
+
+/* Tables */
+.shared-md-viewer table {
+  width: 100%;
+  margin: 0 0 var(--space-4);
+  border-collapse: collapse;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.shared-md-viewer th,
+.shared-md-viewer td {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-primary);
+  text-align: left;
+}
+
+.shared-md-viewer th {
+  background: var(--color-bg-tertiary);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.shared-md-viewer td {
+  font-size: var(--text-sm);
+}
+
+.shared-md-viewer tr:hover td {
+  background: var(--color-bg-hover);
+}
+
+/* Task lists */
+.shared-md-viewer input[type="checkbox"] {
+  margin-right: var(--space-2);
+  accent-color: var(--color-accent);
+}
+
+/* Wiki links */
+.shared-md-wiki-link {
+  color: var(--color-accent-text);
+  font-weight: var(--weight-medium);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.shared-md-wiki-link:hover {
+  background: var(--color-accent-muted);
+}
+
+.shared-md-wiki-link-missing {
+  color: var(--color-text-tertiary);
+  text-decoration-style: dashed;
+}
+
+/* Mermaid diagrams (viewer) */
+.shared-md-mermaid-diagram {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  text-align: center;
+}
+
+.shared-md-mermaid-error {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-muted);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}

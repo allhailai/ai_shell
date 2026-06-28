@@ -12,11 +12,13 @@ import { helloWorldApp } from "./hello-world/manifest";
 import { arcadeApp } from "./arcade/manifest";
 import { adminApp } from "./admin/manifest";
 import { dbHelperApp } from "./db-helper/manifest";
+import { codaScopeApp } from "./codascope/manifest";
 
 /** All registered applications. Add new app imports here. */
 export const apps: AppManifest[] = [
   helloWorldApp,
   arcadeApp,
   dbHelperApp,
+  codaScopeApp,
   adminApp,
 ];

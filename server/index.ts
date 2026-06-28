@@ -24,6 +24,8 @@ import { createSecretService } from "./services/secretService.js";
 import { registerSecretRoutes } from "./routes/secretRoutes.js";
 import { registerDbHelperRoutes } from "./routes/dbHelperRoutes.js";
 import { registerDbExplorerRoutes } from "./routes/dbExplorerRoutes.js";
+import { registerCodaScopeRoutes } from "./routes/codaScopeRoutes.js";
+import { registerFilesystemRoutes } from "./routes/filesystemRoutes.js";
 
 export type ShellMode = "standalone" | "server";
 
@@ -188,6 +190,8 @@ const secretService = createSecretService({
 registerSecretRoutes(app, { secretService, authMiddleware, httpError, mode: SHELL_MODE });
 registerDbHelperRoutes(app, { secretService, authMiddleware, httpError });
 registerDbExplorerRoutes(app, { secretService, authMiddleware, httpError });
+registerCodaScopeRoutes(app, { secretService, authMiddleware, httpError });
+registerFilesystemRoutes(app, { authMiddleware, httpError });
 
 // ── Error handler ───────────────────────────────────────────────────
 
