@@ -25,6 +25,7 @@ import { WikiBrowser } from "./views/WikiBrowser";
 import { ChatView } from "./views/ChatView";
 import { SkillsManager } from "./views/SkillsManager";
 import { Settings } from "./views/Settings";
+import { SetupBanners } from "./components/SetupBanners";
 
 export function CodaScopeContent() {
   const { segments, replace } = useAppSubRoute("codascope");
@@ -70,19 +71,29 @@ export function CodaScopeContent() {
 
   if (section === "project") {
     const view = segments[2] ?? "dashboard";
+
+    // Don't show banners on settings page (user is already there)
+    const showBanners = view !== "settings";
+
+    let content: React.ReactNode;
     switch (view) {
       case "dashboard":
-        return <ProjectDashboard />;
+        content = <ProjectDashboard />;
+        break;
       case "wiki":
-        return <WikiBrowser />;
+        content = <WikiBrowser />;
+        break;
       case "chat":
-        return <ChatView />;
+        content = <ChatView />;
+        break;
       case "skills":
-        return <SkillsManager />;
+        content = <SkillsManager />;
+        break;
       case "settings":
-        return <Settings />;
+        content = <Settings />;
+        break;
       case "quality":
-        return (
+        content = (
           <div className="codascope-empty-state">
             <div className="codascope-empty-state-icon">📊</div>
             <div className="codascope-empty-state-title">Quality Dashboard</div>
@@ -91,8 +102,9 @@ export function CodaScopeContent() {
             </div>
           </div>
         );
+        break;
       case "rules":
-        return (
+        content = (
           <div className="codascope-empty-state">
             <div className="codascope-empty-state-icon">📜</div>
             <div className="codascope-empty-state-title">Golden Rules</div>
@@ -101,8 +113,9 @@ export function CodaScopeContent() {
             </div>
           </div>
         );
+        break;
       case "concepts":
-        return (
+        content = (
           <div className="codascope-empty-state">
             <div className="codascope-empty-state-icon">🧩</div>
             <div className="codascope-empty-state-title">Concept Explorer</div>
@@ -111,9 +124,17 @@ export function CodaScopeContent() {
             </div>
           </div>
         );
+        break;
       default:
-        return <ProjectDashboard />;
+        content = <ProjectDashboard />;
     }
+
+    return (
+      <>
+        {showBanners && <SetupBanners />}
+        {content}
+      </>
+    );
   }
 
   // Fallback

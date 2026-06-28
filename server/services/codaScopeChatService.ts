@@ -89,4 +89,18 @@ export class CodaScopeChatService {
       context: wikiPages.slice(0, 5),
     };
   }
+
+  // ── Save Message (for SSE streaming routes) ─────────────────────
+
+  async saveMessage(projectId: string, role: string, content: string): Promise<void> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return;
+
+    const chatDir = path.join(projectDir, "chat");
+    if (!existsSync(chatDir)) mkdirSync(chatDir, { recursive: true });
+    const historyPath = path.join(chatDir, "history.jsonl");
+    const entry = JSON.stringify({ role, content, timestamp: new Date().toISOString() }) + "\n";
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(historyPath, entry);
+  }
 }

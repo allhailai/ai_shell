@@ -2,7 +2,7 @@
    Project settings, repository management, and version management.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { FolderPicker } from "../../../shared/folder-picker";
 
@@ -18,6 +18,119 @@ export function Settings() {
   const [repoName, setRepoName] = useState("");
   const [saving, setSaving] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+
+  // ── API Key state ───────────────────────────────────────────────────
+
+  const [apiKey, setApiKey] = useState("");
+  const [apiKeyMasked, setApiKeyMasked] = useState<string | null>(null);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeyRefreshToken, setApiKeyRefreshToken] = useState(0);
+  const [apiKeyStatus, setApiKeyStatus] = useState<{
+    state: "idle" | "validating" | "valid" | "error";
+    modelCount?: number;
+    error?: string;
+  }>({ state: "idle" });
+
+  // Load existing key + validate on mount and after save
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/secrets/app/codascope/cursor_api_key");
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.value) {
+            const val = data.value as string;
+            setApiKeyMasked(val.slice(0, 8) + "•".repeat(Math.max(0, val.length - 12)) + val.slice(-4));
+            // Auto-validate the existing key
+            setApiKeyStatus({ state: "validating" });
+            try {
+              const vRes = await fetch("/api/codascope/validate-api-key", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ apiKey: val }),
+              });
+              if (cancelled) return;
+              if (vRes.ok) {
+                const vData = await vRes.json();
+                if (vData.valid) {
+                  setApiKeyStatus({ state: "valid", modelCount: vData.modelCount });
+                } else {
+                  setApiKeyStatus({ state: "error", error: vData.error });
+                }
+              } else {
+                setApiKeyStatus({ state: "error", error: "Failed to validate key" });
+              }
+            } catch {
+              if (!cancelled) setApiKeyStatus({ state: "error", error: "Network error during validation" });
+            }
+          } else {
+            setApiKeyMasked(null);
+            setApiKeyStatus({ state: "idle" });
+          }
+        } else {
+          setApiKeyMasked(null);
+          setApiKeyStatus({ state: "idle" });
+        }
+      } catch {
+        if (!cancelled) {
+          setApiKeyMasked(null);
+          setApiKeyStatus({ state: "idle" });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiKeyRefreshToken]);
+
+  const handleSaveApiKey = useCallback(async () => {
+    const key = apiKey.trim();
+    if (!key) return;
+
+    setApiKeySaving(true);
+    setApiKeyStatus({ state: "validating" });
+
+    try {
+      // Step 1: Validate the key first
+      const vRes = await fetch("/api/codascope/validate-api-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key }),
+      });
+
+      if (!vRes.ok) {
+        setApiKeyStatus({ state: "error", error: "Validation request failed" });
+        return;
+      }
+
+      const vData = await vRes.json();
+
+      if (!vData.valid) {
+        // Key is invalid — show the error, do NOT save
+        setApiKeyStatus({ state: "error", error: vData.error });
+        return;
+      }
+
+      // Step 2: Key is valid — persist it
+      const res = await fetch("/api/secrets/app/codascope/cursor_api_key", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: key }),
+      });
+
+      if (res.ok) {
+        setApiKey("");
+        setApiKeyStatus({ state: "valid", modelCount: vData.modelCount });
+        setApiKeyRefreshToken((v) => v + 1); // Re-fetch masked value
+      } else {
+        setApiKeyStatus({ state: "error", error: "Failed to save key" });
+      }
+    } catch {
+      setApiKeyStatus({ state: "error", error: "Network error" });
+    } finally {
+      setApiKeySaving(false);
+    }
+  }, [apiKey]);
 
   // ── Add repository ────────────────────────────────────────────────
 
@@ -127,20 +240,73 @@ export function Settings() {
         <div className="codascope-page-title">Settings</div>
       </div>
 
+      {/* Cursor API Key */}
+      <div id="api-key-section" className="codascope-settings-section">
+        <div className="codascope-settings-section-title">
+          🔑 Cursor API Key
+          {apiKeyStatus.state === "valid" && (
+            <span className="codascope-api-key-badge codascope-api-key-badge--valid">
+              ✓ Connected · {apiKeyStatus.modelCount} models
+            </span>
+          )}
+          {apiKeyStatus.state === "validating" && (
+            <span className="codascope-api-key-badge codascope-api-key-badge--validating">
+              ⟳ Validating…
+            </span>
+          )}
+          {apiKeyStatus.state === "error" && (
+            <span className="codascope-api-key-badge codascope-api-key-badge--error">
+              ✗ Invalid
+            </span>
+          )}
+        </div>
+        <div className="codascope-settings-section-desc">
+          Required for agent features, the assistant panel, and wiki builds.
+        </div>
+
+        {/* Status detail */}
+        {apiKeyStatus.state === "error" && apiKeyStatus.error && (
+          <div className="codascope-api-key-error">
+            {apiKeyStatus.error}
+          </div>
+        )}
+
+        {apiKeyMasked && (
+          <div className="codascope-settings-api-key-current">
+            <span className="codascope-settings-api-key-label">Current key:</span>
+            <code className="codascope-settings-api-key-value">{apiKeyMasked}</code>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
+          <div style={{ flex: 1 }}>
+            <label className="codascope-form-label" htmlFor="cursor-api-key">
+              {apiKeyMasked ? "Replace API Key" : "Enter API Key"}
+            </label>
+            <input
+              className="codascope-form-input"
+              id="cursor-api-key"
+              type="password"
+              placeholder="cur_xxxxxxxxxxxxxxxx"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <button
+            className="codascope-btn codascope-btn-primary"
+            onClick={handleSaveApiKey}
+            disabled={apiKeySaving || !apiKey.trim()}
+            type="button"
+            style={{ marginBottom: "1px" }}
+          >
+            {apiKeySaving ? "Validating…" : "Save Key"}
+          </button>
+        </div>
+      </div>
+
       {/* Project info */}
-      <div style={{
-        padding: "var(--space-5)",
-        marginBottom: "var(--space-6)",
-        borderRadius: "var(--radius-xl)",
-        background: "var(--color-bg-secondary)",
-        border: "1px solid var(--color-border-primary)",
-      }}>
-        <div style={{
-          fontSize: "var(--text-sm)",
-          fontWeight: "var(--weight-semibold)",
-          color: "var(--color-text-primary)",
-          marginBottom: "var(--space-4)",
-        }}>
+      <div className="codascope-settings-section">
+        <div className="codascope-settings-section-title">
           Project Details
         </div>
         <div className="codascope-form-group">
@@ -174,20 +340,9 @@ export function Settings() {
       </div>
 
       {/* Repositories */}
-      <div style={{
-        padding: "var(--space-5)",
-        marginBottom: "var(--space-6)",
-        borderRadius: "var(--radius-xl)",
-        background: "var(--color-bg-secondary)",
-        border: "1px solid var(--color-border-primary)",
-      }}>
-        <div style={{
-          fontSize: "var(--text-sm)",
-          fontWeight: "var(--weight-semibold)",
-          color: "var(--color-text-primary)",
-          marginBottom: "var(--space-4)",
-        }}>
-          Repositories ({project.repositories.length})
+      <div id="repos-section" className="codascope-settings-section">
+        <div className="codascope-settings-section-title">
+          📦 Repositories ({project.repositories.length})
         </div>
 
         {project.repositories.map((repo) => (

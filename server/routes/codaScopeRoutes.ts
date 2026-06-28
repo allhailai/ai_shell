@@ -9,6 +9,7 @@ import { CodaScopeProjectService } from "../services/codaScopeProjectService.js"
 import { CodaScopeWikiService } from "../services/codaScopeWikiService.js";
 import { CodaScopeChatService } from "../services/codaScopeChatService.js";
 import { CodaScopeSkillService } from "../services/codaScopeSkillService.js";
+import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
 
 type HttpErrorFn = (message: string, status: number, code: string) => Error;
 
@@ -29,6 +30,7 @@ let projectService: CodaScopeProjectService | null = null;
 let wikiService: CodaScopeWikiService | null = null;
 let chatService: CodaScopeChatService | null = null;
 let skillService: CodaScopeSkillService | null = null;
+let agentService: CodaScopeAgentService | null = null;
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -41,7 +43,7 @@ async function setProjectsRoot(secretService: SecretService, value: string): Pro
   return secretService.setAppSecret(APP_ID, CONFIG_KEY, value);
 }
 
-async function ensureServices(secretService: SecretService, httpError: HttpErrorFn): Promise<{ projectSvc: CodaScopeProjectService; wikiSvc: CodaScopeWikiService; chatSvc: CodaScopeChatService; skillSvc: CodaScopeSkillService }> {
+async function ensureServices(secretService: SecretService, httpError: HttpErrorFn): Promise<{ projectSvc: CodaScopeProjectService; wikiSvc: CodaScopeWikiService; chatSvc: CodaScopeChatService; skillSvc: CodaScopeSkillService; agentSvc: CodaScopeAgentService }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
 
@@ -57,7 +59,10 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!skillService) skillService = new CodaScopeSkillService(root);
   else skillService.setRoot(root);
 
-  return { projectSvc: projectService, wikiSvc: wikiService, chatSvc: chatService, skillSvc: skillService };
+  if (!agentService) agentService = new CodaScopeAgentService(secretService, root);
+  else agentService.setProjectsRoot(root);
+
+  return { projectSvc: projectService, wikiSvc: wikiService, chatSvc: chatService, skillSvc: skillService, agentSvc: agentService };
 }
 
 export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps): void {
@@ -239,4 +244,174 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     console.log(`[codascope] Agent run requested: ${command} with model ${model ?? "default"} for project ${id}`);
     res.json({ message: `Agent run "${command}" started. (Integration pending)`, runId: `run-${Date.now()}` });
   }));
+
+  // ── Models ──────────────────────────────────────────────────────
+
+  app.get("/api/codascope/models", wrap(async (_req, res) => {
+    const { agentSvc } = await ensureServices(secretService, httpError);
+    try {
+      const models = await agentSvc.listModels();
+      res.json({ models });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to list models";
+      // If API key not set, return empty list rather than error
+      if (message.includes("not configured")) {
+        res.json({ models: [], error: message });
+      } else {
+        throw httpError(message, 500, "model_list_failed");
+      }
+    }
+  }));
+
+  // ── Validate API Key ───────────────────────────────────────────────
+
+  app.post("/api/codascope/validate-api-key", wrap(async (req, res) => {
+    const { apiKey } = req.body as { apiKey?: string };
+    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+      throw httpError("apiKey is required", 400, "missing_api_key");
+    }
+
+    // We need an agentService but don't need full project setup.
+    // Create a temporary one if not initialized yet.
+    let svc = agentService;
+    if (!svc) {
+      const root = await getProjectsRoot(secretService) ?? "/tmp/codascope-validate";
+      svc = new CodaScopeAgentService(secretService, root);
+      // Don't persist as the singleton — let ensureServices do that
+    }
+
+    const result = await svc.validateApiKey(apiKey.trim());
+    res.json(result);
+  }));
+
+  // ── Assistant (Right Panel) — SSE Streaming ─────────────────────
+
+  app.post("/api/codascope/projects/:id/assistant", (req: Request, res: Response, next: NextFunction) => {
+    (async () => {
+      const { agentSvc } = await ensureServices(secretService, httpError);
+      const id = param(req, "id");
+      const { message, modelId, context } = req.body as {
+        message?: string;
+        modelId?: string;
+        context?: string;
+      };
+
+      if (!message || typeof message !== "string" || !message.trim()) {
+        throw httpError("message is required.", 400, "invalid_input");
+      }
+      if (!modelId || typeof modelId !== "string") {
+        throw httpError("modelId is required.", 400, "invalid_input");
+      }
+
+      // Set up SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      // Handle client disconnect
+      let aborted = false;
+      req.on("close", () => {
+        aborted = true;
+      });
+
+      await agentSvc.send({
+        projectId: id,
+        message: message.trim(),
+        modelId,
+        context: context?.trim(),
+        purpose: "assistant",
+        onMessage: (msg) => {
+          if (aborted) return;
+          res.write(`data: ${JSON.stringify(msg)}\n\n`);
+        },
+        onDone: (result) => {
+          if (aborted) return;
+          res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
+          res.end();
+        },
+        onError: (err) => {
+          if (aborted) return;
+          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+          res.end();
+        },
+      });
+    })().catch(next);
+  });
+
+  // ── Chat — SSE Streaming ────────────────────────────────────────
+
+  app.post("/api/codascope/projects/:id/chat/stream", (req: Request, res: Response, next: NextFunction) => {
+    (async () => {
+      const { agentSvc, chatSvc } = await ensureServices(secretService, httpError);
+      const id = param(req, "id");
+      const { message, modelId } = req.body as {
+        message?: string;
+        modelId?: string;
+      };
+
+      if (!message || typeof message !== "string" || !message.trim()) {
+        throw httpError("message is required.", 400, "invalid_input");
+      }
+      if (!modelId || typeof modelId !== "string") {
+        throw httpError("modelId is required.", 400, "invalid_input");
+      }
+
+      // Save user message to chat history
+      await chatSvc.saveMessage(id, "user", message.trim());
+
+      // Set up SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let aborted = false;
+      req.on("close", () => {
+        aborted = true;
+      });
+
+      let fullResponse = "";
+
+      await agentSvc.send({
+        projectId: id,
+        message: message.trim(),
+        modelId,
+        systemPrompt:
+          "You are CodaScope, an AI assistant that helps users understand and explore codebases. " +
+          "You have access to tools to browse wiki documentation and repository information. " +
+          "Use these tools to find relevant information before answering questions.",
+        purpose: "chat",
+        onMessage: (msg) => {
+          if (aborted) return;
+          // Accumulate text for history
+          if (msg.type === "assistant" && msg.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === "text") fullResponse += block.text;
+            }
+          }
+          res.write(`data: ${JSON.stringify(msg)}\n\n`);
+        },
+        onDone: async (result) => {
+          if (!aborted) {
+            // Save assistant response to chat history
+            if (fullResponse) {
+              await chatSvc.saveMessage(id, "agent", fullResponse);
+            }
+            res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
+            res.end();
+          }
+        },
+        onError: (err) => {
+          if (aborted) return;
+          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+          res.end();
+        },
+      });
+    })().catch(next);
+  });
 }

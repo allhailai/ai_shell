@@ -1,10 +1,7 @@
-/* ── CodaScope: Manifest ──────────────────────────────────────────────
-   Application manifest for CodaScope — AI-powered codebase explorer.
-   ──────────────────────────────────────────────────────────────────── */
-
 import type { AppManifest } from "../../types/app";
 import { CodaScopeContent } from "./CodaScopeContent";
 import { CodaScopeNav } from "./CodaScopeNav";
+import { CodaScopeAssistant } from "./CodaScopeAssistant";
 
 function CodaScopeIcon({ size = 18 }: { size?: number }) {
   return (
@@ -37,6 +34,15 @@ export const codaScopeApp: AppManifest = {
   leftNav: CodaScopeNav,
   mainContent: CodaScopeContent,
 
+  rightPanel: {
+    id: "assistant",
+    label: "CodaScope Assistant",
+    component: CodaScopeAssistant,
+    defaultSize: 420,
+    minSize: 320,
+    maxSize: 700,
+  },
+
   secrets: [
     {
       key: "cursor_api_key",
@@ -56,3 +62,4 @@ export const codaScopeApp: AppManifest = {
     },
   ],
 };
+

@@ -1,0 +1,376 @@
+/* ── CodaScope: Assistant Panel Styles ─────────────────────────────── */
+
+.codascope-assistant {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0;
+}
+
+/* ── Context Badge ──────────────────────────────────────────────── */
+
+.codascope-assistant-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-accent-muted);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.codascope-assistant-context-badge {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent-text);
+}
+
+.codascope-assistant-context-label {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Messages Area ──────────────────────────────────────────────── */
+
+.codascope-assistant-messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overscroll-behavior: contain;
+}
+
+.codascope-assistant-messages::-webkit-scrollbar {
+  width: 4px;
+}
+.codascope-assistant-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+.codascope-assistant-messages::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: var(--radius-full);
+}
+
+/* ── Welcome State ──────────────────────────────────────────────── */
+
+.codascope-assistant-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
+  flex: 1;
+  opacity: 0.7;
+}
+
+.codascope-assistant-welcome-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-3);
+}
+
+.codascope-assistant-welcome h3 {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-2);
+}
+
+.codascope-assistant-welcome p {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 280px;
+}
+
+/* ── Empty State ────────────────────────────────────────────────── */
+
+.codascope-assistant-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  opacity: 0.6;
+}
+
+.codascope-assistant-empty-icon {
+  font-size: 2rem;
+  margin-bottom: var(--space-2);
+}
+
+.codascope-assistant-empty p {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ── Message Bubbles ────────────────────────────────────────────── */
+
+.codascope-assistant-msg {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  animation: codascope-msg-in 0.2s ease-out;
+}
+
+@keyframes codascope-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.codascope-assistant-msg-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  font-size: 14px;
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-assistant-msg-user .codascope-assistant-msg-avatar {
+  background: var(--color-accent-muted);
+}
+
+.codascope-assistant-msg-content {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-primary);
+}
+
+.codascope-assistant-msg-user .codascope-assistant-msg-content {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+}
+
+.codascope-assistant-msg-user .codascope-assistant-msg-content p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.codascope-assistant-msg-assistant .codascope-assistant-msg-content {
+  padding: var(--space-1) 0;
+}
+
+/* Markdown inside assistant messages */
+.codascope-assistant-msg-assistant .shared-md-viewer {
+  font-size: var(--text-sm);
+}
+
+.codascope-assistant-msg-assistant .markdown-viewer p {
+  margin: 0 0 var(--space-2);
+}
+
+.codascope-assistant-msg-assistant .markdown-viewer p:last-child {
+  margin-bottom: 0;
+}
+
+.codascope-assistant-msg-assistant .markdown-viewer code {
+  font-size: 0.85em;
+  background: var(--color-bg-tertiary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.codascope-assistant-msg-assistant .markdown-viewer pre {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  margin: var(--space-2) 0;
+}
+
+.codascope-assistant-msg-assistant .markdown-viewer pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* ── Thinking Indicator ─────────────────────────────────────────── */
+
+.codascope-assistant-thinking {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-2) 0;
+}
+
+.codascope-assistant-thinking span {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  opacity: 0.4;
+  animation: codascope-thinking 1.4s ease-in-out infinite;
+}
+
+.codascope-assistant-thinking span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.codascope-assistant-thinking span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes codascope-thinking {
+  0%, 80%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+/* ── Input Area ─────────────────────────────────────────────────── */
+
+.codascope-assistant-input-area {
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border-primary);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-assistant-input-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.codascope-assistant-input-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.codascope-assistant-stop-btn,
+.codascope-assistant-clear-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.codascope-assistant-stop-btn:hover {
+  background: var(--color-danger-muted, hsl(0, 60%, 20%));
+  color: var(--color-danger, hsl(0, 75%, 60%));
+}
+
+.codascope-assistant-clear-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.codascope-assistant-clear-btn:disabled {
+  opacity: 0.3;
+}
+
+.codascope-assistant-input-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.codascope-assistant-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  line-height: 1.4;
+  min-height: 36px;
+  max-height: 120px;
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-assistant-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.codascope-assistant-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-assistant-send-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: white;
+  transition: all var(--transition-fast);
+}
+
+.codascope-assistant-send-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.codascope-assistant-send-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Model Picker (compact for panel) ───────────────────────────── */
+
+.codascope-model-picker {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-model-picker:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.codascope-model-picker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codascope-model-picker-compact {
+  max-width: 180px;
+}
+
+.codascope-model-picker-empty {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
