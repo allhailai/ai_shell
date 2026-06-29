@@ -1,9 +1,11 @@
 /* ── CodaScope: SkillsManager View ────────────────────────────────────
    Displays framework skills (read-only) and project skills (CRUD).
+   Runs skills via SSE streaming from the agent service.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore, type SkillInfo } from "../useCodaScopeStore";
+import { ModelPicker } from "../components/ModelPicker";
 
 export function SkillsManager() {
   const {
@@ -12,6 +14,7 @@ export function SkillsManager() {
     setSkills,
     agentRunning,
     selectedModel,
+    setSelectedModel,
     setAgentRunning,
     setAgentStatus,
   } = useCodaScopeStore();
@@ -19,6 +22,9 @@ export function SkillsManager() {
   const [showCreate, setShowCreate] = useState(false);
   const [newSkill, setNewSkill] = useState({ name: "", description: "", category: "analysis" });
   const [runningSkillId, setRunningSkillId] = useState<string | null>(null);
+  const [runOutput, setRunOutput] = useState("");
+  const [runError, setRunError] = useState("");
+  const outputEndRef = useRef<HTMLDivElement | null>(null);
 
   // ── Fetch skills ──────────────────────────────────────────────────
 
@@ -37,23 +43,69 @@ export function SkillsManager() {
     })();
   }, [activeProjectId, setSkills]);
 
-  // ── Run skill ─────────────────────────────────────────────────────
+  // ── Run skill via SSE ─────────────────────────────────────────────
 
   const handleRunSkill = useCallback(async (skill: SkillInfo) => {
-    if (agentRunning || !activeProjectId) return;
+    if (agentRunning || !activeProjectId || !selectedModel) return;
+
     if (skill.lockType === "write") {
       setAgentRunning(true);
       setAgentStatus(`Running ${skill.name}…`);
     }
     setRunningSkillId(skill.id);
+    setRunOutput("");
+    setRunError("");
+
     try {
-      await fetch(`/api/codascope/projects/${activeProjectId}/skills/${skill.id}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: selectedModel }),
-      });
-    } catch {
-      // Silently fail
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/skills/${skill.id}/run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ modelId: selectedModel }),
+        },
+      );
+
+      if (!res.ok || !res.body) {
+        const text = await res.text();
+        setRunError(text || "Skill run failed");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const msg = JSON.parse(line.slice(6));
+              if (msg.type === "assistant" && msg.message?.content) {
+                for (const block of msg.message.content) {
+                  if (block.type === "text" && block.text) {
+                    setRunOutput((prev) => prev + block.text);
+                  }
+                }
+              }
+            } catch {
+              // Skip malformed
+            }
+          } else if (line.startsWith("event: error")) {
+            // Next data line will have the error
+          }
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setRunError(message);
     } finally {
       setRunningSkillId(null);
       if (skill.lockType === "write") {
@@ -62,6 +114,14 @@ export function SkillsManager() {
       }
     }
   }, [agentRunning, activeProjectId, selectedModel, setAgentRunning, setAgentStatus]);
+
+  // ── Auto-scroll output ────────────────────────────────────────────
+
+  useEffect(() => {
+    if (outputEndRef.current && runOutput) {
+      outputEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [runOutput]);
 
   // ── Create skill ──────────────────────────────────────────────────
 
@@ -112,14 +172,45 @@ export function SkillsManager() {
             {frameworkSkills.length} framework • {projectSkills.length} project skills
           </div>
         </div>
-        <button
-          className="codascope-btn codascope-btn-primary"
-          onClick={() => setShowCreate(true)}
-          type="button"
-        >
-          + New Skill
-        </button>
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
+          <ModelPicker value={selectedModel} onChange={setSelectedModel} compact />
+          <button
+            className="codascope-btn codascope-btn-primary"
+            onClick={() => setShowCreate(true)}
+            type="button"
+          >
+            + New Skill
+          </button>
+        </div>
       </div>
+
+      {/* Run output panel */}
+      {(runOutput || runError) && (
+        <div className="codascope-build-log" style={{ marginBottom: "var(--space-4)" }}>
+          <div className="codascope-build-log-header">
+            <span>
+              {runningSkillId ? "⟳ Skill Running…" : runError ? "✗ Error" : "✓ Complete"}
+            </span>
+            {!runningSkillId && (
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
+                onClick={() => { setRunOutput(""); setRunError(""); }}
+                type="button"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+          <pre className="codascope-build-log-content">
+            {runError && (
+              <span style={{ color: "hsl(0, 70%, 60%)" }}>{runError}</span>
+            )}
+            {runOutput}
+            <div ref={outputEndRef} />
+          </pre>
+        </div>
+      )}
 
       {/* Create skill form */}
       {showCreate && (
@@ -212,7 +303,7 @@ export function SkillsManager() {
                     className="codascope-btn codascope-btn-secondary"
                     style={{ fontSize: "var(--text-xs)", padding: "2px 10px" }}
                     onClick={() => handleRunSkill(skill)}
-                    disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write")}
+                    disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write") || !selectedModel}
                     type="button"
                   >
                     {runningSkillId === skill.id ? "Running…" : "▶ Run"}
@@ -269,7 +360,7 @@ export function SkillsManager() {
                   className="codascope-btn codascope-btn-secondary"
                   style={{ fontSize: "var(--text-xs)", padding: "2px 10px" }}
                   onClick={() => handleRunSkill(skill)}
-                  disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write")}
+                  disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write") || !selectedModel}
                   type="button"
                 >
                   {runningSkillId === skill.id ? "Running…" : "▶ Run"}

@@ -1,11 +1,13 @@
 /* ── CodaScope: WikiBrowser View ──────────────────────────────────────
    Wiki topic tree + page viewer using the shared MarkdownEditor.
+   Build actions use SSE streaming from the agent.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
+import { ModelPicker } from "../components/ModelPicker";
 
 export function WikiBrowser() {
   const { segments, navigate } = useAppSubRoute("codascope");
@@ -18,6 +20,7 @@ export function WikiBrowser() {
     setActiveTopic,
     setActiveTopicContent,
     selectedModel,
+    setSelectedModel,
     agentRunning,
     setAgentRunning,
     setAgentStatus,
@@ -28,23 +31,30 @@ export function WikiBrowser() {
 
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [buildLog, setBuildLog] = useState("");
+  const [showBuildTopic, setShowBuildTopic] = useState(false);
+  const [topicName, setTopicName] = useState("");
+  const [buildError, setBuildError] = useState("");
+  const logEndRef = useRef<HTMLDivElement | null>(null);
 
   // ── Fetch wiki topics ─────────────────────────────────────────────
 
-  useEffect(() => {
+  const refreshTopics = useCallback(async () => {
     if (!activeProjectId) return;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/codascope/projects/${activeProjectId}/wiki`);
-        if (res.ok) {
-          const data = await res.json();
-          setWikiTopics(data.topics ?? []);
-        }
-      } catch {
-        // Silently fail
+    try {
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/wiki`);
+      if (res.ok) {
+        const data = await res.json();
+        setWikiTopics(data.topics ?? []);
       }
-    })();
+    } catch {
+      // Silently fail
+    }
   }, [activeProjectId, setWikiTopics]);
+
+  useEffect(() => {
+    void refreshTopics();
+  }, [refreshTopics]);
 
   // ── Load topic content when URL topic changes ─────────────────────
 
@@ -87,25 +97,107 @@ export function WikiBrowser() {
     }
   }, [activeProjectId, activeTopicId, activeTopicContent]);
 
-  // ── Build full wiki action ────────────────────────────────────────
+  // ── SSE Agent Run helper ──────────────────────────────────────────
 
-  const handleBuildWiki = useCallback(async () => {
-    if (agentRunning || !activeProjectId) return;
+  const runAgentCommand = useCallback(async (
+    command: string,
+    extra?: Record<string, string>,
+  ) => {
+    if (agentRunning || !activeProjectId || !selectedModel) return;
+
     setAgentRunning(true);
-    setAgentStatus("Building full wiki…");
+    setBuildLog("");
+    setBuildError("");
+    setAgentStatus(`Running ${command}…`);
+
     try {
-      await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "do_build_full_wiki", model: selectedModel }),
+        body: JSON.stringify({ command, modelId: selectedModel, ...extra }),
       });
-    } catch {
-      // Silently fail
+
+      if (!res.ok || !res.body) {
+        let errorText = "Failed to start agent.";
+        try {
+          const data = await res.json();
+          errorText = data.error ?? data.message ?? errorText;
+        } catch {
+          errorText = await res.text();
+        }
+        setBuildError(errorText);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const msg = JSON.parse(line.slice(6));
+              if (msg.type === "assistant" && msg.message?.content) {
+                for (const block of msg.message.content) {
+                  if (block.type === "text" && block.text) {
+                    setBuildLog((prev) => prev + block.text);
+                  }
+                }
+              }
+            } catch {
+              // Skip malformed SSE
+            }
+          } else if (line.startsWith("event: wiki-refresh")) {
+            // Next data: line has updated topics
+          } else if (line.startsWith("event: done")) {
+            // Stream complete
+          } else if (line.startsWith("event: error")) {
+            // Next data: line has error
+          }
+        }
+      }
+
+      // Refresh topics after build
+      await refreshTopics();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setBuildLog((prev) => prev + `\n\nFetch error: ${message}`);
     } finally {
       setAgentRunning(false);
       setAgentStatus("");
     }
-  }, [agentRunning, activeProjectId, selectedModel, setAgentRunning, setAgentStatus]);
+  }, [agentRunning, activeProjectId, selectedModel, setAgentRunning, setAgentStatus, refreshTopics]);
+
+  // ── Build full wiki action ────────────────────────────────────────
+
+  const handleBuildWiki = useCallback(() => {
+    void runAgentCommand("do_build_full_wiki");
+  }, [runAgentCommand]);
+
+  // ── Build single topic ────────────────────────────────────────────
+
+  const handleBuildTopic = useCallback(() => {
+    if (!topicName.trim()) return;
+    void runAgentCommand("do_build_wiki_page", { topicName: topicName.trim() });
+    setTopicName("");
+    setShowBuildTopic(false);
+  }, [runAgentCommand, topicName]);
+
+  // ── Auto-scroll build log ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (logEndRef.current && buildLog) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [buildLog]);
 
   // ── Filter topics ─────────────────────────────────────────────────
 
@@ -142,17 +234,80 @@ export function WikiBrowser() {
       <div className="codascope-wiki-sidebar">
         <div className="codascope-wiki-sidebar-header">
           <span className="codascope-wiki-sidebar-title">Topics</span>
-          <button
-            className="codascope-btn codascope-btn-ghost"
-            style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
-            onClick={handleBuildWiki}
-            disabled={agentRunning}
-            title="Build or rebuild wiki"
-            type="button"
-          >
-            {agentRunning ? "Building…" : "🔄 Build"}
-          </button>
+          <div style={{ display: "flex", gap: "4px" }}>
+            <button
+              className="codascope-btn codascope-btn-ghost"
+              style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
+              onClick={() => setShowBuildTopic(true)}
+              disabled={agentRunning}
+              title="Build a single wiki page"
+              type="button"
+            >
+              + Page
+            </button>
+            <button
+              className="codascope-btn codascope-btn-ghost"
+              style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
+              onClick={handleBuildWiki}
+              disabled={agentRunning}
+              title="Build or rebuild full wiki"
+              type="button"
+            >
+              {agentRunning ? "Building…" : "🔄 Build All"}
+            </button>
+          </div>
         </div>
+
+        {/* Model picker for builds */}
+        <div style={{ padding: "0 var(--space-3) var(--space-2)" }}>
+          <ModelPicker
+            value={selectedModel}
+            onChange={setSelectedModel}
+            compact
+          />
+        </div>
+
+        {/* Build topic form */}
+        {showBuildTopic && (
+          <div style={{
+            padding: "var(--space-3)",
+            borderBottom: "1px solid var(--color-border-primary)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-2)",
+          }}>
+            <input
+              className="codascope-form-input"
+              type="text"
+              placeholder="Topic name (e.g., Authentication)"
+              value={topicName}
+              onChange={(e) => setTopicName(e.target.value)}
+              style={{ fontSize: "var(--text-xs)" }}
+              onKeyDown={(e) => e.key === "Enter" && handleBuildTopic()}
+              autoFocus
+            />
+            <div style={{ display: "flex", gap: "4px" }}>
+              <button
+                className="codascope-btn codascope-btn-primary"
+                style={{ fontSize: "var(--text-xs)", padding: "2px 8px", flex: 1 }}
+                onClick={handleBuildTopic}
+                disabled={!topicName.trim() || agentRunning}
+                type="button"
+              >
+                Build
+              </button>
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                style={{ fontSize: "var(--text-xs)", padding: "2px 8px" }}
+                onClick={() => { setShowBuildTopic(false); setTopicName(""); }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         <input
           className="codascope-wiki-search"
           type="text"
@@ -169,7 +324,7 @@ export function WikiBrowser() {
               fontSize: "var(--text-xs)",
             }}>
               {wikiTopics.length === 0
-                ? "No wiki pages yet. Click Build to generate."
+                ? "No wiki pages yet. Click Build All to generate."
                 : "No matching topics."}
             </div>
           ) : (
@@ -190,7 +345,48 @@ export function WikiBrowser() {
 
       {/* Content area */}
       <div className="codascope-wiki-content">
-        {activeTopicId ? (
+        {/* Error alert */}
+        {buildError && (
+          <div className="codascope-alert codascope-alert--danger" style={{ margin: "var(--space-4)" }}>
+            <span className="codascope-alert-icon">⚠</span>
+            <span>{buildError}</span>
+            <button
+              className="codascope-alert-dismiss"
+              onClick={() => setBuildError("")}
+              type="button"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Build log panel (shown when agent is running or has output) */}
+        {buildLog && (
+          <div className="codascope-build-log">
+            <div className="codascope-build-log-header">
+              <span>
+                {agentRunning ? "⟳ Agent Output" : "✓ Build Complete"}
+              </span>
+              {!agentRunning && (
+                <button
+                  className="codascope-btn codascope-btn-ghost"
+                  style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
+                  onClick={() => setBuildLog("")}
+                  type="button"
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+            <pre className="codascope-build-log-content">
+              {buildLog}
+              <div ref={logEndRef} />
+            </pre>
+          </div>
+        )}
+
+        {activeTopicId && !buildLog ? (
           <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
             <div style={{
               display: "flex",
@@ -221,12 +417,12 @@ export function WikiBrowser() {
               />
             </div>
           </div>
-        ) : (
+        ) : !buildLog ? (
           <div className="codascope-wiki-empty">
             <div className="codascope-wiki-empty-icon">📖</div>
             <div>Select a topic from the sidebar to view or edit it.</div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

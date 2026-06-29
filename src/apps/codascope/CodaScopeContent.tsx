@@ -25,11 +25,67 @@ import { WikiBrowser } from "./views/WikiBrowser";
 import { ChatView } from "./views/ChatView";
 import { SkillsManager } from "./views/SkillsManager";
 import { Settings } from "./views/Settings";
+import { ConceptExplorer } from "./views/ConceptExplorer";
+import { GoldenRules } from "./views/GoldenRules";
+import { QualityDashboard } from "./views/QualityDashboard";
 import { SetupBanners } from "./components/SetupBanners";
+
+/**
+ * Global data loader — fetches config + projects once on mount,
+ * regardless of which route is active. This ensures that navigating
+ * directly to /project/:id/dashboard (e.g. via refresh) still has
+ * project data available in the store.
+ */
+function useCodaScopeBootstrap() {
+  const { configured, setProjectsRoot, setConfigured, setProjects } = useCodaScopeStore();
+
+  // Load config on mount
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/codascope/config");
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.projectsRoot) {
+            setProjectsRoot(data.projectsRoot);
+            setConfigured(true);
+          }
+        }
+      } catch {
+        // Not configured yet
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [setProjectsRoot, setConfigured]);
+
+  // Load projects when configured
+  useEffect(() => {
+    if (!configured) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/codascope/projects");
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          setProjects(data.projects ?? []);
+        }
+      } catch {
+        // Silently fail
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [configured, setProjects]);
+}
 
 export function CodaScopeContent() {
   const { segments, replace } = useAppSubRoute("codascope");
   const { setActiveProject, setActiveTopic } = useCodaScopeStore();
+
+  // Bootstrap: load config + projects on mount (works for all routes)
+  useCodaScopeBootstrap();
 
   // Parse route
   const section = segments[0] ?? "";
@@ -93,37 +149,13 @@ export function CodaScopeContent() {
         content = <Settings />;
         break;
       case "quality":
-        content = (
-          <div className="codascope-empty-state">
-            <div className="codascope-empty-state-icon">📊</div>
-            <div className="codascope-empty-state-title">Quality Dashboard</div>
-            <div className="codascope-empty-state-text">
-              Quality analysis dashboard coming in Phase 2.
-            </div>
-          </div>
-        );
+        content = <QualityDashboard />;
         break;
       case "rules":
-        content = (
-          <div className="codascope-empty-state">
-            <div className="codascope-empty-state-icon">📜</div>
-            <div className="codascope-empty-state-title">Golden Rules</div>
-            <div className="codascope-empty-state-text">
-              Golden rules management coming in Phase 2.
-            </div>
-          </div>
-        );
+        content = <GoldenRules />;
         break;
       case "concepts":
-        content = (
-          <div className="codascope-empty-state">
-            <div className="codascope-empty-state-icon">🧩</div>
-            <div className="codascope-empty-state-title">Concept Explorer</div>
-            <div className="codascope-empty-state-text">
-              Concept extraction and exploration coming in Phase 3.
-            </div>
-          </div>
-        );
+        content = <ConceptExplorer />;
         break;
       default:
         content = <ProjectDashboard />;

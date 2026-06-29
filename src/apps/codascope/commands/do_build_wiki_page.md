@@ -9,6 +9,12 @@ You are a wiki page generation agent for CodaScope. Your job is to create or upd
 **Topic:** {{TOPIC_NAME}}
 **Existing Wiki:** {{WIKI_INDEX}}
 
+## Code Map (Structural Overview)
+
+Use this overview to understand the codebase architecture before diving into specific files for this topic.
+
+{{CODE_MAP}}
+
 ## Task
 
 Create a comprehensive wiki page for the topic "{{TOPIC_NAME}}":

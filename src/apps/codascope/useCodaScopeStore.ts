@@ -110,7 +110,10 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   skills: [],
   agentRunning: false,
   agentStatus: "",
-  selectedModel: "claude-sonnet",
+  selectedModel: (() => {
+    try { return localStorage.getItem("codascope:lastModel") ?? ""; }
+    catch { return ""; }
+  })(),
 
   // Actions
   setProjectsRoot: (root) => set({ projectsRoot: root }),
@@ -125,5 +128,8 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   setSkills: (skills) => set({ skills }),
   setAgentRunning: (running) => set({ agentRunning: running }),
   setAgentStatus: (status) => set({ agentStatus: status }),
-  setSelectedModel: (model) => set({ selectedModel: model }),
+  setSelectedModel: (model) => {
+    try { localStorage.setItem("codascope:lastModel", model); } catch { /* ignore */ }
+    set({ selectedModel: model });
+  },
 }));

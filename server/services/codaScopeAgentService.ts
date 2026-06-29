@@ -19,6 +19,7 @@ import type {
 import type { SecretService } from "./secretService.js";
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
+import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -303,6 +304,87 @@ export class CodaScopeAgentService {
             return JSON.stringify({ frameworkCommands: commands }, null, 2);
           } catch {
             return "Failed to list skills.";
+          }
+        },
+      },
+
+      read_code_map: {
+        description:
+          "Read the Code Map for a specific repository. The Code Map is a structured " +
+          "document describing the repository's architecture, modules, and key files. " +
+          "Use list_repositories to discover available repositories first, then pass " +
+          "the repository name here.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            repoName: {
+              type: "string",
+              description: "The repository name (from list_repositories)",
+            },
+          },
+          required: ["repoName"],
+        },
+        execute: async (args) => {
+          const repoName = args.repoName as string;
+          if (!repoName) return "repoName is required.";
+          try {
+            const codeMapService = new CodaScopeCodeMapService(this.projectsRoot);
+            const slug = CodaScopeCodeMapService.repoSlug(repoName);
+            const content = codeMapService.readCodeMap(projectId, slug);
+            if (content === null) {
+              return `No Code Map found for "${repoName}" (slug: ${slug}). Run an analysis to build it.`;
+            }
+            return content;
+          } catch {
+            return `Failed to read Code Map for "${repoName}".`;
+          }
+        },
+      },
+
+      update_code_map_section: {
+        description:
+          "Update a specific section of the Code Map by its heading. Use this to " +
+          "correct or enrich the Code Map when the user asks you to modify it. " +
+          "The section heading must match an existing ## heading in the Code Map. " +
+          "The new content replaces everything between that heading and the next heading.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            repoName: {
+              type: "string",
+              description: "The repository name",
+            },
+            sectionHeading: {
+              type: "string",
+              description: "The section heading text to update (e.g., 'Key Modules' or 'Architecture')",
+            },
+            newContent: {
+              type: "string",
+              description: "The new content for the section (markdown formatted)",
+            },
+          },
+          required: ["repoName", "sectionHeading", "newContent"],
+        },
+        execute: async (args) => {
+          const repoName = args.repoName as string;
+          const sectionHeading = args.sectionHeading as string;
+          const newContent = args.newContent as string;
+          if (!repoName || !sectionHeading || !newContent) {
+            return "repoName, sectionHeading, and newContent are all required.";
+          }
+          try {
+            const codeMapService = new CodaScopeCodeMapService(this.projectsRoot);
+            const slug = CodaScopeCodeMapService.repoSlug(repoName);
+            const updated = codeMapService.updateCodeMapSection(
+              projectId, slug, sectionHeading, newContent,
+            );
+            if (updated) {
+              return `Successfully updated section "${sectionHeading}" in the Code Map for "${repoName}".`;
+            }
+            return `Could not find a section matching "${sectionHeading}" in the Code Map for "${repoName}". ` +
+              `Make sure the heading exists. Use read_code_map to view current sections.`;
+          } catch {
+            return `Failed to update Code Map section.`;
           }
         },
       },

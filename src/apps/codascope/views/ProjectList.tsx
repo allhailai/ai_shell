@@ -3,7 +3,7 @@
    for configuring the projects root directory.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 
@@ -18,48 +18,13 @@ export function ProjectList() {
     setProjects,
   } = useCodaScopeStore();
 
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [setupPath, setSetupPath] = useState("");
   const [error, setError] = useState("");
 
-  // ── Fetch config on mount ─────────────────────────────────────────
+  // Config + projects loading is handled by useCodaScopeBootstrap in CodaScopeContent.
+  // ProjectList reads from the store directly.
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/codascope/config");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.projectsRoot) {
-            setProjectsRoot(data.projectsRoot);
-            setConfigured(true);
-          }
-        }
-      } catch {
-        // Not configured yet
-      }
-    })();
-  }, [setProjectsRoot, setConfigured]);
-
-  // ── Fetch projects when configured ────────────────────────────────
-
-  useEffect(() => {
-    if (!configured) return;
-    void (async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/codascope/projects");
-        if (res.ok) {
-          const data = await res.json();
-          setProjects(data.projects ?? []);
-        }
-      } catch {
-        // Silently fail
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [configured, setProjects]);
 
   // ── Setup handler ─────────────────────────────────────────────────
 

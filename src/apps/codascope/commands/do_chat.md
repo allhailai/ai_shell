@@ -9,6 +9,10 @@ You are a codebase Q&A agent for CodaScope. Your job is to answer the user's que
 **Existing Wiki Context:**
 {{WIKI_CONTEXT}}
 
+## Code Map (Architecture Reference)
+
+{{CODE_MAP}}
+
 ## User's Question
 
 {{USER_MESSAGE}}

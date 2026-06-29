@@ -1,18 +1,10 @@
 /* ── CodaScope: Chat Service ──────────────────────────────────────────
-   Manages codebase Q&A chat. Stores chat history per project and
-   assembles context from wiki pages for the agent.
-
-   Phase 1: Returns a placeholder response. Agent integration
-   (Cursor SDK) will be connected in the agent service.
+   Persists chat history per project. The actual agent conversation
+   flows through /chat/stream SSE via CodaScopeAgentService.
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
-
-interface ChatResponse {
-  response: string;
-  context: string[];
-}
 
 export class CodaScopeChatService {
   private root: string;
@@ -46,49 +38,8 @@ export class CodaScopeChatService {
     return null;
   }
 
-  // ── Chat ──────────────────────────────────────────────────────────
-
-  async chat(projectId: string, message: string, _model?: string): Promise<ChatResponse> {
-    const projectDir = this.findProjectDir(projectId);
-    if (!projectDir) {
-      return { response: "Project not found.", context: [] };
-    }
-
-    // Gather wiki context
-    const wikiDir = path.join(projectDir, "wiki");
-    const wikiPages: string[] = [];
-    if (existsSync(wikiDir)) {
-      const files = readdirSync(wikiDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        wikiPages.push(file.replace(/\.md$/, ""));
-      }
-    }
-
-    // Save message to chat history
-    const chatDir = path.join(projectDir, "chat");
-    if (!existsSync(chatDir)) mkdirSync(chatDir, { recursive: true });
-    const historyPath = path.join(chatDir, "history.jsonl");
-    const entry = JSON.stringify({ role: "user", content: message, timestamp: new Date().toISOString() }) + "\n";
-    const { appendFileSync } = await import("node:fs");
-    appendFileSync(historyPath, entry);
-
-    // TODO: Integrate with Cursor SDK agent via CodaScopeAgentService
-    // For now, return a placeholder that acknowledges the question
-    const response = `I received your question: "${message}"\n\n` +
-      `**This is a placeholder response.** Agent integration with the Cursor SDK is pending.\n\n` +
-      (wikiPages.length > 0
-        ? `I would consult these wiki pages for context:\n${wikiPages.map((p) => `- ${p}`).join("\n")}`
-        : "No wiki pages available yet. Build the wiki first for richer answers.");
-
-    // Save response to history
-    const responseEntry = JSON.stringify({ role: "agent", content: response, timestamp: new Date().toISOString() }) + "\n";
-    appendFileSync(historyPath, responseEntry);
-
-    return {
-      response,
-      context: wikiPages.slice(0, 5),
-    };
-  }
+  // NOTE: chat() placeholder removed — all chat goes through /chat/stream SSE
+  // via CodaScopeAgentService. Only saveMessage() remains for persisting history.
 
   // ── Save Message (for SSE streaming routes) ─────────────────────
 
