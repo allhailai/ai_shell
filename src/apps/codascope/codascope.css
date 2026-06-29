@@ -8,10 +8,8 @@
 .codascope-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   padding: var(--space-6);
-  overflow-y: auto;
 }
 
 .codascope-page-header {
@@ -1755,5 +1753,374 @@
 .codascope-btn--danger:hover {
   background: hsla(0, 60%, 50%, 0.15);
   border-color: hsl(0, 60%, 50%);
+}
+
+/* ── Phase 2E: Analyze Panel ───────────────────────────────────────── */
+
+.codascope-analyze-panel {
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+  margin-bottom: var(--space-4);
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-analyze-panel--running {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), 0 4px 24px rgba(99, 102, 241, 0.12);
+}
+
+.codascope-analyze-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-analyze-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+}
+
+.codascope-analyze-title-icon {
+  font-size: var(--text-lg);
+}
+
+.codascope-analyze-body {
+  padding: var(--space-4) var(--space-5);
+}
+
+.codascope-analyze-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.codascope-analyze-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.codascope-analyze-toggle-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.codascope-analyze-toggle-icon {
+  font-size: var(--text-md);
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+}
+
+.codascope-analyze-toggle-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-analyze-toggle-sub {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-normal);
+  margin-left: var(--space-1);
+}
+
+.codascope-analyze-toggle-fixed {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.codascope-analyze-toggle-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Reuse rule toggle for the analyze panel */
+.codascope-analyze-toggle .codascope-rule-toggle-track {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+}
+
+.codascope-analyze-toggle .codascope-rule-toggle-track::after {
+  width: 14px;
+  height: 14px;
+}
+
+.codascope-analyze-toggle input:checked + .codascope-rule-toggle-track::after {
+  transform: translateX(14px);
+}
+
+/* Wiki mode select */
+.codascope-analyze-mode-select {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.codascope-analyze-mode-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* Divider */
+.codascope-analyze-divider {
+  height: 1px;
+  background: var(--color-border-primary);
+  margin: var(--space-3) 0;
+}
+
+/* Scope selector row */
+.codascope-analyze-scope-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.codascope-analyze-scope-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.codascope-analyze-scope-select {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.codascope-analyze-scope-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* Footer info */
+.codascope-analyze-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border-primary);
+  background: hsla(220, 20%, 8%, 0.5);
+}
+
+.codascope-analyze-footer-info {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-analyze-footer-info-icon {
+  font-size: var(--text-sm);
+  opacity: 0.7;
+}
+
+/* Run button large */
+.codascope-analyze-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-lg);
+  border: none;
+  background: linear-gradient(135deg, hsl(250, 70%, 56%), hsl(280, 70%, 52%));
+  color: white;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.codascope-analyze-run-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
+}
+
+.codascope-analyze-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.codascope-analyze-run-btn--running {
+  background: linear-gradient(135deg, hsl(250, 50%, 40%), hsl(280, 50%, 38%));
+  animation: codascope-analyze-pulse 2s ease-in-out infinite;
+}
+
+@keyframes codascope-analyze-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 2px 16px rgba(99, 102, 241, 0.5); }
+}
+
+/* ── Pipeline Progress ─────────────────────────────────────────────── */
+
+.codascope-pipeline-progress {
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.codascope-pipeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: hsla(220, 15%, 12%, 1);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-pipeline-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-pipeline-elapsed {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-pipeline-steps {
+  padding: var(--space-3) var(--space-4);
+}
+
+.codascope-pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+}
+
+.codascope-pipeline-step-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.codascope-pipeline-step--pending .codascope-pipeline-step-icon {
+  color: var(--color-text-tertiary);
+  opacity: 0.5;
+}
+
+.codascope-pipeline-step--running .codascope-pipeline-step-icon {
+  color: var(--color-accent);
+  animation: codascope-spin 1s linear infinite;
+}
+
+.codascope-pipeline-step--complete .codascope-pipeline-step-icon {
+  color: hsl(142, 60%, 55%);
+}
+
+.codascope-pipeline-step--skipped .codascope-pipeline-step-icon {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-pipeline-step--error .codascope-pipeline-step-icon {
+  color: hsl(0, 70%, 60%);
+}
+
+@keyframes codascope-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.codascope-pipeline-step-label {
+  flex: 1;
+  color: var(--color-text-primary);
+}
+
+.codascope-pipeline-step--pending .codascope-pipeline-step-label {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-pipeline-step--skipped .codascope-pipeline-step-label {
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+}
+
+.codascope-pipeline-step-detail {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ── Quick Links (below analyze) ────────────────────────────────────── */
+
+.codascope-quick-links {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.codascope-quick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.codascope-quick-link:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-quick-link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 

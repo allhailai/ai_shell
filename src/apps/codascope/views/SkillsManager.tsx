@@ -6,6 +6,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore, type SkillInfo } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
+import { IconSkills } from "../components/CodaScopeIcons";
 
 export function SkillsManager() {
   const {
@@ -151,7 +152,7 @@ export function SkillsManager() {
   if (!activeProjectId) {
     return (
       <div className="codascope-empty-state">
-        <div className="codascope-empty-state-icon">🔧</div>
+        <div className="codascope-empty-state-icon"><IconSkills size={32} /></div>
         <div className="codascope-empty-state-title">No Project Selected</div>
         <div className="codascope-empty-state-text">
           Select a project to manage its skills.

@@ -1,9 +1,10 @@
 /* ── CodaScope: ProjectDashboard View ────────────────────────────────
    Overview dashboard for a selected project with stat cards,
-   quick actions, build state persistence, and model picker.
+   unified Analyze panel with toggles, build state persistence,
+   pipeline progress tracking, and model picker.
 
    Build state features:
-   - Button disables and shows "Building Wiki…" during builds
+   - Button disables and shows progress during analysis
    - Checks server build status on mount (survives refresh)
    - Reconnects to SSE stream on refresh to resume live output
    - Shows build history with auto-generated summaries
@@ -13,6 +14,17 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
+import {
+  IconCodeMap,
+  IconWiki,
+  IconQuality,
+  IconFolder,
+  IconSearch,
+  IconPackage,
+  IconConcepts,
+  IconChat,
+  IconRules,
+} from "../components/CodaScopeIcons";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -36,6 +48,15 @@ interface BuildLogEntry {
   summary: string | null;
   error: string | null;
   durationMs: number | null;
+}
+
+type PipelineStepStatus = "pending" | "running" | "complete" | "skipped" | "error";
+
+interface PipelineStep {
+  id: string;
+  label: string;
+  status: PipelineStepStatus;
+  detail?: string;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -83,10 +104,11 @@ function connectToSseStream(
   url: string | { url: string; method: "POST"; body: Record<string, unknown> },
   callbacks: {
     onText: (text: string) => void;
-    onRunStarted?: (runId: string) => void;
+    onRunStarted?: (runId: string, pipeline?: unknown) => void;
     onDone: (summary: string | null) => void;
     onError: (error: string) => void;
     onWikiRefresh?: (topics: unknown[]) => void;
+    onPipelineStep?: (step: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string }) => void;
   },
 ): AbortController {
   const controller = new AbortController();
@@ -134,7 +156,12 @@ function connectToSseStream(
           if (event === "run-started") {
             try {
               const parsed = JSON.parse(data);
-              callbacks.onRunStarted?.(parsed.runId);
+              callbacks.onRunStarted?.(parsed.runId, parsed.pipeline);
+            } catch { /* skip */ }
+          } else if (event === "pipeline-step") {
+            try {
+              const parsed = JSON.parse(data);
+              callbacks.onPipelineStep?.(parsed);
             } catch { /* skip */ }
           } else if (event === "done") {
             try {
@@ -181,6 +208,18 @@ function connectToSseStream(
   return controller;
 }
 
+/* ── Step Icon helpers ───────────────────────────────────────────────── */
+
+function stepIcon(status: PipelineStepStatus): string {
+  switch (status) {
+    case "running": return "⟳";
+    case "complete": return "✓";
+    case "skipped": return "—";
+    case "error": return "✕";
+    default: return "○";
+  }
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function ProjectDashboard() {
@@ -206,6 +245,16 @@ export function ProjectDashboard() {
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<AbortController | null>(null);
 
+  // ── Analyze toggle state ──────────────────────────────────────────
+  const [wikiEnabled, setWikiEnabled] = useState(true);
+  const [wikiMode, setWikiMode] = useState<"deep" | "quick">("deep");
+  const [qualityEnabled, setQualityEnabled] = useState(true);
+  const [scope, setScope] = useState("full");
+
+  // ── Pipeline progress ─────────────────────────────────────────────
+  const [pipelineSteps, setPipelineSteps] = useState<PipelineStep[]>([]);
+  const [showPipeline, setShowPipeline] = useState(false);
+
   // ── Check build status on mount ──────────────────────────────────
 
   useEffect(() => {
@@ -223,11 +272,15 @@ export function ProjectDashboard() {
           setBuildStartedAt(build.startedAt);
           setAgentRunning(true);
           setAgentStatus(`Resuming ${build.command}…`);
+          setShowPipeline(true);
 
           const controller = connectToSseStream(
             `/api/codascope/projects/${activeProjectId}/build-log/${build.runId}/stream`,
             {
               onText: (text) => setRunOutput((prev) => prev + text),
+              onPipelineStep: (step) => {
+                setPipelineSteps((prev) => updatePipelineSteps(prev, step));
+              },
               onDone: (summary) => {
                 setAgentRunning(false);
                 setAgentStatus("");
@@ -288,7 +341,103 @@ export function ProjectDashboard() {
     return () => clearInterval(interval);
   }, [buildStartedAt, runningCommand]);
 
-  // ── Quick actions — SSE streaming ────────────────────────────────
+  // ── Pipeline step updater ─────────────────────────────────────────
+
+  function updatePipelineSteps(
+    prev: PipelineStep[],
+    event: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string },
+  ): PipelineStep[] {
+    const { step: stepId, status, repo, topic, progress, reason, error, mode } = event;
+    const next = [...prev];
+
+    // Build a detail string
+    let detail = "";
+    if (repo) detail = repo;
+    if (topic) detail = topic;
+    if (progress) detail = progress;
+    if (reason) detail = reason;
+    if (error) detail = `Error: ${error}`;
+    if (mode) detail = mode;
+
+    // Find and update existing step, or add a new one
+    const existing = next.findIndex((s) => s.id === stepId);
+    if (existing >= 0) {
+      next[existing] = {
+        ...next[existing],
+        status: status as PipelineStepStatus,
+        detail: detail || next[existing].detail,
+      };
+    } else {
+      const labelMap: Record<string, string> = {
+        "code-map": "Code Map",
+        "wiki": "Wiki",
+        "wiki-draft": "Wiki (Draft)",
+        "wiki-enrich": "Wiki (Enrichment)",
+        "quality": "Quality Scan",
+      };
+      next.push({
+        id: stepId,
+        label: labelMap[stepId] ?? stepId,
+        status: status as PipelineStepStatus,
+        detail,
+      });
+    }
+
+    return next;
+  }
+
+  // ── Unified Analyze action — SSE streaming ───────────────────────
+
+  const handleAnalyze = useCallback(async () => {
+    if (agentRunning || !activeProjectId || !selectedModel) return;
+    setAgentRunning(true);
+    setAgentStatus("Running analysis…");
+    setRunningCommand("analyze");
+    setRunOutput("");
+    setRunError("");
+    setBuildSummary(null);
+    setBuildStartedAt(new Date().toISOString());
+    setShowPipeline(true);
+    setPipelineSteps([]);
+
+    const controller = connectToSseStream(
+      {
+        url: `/api/codascope/projects/${activeProjectId}/analyze`,
+        method: "POST",
+        body: {
+          modelId: selectedModel,
+          wiki: wikiEnabled ? wikiMode : false,
+          quality: qualityEnabled,
+          scope,
+        },
+      },
+      {
+        onText: (text) => setRunOutput((prev) => prev + text),
+        onRunStarted: (_runId) => {
+          // Pipeline started
+        },
+        onPipelineStep: (step) => {
+          setPipelineSteps((prev) => updatePipelineSteps(prev, step));
+        },
+        onDone: (summary) => {
+          setAgentRunning(false);
+          setAgentStatus("");
+          setRunningCommand(null);
+          setBuildSummary(summary);
+          void refreshBuildLogs();
+        },
+        onError: (error) => {
+          setRunError(error);
+          setAgentRunning(false);
+          setAgentStatus("");
+          setRunningCommand(null);
+        },
+      },
+    );
+    streamRef.current = controller;
+  }, [agentRunning, activeProjectId, selectedModel, wikiEnabled, wikiMode, qualityEnabled, scope, setAgentRunning, setAgentStatus, refreshBuildLogs]);
+
+  // ── Legacy quick action (for individual commands like do_explore) ──
 
   const handleQuickAction = useCallback(async (command: string) => {
     if (agentRunning || !activeProjectId || !selectedModel) return;
@@ -309,7 +458,7 @@ export function ProjectDashboard() {
       {
         onText: (text) => setRunOutput((prev) => prev + text),
         onRunStarted: (_runId) => {
-          // runId received — could store for manual reconnect
+          // runId received
         },
         onDone: (summary) => {
           setAgentRunning(false);
@@ -348,7 +497,7 @@ export function ProjectDashboard() {
   if (!project) {
     return (
       <div className="codascope-empty-state">
-        <div className="codascope-empty-state-icon">📁</div>
+        <div className="codascope-empty-state-icon"><IconFolder size={32} /></div>
         <div className="codascope-empty-state-title">No Project Selected</div>
         <div className="codascope-empty-state-text">
           Select a project from the left navigation to view its dashboard.
@@ -357,22 +506,12 @@ export function ProjectDashboard() {
     );
   }
 
-  /* ── Button labels based on build state ────────────────────────── */
+  /* ── Button label for Analyze ────────────────────────────────── */
 
-  const buildButtonLabel =
-    runningCommand === "do_build_full_wiki"
-      ? `📖 Building Wiki… (${elapsed})`
-      : "📖 Build Full Wiki";
-
-  const exploreButtonLabel =
-    runningCommand === "do_explore"
-      ? `🔍 Exploring… (${elapsed})`
-      : "🔍 Explore Codebase";
-
-  const qualityButtonLabel =
-    runningCommand === "do_quality_scan"
-      ? `📊 Scanning… (${elapsed})`
-      : "📊 Run Quality Scan";
+  const isAnalyzing = runningCommand === "analyze";
+  const analyzeButtonLabel = isAnalyzing
+    ? `⟳ Analyzing… (${elapsed})`
+    : "Run ▶";
 
   return (
     <div className="codascope-page">
@@ -389,62 +528,223 @@ export function ProjectDashboard() {
       {/* Stat cards */}
       <div className="codascope-dashboard-grid">
         <div className="codascope-stat-card">
-          <div className="codascope-stat-card-icon">📦</div>
+          <div className="codascope-stat-card-icon"><IconPackage size={20} /></div>
           <div className="codascope-stat-card-value">{project.repositories.length}</div>
           <div className="codascope-stat-card-label">Repositories</div>
         </div>
         <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/wiki`)} style={{ cursor: "pointer" }}>
-          <div className="codascope-stat-card-icon">📖</div>
+          <div className="codascope-stat-card-icon"><IconWiki size={20} /></div>
           <div className="codascope-stat-card-value">{project.wikiPageCount ?? 0}</div>
           <div className="codascope-stat-card-label">Wiki Pages</div>
         </div>
-        <div className="codascope-stat-card">
-          <div className="codascope-stat-card-icon">📊</div>
+        <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/quality`)} style={{ cursor: "pointer" }}>
+          <div className="codascope-stat-card-icon"><IconQuality size={20} /></div>
           <div className="codascope-stat-card-value">{project.qualityScore ?? "—"}</div>
           <div className="codascope-stat-card-label">Quality Score</div>
         </div>
         <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/concepts`)} style={{ cursor: "pointer" }}>
-          <div className="codascope-stat-card-icon">🧩</div>
+          <div className="codascope-stat-card-icon"><IconConcepts size={20} /></div>
           <div className="codascope-stat-card-value">{project.conceptCount ?? 0}</div>
           <div className="codascope-stat-card-label">Concepts</div>
         </div>
       </div>
 
-      {/* Quick actions */}
-      <div className="codascope-page-header" style={{ marginBottom: "var(--space-4)" }}>
-        <div className="codascope-page-title" style={{ fontSize: "var(--text-md)" }}>Quick Actions</div>
+      {/* ── Unified Analyze Panel ──────────────────────────────────── */}
+      <div className={`codascope-analyze-panel ${isAnalyzing ? "codascope-analyze-panel--running" : ""}`} id="analyze-panel">
+        <div className="codascope-analyze-header">
+          <div className="codascope-analyze-title">
+            <span className="codascope-analyze-title-icon"><IconSearch size={16} /></span>
+            Analyze Codebase
+          </div>
+          <button
+            className={`codascope-analyze-run-btn ${isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
+            onClick={handleAnalyze}
+            disabled={agentRunning || !selectedModel}
+            type="button"
+            id="analyze-run-btn"
+          >
+            {analyzeButtonLabel}
+          </button>
+        </div>
+
+        <div className="codascope-analyze-body">
+          {/* Code Map — always on */}
+          <div className="codascope-analyze-toggles">
+            <div className="codascope-analyze-toggle-row">
+              <div className="codascope-analyze-toggle-label">
+                <span className="codascope-analyze-toggle-icon"><IconCodeMap size={16} /></span>
+                <span className="codascope-analyze-toggle-text">
+                  Code Map
+                  <span className="codascope-analyze-toggle-sub">always</span>
+                </span>
+              </div>
+              <div className="codascope-analyze-toggle-right">
+                <span className="codascope-analyze-toggle-fixed">auto-skips if fresh</span>
+              </div>
+            </div>
+
+            {/* Wiki toggle */}
+            <div className="codascope-analyze-toggle-row">
+              <div className="codascope-analyze-toggle-label">
+                <span className="codascope-analyze-toggle-icon"><IconWiki size={16} /></span>
+                <span className="codascope-analyze-toggle-text">Wiki</span>
+              </div>
+              <div className="codascope-analyze-toggle-right">
+                {wikiEnabled && (
+                  <select
+                    className="codascope-analyze-mode-select"
+                    value={wikiMode}
+                    onChange={(e) => setWikiMode(e.target.value as "deep" | "quick")}
+                    disabled={agentRunning}
+                    id="wiki-mode-select"
+                  >
+                    <option value="deep">Deep</option>
+                    <option value="quick">Quick</option>
+                  </select>
+                )}
+                <label className="codascope-rule-toggle codascope-analyze-toggle">
+                  <input
+                    type="checkbox"
+                    checked={wikiEnabled}
+                    onChange={(e) => setWikiEnabled(e.target.checked)}
+                    disabled={agentRunning}
+                  />
+                  <span className="codascope-rule-toggle-track" />
+                </label>
+              </div>
+            </div>
+
+            {/* Quality toggle */}
+            <div className="codascope-analyze-toggle-row">
+              <div className="codascope-analyze-toggle-label">
+                <span className="codascope-analyze-toggle-icon"><IconQuality size={16} /></span>
+                <span className="codascope-analyze-toggle-text">Quality</span>
+              </div>
+              <div className="codascope-analyze-toggle-right">
+                <label className="codascope-rule-toggle codascope-analyze-toggle">
+                  <input
+                    type="checkbox"
+                    checked={qualityEnabled}
+                    onChange={(e) => setQualityEnabled(e.target.checked)}
+                    disabled={agentRunning}
+                  />
+                  <span className="codascope-rule-toggle-track" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Scope selector */}
+          <div className="codascope-analyze-scope-row">
+            <span className="codascope-analyze-scope-label">Scope</span>
+            <select
+              className="codascope-analyze-scope-select"
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              disabled={agentRunning}
+              id="analyze-scope-select"
+            >
+              <option value="full">Full Repository</option>
+              <option value="backend">Backend Only</option>
+              <option value="frontend">Frontend Only</option>
+              <option value="security">Security Focus</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Footer with Code Map freshness info */}
+        <div className="codascope-analyze-footer">
+          <div className="codascope-analyze-footer-info">
+            <span className="codascope-analyze-footer-info-icon">ⓘ</span>
+            <span>Code Map auto-rebuilds when repository HEAD changes</span>
+          </div>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: "var(--space-3)", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
+
+      {/* ── Pipeline Progress ────────────────────────────────────────── */}
+      {showPipeline && pipelineSteps.length > 0 && (
+        <div className="codascope-pipeline-progress" id="pipeline-progress">
+          <div className="codascope-pipeline-header">
+            <div className="codascope-pipeline-title">
+              {isAnalyzing ? "⟳" : "✓"} Analysis Pipeline
+            </div>
+            {isAnalyzing && (
+              <span className="codascope-pipeline-elapsed">{elapsed}</span>
+            )}
+            {!isAnalyzing && (
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
+                onClick={() => { setShowPipeline(false); setPipelineSteps([]); }}
+                type="button"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+          <div className="codascope-pipeline-steps">
+            {pipelineSteps.map((step) => (
+              <div
+                key={step.id}
+                className={`codascope-pipeline-step codascope-pipeline-step--${step.status}`}
+              >
+                <div className="codascope-pipeline-step-icon">
+                  {stepIcon(step.status)}
+                </div>
+                <div className="codascope-pipeline-step-label">{step.label}</div>
+                {step.detail && (
+                  <div className="codascope-pipeline-step-detail">{step.detail}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Quick Links ──────────────────────────────────────────────── */}
+      <div className="codascope-quick-links">
         <button
-          className={`codascope-btn ${runningCommand === "do_build_full_wiki" ? "codascope-btn-building" : "codascope-btn-primary"}`}
-          onClick={() => handleQuickAction("do_build_full_wiki")}
-          disabled={agentRunning || !selectedModel}
+          className="codascope-quick-link"
+          onClick={() => navigate(`project/${activeProjectId}/chat`)}
           type="button"
         >
-          {buildButtonLabel}
+          <IconChat size={14} /> Chat with Code
         </button>
         <button
-          className={`codascope-btn ${runningCommand === "do_explore" ? "codascope-btn-building" : "codascope-btn-secondary"}`}
+          className="codascope-quick-link"
+          onClick={() => navigate(`project/${activeProjectId}/wiki`)}
+          type="button"
+        >
+          <IconWiki size={14} /> Browse Wiki
+        </button>
+        <button
+          className="codascope-quick-link"
+          onClick={() => navigate(`project/${activeProjectId}/quality`)}
+          type="button"
+        >
+          <IconQuality size={14} /> Quality Dashboard
+        </button>
+        <button
+          className="codascope-quick-link"
+          onClick={() => navigate(`project/${activeProjectId}/rules`)}
+          type="button"
+        >
+          <IconRules size={14} /> Golden Rules
+        </button>
+        <button
+          className="codascope-quick-link"
+          onClick={() => navigate(`project/${activeProjectId}/concepts`)}
+          type="button"
+        >
+          <IconConcepts size={14} /> Concepts
+        </button>
+        <button
+          className="codascope-quick-link"
           onClick={() => handleQuickAction("do_explore")}
           disabled={agentRunning || !selectedModel}
           type="button"
         >
-          {exploreButtonLabel}
-        </button>
-        <button
-          className="codascope-btn codascope-btn-secondary"
-          onClick={() => navigate(`project/${activeProjectId}/chat`)}
-          type="button"
-        >
-          💬 Chat with Code
-        </button>
-        <button
-          className={`codascope-btn ${runningCommand === "do_quality_scan" ? "codascope-btn-building" : "codascope-btn-secondary"}`}
-          onClick={() => handleQuickAction("do_quality_scan")}
-          disabled={agentRunning || !selectedModel}
-          type="button"
-        >
-          {qualityButtonLabel}
+          <IconSearch size={14} /> Explore Only
         </button>
       </div>
 

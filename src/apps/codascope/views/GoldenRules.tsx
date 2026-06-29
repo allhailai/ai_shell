@@ -3,8 +3,18 @@
    Rules are evaluated during quality scans.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import {
+  IconLock,
+  IconArchitecture,
+  IconQuality,
+  IconFlask,
+  IconPaintbrush,
+  IconBolt,
+  IconClock,
+  IconRules,
+} from "../components/CodaScopeIcons";
 
 interface GoldenRule {
   id: string;
@@ -19,13 +29,13 @@ interface GoldenRule {
   updatedAt: string;
 }
 
-const CATEGORIES = [
-  { key: "security", label: "Security", icon: "🔒" },
-  { key: "architecture", label: "Architecture", icon: "🏗️" },
-  { key: "data", label: "Data", icon: "💾" },
-  { key: "testing", label: "Testing", icon: "🧪" },
-  { key: "style", label: "Style", icon: "🎨" },
-  { key: "performance", label: "Performance", icon: "⚡" },
+const CATEGORIES: { key: string; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { key: "security", label: "Security", icon: IconLock },
+  { key: "architecture", label: "Architecture", icon: IconArchitecture },
+  { key: "data", label: "Data", icon: IconQuality },
+  { key: "testing", label: "Testing", icon: IconFlask },
+  { key: "style", label: "Style", icon: IconPaintbrush },
+  { key: "performance", label: "Performance", icon: IconBolt },
 ];
 
 const SEVERITIES = [
@@ -35,7 +45,7 @@ const SEVERITIES = [
 ];
 
 export function GoldenRules() {
-  const { activeProject } = useCodaScopeStore();
+  const { activeProjectId: activeProject } = useCodaScopeStore();
   const [rules, setRules] = useState<GoldenRule[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -109,7 +119,7 @@ export function GoldenRules() {
     return (
       <div className="codascope-page">
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">⏳</div>
+          <div className="codascope-empty-state-icon"><IconClock size={32} /></div>
           <div className="codascope-empty-state-text">Loading rules…</div>
         </div>
       </div>
@@ -139,7 +149,7 @@ export function GoldenRules() {
         >
           <option value="">All Categories</option>
           {CATEGORIES.map((c) => (
-            <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+            <option key={c.key} value={c.key}>{c.label}</option>
           ))}
         </select>
         <select
@@ -157,7 +167,7 @@ export function GoldenRules() {
       {/* Rules List */}
       {rules.length === 0 ? (
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">📜</div>
+          <div className="codascope-empty-state-icon"><IconRules size={32} /></div>
           <div className="codascope-empty-state-title">No golden rules yet</div>
           <div className="codascope-empty-state-text">
             Add rules to define coding standards evaluated during quality scans.
@@ -186,7 +196,7 @@ export function GoldenRules() {
                       {rule.severity}
                     </span>
                     <span className="codascope-category-badge">
-                      {CATEGORIES.find((c) => c.key === rule.category)?.icon} {rule.category}
+                      {rule.category}
                     </span>
                   </div>
                 </div>

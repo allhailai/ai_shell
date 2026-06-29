@@ -10,11 +10,12 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { MarkdownViewer } from "../../shared/markdown";
-import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "./useCodaScopeStore";
+import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext, formatContextForAgent } from "./contextAssembler";
+import { useAppSubRoute } from "../../shell/useAppSubRoute";
+import { ModelPicker, useModelPicker } from "./components/ModelPicker";
+import { IconSearch } from "./components/CodaScopeIcons";
 
 interface ChatMessage {
   id: string;
@@ -58,12 +59,12 @@ export function CodaScopeAssistant() {
     const ctx = assembleContext(segments, projectName);
     if (!ctx) return null;
     switch (ctx.view) {
-      case "wiki": return `📄 Wiki`;
-      case "dashboard": return "📊 Dashboard";
-      case "settings": return "⚙️ Settings";
-      case "skills": return "🛠️ Skills";
-      case "chat": return "💬 Chat";
-      default: return `📋 ${ctx.view}`;
+      case "wiki": return "Wiki";
+      case "dashboard": return "Dashboard";
+      case "settings": return "Settings";
+      case "skills": return "Skills";
+      case "chat": return "Chat";
+      default: return ctx.view;
     }
   })();
 
@@ -214,7 +215,7 @@ export function CodaScopeAssistant() {
       <div className="codascope-assistant-messages" ref={scrollRef}>
         {messages.length === 0 && !streaming && (
           <div className="codascope-assistant-welcome">
-            <div className="codascope-assistant-welcome-icon">🔍</div>
+            <div className="codascope-assistant-welcome-icon"><IconSearch size={24} /></div>
             <h3>CodaScope Assistant</h3>
             <p>
               Ask questions about your codebase. I can browse your wiki,
@@ -288,7 +289,7 @@ export function CodaScopeAssistant() {
                 title="Clear conversation"
                 disabled={messages.length === 0}
               >
-                🗑️
+                ×
               </button>
             )}
           </div>

@@ -6,6 +6,7 @@
 import { useState, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { IconFolder } from "../components/CodaScopeIcons";
 
 export function ProjectList() {
   const { navigate } = useAppSubRoute("codascope");
@@ -196,7 +197,7 @@ export function ProjectList() {
         <div className="codascope-loading">Loading projects…</div>
       ) : projects.length === 0 ? (
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">📁</div>
+          <div className="codascope-empty-state-icon"><IconFolder size={32} /></div>
           <div className="codascope-empty-state-title">No Projects Yet</div>
           <div className="codascope-empty-state-text">
             Create your first project to start exploring and documenting your codebase.

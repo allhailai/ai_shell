@@ -5,6 +5,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { FolderPicker } from "../../../shared/folder-picker";
+import { IconSettings, IconKey, IconPackage, IconFolderOpen } from "../components/CodaScopeIcons";
 
 export function Settings() {
   const {
@@ -225,7 +226,7 @@ export function Settings() {
   if (!project) {
     return (
       <div className="codascope-empty-state">
-        <div className="codascope-empty-state-icon">⚙️</div>
+        <div className="codascope-empty-state-icon"><IconSettings size={32} /></div>
         <div className="codascope-empty-state-title">No Project Selected</div>
         <div className="codascope-empty-state-text">
           Select a project to manage its settings.
@@ -243,7 +244,7 @@ export function Settings() {
       {/* Cursor API Key */}
       <div id="api-key-section" className="codascope-settings-section">
         <div className="codascope-settings-section-title">
-          🔑 Cursor API Key
+          <IconKey size={14} /> Cursor API Key
           {apiKeyStatus.state === "valid" && (
             <span className="codascope-api-key-badge codascope-api-key-badge--valid">
               ✓ Connected · {apiKeyStatus.modelCount} models
@@ -342,7 +343,7 @@ export function Settings() {
       {/* Repositories */}
       <div id="repos-section" className="codascope-settings-section">
         <div className="codascope-settings-section-title">
-          📦 Repositories ({project.repositories.length})
+          <IconPackage size={14} /> Repositories ({project.repositories.length})
         </div>
 
         {project.repositories.map((repo) => (
@@ -400,7 +401,7 @@ export function Settings() {
                 title="Browse filesystem to select a repository folder"
                 style={{ whiteSpace: "nowrap", flexShrink: 0 }}
               >
-                📂 Browse
+                <IconFolderOpen size={12} /> Browse
               </button>
             </div>
           </div>

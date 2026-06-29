@@ -3,21 +3,33 @@
    All navigation is URL-driven via useAppSubRoute.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useCallback } from "react";
+import { useCallback, type ComponentType } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "./useCodaScopeStore";
+import {
+  IconDashboard,
+  IconWiki,
+  IconChat,
+  IconQuality,
+  IconRules,
+  IconConcepts,
+  IconSkills,
+  IconSettings,
+  IconFolder,
+  IconLaunch,
+} from "./components/CodaScopeIcons";
 
 type CodaScopeView = "dashboard" | "wiki" | "chat" | "quality" | "rules" | "concepts" | "skills" | "settings";
 
-const NAV_ITEMS: { view: CodaScopeView; icon: string; label: string }[] = [
-  { view: "dashboard", icon: "🏠", label: "Dashboard" },
-  { view: "wiki", icon: "📖", label: "Wiki" },
-  { view: "chat", icon: "💬", label: "Chat" },
-  { view: "quality", icon: "📊", label: "Quality" },
-  { view: "rules", icon: "📜", label: "Golden Rules" },
-  { view: "concepts", icon: "🧩", label: "Concepts" },
-  { view: "skills", icon: "🔧", label: "Skills" },
-  { view: "settings", icon: "⚙️", label: "Settings" },
+const NAV_ITEMS: { view: CodaScopeView; icon: ComponentType<{ size?: number }>; label: string }[] = [
+  { view: "dashboard", icon: IconDashboard, label: "Dashboard" },
+  { view: "wiki", icon: IconWiki, label: "Wiki" },
+  { view: "chat", icon: IconChat, label: "Chat" },
+  { view: "quality", icon: IconQuality, label: "Quality" },
+  { view: "rules", icon: IconRules, label: "Golden Rules" },
+  { view: "concepts", icon: IconConcepts, label: "Concepts" },
+  { view: "skills", icon: IconSkills, label: "Skills" },
+  { view: "settings", icon: IconSettings, label: "Settings" },
 ];
 
 export function CodaScopeNav() {
@@ -59,7 +71,7 @@ export function CodaScopeNav() {
             onClick={() => navigate("projects")}
             type="button"
           >
-            <span className="codascope-nav-icon">🚀</span>
+            <span className="codascope-nav-icon"><IconLaunch size={14} /></span>
             Setup
           </button>
         </div>
@@ -91,7 +103,7 @@ export function CodaScopeNav() {
           onClick={() => navigate("projects")}
           type="button"
         >
-          <span className="codascope-nav-icon">📁</span>
+          <span className="codascope-nav-icon"><IconFolder size={14} /></span>
           Projects
         </button>
 
@@ -102,7 +114,7 @@ export function CodaScopeNav() {
             onClick={() => handleNavClick(item.view)}
             type="button"
           >
-            <span className="codascope-nav-icon">{item.icon}</span>
+            <span className="codascope-nav-icon"><item.icon size={14} /></span>
             {item.label}
           </button>
         ))}

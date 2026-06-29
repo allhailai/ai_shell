@@ -5,9 +5,21 @@
    Level 3: Issue detail (inline expansion)
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
+import {
+  IconFolder,
+  IconRefresh,
+  IconLock,
+  IconArchitecture,
+  IconFlask,
+  IconClipboard,
+  IconClock,
+  IconQuality,
+  IconCheck,
+  IconRules,
+} from "../components/CodaScopeIcons";
 
 interface QualityIssue {
   id: string;
@@ -52,14 +64,14 @@ interface FullReport {
   categories: Record<string, QualityCategory>;
 }
 
-const CATEGORY_META: Record<string, { label: string; icon: string }> = {
-  dead_code: { label: "Dead Code", icon: "🗑️" },
-  complexity: { label: "Complexity", icon: "🔄" },
-  security: { label: "Security", icon: "🔒" },
-  architecture: { label: "Architecture", icon: "🏗️" },
-  data: { label: "Data", icon: "💾" },
-  testing: { label: "Testing", icon: "🧪" },
-  duplication: { label: "Duplication", icon: "📋" },
+const CATEGORY_META: Record<string, { label: string; icon: ComponentType<{ size?: number }> }> = {
+  dead_code: { label: "Dead Code", icon: IconFolder },
+  complexity: { label: "Complexity", icon: IconRefresh },
+  security: { label: "Security", icon: IconLock },
+  architecture: { label: "Architecture", icon: IconArchitecture },
+  data: { label: "Data", icon: IconQuality },
+  testing: { label: "Testing", icon: IconFlask },
+  duplication: { label: "Duplication", icon: IconClipboard },
 };
 
 function scoreColor(score: number): string {
@@ -77,7 +89,7 @@ function scoreLabel(score: number): string {
 }
 
 export function QualityDashboard() {
-  const { activeProject } = useCodaScopeStore();
+  const { activeProjectId: activeProject } = useCodaScopeStore();
   const { segments, navigate } = useAppSubRoute("codascope");
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [fullReport, setFullReport] = useState<FullReport | null>(null);
@@ -117,7 +129,7 @@ export function QualityDashboard() {
     return (
       <div className="codascope-page">
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">⏳</div>
+          <div className="codascope-empty-state-icon"><IconClock size={32} /></div>
           <div className="codascope-empty-state-text">Loading quality data…</div>
         </div>
       </div>
@@ -132,7 +144,7 @@ export function QualityDashboard() {
           <div className="codascope-page-title">Quality Dashboard</div>
         </div>
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">📊</div>
+          <div className="codascope-empty-state-icon"><IconQuality size={32} /></div>
           <div className="codascope-empty-state-title">No quality scans yet</div>
           <div className="codascope-empty-state-text">
             Run an analysis with Quality enabled to see your codebase health.
@@ -146,7 +158,7 @@ export function QualityDashboard() {
   // Level 2: Category detail view
   if (categoryView && fullReport) {
     const categoryData = fullReport.categories[categoryView];
-    const meta = CATEGORY_META[categoryView] ?? { label: categoryView, icon: "📁" };
+    const meta = CATEGORY_META[categoryView] ?? { label: categoryView, icon: IconFolder };
 
     return (
       <div className="codascope-page">
@@ -158,7 +170,7 @@ export function QualityDashboard() {
             >
               ← Quality Overview
             </button>
-            <div className="codascope-page-title">{meta.icon} {meta.label}</div>
+            <div className="codascope-page-title"><meta.icon size={18} /> {meta.label}</div>
             {categoryData && (
               <div className="codascope-page-subtitle">
                 Score: {categoryData.score}/100 · {categoryData.issueCount} issue{categoryData.issueCount !== 1 ? "s" : ""}
@@ -173,7 +185,7 @@ export function QualityDashboard() {
           </div>
         ) : categoryData.issues.length === 0 ? (
           <div className="codascope-empty-state">
-            <div className="codascope-empty-state-icon">✅</div>
+            <div className="codascope-empty-state-icon"><IconCheck size={32} /></div>
             <div className="codascope-empty-state-title">No issues found</div>
             <div className="codascope-empty-state-text">
               This category scored {categoryData.score}/100 with no issues detected.
@@ -194,7 +206,7 @@ export function QualityDashboard() {
                   <span className="codascope-quality-issue-title">{issue.title}</span>
                   <code className="codascope-quality-issue-file">{issue.file}:{issue.line}</code>
                   {issue.goldenRuleId && (
-                    <span className="codascope-quality-golden-badge" title="Golden Rule Violation">📜</span>
+                    <span className="codascope-quality-golden-badge" title="Golden Rule Violation"><IconRules size={12} /></span>
                   )}
                 </div>
 
@@ -213,7 +225,7 @@ export function QualityDashboard() {
                     </div>
                     {issue.goldenRuleId && (
                       <div className="codascope-quality-issue-rule">
-                        📜 Golden Rule violation: {issue.goldenRuleId}
+                        <IconRules size={12} /> Golden Rule violation: {issue.goldenRuleId}
                       </div>
                     )}
                   </div>
@@ -275,7 +287,7 @@ export function QualityDashboard() {
           {summary.goldenRuleViolations > 0 && (
             <div className="codascope-quality-severity-item codascope-quality-severity--golden">
               <span className="codascope-quality-severity-count">{summary.goldenRuleViolations}</span>
-              <span className="codascope-quality-severity-label">📜 Rule Violations</span>
+              <span className="codascope-quality-severity-label"><IconRules size={12} /> Rule Violations</span>
             </div>
           )}
         </div>
@@ -285,14 +297,14 @@ export function QualityDashboard() {
       {fullReport && (
         <div className="codascope-quality-categories">
           {Object.entries(fullReport.categories).map(([key, cat]) => {
-            const meta = CATEGORY_META[key] ?? { label: key, icon: "📁" };
+            const meta = CATEGORY_META[key] ?? { label: key, icon: IconFolder };
             return (
               <div
                 key={key}
                 className="codascope-quality-category-card"
                 onClick={() => navigate(`project/${activeProject}/quality/category/${key}`)}
               >
-                <div className="codascope-quality-category-icon">{meta.icon}</div>
+                <div className="codascope-quality-category-icon"><meta.icon size={20} /></div>
                 <div className="codascope-quality-category-name">{meta.label}</div>
                 <div className="codascope-quality-category-score" style={{ color: scoreColor(cat.score) }}>
                   {cat.score}

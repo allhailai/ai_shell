@@ -8,6 +8,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { ModelPicker, useModelPicker } from "../components/ModelPicker";
+import { IconChat } from "../components/CodaScopeIcons";
 
 interface LocalChatMessage {
   id: string;
@@ -155,7 +156,7 @@ export function ChatView() {
   if (!activeProjectId) {
     return (
       <div className="codascope-empty-state">
-        <div className="codascope-empty-state-icon">💬</div>
+        <div className="codascope-empty-state-icon"><IconChat size={32} /></div>
         <div className="codascope-empty-state-title">No Project Selected</div>
         <div className="codascope-empty-state-text">
           Select a project to chat with your codebase.
@@ -170,7 +171,7 @@ export function ChatView() {
       <div className="codascope-chat-messages">
         {messages.length === 0 && !streaming && (
           <div className="codascope-empty-state" style={{ flex: 1 }}>
-            <div className="codascope-empty-state-icon">💬</div>
+            <div className="codascope-empty-state-icon"><IconChat size={32} /></div>
             <div className="codascope-empty-state-title">Chat with Your Codebase</div>
             <div className="codascope-empty-state-text">
               Ask questions about your code. The agent will search your wiki and
@@ -236,7 +237,7 @@ export function ChatView() {
                 title="Clear chat"
                 type="button"
               >
-                🗑️ Clear
+                × Clear
               </button>
             ) : null}
           </div>

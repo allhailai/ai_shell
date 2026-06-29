@@ -54,6 +54,12 @@ export class CodaScopeBuildStateService {
   /** Active build state per project (in-memory) */
   private activeBuilds = new Map<string, BuildState>();
 
+  /** Track which projects have been hydrated from disk */
+  private hydratedProjects = new Set<string>();
+
+  /** Map project IDs to their actual directory paths on disk */
+  private projectDirs = new Map<string, string>();
+
   constructor(root: string) {
     this.root = root;
   }
@@ -62,10 +68,98 @@ export class CodaScopeBuildStateService {
     this.root = root;
   }
 
+  /**
+   * Register the actual filesystem directory for a project.
+   * Call this before any build operations so build-logs go to the right place.
+   */
+  registerProjectDir(projectId: string, projectDir: string): void {
+    this.projectDirs.set(projectId, projectDir);
+  }
+
+  /**
+   * Hydrate build state from disk for a given project.
+   * If a build was "building" when the server crashed, mark it as interrupted.
+   * Only runs once per project per server lifetime.
+   */
+  private hydrateProjectFromDisk(projectId: string): void {
+    if (this.hydratedProjects.has(projectId)) return;
+    this.hydratedProjects.add(projectId);
+
+    // If we already have in-memory state for this project, skip disk read
+    if (this.activeBuilds.has(projectId)) return;
+
+    const dir = this.buildLogsDir(projectId);
+    if (!existsSync(dir)) return;
+
+    // Find the most recent .json build log
+    const jsonFiles = readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        const fullPath = path.join(dir, f);
+        try {
+          const stat = statSync(fullPath);
+          return { file: f, path: fullPath, mtime: stat.mtimeMs };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as { file: string; path: string; mtime: number }[];
+
+    if (jsonFiles.length === 0) return;
+
+    jsonFiles.sort((a, b) => b.mtime - a.mtime);
+    const latest = jsonFiles[0];
+
+    try {
+      const data = JSON.parse(readFileSync(latest.path, "utf-8")) as BuildLogEntry;
+
+      // Convert BuildLogEntry back into BuildState
+      const state: BuildState = {
+        runId: data.runId,
+        status: data.status,
+        command: data.command,
+        modelId: data.modelId,
+        startedAt: data.startedAt,
+        completedAt: data.completedAt,
+        summary: data.summary,
+        error: data.error,
+        outputLength: 0,
+      };
+
+      // If the build was interrupted (still "building" on disk), mark it as crashed
+      if (state.status === "building") {
+        const now = new Date();
+        state.status = "error";
+        state.completedAt = now.toISOString();
+        state.error = "Build was interrupted by server restart.";
+        const startTime = new Date(state.startedAt).getTime();
+        const durationMs = now.getTime() - startTime;
+        state.summary = `Interrupted after ${formatDuration(durationMs)}`;
+
+        // Update the on-disk metadata too
+        const entry: BuildLogEntry = {
+          ...data,
+          status: "error",
+          completedAt: state.completedAt,
+          summary: state.summary,
+          error: state.error,
+          durationMs,
+        };
+        writeFileSync(latest.path, JSON.stringify(entry, null, 2), "utf-8");
+      }
+
+      this.activeBuilds.set(projectId, state);
+    } catch {
+      // Skip corrupt files
+    }
+  }
+
   /* ── Directory helpers ─────────────────────────────────────────────── */
 
   private buildLogsDir(projectId: string): string {
-    return path.join(this.root, projectId, "build-logs");
+    // Use the registered project directory if available, otherwise fall back to ID-based path
+    const baseDir = this.projectDirs.get(projectId) ?? path.join(this.root, projectId);
+    return path.join(baseDir, "build-logs");
   }
 
   private ensureBuildLogsDir(projectId: string): string {
@@ -80,6 +174,9 @@ export class CodaScopeBuildStateService {
 
   /** Start a new build. Returns the runId, or null if a build is already running. */
   startBuild(projectId: string, command: string, modelId: string): string | null {
+    // Hydrate from disk first to detect stale builds
+    this.hydrateProjectFromDisk(projectId);
+
     const existing = this.activeBuilds.get(projectId);
     if (existing && existing.status === "building") {
       return null; // Already building
@@ -192,6 +289,8 @@ export class CodaScopeBuildStateService {
 
   /** Get current build state for a project. Returns null if no build tracked. */
   getBuildState(projectId: string): BuildState | null {
+    // Hydrate from disk if we haven't seen this project yet
+    this.hydrateProjectFromDisk(projectId);
     return this.activeBuilds.get(projectId) ?? null;
   }
 

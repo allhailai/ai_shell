@@ -8,6 +8,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
+import { IconWiki, IconRefresh, IconFile } from "../components/CodaScopeIcons";
 
 export function WikiBrowser() {
   const { segments, navigate } = useAppSubRoute("codascope");
@@ -219,7 +220,7 @@ export function WikiBrowser() {
   if (!activeProjectId) {
     return (
       <div className="codascope-empty-state">
-        <div className="codascope-empty-state-icon">📖</div>
+        <div className="codascope-empty-state-icon"><IconWiki size={32} /></div>
         <div className="codascope-empty-state-title">No Project Selected</div>
         <div className="codascope-empty-state-text">
           Select a project to browse its wiki.
@@ -253,7 +254,7 @@ export function WikiBrowser() {
               title="Build or rebuild full wiki"
               type="button"
             >
-              {agentRunning ? "Building…" : "🔄 Build All"}
+              {agentRunning ? "Building…" : <><IconRefresh size={12} /> Build All</>}
             </button>
           </div>
         </div>
@@ -335,7 +336,7 @@ export function WikiBrowser() {
                 onClick={() => handleSelectTopic(topic.id)}
                 type="button"
               >
-                <span style={{ fontSize: "var(--text-xs)" }}>📄</span>
+                <span style={{ fontSize: "var(--text-xs)" }}><IconFile size={12} /></span>
                 {topic.title}
               </button>
             ))
@@ -403,7 +404,7 @@ export function WikiBrowser() {
                 disabled={saving}
                 type="button"
               >
-                {saving ? "Saving…" : "💾 Save"}
+                {saving ? "Saving…" : "Save"}
               </button>
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
@@ -419,7 +420,7 @@ export function WikiBrowser() {
           </div>
         ) : !buildLog ? (
           <div className="codascope-wiki-empty">
-            <div className="codascope-wiki-empty-icon">📖</div>
+            <div className="codascope-wiki-empty-icon"><IconWiki size={32} /></div>
             <div>Select a topic from the sidebar to view or edit it.</div>
           </div>
         ) : null}

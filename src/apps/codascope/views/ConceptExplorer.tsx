@@ -2,8 +2,20 @@
    Browsable, filterable view of domain concepts extracted from code.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import {
+  IconSearch,
+  IconArchitecture,
+  IconSettings,
+  IconQuality,
+  IconLaunch,
+  IconLink,
+  IconSparkle,
+  IconPackage,
+  IconClock,
+  IconConcepts,
+} from "../components/CodaScopeIcons";
 
 interface Concept {
   id: string;
@@ -17,20 +29,20 @@ interface Concept {
   createdAt: string;
 }
 
-const CATEGORIES = [
-  { key: "all", label: "All", icon: "🔍" },
-  { key: "architecture", label: "Architecture", icon: "🏗️" },
-  { key: "backend", label: "Backend", icon: "⚙️" },
-  { key: "frontend", label: "Frontend", icon: "🖥️" },
-  { key: "data", label: "Data", icon: "💾" },
-  { key: "devops", label: "DevOps", icon: "🚀" },
-  { key: "cross-cutting", label: "Cross-Cutting", icon: "🔗" },
-  { key: "features", label: "Features", icon: "✨" },
-  { key: "other", label: "Other", icon: "📦" },
+const CATEGORIES: { key: string; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { key: "all", label: "All", icon: IconSearch },
+  { key: "architecture", label: "Architecture", icon: IconArchitecture },
+  { key: "backend", label: "Backend", icon: IconSettings },
+  { key: "frontend", label: "Frontend", icon: IconQuality },
+  { key: "data", label: "Data", icon: IconQuality },
+  { key: "devops", label: "DevOps", icon: IconLaunch },
+  { key: "cross-cutting", label: "Cross-Cutting", icon: IconLink },
+  { key: "features", label: "Features", icon: IconSparkle },
+  { key: "other", label: "Other", icon: IconPackage },
 ];
 
 export function ConceptExplorer() {
-  const { activeProject } = useCodaScopeStore();
+  const { activeProjectId: activeProject } = useCodaScopeStore();
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -94,7 +106,7 @@ export function ConceptExplorer() {
     return (
       <div className="codascope-page">
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">⏳</div>
+          <div className="codascope-empty-state-icon"><IconClock size={32} /></div>
           <div className="codascope-empty-state-text">Loading concepts…</div>
         </div>
       </div>
@@ -126,7 +138,7 @@ export function ConceptExplorer() {
               className={`codascope-concept-tab ${activeCategory === cat.key ? "codascope-concept-tab--active" : ""}`}
               onClick={() => setActiveCategory(cat.key)}
             >
-              <span>{cat.icon}</span>
+              <span><cat.icon size={14} /></span>
               <span>{cat.label}</span>
               <span className="codascope-concept-tab-count">{count}</span>
             </button>
@@ -146,7 +158,7 @@ export function ConceptExplorer() {
       {/* Concept Cards */}
       {filteredConcepts.length === 0 ? (
         <div className="codascope-empty-state">
-          <div className="codascope-empty-state-icon">🧩</div>
+          <div className="codascope-empty-state-icon"><IconConcepts size={32} /></div>
           <div className="codascope-empty-state-title">
             {concepts.length === 0 ? "No concepts yet" : "No matching concepts"}
           </div>

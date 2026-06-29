@@ -8,9 +8,10 @@
    Each banner is clickable and navigates to the appropriate settings.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { IconKey, IconPackage } from "./CodaScopeIcons";
 
 interface SetupStatus {
   hasApiKey: boolean;
@@ -66,7 +67,7 @@ export function SetupBanners() {
 
   const banners: Array<{
     key: string;
-    icon: string;
+    icon: ReactNode;
     text: string;
     action: string;
     onClick: () => void;
@@ -76,7 +77,7 @@ export function SetupBanners() {
   if (!hasApiKey) {
     banners.push({
       key: "api-key",
-      icon: "🔑",
+      icon: <IconKey size={14} />,
       text: "Cursor API key not configured — agent features are disabled",
       action: "Add API Key",
       onClick: () => {
@@ -95,7 +96,7 @@ export function SetupBanners() {
   if (activeProjectId && !hasRepos) {
     banners.push({
       key: "repos",
-      icon: "📦",
+      icon: <IconPackage size={14} />,
       text: "No repositories added to this project",
       action: "Add Repositories",
       onClick: () => navigate(`project/${activeProjectId}/settings`),

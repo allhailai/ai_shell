@@ -356,6 +356,10 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         throw httpError("modelId is required.", 400, "invalid_input");
       }
 
+      // Register the actual project directory so build-logs go to the right place
+      const projectDir = projectSvc.getProjectDir(id);
+      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
+
       // Reject duplicate builds
       const runId = buildSvc.startBuild(id, command, modelId);
       if (!runId) {
@@ -369,7 +373,6 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         throw httpError("Project not found.", 404, "not_found");
       }
 
-      const projectDir = projectSvc.getProjectDir(id);
       if (!projectDir) {
         buildSvc.failBuild(id, runId, "Project directory not found.");
         throw httpError("Project directory not found.", 404, "not_found");
@@ -459,8 +462,10 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   // ── Build Status ─────────────────────────────────────────────────
 
   app.get("/api/codascope/projects/:id/build-status", wrap(async (req, res) => {
-    const { buildSvc } = await ensureServices(secretService, httpError);
+    const { buildSvc, projectSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
+    const projectDir = projectSvc.getProjectDir(id);
+    if (projectDir) buildSvc.registerProjectDir(id, projectDir);
     const state = buildSvc.getBuildState(id);
     res.json({ build: state });
   }));
@@ -468,8 +473,10 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   // ── Build Logs (History) ─────────────────────────────────────────
 
   app.get("/api/codascope/projects/:id/build-logs", wrap(async (req, res) => {
-    const { buildSvc } = await ensureServices(secretService, httpError);
+    const { buildSvc, projectSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
+    const projectDir = projectSvc.getProjectDir(id);
+    if (projectDir) buildSvc.registerProjectDir(id, projectDir);
     const limit = parseInt(String(req.query.limit ?? "20"), 10);
     const logs = buildSvc.listBuildLogs(id, limit);
     res.json({ logs });
@@ -481,9 +488,11 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
   app.get("/api/codascope/projects/:id/build-log/:runId/stream", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
-      const { buildSvc } = await ensureServices(secretService, httpError);
+      const { buildSvc, projectSvc } = await ensureServices(secretService, httpError);
       const id = param(req, "id");
       const runId = param(req, "runId");
+      const projectDir = projectSvc.getProjectDir(id);
+      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
 
       // SSE headers
       res.writeHead(200, {
@@ -966,6 +975,9 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       const projectDir = projectSvc.getProjectDir(id);
       if (!projectDir) throw httpError("Project directory not found.", 404, "not_found");
 
+      // Register project dir for build-logs co-location
+      buildSvc.registerProjectDir(id, projectDir);
+
       // Reject duplicate builds
       const runId = buildSvc.startBuild(id, "analyze", modelId);
       if (!runId) {
@@ -1064,7 +1076,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         }
 
         // ── Step 2: Wiki (if toggled on) ──────────────────────────────
-        if (wiki && wiki !== false) {
+        if (wiki) {
           sendEvent("pipeline-step", { step: "wiki", status: "running", mode: wiki });
 
           const vars = buildBaseVars({
