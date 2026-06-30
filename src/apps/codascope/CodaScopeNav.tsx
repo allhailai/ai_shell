@@ -3,7 +3,7 @@
    All navigation is URL-driven via useAppSubRoute.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useCallback, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, type ComponentType } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import {
@@ -39,6 +39,11 @@ export function CodaScopeNav() {
     configured,
     agentRunning,
     agentStatus,
+    activeProjectId,
+    setAgentRunning,
+    setAgentStatus,
+    setBuildSummary,
+    setActiveRunId,
   } = useCodaScopeStore();
 
   // Derive current view from URL
@@ -60,6 +65,40 @@ export function CodaScopeNav() {
       navigate(`project/${urlProjectId}/${view}`);
     }
   }, [navigate, urlProjectId]);
+
+  // ── Poll build status when agentRunning is true ──────────────────
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    // Determine the project to poll: URL project or active project
+    const projectId = urlProjectId ?? activeProjectId;
+    if (!agentRunning || !projectId) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      return;
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/codascope/projects/${projectId}/build-status`);
+        if (!res.ok) return;
+        const { build } = await res.json();
+        if (!build) return;
+
+        if (build.status !== "building") {
+          setAgentRunning(false);
+          setAgentStatus("");
+          setActiveRunId(null);
+          if (build.summary) setBuildSummary(build.summary);
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        }
+      } catch { /* ignore */ }
+    };
+
+    pollRef.current = setInterval(poll, 5000);
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [agentRunning, urlProjectId, activeProjectId, setAgentRunning, setAgentStatus, setActiveRunId, setBuildSummary]);
 
   if (!configured) {
     return (

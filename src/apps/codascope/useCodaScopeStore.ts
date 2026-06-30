@@ -80,6 +80,8 @@ interface CodaScopeState {
   agentRunning: boolean;
   agentStatus: string;
   selectedModel: string;
+  activeRunId: string | null;
+  buildSummary: string | null;
 
   // Actions
   setProjectsRoot: (root: string) => void;
@@ -95,6 +97,8 @@ interface CodaScopeState {
   setAgentRunning: (running: boolean) => void;
   setAgentStatus: (status: string) => void;
   setSelectedModel: (model: string) => void;
+  setActiveRunId: (runId: string | null) => void;
+  setBuildSummary: (summary: string | null) => void;
 }
 
 export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
@@ -110,6 +114,8 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   skills: [],
   agentRunning: false,
   agentStatus: "",
+  activeRunId: null,
+  buildSummary: null,
   selectedModel: (() => {
     try { return localStorage.getItem("codascope:lastModel") ?? ""; }
     catch { return ""; }
@@ -128,6 +134,8 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   setSkills: (skills) => set({ skills }),
   setAgentRunning: (running) => set({ agentRunning: running }),
   setAgentStatus: (status) => set({ agentStatus: status }),
+  setActiveRunId: (runId) => set({ activeRunId: runId }),
+  setBuildSummary: (summary) => set({ buildSummary: summary }),
   setSelectedModel: (model) => {
     try { localStorage.setItem("codascope:lastModel", model); } catch { /* ignore */ }
     set({ selectedModel: model });

@@ -233,6 +233,7 @@ export function ProjectDashboard() {
     agentRunning,
     setAgentRunning,
     setAgentStatus,
+    setActiveRunId,
   } = useCodaScopeStore();
 
   const project = projects.find((p) => p.id === activeProjectId);

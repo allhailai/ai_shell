@@ -577,6 +577,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
       // 3. Tail live output — poll the file for new content
       let lastSize = existsSync(logPath) ? statSync(logPath).size : 0;
+      let lastStepCount = buildState?.pipelineSteps.length ?? 0;
       const pollInterval = setInterval(() => {
         if (aborted) {
           clearInterval(pollInterval);
@@ -599,6 +600,23 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
               res.write(`data: ${line}\n\n`);
             }
             lastSize = currentSize;
+          }
+        }
+
+        // Forward new pipeline step updates
+        if (currentState && currentState.runId === runId) {
+          const steps = currentState.pipelineSteps;
+          if (steps.length > lastStepCount) {
+            // Send newly added steps
+            for (let i = lastStepCount; i < steps.length; i++) {
+              res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: steps[i].id, status: steps[i].status, detail: steps[i].detail })}\n\n`);
+            }
+            lastStepCount = steps.length;
+          } else {
+            // Check if existing steps have been updated (status changed)
+            for (const step of steps) {
+              res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: step.id, status: step.status, detail: step.detail })}\n\n`);
+            }
           }
         }
 
