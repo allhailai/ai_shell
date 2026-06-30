@@ -12,6 +12,8 @@ export function Settings() {
     activeProjectId,
     projects,
     setProjects,
+    projectsRoot,
+    setProjectsRoot,
   } = useCodaScopeStore();
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -19,6 +21,14 @@ export function Settings() {
   const [repoName, setRepoName] = useState("");
   const [saving, setSaving] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+
+  // ── Projects root state ─────────────────────────────────────────────
+
+  const [editingRoot, setEditingRoot] = useState(false);
+  const [newRoot, setNewRoot] = useState(projectsRoot);
+  const [rootSaving, setRootSaving] = useState(false);
+  const [rootError, setRootError] = useState<string | null>(null);
+  const [showRootFolderPicker, setShowRootFolderPicker] = useState(false);
 
   // ── API Key state ───────────────────────────────────────────────────
 
@@ -214,14 +224,35 @@ export function Settings() {
 
   // ── Folder picker selection handler ───────────────────────────────
 
-  const handleFolderSelected = useCallback((selectedPath: string) => {
-    setRepoPath(selectedPath);
-    // Auto-suggest a name from the folder basename if name is empty
-    if (!repoName.trim()) {
-      const basename = selectedPath.split("/").filter(Boolean).pop() ?? "repo";
-      setRepoName(basename);
+  const handleFolderSelected = useCallback(async (selectedPath: string) => {
+    if (!activeProjectId || !selectedPath.trim()) return;
+    const name = repoName.trim() || selectedPath.split("/").filter(Boolean).pop() || "repo";
+    try {
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/repositories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, path: selectedPath.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const updated = projects.map((p) =>
+          p.id === activeProjectId
+            ? { ...p, repositories: [...p.repositories, data.repository] }
+            : p,
+        );
+        setProjects(updated);
+        setRepoPath("");
+        setRepoName("");
+      }
+    } catch {
+      // Fall back to just filling the fields so user can retry manually
+      setRepoPath(selectedPath);
+      if (!repoName.trim()) {
+        const basename = selectedPath.split("/").filter(Boolean).pop() ?? "repo";
+        setRepoName(basename);
+      }
     }
-  }, [repoName]);
+  }, [activeProjectId, repoName, projects, setProjects]);
 
   if (!project) {
     return (
@@ -303,6 +334,90 @@ export function Settings() {
             {apiKeySaving ? "Validating…" : "Save Key"}
           </button>
         </div>
+      </div>
+
+      {/* Projects Root Directory */}
+      <div className="codascope-settings-section">
+        <div className="codascope-settings-section-title">
+          <IconFolderOpen size={14} /> Projects Root Directory
+        </div>
+        <div className="codascope-settings-section-desc">
+          All CodaScope project data (wiki, build logs, code maps, quality reports) is stored in this directory.
+        </div>
+        {!editingRoot ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+            <code className="codascope-settings-api-key-value" style={{ flex: 1 }}>{projectsRoot || "(not set)"}</code>
+            <button
+              className="codascope-btn codascope-btn-ghost"
+              onClick={() => { setNewRoot(projectsRoot); setEditingRoot(true); setRootError(null); }}
+              type="button"
+            >
+              Change
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+              <input
+                className="codascope-form-input"
+                id="projects-root-input"
+                type="text"
+                value={newRoot}
+                onChange={(e) => setNewRoot(e.target.value)}
+                placeholder="/path/to/codascope_projects"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                onClick={() => setShowRootFolderPicker(true)}
+                type="button"
+                title="Browse filesystem"
+              >
+                <IconFolderOpen size={12} /> Browse
+              </button>
+            </div>
+            {rootError && (
+              <div style={{ color: "var(--color-error, #ef4444)", fontSize: "var(--text-xs)" }}>{rootError}</div>
+            )}
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
+              <button
+                className="codascope-btn codascope-btn-primary"
+                disabled={rootSaving || !newRoot.trim() || newRoot.trim() === projectsRoot}
+                onClick={async () => {
+                  setRootSaving(true);
+                  setRootError(null);
+                  try {
+                    const res = await fetch("/api/codascope/config", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ projectsRoot: newRoot.trim() }),
+                    });
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      throw new Error(data.error ?? "Failed to update");
+                    }
+                    setProjectsRoot(newRoot.trim());
+                    setEditingRoot(false);
+                  } catch (err) {
+                    setRootError(err instanceof Error ? err.message : "Failed to update");
+                  } finally {
+                    setRootSaving(false);
+                  }
+                }}
+                type="button"
+              >
+                {rootSaving ? "Saving…" : "Save"}
+              </button>
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                onClick={() => { setEditingRoot(false); setRootError(null); }}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Project info */}
@@ -427,7 +542,7 @@ export function Settings() {
         </div>
       </div>
 
-      {/* Folder Picker dialog */}
+      {/* Folder Picker for repo */}
       <FolderPicker
         open={showFolderPicker}
         onClose={() => setShowFolderPicker(false)}
@@ -435,6 +550,19 @@ export function Settings() {
         mode="directory"
         title="Select Repository Folder"
         initialPath={repoPath || undefined}
+      />
+
+      {/* Folder Picker for projects root */}
+      <FolderPicker
+        open={showRootFolderPicker}
+        onClose={() => setShowRootFolderPicker(false)}
+        onSelect={(selectedPath: string) => {
+          setNewRoot(selectedPath);
+          setShowRootFolderPicker(false);
+        }}
+        mode="directory"
+        title="Select Projects Root Directory"
+        initialPath={newRoot || projectsRoot || undefined}
       />
     </div>
   );

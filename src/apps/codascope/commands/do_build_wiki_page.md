@@ -41,3 +41,4 @@ Write the page as markdown to `wiki/{{TOPIC_SLUG}}.md`. Include:
 - All output goes to the CodaScope project directory
 - Reference actual file paths and function names — be specific
 - Include Mermaid diagrams for architecture and data flow
+- After writing the topic page, update `wiki/index.md` to include this new topic under the appropriate category with a one-line description. If `wiki/index.md` doesn't exist yet, skip this step.

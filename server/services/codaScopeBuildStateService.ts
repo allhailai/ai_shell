@@ -21,6 +21,27 @@ import crypto from "node:crypto";
 
 export type BuildStatus = "idle" | "building" | "complete" | "error";
 
+export interface TokenUsageRecord {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
+}
+
+export interface PipelineStepRecord {
+  id: string;
+  label: string;
+  status: string;
+  detail?: string;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  tokenUsage?: TokenUsageRecord;
+  updatedAt: string;
+}
+
 export interface BuildState {
   runId: string;
   status: BuildStatus;
@@ -31,6 +52,7 @@ export interface BuildState {
   summary: string | null;
   error: string | null;
   outputLength: number;  // bytes of output written so far
+  pipelineSteps: PipelineStepRecord[];
 }
 
 export interface BuildLogEntry {
@@ -44,6 +66,14 @@ export interface BuildLogEntry {
   error: string | null;
   pageCount: number | null;
   durationMs: number | null;
+  pipelineSteps?: PipelineStepRecord[];
+  // ── Build Analytics ──
+  totalTokens?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  buildMode?: string;
+  topicsBuilt?: number;
+  topicsSkipped?: number;
 }
 
 /* ── Service ────────────────────────────────────────────────────────── */
@@ -60,12 +90,30 @@ export class CodaScopeBuildStateService {
   /** Map project IDs to their actual directory paths on disk */
   private projectDirs = new Map<string, string>();
 
+  /** Cancelled builds — projectId set, checked by running pipelines */
+  private cancelledProjects = new Set<string>();
+
   constructor(root: string) {
     this.root = root;
   }
 
   setRoot(root: string): void {
     this.root = root;
+  }
+
+  /** Request cancellation of the active build for a project. */
+  cancelBuild(projectId: string): void {
+    this.cancelledProjects.add(projectId);
+  }
+
+  /** Check if the build for a project has been cancelled. */
+  isCancelled(projectId: string): boolean {
+    return this.cancelledProjects.has(projectId);
+  }
+
+  /** Clear the cancellation flag (call when a new build starts). */
+  clearCancellation(projectId: string): void {
+    this.cancelledProjects.delete(projectId);
   }
 
   /**
@@ -124,6 +172,7 @@ export class CodaScopeBuildStateService {
         summary: data.summary,
         error: data.error,
         outputLength: 0,
+        pipelineSteps: data.pipelineSteps ?? [],
       };
 
       // If the build was interrupted (still "building" on disk), mark it as crashed
@@ -195,6 +244,7 @@ export class CodaScopeBuildStateService {
       summary: null,
       error: null,
       outputLength: 0,
+      pipelineSteps: [],
     };
 
     this.activeBuilds.set(projectId, state);
@@ -222,8 +272,98 @@ export class CodaScopeBuildStateService {
     }
   }
 
+  /** Record a pipeline step update. Persists to disk for reconnection. */
+  addPipelineStep(
+    projectId: string,
+    runId: string,
+    step: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord },
+  ): void {
+    const state = this.activeBuilds.get(projectId);
+    if (!state || state.runId !== runId) return;
+
+    const labelMap: Record<string, string> = {
+      "code-map": "Code Map",
+      "wiki": "Wiki",
+      "wiki-draft": "Wiki (Draft)",
+      "wiki-enrich": "Wiki (Enrichment)",
+      "wiki-delta": "Wiki (Delta)",
+      "wiki-outline": "Wiki (Outline)",
+      "wiki-state": "Wiki State",
+      "quality": "Quality Scan",
+    };
+
+    let detail = "";
+    if (step.repo) detail = step.repo;
+    if (step.topic) detail = step.topic;
+    if (step.progress) detail = step.progress;
+    if (step.reason) detail = step.reason;
+    if (step.error) detail = `Error: ${step.error}`;
+    if (step.mode) detail = step.mode;
+
+    const now = new Date().toISOString();
+    const existing = state.pipelineSteps.findIndex((s) => s.id === step.step);
+
+    // Preserve startedAt from existing record, or set it now if step is starting
+    let startedAt = now;
+    let completedAt: string | undefined;
+    let durationMs: number | undefined;
+    let tokenUsage: TokenUsageRecord | undefined = step.tokenUsage;
+
+    if (existing >= 0) {
+      const prev = state.pipelineSteps[existing];
+      startedAt = prev.startedAt; // preserve original start time
+      // Carry forward tokenUsage if not provided in this update
+      if (!tokenUsage && prev.tokenUsage) tokenUsage = prev.tokenUsage;
+    }
+
+    // If step is completing, compute duration
+    const isTerminal = ["complete", "error", "skipped", "enriched"].includes(step.status);
+    if (isTerminal) {
+      completedAt = now;
+      durationMs = new Date(now).getTime() - new Date(startedAt).getTime();
+    }
+
+    const record: PipelineStepRecord = {
+      id: step.step,
+      label: labelMap[step.step] ?? step.step,
+      status: step.status,
+      detail: detail || undefined,
+      startedAt,
+      completedAt,
+      durationMs,
+      tokenUsage,
+      updatedAt: now,
+    };
+
+    if (existing >= 0) {
+      state.pipelineSteps[existing] = record;
+    } else {
+      state.pipelineSteps.push(record);
+    }
+
+    // Persist updated metadata to disk
+    const dir = this.buildLogsDir(projectId);
+    const metaPath = path.join(dir, `${runId}.json`);
+    if (existsSync(metaPath)) {
+      try {
+        const data = JSON.parse(readFileSync(metaPath, "utf-8"));
+        data.pipelineSteps = state.pipelineSteps;
+        writeFileSync(metaPath, JSON.stringify(data, null, 2), "utf-8");
+      } catch { /* skip */ }
+    }
+  }
+
   /** Mark build as complete with auto-generated summary. */
-  completeBuild(projectId: string, runId: string, pageCount?: number): void {
+  completeBuild(
+    projectId: string,
+    runId: string,
+    pageCount?: number,
+    buildInfo?: {
+      buildMode?: "outline" | "delta" | "full";
+      topicsRebuilt?: number;
+      topicsSkipped?: number;
+    },
+  ): void {
     const state = this.activeBuilds.get(projectId);
     if (!state || state.runId !== runId) return;
 
@@ -231,12 +371,23 @@ export class CodaScopeBuildStateService {
     state.status = "complete";
     state.completedAt = now.toISOString();
 
-    // Auto-generate summary
+    // Auto-generate summary based on what actually happened
     const startTime = new Date(state.startedAt).getTime();
     const durationMs = now.getTime() - startTime;
     const durationStr = formatDuration(durationMs);
-    const pageStr = pageCount !== undefined ? `${pageCount} wiki page${pageCount !== 1 ? "s" : ""}` : "wiki";
-    state.summary = `Built ${pageStr} in ${durationStr}`;
+
+    if (buildInfo?.buildMode === "delta") {
+      if (buildInfo.topicsRebuilt && buildInfo.topicsRebuilt > 0) {
+        state.summary = `Delta: updated ${buildInfo.topicsRebuilt} of ${pageCount ?? "?"} topics in ${durationStr}`;
+      } else {
+        state.summary = `Delta: no topics affected (${pageCount ?? 0} pages unchanged) in ${durationStr}`;
+      }
+    } else if (buildInfo?.buildMode === "outline") {
+      state.summary = `Outline: built ${pageCount ?? 0} topics in ${durationStr}`;
+    } else {
+      const pageStr = pageCount !== undefined ? `${pageCount} wiki page${pageCount !== 1 ? "s" : ""}` : "wiki";
+      state.summary = `Built ${pageStr} in ${durationStr}`;
+    }
 
     // Save metadata to disk
     this.saveMetadata(projectId, runId, state, pageCount, durationMs);
@@ -269,6 +420,32 @@ export class CodaScopeBuildStateService {
     const dir = this.ensureBuildLogsDir(projectId);
     const metaPath = path.join(dir, `${runId}.json`);
 
+    // Aggregate token usage from pipeline steps
+    let totalTokens = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let buildMode: string | undefined;
+    let topicsBuilt: number | undefined;
+    let topicsSkipped: number | undefined;
+
+    for (const step of state.pipelineSteps) {
+      if (step.tokenUsage) {
+        totalTokens += step.tokenUsage.totalTokens;
+        totalInputTokens += step.tokenUsage.inputTokens;
+        totalOutputTokens += step.tokenUsage.outputTokens;
+      }
+    }
+
+    // Try to read existing metadata for analytics fields set during the build
+    try {
+      if (existsSync(metaPath)) {
+        const existing = JSON.parse(readFileSync(metaPath, "utf-8"));
+        if (existing.buildMode) buildMode = existing.buildMode;
+        if (existing.topicsBuilt != null) topicsBuilt = existing.topicsBuilt;
+        if (existing.topicsSkipped != null) topicsSkipped = existing.topicsSkipped;
+      }
+    } catch { /* skip */ }
+
     const entry: BuildLogEntry = {
       runId,
       command: state.command,
@@ -280,6 +457,13 @@ export class CodaScopeBuildStateService {
       error: state.error,
       pageCount: pageCount ?? null,
       durationMs,
+      pipelineSteps: state.pipelineSteps,
+      totalTokens: totalTokens > 0 ? totalTokens : undefined,
+      totalInputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
+      totalOutputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
+      buildMode,
+      topicsBuilt,
+      topicsSkipped,
     };
 
     writeFileSync(metaPath, JSON.stringify(entry, null, 2), "utf-8");

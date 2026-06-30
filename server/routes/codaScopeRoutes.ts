@@ -15,7 +15,9 @@ import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js"
 import { CodaScopeConceptService } from "../services/codaScopeConceptService.js";
 import { CodaScopeGoldenRuleService } from "../services/codaScopeGoldenRuleService.js";
 import { CodaScopeQualityService } from "../services/codaScopeQualityService.js";
+import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
+import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 type HttpErrorFn = (message: string, status: number, code: string) => Error;
@@ -43,6 +45,7 @@ let codeMapService: CodaScopeCodeMapService | null = null;
 let conceptService: CodaScopeConceptService | null = null;
 let goldenRuleService: CodaScopeGoldenRuleService | null = null;
 let qualityService: CodaScopeQualityService | null = null;
+let wikiStateService: CodaScopeWikiStateService | null = null;
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -66,6 +69,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   conceptSvc: CodaScopeConceptService;
   goldenRuleSvc: CodaScopeGoldenRuleService;
   qualitySvc: CodaScopeQualityService;
+  wikiStateSvc: CodaScopeWikiStateService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -100,6 +104,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!qualityService) qualityService = new CodaScopeQualityService(root);
   else qualityService.setRoot(root);
 
+  if (!wikiStateService) wikiStateService = new CodaScopeWikiStateService(root);
+  else wikiStateService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -111,6 +118,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     conceptSvc: conceptService,
     goldenRuleSvc: goldenRuleService,
     qualitySvc: qualityService,
+    wikiStateSvc: wikiStateService,
   };
 }
 
@@ -235,6 +243,19 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     if (content === undefined) throw httpError("content is required.", 400, "invalid_input");
     await wikiSvc.updateTopicContent(id, topicId, content);
     res.json({ saved: true });
+  }));
+
+  app.get("/api/codascope/projects/:id/wiki-state", wrap(async (req, res) => {
+    const { projectSvc, wikiStateSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const projectDir = projectSvc.getProjectDir(id);
+    if (!projectDir) throw httpError("Project not found.", 404, "not_found");
+    const state = wikiStateSvc.getWikiState(projectDir);
+    if (!state) {
+      res.json({ topics: {} });
+      return;
+    }
+    res.json(state);
   }));
 
   // ── Chat ────────────────────────────────────────────────────────
@@ -470,6 +491,20 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json({ build: state });
   }));
 
+  // ── Cancel Build ──────────────────────────────────────────────────
+
+  app.post("/api/codascope/projects/:id/build/cancel", wrap(async (req, res) => {
+    const { buildSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const state = buildSvc.getBuildState(id);
+    if (!state || state.status !== "building") {
+      res.json({ cancelled: false, reason: "No active build" });
+      return;
+    }
+    buildSvc.cancelBuild(id);
+    res.json({ cancelled: true, runId: state.runId });
+  }));
+
   // ── Build Logs (History) ─────────────────────────────────────────
 
   app.get("/api/codascope/projects/:id/build-logs", wrap(async (req, res) => {
@@ -513,6 +548,15 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         for (const line of lines) {
           if (aborted) break;
           res.write(`data: ${line}\n\n`);
+        }
+      }
+
+      // 1b. Replay persisted pipeline steps
+      const buildState = buildSvc.getBuildState(id);
+      if (buildState && buildState.runId === runId && buildState.pipelineSteps.length > 0) {
+        for (const step of buildState.pipelineSteps) {
+          if (aborted) break;
+          res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: step.id, status: step.status, detail: step.detail })}\n\n`);
         }
       }
 
@@ -956,11 +1000,11 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
   app.post("/api/codascope/projects/:id/analyze", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
-      const { agentSvc, projectSvc, wikiSvc, buildSvc, codeMapSvc } = await ensureServices(secretService, httpError);
+      const { agentSvc, projectSvc, wikiSvc, buildSvc, codeMapSvc, wikiStateSvc } = await ensureServices(secretService, httpError);
       const id = param(req, "id");
       const { modelId, wiki, quality, scope } = req.body as {
         modelId?: string;
-        wiki?: "deep" | "quick" | false;
+        wiki?: "auto" | "full" | false;
         quality?: boolean;
         scope?: string | { path: string };
       };
@@ -995,22 +1039,35 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
       res.write(`event: run-started\ndata: ${JSON.stringify({ runId, pipeline: { wiki, quality, scope } })}\n\n`);
 
-      let aborted = false;
-      req.on("close", () => { aborted = true; });
+      // Clear any previous cancellation for this project
+      buildSvc.clearCancellation(id);
+
+      let sseAborted = false;
+      req.on("close", () => { sseAborted = true; });
+
+      // Check both SSE disconnect and explicit cancel request
+      const isAborted = () => sseAborted || buildSvc.isCancelled(id);
 
       const sendEvent = (event: string, data: unknown) => {
-        if (aborted) return;
+        if (event === "pipeline-step") {
+          buildSvc.addPipelineStep(id, runId, data as { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord });
+        }
+        if (isAborted()) return;
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
       const sendMessage = (msg: unknown) => {
         const msgJson = JSON.stringify(msg);
         buildSvc.appendOutput(id, runId, msgJson + "\n");
-        if (aborted) return;
+        if (isAborted()) return;
         res.write(`data: ${msgJson}\n\n`);
       };
 
       try {
+        // ── Build info tracker ───────────────────────────────────────
+        let buildMode: "outline" | "delta" | "full" | undefined;
+        let topicsRebuilt = 0;
+
         // ── Step 1: Code Map (always runs if stale) ──────────────────
         const repos = project.repositories ?? [];
         const isStale = codeMapSvc.isAnyCodeMapStale(id, repos);
@@ -1053,7 +1110,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
                 "Do NOT modify files in the source repositories.",
               purpose: "wiki-build",
               onMessage: sendMessage,
-              onDone: async () => {
+              onDone: async (result) => {
                 // Save Code Map metadata
                 const currentHead = codeMapSvc.getGitHead(repo.path);
                 codeMapSvc.saveCodeMapMeta(id, slug, {
@@ -1064,7 +1121,16 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
                   totalFiles: inventory.totalFiles,
                   languages: Object.keys(inventory.languages),
                 });
-                sendEvent("pipeline-step", { step: "code-map", status: "complete", repo: repo.name });
+                // Capture token usage
+                const tokenUsage = result?.usage ? {
+                  inputTokens: result.usage.inputTokens,
+                  outputTokens: result.usage.outputTokens,
+                  cacheReadTokens: result.usage.cacheReadTokens,
+                  cacheWriteTokens: result.usage.cacheWriteTokens,
+                  totalTokens: result.usage.totalTokens,
+                  reasoningTokens: result.usage.reasoningTokens,
+                } : undefined;
+                sendEvent("pipeline-step", { step: "code-map", status: "complete", repo: repo.name, tokenUsage });
               },
               onError: (err) => {
                 sendEvent("pipeline-step", { step: "code-map", status: "error", repo: repo.name, error: err.message });
@@ -1077,16 +1143,20 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
         // ── Step 2: Wiki (if toggled on) ──────────────────────────────
         if (wiki) {
-          sendEvent("pipeline-step", { step: "wiki", status: "running", mode: wiki });
+          const wikiState = wikiStateSvc.getWikiState(projectDir);
+          const isFullBuild = wiki === "full" || !wikiState || Object.keys(wikiState.topics).length === 0;
+          buildMode = isFullBuild ? "outline" : "delta";
 
-          const vars = buildBaseVars({
-            projectName: project.name,
-            projectDir,
-            repositories: repos,
-          });
+          if (isFullBuild) {
+            // ── Outline Build: single LLM call, all topics at outline depth ──
+            sendEvent("pipeline-step", { step: "wiki-outline", status: "running", mode: "outline" });
 
-          if (wiki === "quick") {
-            // Single-pass: use existing do_build_full_wiki command with Code Map context
+            const vars = buildBaseVars({
+              projectName: project.name,
+              projectDir,
+              repositories: repos,
+            });
+
             const prompt = loadCommandOrSkill("do_build_full_wiki", projectDir, vars);
             if (prompt) {
               await agentSvc.send({
@@ -1099,88 +1169,168 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
                   "Do NOT modify files in the source repositories.",
                 purpose: "wiki-build",
                 onMessage: sendMessage,
-                onDone: async () => {
-                  sendEvent("pipeline-step", { step: "wiki", status: "complete" });
+                onDone: async (result) => {
+                  const tokenUsage = result?.usage ? {
+                    inputTokens: result.usage.inputTokens,
+                    outputTokens: result.usage.outputTokens,
+                    cacheReadTokens: result.usage.cacheReadTokens,
+                    cacheWriteTokens: result.usage.cacheWriteTokens,
+                    totalTokens: result.usage.totalTokens,
+                    reasoningTokens: result.usage.reasoningTokens,
+                  } : undefined;
+                  sendEvent("pipeline-step", { step: "wiki-outline", status: "complete", tokenUsage });
                 },
                 onError: (err) => {
-                  sendEvent("pipeline-step", { step: "wiki", status: "error", error: err.message });
+                  sendEvent("pipeline-step", { step: "wiki-outline", status: "error", error: err.message });
                 },
               });
             }
           } else {
-            // Deep: topic-by-topic (use do_build_wiki_page per topic from _index.md)
-            // First, build all pages via full wiki (which respects Code Map context now)
-            const prompt = loadCommandOrSkill("do_build_full_wiki", projectDir, vars);
-            if (prompt) {
-              await agentSvc.send({
-                projectId: id,
-                message: prompt,
-                modelId,
-                systemPrompt:
-                  "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-                  "Follow the instructions precisely. Write all output files to the project's wiki/ directory. " +
-                  "Do NOT modify files in the source repositories.",
-                purpose: "wiki-build",
-                onMessage: sendMessage,
-                onDone: async () => {
-                  sendEvent("pipeline-step", { step: "wiki-draft", status: "complete" });
-                },
-                onError: (err) => {
-                  sendEvent("pipeline-step", { step: "wiki-draft", status: "error", error: err.message });
-                },
+            // ── Delta Build: only rebuild topics affected by git changes ──
+            const gitHeadDebug = Object.entries(wikiState.gitHeads).map(([k, v]) => `${k}:${String(v).slice(0,8)}`).join(", ");
+            sendEvent("pipeline-step", { step: "wiki-delta", status: "running", mode: "delta", repoCount: repos.length, gitHeads: gitHeadDebug });
+
+            // Collect all changed files across repos
+            const allChangedFiles: string[] = [];
+            for (const repo of repos) {
+              const repoKey = repo.name || repo.path;
+              const lastHead = wikiState.gitHeads[repoKey];
+              const currentHead = codeMapSvc.getGitHead(repo.path);
+              console.log(`[wiki-delta] repo=${repoKey} lastHead=${lastHead?.slice(0,8) ?? "null"} currentHead=${currentHead?.slice(0,8) ?? "null"} match=${lastHead === currentHead}`);
+              if (lastHead && currentHead && lastHead !== currentHead) {
+                const changed = codeMapSvc.getChangedFiles(repo.path, lastHead, currentHead);
+                console.log(`[wiki-delta] ${changed.length} changed files for ${repoKey}`);
+                allChangedFiles.push(...changed);
+              } else if (!lastHead) {
+                console.log(`[wiki-delta] no lastHead for ${repoKey} — gitHeads keys: ${Object.keys(wikiState.gitHeads).join(", ")}`);
+              }
+            }
+
+            // Map changed files to affected topics
+            const affectedTopics = wikiStateSvc.getAffectedTopics(wikiState, allChangedFiles);
+
+            if (affectedTopics.length === 0) {
+              const repoDebug = repos.map((r) => {
+                const k = r.name || r.path;
+                const last = wikiState.gitHeads[k];
+                const cur = codeMapSvc.getGitHead(r.path);
+                return `${k}[last=${last?.slice(0,8) ?? "none"} cur=${cur?.slice(0,8) ?? "none"} eq=${last === cur}]`;
+              }).join("; ");
+              sendEvent("pipeline-step", { step: "wiki-delta", status: "skipped", reason: `No wiki topics affected by ${allChangedFiles.length} changed file(s)`, debug: repoDebug });
+            } else {
+              sendEvent("pipeline-step", {
+                step: "wiki-delta",
+                status: "building",
+                progress: `${affectedTopics.length} of ${Object.keys(wikiState.topics).length} topics affected`,
               });
 
-              // Enrichment pass: enrich each wiki page
-              sendEvent("pipeline-step", { step: "wiki-enrich", status: "running" });
-              const topics = await wikiSvc.listTopics(id);
-              for (const topic of topics) {
-                if (aborted) break;
-                sendEvent("pipeline-step", {
-                  step: "wiki-enrich",
-                  status: "enriching",
-                  topic: topic.title ?? topic.id,
-                  progress: `${topics.indexOf(topic) + 1}/${topics.length}`,
+              // Rebuild each affected topic
+              for (const topicId of affectedTopics) {
+                if (isAborted()) break;
+
+                const existingContent = await wikiSvc.getTopicContent(id, topicId);
+                const topicState = wikiState.topics[topicId];
+
+                const vars = buildBaseVars({
+                  projectName: project.name,
+                  projectDir,
+                  repositories: repos,
                 });
+                vars.TOPIC_NAME = topicId.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+                vars.TOPIC_SLUG = topicId;
+                vars.WIKI_PAGE_CONTENT = existingContent ?? "(No existing content)";
+                vars.CHANGED_FILES = allChangedFiles.join("\n");
+                vars.CURRENT_DEPTH = topicState?.depth ?? "outline";
 
-                const enrichVars = { ...vars };
-                enrichVars.TOPIC_NAME = topic.title ?? topic.id;
-                enrichVars.TOPIC_SLUG = topic.id;
-                // Read existing wiki page content for enrichment
-                const existingContent = await wikiSvc.getTopicContent(id, topic.id);
-                enrichVars.WIKI_PAGE_CONTENT = existingContent ?? "(No existing content)";
-
-                const enrichPrompt = loadCommandOrSkill("do_enrich_wiki_page", projectDir, enrichVars);
-                if (enrichPrompt) {
+                const prompt = loadCommandOrSkill("do_build_wiki_delta", projectDir, vars);
+                if (prompt) {
                   await agentSvc.send({
                     projectId: id,
-                    message: enrichPrompt,
+                    message: prompt,
                     modelId,
                     systemPrompt:
                       "You are CodaScope, a technical documentation specialist. " +
-                      "Enrich the wiki page with deeper detail, code examples, and cross-references. " +
+                      "Update the wiki page to reflect recent code changes. Preserve the existing depth and quality. " +
                       "Do NOT modify files in the source repositories.",
                     purpose: "wiki-build",
                     onMessage: sendMessage,
-                    onDone: async () => {
+                    onDone: async (result) => {
+                      const tokenUsage = result?.usage ? {
+                        inputTokens: result.usage.inputTokens,
+                        outputTokens: result.usage.outputTokens,
+                        cacheReadTokens: result.usage.cacheReadTokens,
+                        cacheWriteTokens: result.usage.cacheWriteTokens,
+                        totalTokens: result.usage.totalTokens,
+                        reasoningTokens: result.usage.reasoningTokens,
+                      } : undefined;
                       sendEvent("pipeline-step", {
-                        step: "wiki-enrich",
+                        step: "wiki-delta",
                         status: "enriched",
-                        topic: topic.title ?? topic.id,
+                        topic: topicId,
+                        tokenUsage,
                       });
+                      topicsRebuilt++;
                     },
                     onError: (err) => {
                       sendEvent("pipeline-step", {
-                        step: "wiki-enrich",
+                        step: "wiki-delta",
                         status: "error",
-                        topic: topic.title ?? topic.id,
+                        topic: topicId,
                         error: err.message,
                       });
                     },
                   });
                 }
               }
-              sendEvent("pipeline-step", { step: "wiki-enrich", status: "complete" });
+              sendEvent("pipeline-step", { step: "wiki-delta", status: "complete" });
             }
+          }
+
+          // ── Post-wiki: update wiki-state.json ────────────────────────
+          sendEvent("pipeline-step", { step: "wiki-state", status: "running" });
+          try {
+            const newState = wikiState ?? wikiStateSvc.createEmptyState();
+            newState.lastBuildAt = new Date().toISOString();
+            newState.lastBuildMode = isFullBuild ? "outline" : "delta";
+
+            // Update git heads — only advance the HEAD when topics were
+            // actually rebuilt (or on full/outline builds). Otherwise the
+            // baseline stays at the pre-build HEAD so deltas can still be
+            // detected on the next run.
+            if (isFullBuild || topicsRebuilt > 0) {
+              for (const repo of repos) {
+                const repoKey = repo.name || repo.path;
+                const currentHead = codeMapSvc.getGitHead(repo.path);
+                if (currentHead) newState.gitHeads[repoKey] = currentHead;
+              }
+            }
+
+            // Evaluate depth and extract deps for all topics
+            const topics = await wikiSvc.listTopics(id);
+            for (const topic of topics) {
+              if (topic.id === "_index" || topic.id.startsWith("_")) continue;
+              const content = await wikiSvc.getTopicContent(id, topic.id);
+              if (!content) continue;
+
+              const { depth, metrics } = wikiStateSvc.evaluateTopicDepth(content);
+              const deps = wikiStateSvc.extractDepsFromContent(content);
+
+              // Preserve existing state fields (lastDeepenedAt) if topic already tracked
+              const existing = newState.topics[topic.id];
+              newState.topics[topic.id] = {
+                depth: existing?.depth === "deep" && depth !== "deep" ? existing.depth : depth, // never downgrade
+                builtAt: new Date().toISOString(),
+                lastDeepenedAt: existing?.lastDeepenedAt,
+                deps,
+                metrics,
+              };
+            }
+
+            wikiStateSvc.saveWikiState(projectDir, newState);
+            sendEvent("pipeline-step", { step: "wiki-state", status: "complete" });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            sendEvent("pipeline-step", { step: "wiki-state", status: "error", error: msg });
           }
         }
 
@@ -1214,8 +1364,16 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
                 "Do NOT modify files in the source repositories.",
               purpose: "wiki-build",
               onMessage: sendMessage,
-              onDone: async () => {
-                sendEvent("pipeline-step", { step: "quality", status: "complete" });
+              onDone: async (result) => {
+                const tokenUsage = result?.usage ? {
+                  inputTokens: result.usage.inputTokens,
+                  outputTokens: result.usage.outputTokens,
+                  cacheReadTokens: result.usage.cacheReadTokens,
+                  cacheWriteTokens: result.usage.cacheWriteTokens,
+                  totalTokens: result.usage.totalTokens,
+                  reasoningTokens: result.usage.reasoningTokens,
+                } : undefined;
+                sendEvent("pipeline-step", { step: "quality", status: "complete", tokenUsage });
               },
               onError: (err) => {
                 sendEvent("pipeline-step", { step: "quality", status: "error", error: err.message });
@@ -1232,16 +1390,25 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
           sendEvent("wiki-refresh", { topics });
         } catch { /* ignore */ }
 
-        buildSvc.completeBuild(id, runId, pageCount);
-        sendEvent("done", { runId, buildSummary: buildSvc.getBuildState(id)?.summary });
-        if (!aborted) res.end();
+        if (buildSvc.isCancelled(id)) {
+          buildSvc.failBuild(id, runId, "Build cancelled by user");
+          buildSvc.clearCancellation(id);
+          sendEvent("cancelled", { runId });
+          if (!sseAborted) res.end();
+        } else {
+          buildSvc.completeBuild(id, runId, pageCount, { buildMode, topicsRebuilt });
+          sendEvent("done", { runId, buildSummary: buildSvc.getBuildState(id)?.summary });
+          if (!isAborted()) res.end();
+        }
 
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         buildSvc.failBuild(id, runId, message);
+        buildSvc.clearCancellation(id);
         sendEvent("error", { error: message });
-        if (!aborted) res.end();
+        if (!isAborted()) res.end();
       }
     })().catch(next);
   });
 }
+

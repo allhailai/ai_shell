@@ -310,3 +310,15 @@ export function IconClipboard({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** House — Wiki home / index page */
+export function IconHome({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 8l6-5.5L14 8" />
+      <path d="M3.5 9v4.5a1 1 0 001 1h7a1 1 0 001-1V9" />
+      <rect x="6.5" y="10" width="3" height="4.5" />
+    </svg>
+  );
+}
+

@@ -349,6 +349,18 @@
   font-weight: var(--weight-medium);
 }
 
+.codascope-wiki-depth-badge {
+  margin-left: auto;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.codascope-wiki-depth-badge:hover {
+  opacity: 1;
+}
+
 .codascope-wiki-content {
   height: 100%;
   min-height: 0;
@@ -1986,6 +1998,20 @@
 @keyframes codascope-analyze-pulse {
   0%, 100% { box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3); }
   50% { box-shadow: 0 2px 16px rgba(99, 102, 241, 0.5); }
+}
+
+.codascope-analyze-run-btn--stop {
+  background: linear-gradient(135deg, hsl(0, 55%, 45%), hsl(15, 55%, 40%));
+  color: white;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.codascope-analyze-run-btn--stop:hover {
+  background: linear-gradient(135deg, hsl(0, 60%, 50%), hsl(15, 60%, 45%));
+  box-shadow: 0 2px 12px rgba(220, 38, 38, 0.4);
 }
 
 /* ── Pipeline Progress ─────────────────────────────────────────────── */

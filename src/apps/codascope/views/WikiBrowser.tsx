@@ -8,7 +8,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
-import { IconWiki, IconRefresh, IconFile } from "../components/CodaScopeIcons";
+import { IconWiki, IconRefresh, IconFile, IconHome } from "../components/CodaScopeIcons";
 
 export function WikiBrowser() {
   const { segments, navigate } = useAppSubRoute("codascope");
@@ -36,6 +36,7 @@ export function WikiBrowser() {
   const [showBuildTopic, setShowBuildTopic] = useState(false);
   const [topicName, setTopicName] = useState("");
   const [buildError, setBuildError] = useState("");
+  const [topicDepths, setTopicDepths] = useState<Record<string, string>>({});
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   // ── Fetch wiki topics ─────────────────────────────────────────────
@@ -56,6 +57,34 @@ export function WikiBrowser() {
   useEffect(() => {
     void refreshTopics();
   }, [refreshTopics]);
+
+  // ── Fetch wiki state for depth badges ──────────────────────────────
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    fetch(`/api/codascope/projects/${activeProjectId}/wiki-state`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (data?.topics) {
+          const depths: Record<string, string> = {};
+          for (const [topicId, topicState] of Object.entries(data.topics)) {
+            depths[topicId] = (topicState as { depth: string }).depth;
+          }
+          setTopicDepths(depths);
+        }
+      })
+      .catch(() => { /* ignore */ });
+  }, [activeProjectId, wikiTopics]);
+
+  // ── Auto-navigate to index topic when none selected ───────────────
+
+  useEffect(() => {
+    if (!activeProjectId || urlTopicId) return;
+    const hasIndex = wikiTopics.some((t) => t.id === "index");
+    if (hasIndex) {
+      navigate(`project/${activeProjectId}/wiki/index`);
+    }
+  }, [activeProjectId, urlTopicId, wikiTopics, navigate]);
 
   // ── Load topic content when URL topic changes ─────────────────────
 
@@ -336,8 +365,18 @@ export function WikiBrowser() {
                 onClick={() => handleSelectTopic(topic.id)}
                 type="button"
               >
-                <span style={{ fontSize: "var(--text-xs)" }}><IconFile size={12} /></span>
+                <span style={{ fontSize: "var(--text-xs)" }}>
+                  {topic.id === "index" ? <IconHome size={12} /> : <IconFile size={12} />}
+                </span>
                 {topic.title}
+                {topicDepths[topic.id] && topic.id !== "index" && (
+                  <span
+                    className={`codascope-wiki-depth-badge codascope-wiki-depth-badge--${topicDepths[topic.id]}`}
+                    title={`Depth: ${topicDepths[topic.id]}`}
+                  >
+                    {topicDepths[topic.id] === "deep" ? "🟢" : topicDepths[topic.id] === "developed" ? "🟡" : "🔵"}
+                  </span>
+                )}
               </button>
             ))
           )}

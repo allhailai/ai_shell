@@ -33,3 +33,4 @@ Write the answer as a wiki page to `wiki/{{TOPIC_SLUG}}.md`. Include:
 - All output goes to the CodaScope project directory
 - Focus on the specific question — don't try to document everything
 - Be precise — reference actual code, not hypothetical examples
+- After writing the topic page, update `wiki/index.md` to include this new topic under the appropriate category with a one-line description. If `wiki/index.md` doesn't exist yet, skip this step.

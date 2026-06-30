@@ -69,7 +69,12 @@ export class CodaScopeWikiService {
       });
     }
 
-    return topics.sort((a, b) => a.title.localeCompare(b.title));
+    // Pin "index" topic to top, then sort rest alphabetically
+    return topics.sort((a, b) => {
+      if (a.id === "index") return -1;
+      if (b.id === "index") return 1;
+      return a.title.localeCompare(b.title);
+    });
   }
 
   // ── Get topic content ─────────────────────────────────────────────

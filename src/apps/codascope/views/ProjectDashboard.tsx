@@ -37,6 +37,7 @@ interface BuildState {
   completedAt: string | null;
   summary: string | null;
   error: string | null;
+  pipelineSteps?: Array<{ id: string; label: string; status: string; detail?: string }>;
 }
 
 interface BuildLogEntry {
@@ -247,7 +248,7 @@ export function ProjectDashboard() {
 
   // ── Analyze toggle state ──────────────────────────────────────────
   const [wikiEnabled, setWikiEnabled] = useState(true);
-  const [wikiMode, setWikiMode] = useState<"deep" | "quick">("deep");
+  const [wikiMode, setWikiMode] = useState<"auto" | "full">("auto");
   const [qualityEnabled, setQualityEnabled] = useState(true);
   const [scope, setScope] = useState("full");
 
@@ -273,6 +274,16 @@ export function ProjectDashboard() {
           setAgentRunning(true);
           setAgentStatus(`Resuming ${build.command}…`);
           setShowPipeline(true);
+
+          // Restore persisted pipeline steps immediately
+          if (build.pipelineSteps && build.pipelineSteps.length > 0) {
+            setPipelineSteps(build.pipelineSteps.map((s) => ({
+              id: s.id,
+              label: s.label,
+              status: s.status as PipelineStepStatus,
+              detail: s.detail,
+            })));
+          }
 
           const controller = connectToSseStream(
             `/api/codascope/projects/${activeProjectId}/build-log/${build.runId}/stream`,
@@ -301,6 +312,16 @@ export function ProjectDashboard() {
           // Show last build result
           setBuildSummary(build.summary);
           if (build.error) setRunError(build.error);
+          // Restore pipeline steps from completed/errored build
+          if (build.pipelineSteps && build.pipelineSteps.length > 0) {
+            setPipelineSteps(build.pipelineSteps.map((s) => ({
+              id: s.id,
+              label: s.label,
+              status: s.status as PipelineStepStatus,
+              detail: s.detail,
+            })));
+            setShowPipeline(true);
+          }
         }
       } catch {
         // Ignore — server may not be ready
@@ -373,6 +394,9 @@ export function ProjectDashboard() {
         "wiki": "Wiki",
         "wiki-draft": "Wiki (Draft)",
         "wiki-enrich": "Wiki (Enrichment)",
+        "wiki-outline": "Wiki (Outline)",
+        "wiki-delta": "Wiki (Delta)",
+        "wiki-state": "Wiki State",
         "quality": "Quality Scan",
       };
       next.push({
@@ -436,6 +460,24 @@ export function ProjectDashboard() {
     );
     streamRef.current = controller;
   }, [agentRunning, activeProjectId, selectedModel, wikiEnabled, wikiMode, qualityEnabled, scope, setAgentRunning, setAgentStatus, refreshBuildLogs]);
+
+  // ── Cancel Build ─────────────────────────────────────────────────
+
+  const handleCancelBuild = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      await fetch(`/api/codascope/projects/${activeProjectId}/build/cancel`, { method: "POST" });
+      streamRef.current?.abort();
+      setAgentRunning(false);
+      setAgentStatus("");
+      setRunError("");
+      setBuildSummary("Build cancelled");
+      setRunningCommand(null);
+      refreshBuildLogs();
+    } catch {
+      // ignore
+    }
+  }, [activeProjectId, setAgentRunning, setAgentStatus, refreshBuildLogs]);
 
   // ── Legacy quick action (for individual commands like do_explore) ──
 
@@ -556,15 +598,26 @@ export function ProjectDashboard() {
             <span className="codascope-analyze-title-icon"><IconSearch size={16} /></span>
             Analyze Codebase
           </div>
-          <button
-            className={`codascope-analyze-run-btn ${isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
-            onClick={handleAnalyze}
-            disabled={agentRunning || !selectedModel}
-            type="button"
-            id="analyze-run-btn"
-          >
-            {analyzeButtonLabel}
-          </button>
+          {agentRunning ? (
+            <button
+              className="codascope-analyze-run-btn codascope-analyze-run-btn--stop"
+              onClick={handleCancelBuild}
+              type="button"
+              id="analyze-stop-btn"
+            >
+              ■ Stop
+            </button>
+          ) : (
+            <button
+              className={`codascope-analyze-run-btn ${isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
+              onClick={handleAnalyze}
+              disabled={!selectedModel}
+              type="button"
+              id="analyze-run-btn"
+            >
+              {analyzeButtonLabel}
+            </button>
+          )}
         </div>
 
         <div className="codascope-analyze-body">
@@ -594,12 +647,12 @@ export function ProjectDashboard() {
                   <select
                     className="codascope-analyze-mode-select"
                     value={wikiMode}
-                    onChange={(e) => setWikiMode(e.target.value as "deep" | "quick")}
+                    onChange={(e) => setWikiMode(e.target.value as "auto" | "full")}
                     disabled={agentRunning}
                     id="wiki-mode-select"
                   >
-                    <option value="deep">Deep</option>
-                    <option value="quick">Quick</option>
+                    <option value="auto">Auto</option>
+                    <option value="full">Full Rebuild</option>
                   </select>
                 )}
                 <label className="codascope-rule-toggle codascope-analyze-toggle">

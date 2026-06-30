@@ -381,6 +381,27 @@ export class CodaScopeCodeMapService {
     }
   }
 
+  /**
+   * Get the list of files changed between two git refs.
+   * Returns relative file paths from the repo root.
+   */
+  getChangedFiles(repoPath: string, fromRef: string, toRef: string): string[] {
+    try {
+      const result = execSync(`git diff --name-only ${fromRef}..${toRef}`, {
+        cwd: repoPath,
+        encoding: "utf-8",
+        timeout: 10000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return result
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   /* ── Code Map Read/Write ──────────────────────────────────────────── */
 
   /**
