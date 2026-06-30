@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, type ComponentType } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
+import { useRightPanel } from "../../shell/hooks";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import {
   IconDashboard,
@@ -19,12 +20,11 @@ import {
   IconLaunch,
 } from "./components/CodaScopeIcons";
 
-type CodaScopeView = "dashboard" | "wiki" | "chat" | "quality" | "rules" | "concepts" | "skills" | "settings";
+type CodaScopeView = "dashboard" | "wiki" | "quality" | "rules" | "concepts" | "skills" | "settings";
 
 const NAV_ITEMS: { view: CodaScopeView; icon: ComponentType<{ size?: number }>; label: string }[] = [
   { view: "dashboard", icon: IconDashboard, label: "Dashboard" },
   { view: "wiki", icon: IconWiki, label: "Wiki" },
-  { view: "chat", icon: IconChat, label: "Chat" },
   { view: "quality", icon: IconQuality, label: "Quality" },
   { view: "rules", icon: IconRules, label: "Golden Rules" },
   { view: "concepts", icon: IconConcepts, label: "Concepts" },
@@ -45,6 +45,7 @@ export function CodaScopeNav() {
     setBuildSummary,
     setActiveRunId,
   } = useCodaScopeStore();
+  const { isOpen: isAssistantOpen, toggle: toggleAssistant } = useRightPanel("assistant");
 
   // Derive current view from URL
   const section = segments[0] ?? "";
@@ -146,17 +147,31 @@ export function CodaScopeNav() {
           Projects
         </button>
 
-        {urlProjectId && NAV_ITEMS.map((item) => (
-          <button
-            key={item.view}
-            className={`codascope-nav-item ${currentView === item.view ? "codascope-nav-item--active" : ""}`}
-            onClick={() => handleNavClick(item.view)}
-            type="button"
-          >
-            <span className="codascope-nav-icon"><item.icon size={14} /></span>
-            {item.label}
-          </button>
-        ))}
+        {urlProjectId && (
+          <>
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.view}
+                className={`codascope-nav-item ${currentView === item.view ? "codascope-nav-item--active" : ""}`}
+                onClick={() => handleNavClick(item.view)}
+                type="button"
+              >
+                <span className="codascope-nav-icon"><item.icon size={14} /></span>
+                {item.label}
+              </button>
+            ))}
+
+            {/* Chat opens the right-panel assistant instead of navigating */}
+            <button
+              className={`codascope-nav-item ${isAssistantOpen ? "codascope-nav-item--active" : ""}`}
+              onClick={toggleAssistant}
+              type="button"
+            >
+              <span className="codascope-nav-icon"><IconChat size={14} /></span>
+              Chat
+            </button>
+          </>
+        )}
       </div>
 
       {/* Agent status */}

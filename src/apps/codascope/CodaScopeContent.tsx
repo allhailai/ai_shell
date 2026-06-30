@@ -8,7 +8,7 @@
      /codascope/project/:id/dashboard     → project dashboard
      /codascope/project/:id/wiki          → wiki browser (no topic)
      /codascope/project/:id/wiki/:topicId → wiki browser (specific topic)
-     /codascope/project/:id/chat          → codebase chat
+     /codascope/project/:id/chat          → redirects to dashboard (chat is in right panel)
      /codascope/project/:id/quality       → quality dashboard
      /codascope/project/:id/rules         → golden rules
      /codascope/project/:id/concepts      → concept explorer
@@ -22,7 +22,6 @@ import { useCodaScopeStore } from "./useCodaScopeStore";
 import { ProjectList } from "./views/ProjectList";
 import { ProjectDashboard } from "./views/ProjectDashboard";
 import { WikiBrowser } from "./views/WikiBrowser";
-import { ChatView } from "./views/ChatView";
 import { SkillsManager } from "./views/SkillsManager";
 import { Settings } from "./views/Settings";
 import { ConceptExplorer } from "./views/ConceptExplorer";
@@ -140,7 +139,9 @@ export function CodaScopeContent() {
         content = <WikiBrowser />;
         break;
       case "chat":
-        content = <ChatView />;
+        // Chat is now handled by the right-panel assistant.
+        // Redirect any stale /chat URLs to dashboard.
+        content = <ProjectDashboard />;
         break;
       case "skills":
         content = <SkillsManager />;
