@@ -88,7 +88,7 @@ export function useAppSubRoute(appId: string): AppSubRoute {
       const currentParams = new URLSearchParams(window.location.search);
       const shellParams = new URLSearchParams();
       for (const [key, value] of currentParams) {
-        if (["rp", "bp", "rpw", "bph", "nav"].includes(key) || key.startsWith("rp.") || key.startsWith("bp.")) {
+        if (["rp", "bp", "rpw", "bph", "nav", "conv"].includes(key) || key.startsWith("rp.") || key.startsWith("bp.")) {
           shellParams.set(key, value);
         }
       }
@@ -105,7 +105,7 @@ export function useAppSubRoute(appId: string): AppSubRoute {
       const currentParams = new URLSearchParams(window.location.search);
       const shellParams = new URLSearchParams();
       for (const [key, value] of currentParams) {
-        if (["rp", "bp", "rpw", "bph", "nav"].includes(key) || key.startsWith("rp.") || key.startsWith("bp.")) {
+        if (["rp", "bp", "rpw", "bph", "nav", "conv"].includes(key) || key.startsWith("rp.") || key.startsWith("bp.")) {
           shellParams.set(key, value);
         }
       }

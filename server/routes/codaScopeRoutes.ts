@@ -680,16 +680,56 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json(result);
   }));
 
-  // ── Assistant (Right Panel) — SSE Streaming ─────────────────────
+  // ── Conversations — CRUD ─────────────────────────────────────────
 
-  app.post("/api/codascope/projects/:id/assistant", (req: Request, res: Response, next: NextFunction) => {
+  // List conversations
+  app.get("/api/codascope/projects/:id/conversations", wrap(async (req, res) => {
+    const { chatSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const conversations = await chatSvc.listConversations(id);
+    res.json({ conversations });
+  }));
+
+  // Create conversation
+  app.post("/api/codascope/projects/:id/conversations", wrap(async (req, res) => {
+    const { chatSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const { title, modelId } = req.body as { title?: string; modelId?: string };
+    const conversation = await chatSvc.createConversation(id, { title, modelId });
+    res.status(201).json({ conversation });
+  }));
+
+  // Read conversation
+  app.get("/api/codascope/projects/:id/conversations/:convId", wrap(async (req, res) => {
+    const { chatSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const convId = param(req, "convId");
+    const conversation = await chatSvc.readConversation(id, convId);
+    if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
+    res.json({ conversation });
+  }));
+
+  // Update conversation (title)
+  app.patch("/api/codascope/projects/:id/conversations/:convId", wrap(async (req, res) => {
+    const { chatSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const convId = param(req, "convId");
+    const { title, summary } = req.body as { title?: string; summary?: string };
+    const conversation = await chatSvc.updateConversation(id, convId, { title, summary });
+    if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
+    res.json({ conversation });
+  }));
+
+  // Send message — creates conversation if needed, persists, streams agent SSE
+  app.post("/api/codascope/projects/:id/conversations/:convId/messages", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
-      const { agentSvc } = await ensureServices(secretService, httpError);
+      const { agentSvc, chatSvc } = await ensureServices(secretService, httpError);
       const id = param(req, "id");
+      const convId = param(req, "convId");
       const { message, modelId, context } = req.body as {
         message?: string;
         modelId?: string;
-        context?: string;
+        context?: Record<string, unknown>;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -698,6 +738,27 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       if (!modelId || typeof modelId !== "string") {
         throw httpError("modelId is required.", 400, "invalid_input");
       }
+
+      // Persist user message
+      const userMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await chatSvc.appendMessage(id, convId, {
+        id: userMsgId,
+        role: "user",
+        content: message.trim(),
+        modelId: null,
+        status: "complete",
+        context: context ?? null,
+      });
+
+      // Create a placeholder for the assistant message
+      const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await chatSvc.appendMessage(id, convId, {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        modelId,
+        status: "streaming",
+      });
 
       // Set up SSE headers
       res.writeHead(200, {
@@ -707,45 +768,96 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         "X-Accel-Buffering": "no",
       });
 
-      // Handle client disconnect
       let aborted = false;
       req.on("close", () => {
         aborted = true;
       });
 
+      // Build context string for agent
+      const contextStr = context
+        ? `[Current View: ${(context as Record<string, string>).view ?? "unknown"}] The user is in project "${(context as Record<string, string>).projectName ?? ""}"${(context as Record<string, string>).topicId ? `, viewing wiki topic "${(context as Record<string, string>).topicId}"` : ""}.`
+        : undefined;
+
+      let fullResponse = "";
+
       await agentSvc.send({
         projectId: id,
         message: message.trim(),
         modelId,
-        context: context?.trim(),
+        context: contextStr,
         purpose: "assistant",
         onMessage: (msg) => {
           if (aborted) return;
+          // Accumulate text
+          if (msg.type === "assistant" && msg.message?.content) {
+            for (const block of msg.message.content) {
+              if (block.type === "text") fullResponse += block.text;
+            }
+          }
           res.write(`data: ${JSON.stringify(msg)}\n\n`);
         },
-        onDone: (result) => {
-          if (aborted) return;
-          res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
-          res.end();
+        onDone: async (result) => {
+          // Update assistant message with final content
+          try {
+            const conversation = await chatSvc.readConversation(id, convId);
+            if (conversation) {
+              const updated = {
+                ...conversation,
+                messages: conversation.messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: fullResponse, status: "complete" as const, updatedAt: new Date().toISOString() }
+                    : m,
+                ),
+              };
+              await chatSvc.writeConversation(id, updated);
+            }
+          } catch {
+            // Best effort persistence
+          }
+          if (!aborted) {
+            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId })}\n\n`);
+            res.end();
+          }
         },
-        onError: (err) => {
-          if (aborted) return;
-          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-          res.end();
+        onError: async (err) => {
+          // Mark assistant message as error
+          try {
+            const conversation = await chatSvc.readConversation(id, convId);
+            if (conversation) {
+              const updated = {
+                ...conversation,
+                messages: conversation.messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: fullResponse || `Error: ${err.message}`, status: "error" as const, updatedAt: new Date().toISOString() }
+                    : m,
+                ),
+              };
+              await chatSvc.writeConversation(id, updated);
+            }
+          } catch {
+            // Best effort
+          }
+          if (!aborted) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.end();
+          }
         },
       });
     })().catch(next);
   });
 
-  // ── Chat — SSE Streaming ────────────────────────────────────────
+  // ── Assistant (Right Panel) — SSE Streaming ─────────────────────
+  // Backwards-compatible endpoint: auto-creates or reuses a conversation.
 
-  app.post("/api/codascope/projects/:id/chat/stream", (req: Request, res: Response, next: NextFunction) => {
+  app.post("/api/codascope/projects/:id/assistant", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
       const { agentSvc, chatSvc } = await ensureServices(secretService, httpError);
       const id = param(req, "id");
-      const { message, modelId } = req.body as {
+      const { message, modelId, context, conversationId } = req.body as {
         message?: string;
         modelId?: string;
+        context?: string;
+        conversationId?: string;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -755,8 +867,19 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         throw httpError("modelId is required.", 400, "invalid_input");
       }
 
-      // Save user message to chat history
-      await chatSvc.saveMessage(id, "user", message.trim());
+      // Resolve or create conversation
+      let convId = conversationId;
+      if (!convId) {
+        const conv = await chatSvc.createConversation(id, { modelId });
+        convId = conv.id;
+      }
+
+      // Persist user message
+      await chatSvc.appendMessage(id, convId, {
+        role: "user",
+        content: message.trim(),
+        status: "complete",
+      });
 
       // Set up SSE headers
       res.writeHead(200, {
@@ -777,14 +900,10 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         projectId: id,
         message: message.trim(),
         modelId,
-        systemPrompt:
-          "You are CodaScope, an AI assistant that helps users understand and explore codebases. " +
-          "You have access to tools to browse wiki documentation and repository information. " +
-          "Use these tools to find relevant information before answering questions.",
-        purpose: "chat",
+        context: context?.trim(),
+        purpose: "assistant",
         onMessage: (msg) => {
           if (aborted) return;
-          // Accumulate text for history
           if (msg.type === "assistant" && msg.message?.content) {
             for (const block of msg.message.content) {
               if (block.type === "text") fullResponse += block.text;
@@ -793,19 +912,34 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
           res.write(`data: ${JSON.stringify(msg)}\n\n`);
         },
         onDone: async (result) => {
+          // Persist assistant response
+          if (fullResponse) {
+            await chatSvc.appendMessage(id, convId!, {
+              role: "assistant",
+              content: fullResponse,
+              modelId,
+              status: "complete",
+            }).catch(() => { /* best effort */ });
+          }
           if (!aborted) {
-            // Save assistant response to chat history
-            if (fullResponse) {
-              await chatSvc.saveMessage(id, "agent", fullResponse);
-            }
-            res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
+            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId })}\n\n`);
             res.end();
           }
         },
-        onError: (err) => {
-          if (aborted) return;
-          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-          res.end();
+        onError: async (err) => {
+          // Persist error
+          if (fullResponse) {
+            await chatSvc.appendMessage(id, convId!, {
+              role: "assistant",
+              content: fullResponse,
+              modelId,
+              status: "error",
+            }).catch(() => { /* best effort */ });
+          }
+          if (!aborted) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: err.message, conversationId: convId })}\n\n`);
+            res.end();
+          }
         },
       });
     })().catch(next);
