@@ -3,9 +3,10 @@
 
    Key features:
    - Agent pool: one agent per (projectId, purpose) with idle cleanup
-   - Custom tools: progressive wiki/repo discovery (no context dumping)
+   - Custom tools: purpose-based filtering (read-only vs read+write)
    - Streaming: emits SDKMessage objects via callback for SSE
    - Model listing: cached Cursor.models.list() results
+   - Cancel support: AbortController registry per project
    ──────────────────────────────────────────────────────────────────── */
 
 import { Agent, Cursor } from "@cursor/sdk";
@@ -20,6 +21,10 @@ import type { SecretService } from "./secretService.js";
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
+import { CodaScopeQualityService } from "./codaScopeQualityService.js";
+import { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
+import { CodaScopeConceptService } from "./codaScopeConceptService.js";
+import { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -62,6 +67,9 @@ export class CodaScopeAgentService {
   private pool = new Map<string, PoolEntry>();
   private modelCache: ModelCache | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Active chat AbortControllers keyed by projectId for cancel support */
+  private activeChatControllers = new Map<string, AbortController>();
 
   constructor(secretService: SecretService, projectsRoot: string) {
     this.secretService = secretService;
@@ -145,13 +153,23 @@ export class CodaScopeAgentService {
     }
   }
 
-  /* ── Custom Tools (Progressive Discovery) ─────────────────────────── */
+  /* ── Custom Tools: Read-Only ──────────────────────────────────────── */
 
-  private buildCustomTools(projectId: string): Record<string, SDKCustomTool> {
+  /**
+   * Build read-only tools available to ALL agent purposes.
+   * These tools can discover and read CodaScope data but cannot modify it.
+   */
+  private buildReadOnlyTools(projectId: string): Record<string, SDKCustomTool> {
     const wikiService = new CodaScopeWikiService(this.projectsRoot);
     const projectService = new CodaScopeProjectService(this.projectsRoot);
+    const qualityService = new CodaScopeQualityService(this.projectsRoot);
+    const goldenRuleService = new CodaScopeGoldenRuleService(this.projectsRoot);
+    const conceptService = new CodaScopeConceptService(this.projectsRoot);
+    const buildStateService = new CodaScopeBuildStateService(this.projectsRoot);
 
     return {
+      /* ── Existing Tools ───────────────────────────────────────────── */
+
       list_wiki_topics: {
         description:
           "List all available wiki topics for this project. Returns topic IDs and titles. " +
@@ -341,6 +359,182 @@ export class CodaScopeAgentService {
         },
       },
 
+      /* ── New Phase 2 Tools ────────────────────────────────────────── */
+
+      read_quality_report: {
+        description:
+          "Read the latest quality scan report for this project. Returns overall score, " +
+          "category scores, issue counts by severity, and top issues. Use this when the " +
+          "user asks about code quality, issues, or standards compliance.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+        execute: async () => {
+          try {
+            const report = qualityService.getLatestReport(projectId);
+            if (!report) {
+              return "No quality scan has been run yet. Suggest running a quality scan to analyze the codebase.";
+            }
+            // Return a compact summary with top issues
+            const result: Record<string, unknown> = {
+              scanId: report.scanId,
+              timestamp: report.timestamp,
+              scanScope: report.scanScope,
+              duration: report.duration,
+              summary: report.summary,
+              categories: Object.fromEntries(
+                Object.entries(report.categories).map(([name, cat]) => [
+                  name,
+                  {
+                    score: cat.score,
+                    issueCount: cat.issueCount,
+                    bySeverity: cat.bySeverity,
+                    // Include top 5 issues per category for context
+                    topIssues: cat.issues.slice(0, 5).map((i) => ({
+                      severity: i.severity,
+                      title: i.title,
+                      file: i.file,
+                      line: i.line,
+                      suggestion: i.suggestion,
+                    })),
+                  },
+                ]),
+              ),
+            };
+            return JSON.stringify(result, null, 2);
+          } catch {
+            return "Failed to read quality report.";
+          }
+        },
+      },
+
+      list_golden_rules: {
+        description:
+          "List all golden rules (coding standards) configured for this project. " +
+          "Returns rule names, descriptions, categories, severities, and enabled status. " +
+          "Use this when the user asks about coding standards or golden rules.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+        execute: async () => {
+          try {
+            const rules = goldenRuleService.listRules(projectId);
+            if (rules.length === 0) {
+              return "No golden rules have been configured yet.";
+            }
+            return JSON.stringify(
+              rules.map((r) => ({
+                id: r.id,
+                name: r.name,
+                description: r.description,
+                category: r.category,
+                severity: r.severity,
+                enabled: r.enabled,
+                appliesTo: r.appliesTo,
+              })),
+              null,
+              2,
+            );
+          } catch {
+            return "Failed to list golden rules.";
+          }
+        },
+      },
+
+      list_concepts: {
+        description:
+          "List domain concepts extracted from the codebase. Concepts represent key " +
+          "abstractions, patterns, and domain vocabulary. Use this when the user asks " +
+          "about domain concepts, architecture patterns, or codebase terminology.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              description: "Optional category filter (architecture, backend, frontend, data, devops, cross-cutting, features, other)",
+            },
+          },
+        },
+        execute: async (args) => {
+          try {
+            const category = args.category as string | undefined;
+            const concepts = conceptService.listConcepts(projectId, category);
+            if (concepts.length === 0) {
+              return category
+                ? `No concepts found in category "${category}".`
+                : "No domain concepts have been extracted yet. Run a codebase exploration to discover concepts.";
+            }
+            return JSON.stringify(
+              concepts.map((c) => ({
+                id: c.id,
+                name: c.name,
+                description: c.description,
+                category: c.category,
+                relatedConcepts: c.relatedConcepts,
+                wikiTopicId: c.wikiTopicId,
+              })),
+              null,
+              2,
+            );
+          } catch {
+            return "Failed to list concepts.";
+          }
+        },
+      },
+
+      read_build_status: {
+        description:
+          "Read the current build state for this project. Shows whether a build is " +
+          "running, what the last build command was, and when it completed. Use this " +
+          "when the user asks about build status or when you need to check data freshness.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+        execute: async () => {
+          try {
+            const state = buildStateService.getBuildState(projectId);
+            if (!state) {
+              return JSON.stringify({ status: "idle", lastBuild: null, message: "No builds have been run yet." });
+            }
+            return JSON.stringify(
+              {
+                status: state.status,
+                runId: state.runId,
+                command: state.command,
+                modelId: state.modelId,
+                startedAt: state.startedAt,
+                completedAt: state.completedAt,
+                summary: state.summary,
+                error: state.error,
+                pipelineSteps: state.pipelineSteps.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                  status: s.status,
+                })),
+              },
+              null,
+              2,
+            );
+          } catch {
+            return "Failed to read build status.";
+          }
+        },
+      },
+    };
+  }
+
+  /* ── Custom Tools: Write ──────────────────────────────────────────── */
+
+  /**
+   * Build write tools available ONLY to wiki-build purpose.
+   * These tools can modify CodaScope data and should never be
+   * exposed to the assistant/chat.
+   */
+  private buildWriteTools(projectId: string): Record<string, SDKCustomTool> {
+    return {
       update_code_map_section: {
         description:
           "Update a specific section of the Code Map by its heading. Use this to " +
@@ -391,6 +585,28 @@ export class CodaScopeAgentService {
     };
   }
 
+  /* ── Tool Assembly by Purpose ─────────────────────────────────────── */
+
+  /**
+   * Get the appropriate tools for a given agent purpose.
+   * - assistant / chat: read-only tools only
+   * - wiki-build: read-only + write tools
+   */
+  private getToolsForPurpose(
+    projectId: string,
+    purpose: string,
+  ): Record<string, SDKCustomTool> {
+    const readOnly = this.buildReadOnlyTools(projectId);
+
+    if (purpose === "wiki-build") {
+      const write = this.buildWriteTools(projectId);
+      return { ...readOnly, ...write };
+    }
+
+    // assistant and chat get read-only only
+    return readOnly;
+  }
+
   /* ── Agent Pool ───────────────────────────────────────────────────── */
 
   private poolKey(projectId: string, purpose: string): string {
@@ -425,7 +641,7 @@ export class CodaScopeAgentService {
       name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
       local: {
         cwd: repoPaths.length > 0 ? repoPaths : undefined,
-        customTools: this.buildCustomTools(projectId),
+        customTools: this.getToolsForPurpose(projectId, purpose),
       },
     });
 
@@ -456,12 +672,36 @@ export class CodaScopeAgentService {
     }
   }
 
+  /* ── Cancel Support ──────────────────────────────────────────────── */
+
+  /**
+   * Cancel an active agent chat for a project.
+   * Returns true if a controller was found and aborted.
+   */
+  cancelAgent(projectId: string): boolean {
+    const controller = this.activeChatControllers.get(projectId);
+    if (controller) {
+      controller.abort();
+      this.activeChatControllers.delete(projectId);
+      return true;
+    }
+    return false;
+  }
+
   /* ── Send Message ─────────────────────────────────────────────────── */
 
   async send(options: AgentSendOptions): Promise<void> {
     const { projectId, message, modelId, systemPrompt, context, purpose, onMessage, onDone, onError } = options;
 
     const key = this.poolKey(projectId, purpose);
+
+    // Set up AbortController for cancel support (assistant/chat only)
+    const abortController = new AbortController();
+    if (purpose === "assistant" || purpose === "chat") {
+      // Cancel any existing controller for this project
+      this.activeChatControllers.get(projectId)?.abort();
+      this.activeChatControllers.set(projectId, abortController);
+    }
 
     try {
       const agent = await this.getOrCreateAgent(projectId, purpose, modelId);
@@ -482,6 +722,9 @@ export class CodaScopeAgentService {
       const run = await agent.send(fullMessage, {
         model: { id: modelId },
         onDelta: ({ update }) => {
+          // Check if cancelled
+          if (abortController.signal.aborted) return;
+
           // Convert delta updates to a synthetic message for the frontend
           if ("text" in update && update.text) {
             onMessage({
@@ -505,7 +748,14 @@ export class CodaScopeAgentService {
         entry.lastUsed = Date.now();
       }
 
-      onDone(result);
+      // Clean up controller
+      this.activeChatControllers.delete(projectId);
+
+      if (abortController.signal.aborted) {
+        onError(new Error("Agent cancelled by user."));
+      } else {
+        onDone(result);
+      }
     } catch (err) {
       const entry = this.pool.get(key);
       if (entry) entry.busy = false;
@@ -513,7 +763,14 @@ export class CodaScopeAgentService {
       // If agent creation failed, remove from pool
       this.pool.delete(key);
 
-      onError(err instanceof Error ? err : new Error(String(err)));
+      // Clean up controller
+      this.activeChatControllers.delete(projectId);
+
+      if (abortController.signal.aborted) {
+        onError(new Error("Agent cancelled by user."));
+      } else {
+        onError(err instanceof Error ? err : new Error(String(err)));
+      }
     }
   }
 
@@ -524,6 +781,12 @@ export class CodaScopeAgentService {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+
+    // Cancel all active chats
+    for (const [, controller] of this.activeChatControllers) {
+      controller.abort();
+    }
+    this.activeChatControllers.clear();
 
     for (const [, entry] of this.pool) {
       try {

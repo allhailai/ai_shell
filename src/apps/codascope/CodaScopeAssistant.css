@@ -75,11 +75,13 @@
 
 .codascope-conv-new-btn {
   flex-shrink: 0;
-  width: 28px;
   height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  font-size: var(--text-2xs);
   border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
   transition: all var(--transition-fast);
@@ -592,4 +594,139 @@
   font-size: var(--text-2xs);
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+
+/* ── Action Cards ──────────────────────────────────────────────── */
+
+.codascope-action-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2) 42px;
+}
+
+.codascope-action-card {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-secondary);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.codascope-action-card:hover {
+  border-color: var(--color-border-hover, var(--color-border-secondary));
+}
+
+.codascope-action-card-success {
+  border-color: var(--color-success, #34d399);
+  background: color-mix(in srgb, var(--color-success, #34d399) 6%, var(--color-bg-secondary));
+}
+
+.codascope-action-card-error {
+  border-color: var(--color-error, #f87171);
+  background: color-mix(in srgb, var(--color-error, #f87171) 6%, var(--color-bg-secondary));
+}
+
+.codascope-action-card-running {
+  border-color: var(--color-accent, #60a5fa);
+}
+
+.codascope-action-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.codascope-action-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.codascope-action-card-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.codascope-action-card-attr {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.codascope-action-card-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2);
+  line-height: 1.5;
+}
+
+.codascope-action-card-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-action-card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 12px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.codascope-action-card-btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-action-card-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codascope-action-card-btn-success {
+  color: var(--color-success, #34d399);
+  border-color: var(--color-success, #34d399);
+}
+
+.codascope-action-card-btn-error {
+  color: var(--color-error, #f87171);
+  border-color: var(--color-error, #f87171);
+}
+
+.codascope-action-card-error {
+  font-size: var(--text-2xs);
+  color: var(--color-error, #f87171);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-action-card-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border-primary);
+  border-top-color: var(--color-accent, #60a5fa);
+  border-radius: 50%;
+  animation: codascope-spin 0.6s linear infinite;
+}
+
+@keyframes codascope-spin {
+  to { transform: rotate(360deg); }
 }

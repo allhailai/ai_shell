@@ -1,0 +1,104 @@
+/* ── CodaScope: Action Parser ─────────────────────────────────────────
+   Extracts structured action tags from agent response text.
+
+   The agent emits tags like:
+     <codascope_action type="build_wiki_page" topic="auth-flow">
+       Build a wiki page for the authentication flow module
+     </codascope_action>
+
+   This parser extracts them into structured objects for storage in
+   message.metadata.actions and rendering as interactive cards.
+
+   Pattern modeled on kiss_ai's chatParsers.js allTagContent().
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Types ──────────────────────────────────────────────────────────── */
+
+export interface CodaScopeAction {
+  type: string;
+  attributes: Record<string, string>;
+  description: string;
+}
+
+/** Valid action types the agent can suggest */
+export const VALID_ACTION_TYPES = new Set([
+  "build_wiki_page",
+  "build_full_wiki",
+  "run_quality_scan",
+  "navigate",
+  "create_golden_rule",
+  "explore_codebase",
+]);
+
+/* ── Parser ────────────────────────────────────────────────────────── */
+
+/**
+ * Extract all `<codascope_action>` tags from agent response text.
+ *
+ * Returns an array of parsed actions with type, attributes, and description.
+ * Invalid or malformed tags are silently skipped.
+ */
+export function extractActions(text: string): CodaScopeAction[] {
+  if (!text) return [];
+
+  // Match <codascope_action ...>...</codascope_action> tags
+  // Uses non-greedy match for content between tags
+  const tagPattern = /<codascope_action\s+([^>]*)>\s*([\s\S]*?)\s*<\/codascope_action>/gi;
+  const actions: CodaScopeAction[] = [];
+
+  for (const match of text.matchAll(tagPattern)) {
+    const attrString = match[1] ?? "";
+    const description = (match[2] ?? "").trim();
+
+    // Parse attributes from the opening tag
+    const attributes = parseAttributes(attrString);
+    const type = attributes.type;
+
+    // Skip if no type or invalid type
+    if (!type || !VALID_ACTION_TYPES.has(type)) continue;
+
+    // Remove 'type' from attributes (it's a top-level field)
+    delete attributes.type;
+
+    actions.push({ type, attributes, description });
+  }
+
+  return actions;
+}
+
+/**
+ * Strip `<codascope_action>` tags from text, returning clean markdown.
+ * Used client-side to render the message without raw XML tags.
+ */
+export function stripActionTags(text: string): string {
+  if (!text) return "";
+
+  return text
+    .replace(/<codascope_action\s+[^>]*>[\s\S]*?<\/codascope_action>/gi, "")
+    .replace(/\n{3,}/g, "\n\n") // Collapse excessive blank lines left by removed tags
+    .trim();
+}
+
+/* ── Internal Helpers ──────────────────────────────────────────────── */
+
+/**
+ * Parse HTML-style attributes from a string.
+ *
+ * Handles both quoted and unquoted values:
+ *   type="build_wiki_page" topic="auth-flow"
+ *   type=build_wiki_page topic=auth-flow
+ */
+function parseAttributes(attrString: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+
+  // Match key="value" or key='value' or key=value patterns
+  const attrPattern = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+
+  for (const match of attrString.matchAll(attrPattern)) {
+    const key = match[1];
+    const value = match[2] ?? match[3] ?? match[4] ?? "";
+    if (key) attrs[key] = value;
+  }
+
+  return attrs;
+}

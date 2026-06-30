@@ -14,11 +14,41 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import { MarkdownViewer } from "../../shared/markdown";
-import { assembleContext } from "./contextAssembler";
+import { assembleContext, clearRecentViews } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
 import { IconSearch } from "./components/CodaScopeIcons";
 import { ConversationHeader, type ConversationSummary } from "./components/ConversationHeader";
+import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Strip <codascope_action> tags from text for clean rendering.
+ * Client-side version (avoids importing server module).
+ */
+function stripActionTagsClient(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/<codascope_action\s+[^>]*>[\s\S]*?<\/codascope_action>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Convert Obsidian-style [[topic-id]] wikilinks into markdown links
+ * that navigate to the wiki topic page within CodaScope.
+ */
+function convertWikiLinks(text: string, projectId: string | null): string {
+  if (!text || !projectId) return text;
+  return text.replace(
+    /\[\[([^\]]+)\]\]/g,
+    (_match, topicId: string) => {
+      const slug = topicId.trim();
+      return `[${slug}](/codascope/project/${projectId}/wiki/${encodeURIComponent(slug)})`;
+    },
+  );
+}
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -28,6 +58,7 @@ interface ChatMessage {
   content: string;
   status?: "complete" | "streaming" | "error";
   createdAt?: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface Conversation {
@@ -40,7 +71,7 @@ interface Conversation {
 
 export function CodaScopeAssistant() {
   const { segments, getParam, setParam } = useAppSubRoute("codascope");
-  const { activeProjectId, projects } = useCodaScopeStore();
+  const { activeProjectId, projects, wikiTopics } = useCodaScopeStore();
 
   // Conversation state
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -95,6 +126,7 @@ export function CodaScopeAssistant() {
               content: m.content,
               status: m.status ?? "complete",
               createdAt: m.createdAt,
+              metadata: m.metadata,
             })),
         );
       }
@@ -108,6 +140,9 @@ export function CodaScopeAssistant() {
     if (!activeProjectId) return;
     if (lastProjectRef.current === activeProjectId) return;
     lastProjectRef.current = activeProjectId;
+
+    // Clear navigation history when switching projects
+    clearRecentViews();
 
     let cancelled = false;
     void (async () => {
@@ -160,21 +195,29 @@ export function CodaScopeAssistant() {
 
   // Build context from current view
   const getContext = useCallback(() => {
-    const ctx = assembleContext(segments, projectName);
+    if (!activeProjectId) return undefined;
+    // Resolve the topic title from the store for enriched context
+    const topicId = segments[2] === "wiki" ? (segments[3] ?? null) : null;
+    const topicTitle = topicId
+      ? (wikiTopics.find((t) => t.id === topicId)?.title ?? null)
+      : null;
+    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle });
     if (!ctx) return undefined;
-    return {
-      view: ctx.view,
-      projectName: ctx.projectName,
-      projectId: activeProjectId,
-    };
-  }, [segments, projectName, activeProjectId]);
+    return ctx;
+  }, [segments, projectName, activeProjectId, wikiTopics]);
 
   // Get context badge label
   const contextBadge = (() => {
-    const ctx = assembleContext(segments, projectName);
+    const ctx = activeProjectId ? assembleContext(segments, projectName, activeProjectId) : null;
     if (!ctx) return null;
     switch (ctx.view) {
-      case "wiki": return "Wiki";
+      case "wiki": {
+        if (ctx.topicId) {
+          const title = wikiTopics.find((t) => t.id === ctx.topicId)?.title;
+          return title ? `Wiki: ${title}` : "Wiki";
+        }
+        return "Wiki";
+      }
       case "dashboard": return "Dashboard";
       case "settings": return "Settings";
       case "skills": return "Skills";
@@ -288,6 +331,8 @@ export function CodaScopeAssistant() {
       let buffer = "";
       let newTitle: string | undefined;
 
+      let parsedActions: CodaScopeAction[] = [];
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -308,7 +353,10 @@ export function CodaScopeAssistant() {
                   }
                 }
               }
-              // Capture conversation ID from done event
+              // Capture actions + conversation ID from done event
+              if (data.actions && Array.isArray(data.actions)) {
+                parsedActions = data.actions as CodaScopeAction[];
+              }
               if (data.conversationId && !activeConversationId) {
                 setActiveConversationId(data.conversationId);
               }
@@ -316,18 +364,19 @@ export function CodaScopeAssistant() {
               // Skip malformed JSON
             }
           } else if (line.startsWith("event: done")) {
-            // Next data line contains result with conversationId
+            // Next data line contains result with conversationId + actions
           }
         }
       }
 
-      // Finalize the assistant message
+      // Finalize the assistant message with actions metadata
       if (accumulated) {
         const assistantMsg: ChatMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
           content: accumulated,
           status: "complete",
+          metadata: parsedActions.length > 0 ? { actions: parsedActions } : undefined,
         };
         setMessages((prev) => [...prev, assistantMsg]);
       }
@@ -368,11 +417,19 @@ export function CodaScopeAssistant() {
     [sendMessage],
   );
 
-  const stopStreaming = useCallback(() => {
+  const stopStreaming = useCallback(async () => {
     abortRef.current?.abort();
+    // Also cancel server-side agent
+    if (activeProjectId) {
+      try {
+        await fetch(`/api/codascope/projects/${activeProjectId}/assistant/cancel`, {
+          method: "POST",
+        });
+      } catch { /* best effort */ }
+    }
     setStreaming(false);
     setStreamingContent("");
-  }, []);
+  }, [activeProjectId]);
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -418,23 +475,34 @@ export function CodaScopeAssistant() {
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`codascope-assistant-msg codascope-assistant-msg-${msg.role}`}
-          >
-            <div className="codascope-assistant-msg-avatar">
-              {msg.role === "user" ? "👤" : "🤖"}
-            </div>
-            <div className="codascope-assistant-msg-content">
-              {msg.role === "assistant" ? (
-                <MarkdownViewer content={msg.content} />
-              ) : (
-                <p>{msg.content}</p>
+        {messages.map((msg) => {
+          const actions = (msg.metadata?.actions ?? []) as CodaScopeAction[];
+          const displayContent = msg.role === "assistant" && actions.length > 0
+            ? stripActionTagsClient(msg.content)
+            : msg.content;
+
+          return (
+            <div key={msg.id}>
+              <div
+                className={`codascope-assistant-msg codascope-assistant-msg-${msg.role}`}
+              >
+                <div className="codascope-assistant-msg-avatar">
+                  {msg.role === "user" ? "👤" : "🤖"}
+                </div>
+                <div className="codascope-assistant-msg-content">
+                  {msg.role === "assistant" ? (
+                    <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId)} />
+                  ) : (
+                    <p>{msg.content}</p>
+                  )}
+                </div>
+              </div>
+              {actions.length > 0 && (
+                <ActionCardList actions={actions} />
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Streaming message */}
         {streaming && (
@@ -442,7 +510,7 @@ export function CodaScopeAssistant() {
             <div className="codascope-assistant-msg-avatar">🤖</div>
             <div className="codascope-assistant-msg-content">
               {streamingContent ? (
-                <MarkdownViewer content={streamingContent} />
+                <MarkdownViewer content={convertWikiLinks(stripActionTagsClient(streamingContent), activeProjectId)} />
               ) : (
                 <div className="codascope-assistant-thinking">
                   <span />
@@ -465,6 +533,16 @@ export function CodaScopeAssistant() {
             disabled={modelsLoading || streaming}
             compact
           />
+          <button
+            className="codascope-conv-new-btn"
+            disabled={streaming}
+            onClick={createNewConversation}
+            title="New conversation"
+            type="button"
+            style={{ marginLeft: "auto" }}
+          >
+            + New Chat
+          </button>
           <div className="codascope-assistant-input-actions">
             {streaming && (
               <button

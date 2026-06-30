@@ -16,8 +16,10 @@ import { CodaScopeConceptService } from "../services/codaScopeConceptService.js"
 import { CodaScopeGoldenRuleService } from "../services/codaScopeGoldenRuleService.js";
 import { CodaScopeQualityService } from "../services/codaScopeQualityService.js";
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
-import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
+import { buildBaseVars, loadCommandOrSkill, loadCommandTemplate, substituteVars } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
+import { buildProjectManifest, formatConversationHistory, formatViewContext, type ManifestInput, type ViewContext } from "../services/codaScopeChatPromptHelpers.js";
+import { extractActions } from "../services/codaScopeActionParser.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 type HttpErrorFn = (message: string, status: number, code: string) => Error;
@@ -120,6 +122,89 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     qualitySvc: qualityService,
     wikiStateSvc: wikiStateService,
   };
+}
+
+/* ── Assistant Prompt Helpers ────────────────────────────────────────── */
+
+/**
+ * Build a lightweight project manifest from services.
+ * All lookups are fast (titles/counts only, no full content).
+ */
+async function buildManifestFromServices(
+  projectId: string,
+  svcs: {
+    projectSvc: CodaScopeProjectService;
+    wikiSvc: CodaScopeWikiService;
+    goldenRuleSvc: CodaScopeGoldenRuleService;
+    conceptSvc: CodaScopeConceptService;
+    qualitySvc: CodaScopeQualityService;
+    buildSvc: CodaScopeBuildStateService;
+    wikiStateSvc: CodaScopeWikiStateService;
+    codeMapSvc: CodaScopeCodeMapService;
+  },
+): Promise<ManifestInput> {
+  const project = await svcs.projectSvc.getProject(projectId);
+  const repos = project?.repositories ?? [];
+  const topics = await svcs.wikiSvc.listTopics(projectId);
+  const rules = svcs.goldenRuleSvc.listRules(projectId);
+  const concepts = svcs.conceptSvc.listConcepts(projectId);
+  const qualityScore = svcs.qualitySvc.getOverallScore(projectId);
+  const qualitySummary = svcs.qualitySvc.getLatestSummary(projectId);
+  const buildState = svcs.buildSvc.getBuildState(projectId);
+
+  // Get wiki build freshness from wiki-state
+  const projectDir = svcs.projectSvc.getProjectDir(projectId);
+  let lastWikiBuildTimestamp: string | null = null;
+  let lastCodeMapBuildTimestamp: string | null = null;
+  if (projectDir) {
+    const wikiState = svcs.wikiStateSvc.getWikiState(projectDir);
+    lastWikiBuildTimestamp = wikiState?.lastBuildAt ?? null;
+    // Code map freshness from first repo's meta
+    if (repos.length > 0) {
+      const slug = CodaScopeCodeMapService.repoSlug(repos[0].name || repos[0].path);
+      const meta = svcs.codeMapSvc.getCodeMapMeta(projectId, slug);
+      lastCodeMapBuildTimestamp = meta?.generatedAt ?? null;
+    }
+  }
+
+  return {
+    projectName: project?.name ?? "Unknown",
+    projectId,
+    repositoryCount: repos.length,
+    repositories: repos.map((r: { name: string; path: string }) => ({ name: r.name, path: r.path })),
+    wikiTopicTitles: topics.map((t: { id: string; title: string }) => ({ id: t.id, title: t.title })),
+    goldenRuleNames: rules.map((r: { name: string; enabled: boolean }) => ({ name: r.name, enabled: r.enabled })),
+    conceptNames: concepts.map((c: { name: string; category: string }) => ({ name: c.name, category: c.category })),
+    qualityScore,
+    lastQualityScanTimestamp: qualitySummary?.timestamp ?? null,
+    currentBuildStatus: buildState?.status ?? "idle",
+    lastBuildTimestamp: buildState?.completedAt ?? buildState?.startedAt ?? null,
+    lastBuildCommand: buildState?.command ?? null,
+    lastWikiBuildTimestamp,
+    lastCodeMapBuildTimestamp,
+  };
+}
+
+/**
+ * Load the assistant system prompt (do_chat.md), substitute manifest/history/view/message placeholders.
+ */
+function buildAssistantPrompt(
+  manifest: string,
+  history: string,
+  viewContext: string,
+  userMessage: string,
+): string {
+  const template = loadCommandTemplate("do_chat");
+  if (!template) {
+    // Fallback if do_chat.md is missing
+    return `You are a helpful CodaScope assistant.\n\n${manifest}\n\n${history}\n\n${viewContext}\n\nUser: ${userMessage}`;
+  }
+  return substituteVars(template, {
+    PROJECT_MANIFEST: manifest,
+    CONVERSATION_HISTORY: history,
+    VIEW_CONTEXT: viewContext,
+    USER_MESSAGE: userMessage,
+  });
 }
 
 export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps): void {
@@ -723,7 +808,8 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   // Send message — creates conversation if needed, persists, streams agent SSE
   app.post("/api/codascope/projects/:id/conversations/:convId/messages", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
-      const { agentSvc, chatSvc } = await ensureServices(secretService, httpError);
+      const svcs = await ensureServices(secretService, httpError);
+      const { agentSvc, chatSvc } = svcs;
       const id = param(req, "id");
       const convId = param(req, "convId");
       const { message, modelId, context } = req.body as {
@@ -760,6 +846,38 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         status: "streaming",
       });
 
+      // ── Build manifest + system prompt ─────────────────────────────
+      const manifest = await buildManifestFromServices(id, svcs);
+      const manifestStr = buildProjectManifest(manifest);
+
+      // Format conversation history (prior messages, not including current)
+      const conversation = await chatSvc.readConversation(id, convId);
+      const priorMessages = (conversation?.messages ?? [])
+        .filter((m) => m.id !== userMsgId && m.id !== assistantMsgId)
+        .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system")
+        .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
+      const historyStr = formatConversationHistory(priorMessages);
+
+      // Format view context (enriched with topicTitle, filePath, recentViews)
+      const ctxRecord = context as Record<string, unknown> | undefined;
+      const viewCtx: ViewContext | null = ctxRecord
+        ? {
+            view: (ctxRecord.view as string) ?? "unknown",
+            topicId: (ctxRecord.topicId as string) ?? null,
+            topicTitle: (ctxRecord.topicTitle as string) ?? null,
+            filePath: (ctxRecord.filePath as string) ?? null,
+            recentViews: Array.isArray(ctxRecord.recentViews)
+              ? (ctxRecord.recentViews as Array<{ view: string; label: string }>)
+              : undefined,
+            projectName: (ctxRecord.projectName as string) ?? "",
+            projectId: id,
+          }
+        : null;
+      const viewStr = formatViewContext(viewCtx);
+
+      // Build the full system prompt with all context injected
+      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr, message.trim());
+
       // Set up SSE headers
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -773,18 +891,13 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         aborted = true;
       });
 
-      // Build context string for agent
-      const contextStr = context
-        ? `[Current View: ${(context as Record<string, string>).view ?? "unknown"}] The user is in project "${(context as Record<string, string>).projectName ?? ""}"${(context as Record<string, string>).topicId ? `, viewing wiki topic "${(context as Record<string, string>).topicId}"` : ""}.`
-        : undefined;
-
       let fullResponse = "";
 
       await agentSvc.send({
         projectId: id,
         message: message.trim(),
         modelId,
-        context: contextStr,
+        systemPrompt,
         purpose: "assistant",
         onMessage: (msg) => {
           if (aborted) return;
@@ -797,15 +910,27 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
           res.write(`data: ${JSON.stringify(msg)}\n\n`);
         },
         onDone: async (result) => {
-          // Update assistant message with final content
+          // Parse action tags from the response
+          const actions = extractActions(fullResponse);
+
+          // Update assistant message with final content + actions
           try {
-            const conversation = await chatSvc.readConversation(id, convId);
-            if (conversation) {
+            const conv = await chatSvc.readConversation(id, convId);
+            if (conv) {
               const updated = {
-                ...conversation,
-                messages: conversation.messages.map((m) =>
+                ...conv,
+                messages: conv.messages.map((m) =>
                   m.id === assistantMsgId
-                    ? { ...m, content: fullResponse, status: "complete" as const, updatedAt: new Date().toISOString() }
+                    ? {
+                        ...m,
+                        content: fullResponse,
+                        status: "complete" as const,
+                        updatedAt: new Date().toISOString(),
+                        metadata: {
+                          ...(m.metadata ?? {}),
+                          ...(actions.length > 0 ? { actions } : {}),
+                        },
+                      }
                     : m,
                 ),
               };
@@ -815,18 +940,18 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
             // Best effort persistence
           }
           if (!aborted) {
-            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId })}\n\n`);
+            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId, actions })}\n\n`);
             res.end();
           }
         },
         onError: async (err) => {
           // Mark assistant message as error
           try {
-            const conversation = await chatSvc.readConversation(id, convId);
-            if (conversation) {
+            const conv = await chatSvc.readConversation(id, convId);
+            if (conv) {
               const updated = {
-                ...conversation,
-                messages: conversation.messages.map((m) =>
+                ...conv,
+                messages: conv.messages.map((m) =>
                   m.id === assistantMsgId
                     ? { ...m, content: fullResponse || `Error: ${err.message}`, status: "error" as const, updatedAt: new Date().toISOString() }
                     : m,
@@ -851,7 +976,8 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
   app.post("/api/codascope/projects/:id/assistant", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
-      const { agentSvc, chatSvc } = await ensureServices(secretService, httpError);
+      const svcs = await ensureServices(secretService, httpError);
+      const { agentSvc, chatSvc } = svcs;
       const id = param(req, "id");
       const { message, modelId, context, conversationId } = req.body as {
         message?: string;
@@ -881,6 +1007,24 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         status: "complete",
       });
 
+      // ── Build manifest + system prompt ─────────────────────────────
+      const manifest = await buildManifestFromServices(id, svcs);
+      const manifestStr = buildProjectManifest(manifest);
+
+      // Format conversation history
+      const conversation = await chatSvc.readConversation(id, convId);
+      const priorMessages = (conversation?.messages ?? [])
+        .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system")
+        .slice(0, -1) // exclude the just-appended user message (it's the current one)
+        .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
+      const historyStr = formatConversationHistory(priorMessages);
+
+      // Parse view context from the string (backwards-compat format)
+      const viewStr = context?.trim() ?? "The user's current view is unknown.";
+
+      // Build system prompt
+      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr, message.trim());
+
       // Set up SSE headers
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -900,7 +1044,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         projectId: id,
         message: message.trim(),
         modelId,
-        context: context?.trim(),
+        systemPrompt,
         purpose: "assistant",
         onMessage: (msg) => {
           if (aborted) return;
@@ -912,17 +1056,20 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
           res.write(`data: ${JSON.stringify(msg)}\n\n`);
         },
         onDone: async (result) => {
-          // Persist assistant response
+          // Parse actions and persist
+          const actions = extractActions(fullResponse);
+
           if (fullResponse) {
             await chatSvc.appendMessage(id, convId!, {
               role: "assistant",
               content: fullResponse,
               modelId,
               status: "complete",
+              metadata: actions.length > 0 ? { actions } : undefined,
             }).catch(() => { /* best effort */ });
           }
           if (!aborted) {
-            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId })}\n\n`);
+            res.write(`event: done\ndata: ${JSON.stringify({ ...result, conversationId: convId, actions })}\n\n`);
             res.end();
           }
         },
@@ -944,6 +1091,15 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       });
     })().catch(next);
   });
+
+  // ── Cancel Agent Chat ──────────────────────────────────────────────
+
+  app.post("/api/codascope/projects/:id/assistant/cancel", wrap(async (req, res) => {
+    const { agentSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const cancelled = agentSvc.cancelAgent(id);
+    res.json({ cancelled });
+  }));
 
   // ── Code Map ──────────────────────────────────────────────────────
 

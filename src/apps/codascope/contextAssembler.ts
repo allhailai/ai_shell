@@ -1,26 +1,88 @@
 /* ── CodaScope: Context Assembler ─────────────────────────────────────
    Lightweight current-view context for the right-panel assistant.
    
-   Instead of dumping full wiki content, this provides a brief summary
-   of what the user is currently looking at. The agent discovers deeper
-   content via custom tools (list_wiki_topics, read_wiki_topic, etc).
+   Produces a MessageContext object with the current view, topicId,
+   file info, and recent navigation history. The server-side prompt
+   helpers handle formatting this into the agent prompt.
    ──────────────────────────────────────────────────────────────────── */
 
-export interface AssistantContext {
+export interface MessageContext {
   view: string;
+  topicId?: string | null;
+  topicTitle?: string | null;
+  filePath?: string | null;
+  recentViews?: Array<{ view: string; label: string }>;
   projectName: string;
-  summary: string;
+  projectId: string;
+}
+
+/* ── Recent Views Ring Buffer ──────────────────────────────────────── */
+
+const MAX_RECENT_VIEWS = 5;
+const recentViewsBuffer: Array<{ view: string; label: string }> = [];
+
+/**
+ * Record a view visit into the ring buffer.
+ * Called each time the user navigates to a new view.
+ */
+export function recordViewVisit(view: string, label: string): void {
+  // Don't record duplicate consecutive views
+  const last = recentViewsBuffer[recentViewsBuffer.length - 1];
+  if (last?.view === view && last?.label === label) return;
+
+  recentViewsBuffer.push({ view, label });
+  if (recentViewsBuffer.length > MAX_RECENT_VIEWS) {
+    recentViewsBuffer.shift();
+  }
 }
 
 /**
- * Assemble a lightweight context string from the current URL state.
- * This is prepended to the user's message so the agent knows what view
- * they're looking at.
+ * Get the current recent views snapshot.
+ */
+export function getRecentViews(): Array<{ view: string; label: string }> {
+  return [...recentViewsBuffer];
+}
+
+/**
+ * Clear the recent views buffer (e.g., on project switch).
+ */
+export function clearRecentViews(): void {
+  recentViewsBuffer.length = 0;
+}
+
+/* ── View Labels ──────────────────────────────────────────────────── */
+
+function viewLabel(view: string, topicId?: string | null, topicTitle?: string | null): string {
+  switch (view) {
+    case "dashboard": return "Dashboard";
+    case "wiki":
+      if (topicId) return topicTitle ?? topicId;
+      return "Wiki";
+    case "quality": return "Quality";
+    case "rules": return "Golden Rules";
+    case "concepts": return "Concepts";
+    case "settings": return "Settings";
+    case "skills": return "Skills";
+    default: return view;
+  }
+}
+
+/* ── Main Assembler ───────────────────────────────────────────────── */
+
+/**
+ * Assemble a context object from the current URL state and optional metadata.
+ * This is sent with each message so the server knows what the user
+ * is currently viewing, including any file they're focused on.
  */
 export function assembleContext(
   urlSegments: string[],
   projectName: string,
-): AssistantContext | null {
+  projectId: string,
+  options?: {
+    topicTitle?: string | null;
+    filePath?: string | null;
+  },
+): MessageContext | null {
   if (!urlSegments.length) return null;
 
   const section = urlSegments[0];
@@ -28,63 +90,18 @@ export function assembleContext(
 
   const view = urlSegments[2] ?? "dashboard";
   const topicId = view === "wiki" ? (urlSegments[3] ?? null) : null;
+  const topicTitle = options?.topicTitle ?? null;
 
-  switch (view) {
-    case "dashboard":
-      return {
-        view: "dashboard",
-        projectName,
-        summary: `The user is viewing the project dashboard for "${projectName}". They can see project stats, repository list, and quick actions.`,
-      };
+  // Record this view visit
+  recordViewVisit(view, viewLabel(view, topicId, topicTitle));
 
-    case "wiki":
-      if (topicId) {
-        return {
-          view: "wiki",
-          projectName,
-          summary: `The user is reading wiki topic "${topicId}" in project "${projectName}". Use the read_wiki_topic tool with topicId="${topicId}" to see what they're reading if needed.`,
-        };
-      }
-      return {
-        view: "wiki",
-        projectName,
-        summary: `The user is browsing the wiki topic list for project "${projectName}". Use list_wiki_topics to see available topics.`,
-      };
-
-    case "chat":
-      return {
-        view: "chat",
-        projectName,
-        summary: `The user is in the full-screen codebase chat for project "${projectName}".`,
-      };
-
-    case "skills":
-      return {
-        view: "skills",
-        projectName,
-        summary: `The user is viewing the skills manager for project "${projectName}". Use list_project_skills to see available skills.`,
-      };
-
-    case "settings":
-      return {
-        view: "settings",
-        projectName,
-        summary: `The user is viewing project settings for "${projectName}". Use list_repositories to see configured repos.`,
-      };
-
-    default:
-      return {
-        view,
-        projectName,
-        summary: `The user is viewing the "${view}" section of project "${projectName}".`,
-      };
-  }
-}
-
-/**
- * Format the context into a string suitable for the agent system prompt.
- */
-export function formatContextForAgent(ctx: AssistantContext | null): string | undefined {
-  if (!ctx) return undefined;
-  return `[Current View: ${ctx.view}] ${ctx.summary}`;
+  return {
+    view,
+    topicId,
+    topicTitle,
+    filePath: options?.filePath ?? null,
+    recentViews: getRecentViews(),
+    projectName,
+    projectId,
+  };
 }

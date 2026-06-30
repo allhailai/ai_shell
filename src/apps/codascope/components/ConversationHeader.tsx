@@ -102,19 +102,6 @@ export function ConversationHeader({
             {historyOpen ? "▴" : "▾"}
           </span>
         </button>
-
-        <button
-          className="codascope-conv-new-btn"
-          disabled={disabled}
-          onClick={handleNew}
-          title="New conversation"
-          type="button"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="8" y1="3" x2="8" y2="13" />
-            <line x1="3" y1="8" x2="13" y2="8" />
-          </svg>
-        </button>
       </div>
 
       {historyOpen && (

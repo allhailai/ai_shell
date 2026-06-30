@@ -133,6 +133,23 @@ export function MarkdownViewer({ content, className, onWikiLink }: MarkdownViewe
         );
       }
 
+      // Internal app links — navigate in-place, don't open new tab
+      if (href?.startsWith("/codascope/")) {
+        return (
+          <a
+            href={href}
+            onClick={(e) => {
+              e.preventDefault();
+              window.history.pushState(null, "", href);
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+            {...props}
+          >
+            {children}
+          </a>
+        );
+      }
+
       return (
         <a href={href} rel="noopener noreferrer" target="_blank" {...props}>
           {children}
