@@ -9,7 +9,7 @@ export { MarkdownEditor, type MarkdownFileRef } from "./MarkdownEditor";
 export { buildLivePreviewExtension } from "./extensions/livePreviewExtension";
 export { buildMermaidExtension, parseMermaidBlock, type MermaidBlock } from "./extensions/mermaidExtension";
 export { buildMarkdownTableExtension, parseMarkdownTableBlock, type TableBlock } from "./extensions/markdownTableExtension";
-export { buildWikiLinkExtension } from "./extensions/wikiLinkExtension";
+export { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensions/wikiLinkExtension";
 
 // CSS must be imported by the consuming app's styles.css:
 //   @import "./shared/markdown/MarkdownEditor.css";

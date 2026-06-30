@@ -9,9 +9,9 @@
    Generalized with pluggable file resolver and navigation callbacks.
    ──────────────────────────────────────────────────────────────────── */
 
-import { syntaxTree } from "@codemirror/language";
-import { type Extension } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { RangeSetBuilder, type Extension } from "@codemirror/state";
+import { Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { parseMarkdownTableBlock } from "./markdownTableExtension";
 
 interface WikiLinkFile {
   path: string;
@@ -73,80 +73,129 @@ class WikiLinkWidget extends WidgetType {
     const link = document.createElement("span");
     link.className = `shared-md-wiki-link shared-md-wiki-link-${this.resolution}`;
     link.textContent = this.display;
+    link.role = "link";
+    link.tabIndex = 0;
     link.title = this.resolution === "resolved" ? this.targetPath : `Not found: ${this.targetPath}`;
 
     if (this.resolution === "resolved") {
       link.style.cursor = "pointer";
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const onOpenFile = this.getOnOpenFile();
-        if (onOpenFile) onOpenFile(this.targetPath);
-      });
     }
+
+    const open = () => {
+      if (this.resolution !== "resolved") return;
+      const onOpenFile = this.getOnOpenFile();
+      if (onOpenFile) onOpenFile(this.targetPath);
+    };
+
+    // Prevent mousedown from reaching CodeMirror — this stops CM from
+    // positioning the cursor (which would reveal the raw markdown and
+    // destroy this widget before the click handler fires).
+    link.addEventListener("mousedown", (e) => e.preventDefault());
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      open();
+    });
+    link.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      open();
+    });
 
     return link;
   }
+}
 
-  ignoreEvent() { return false; }
+const WIKI_LINK_RE = /\[\[([^\]\n]+)\]\]/g;
+
+/** Extract display label from a raw wiki link target (handles aliases like `target|alias`). */
+function wikiLinkLabel(rawTarget: string): string {
+  const [target, alias] = rawTarget.split("|").map((s) => s.trim());
+  return alias || target || "";
 }
 
 // ── Decoration builder ──────────────────────────────────────────────
 
-const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
-
-function buildWikiLinkDecorations(view: EditorView, config: WikiLinkConfig): DecorationSet {
+function buildWikiLinkDecorations(view: import("@codemirror/view").EditorView, config: WikiLinkConfig): DecorationSet {
   const { state } = view;
   const files = config.getFiles();
-  const entries: { from: number; to: number; decoration: Decoration }[] = [];
 
-  for (const { from, to } of view.visibleRanges) {
-    const text = state.doc.sliceString(from, to);
-    let match: RegExpExecArray | null;
-    WIKI_LINK_RE.lastIndex = 0;
-
-    while ((match = WIKI_LINK_RE.exec(text)) !== null) {
-      const matchFrom = from + match.index;
-      const matchTo = matchFrom + match[0].length;
-      const target = match[1];
-
-      // Don't decorate if cursor is on this line
-      const line = state.doc.lineAt(matchFrom);
-      let cursorOnLine = false;
-      for (const range of state.selection.ranges) {
-        const cursorLine = state.doc.lineAt(range.head).number;
-        if (cursorLine === line.number) { cursorOnLine = true; break; }
-      }
-      if (cursorOnLine) continue;
-
-      // Check we're not inside a fenced code block
-      const node = syntaxTree(state).resolveInner(matchFrom, 1);
-      if (node.name === "CodeText" || node.name === "FencedCode" || node.name === "CodeBlock") continue;
-
-      const resolved = resolveWikiLink(target, files, config.selectedPath);
-      if (!resolved) continue;
-
-      const [displayText] = target.split("|");
-
-      entries.push({
-        from: matchFrom,
-        to: matchTo,
-        decoration: Decoration.replace({
-          widget: new WikiLinkWidget(
-            displayText.trim(),
-            resolved.path,
-            resolved.resolution,
-            config.getOnOpenFile,
-          ),
-        }),
-      });
+  // Determine which lines have cursors — links on those lines stay as
+  // raw markdown so the user can edit them.
+  const cursorLines = new Set<number>();
+  for (const range of state.selection.ranges) {
+    const startLine = state.doc.lineAt(range.from).number;
+    const endLine = state.doc.lineAt(range.to).number;
+    for (let lineNum = startLine; lineNum <= endLine; lineNum++) {
+      cursorLines.add(lineNum);
     }
   }
 
-  return Decoration.set(
-    entries.map((e) => e.decoration.range(e.from, e.to)),
-    true,
-  );
+  const allLinks: Array<{ from: number; to: number; display: string; targetPath: string; resolution: Resolution }> = [];
+
+  for (const { from, to } of view.visibleRanges) {
+    let position = from;
+
+    while (position <= to) {
+      const line = state.doc.lineAt(position);
+
+      // Skip cursor lines — show raw markdown for editing
+      if (cursorLines.has(line.number)) {
+        if (line.to >= to) break;
+        position = line.to + 1;
+        continue;
+      }
+
+      // Skip table lines — the table extension renders its own wiki links
+      const table = parseMarkdownTableBlock(state.doc, line.number);
+      if (table) {
+        position = table.to + 1;
+        continue;
+      }
+
+      // Find wiki links on this line
+      WIKI_LINK_RE.lastIndex = 0;
+      for (const match of line.text.matchAll(WIKI_LINK_RE)) {
+        const matchIndex = match.index ?? 0;
+        const rawTarget = match[1] ?? "";
+        const matchFrom = line.from + matchIndex;
+        const matchTo = matchFrom + match[0].length;
+
+        const resolved = resolveWikiLink(rawTarget, files, config.selectedPath);
+        if (!resolved) continue;
+
+        allLinks.push({
+          from: matchFrom,
+          to: matchTo,
+          display: wikiLinkLabel(rawTarget),
+          targetPath: resolved.path,
+          resolution: resolved.resolution,
+        });
+      }
+
+      if (line.to >= to) break;
+      position = line.to + 1;
+    }
+  }
+
+  // Sort by position, then build decorations
+  allLinks.sort((a, b) => a.from - b.from || a.to - b.to);
+
+  const builder = new RangeSetBuilder<Decoration>();
+  let lastEnd = -1;
+  for (const link of allLinks) {
+    if (link.from < lastEnd) continue; // skip overlapping
+    lastEnd = link.to;
+    builder.add(
+      link.from,
+      link.to,
+      Decoration.replace({
+        widget: new WikiLinkWidget(link.display, link.targetPath, link.resolution, config.getOnOpenFile),
+      }),
+    );
+  }
+
+  return builder.finish();
 }
 
 // ── Extension entry point ───────────────────────────────────────────
@@ -155,20 +204,125 @@ export function buildWikiLinkExtension(config: WikiLinkConfig): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
-      constructor(view: EditorView) {
+      constructor(view: import("@codemirror/view").EditorView) {
         this.decorations = buildWikiLinkDecorations(view, config);
       }
       update(update: ViewUpdate) {
-        if (
-          update.docChanged ||
-          update.selectionSet ||
-          update.viewportChanged ||
-          syntaxTree(update.state) !== syntaxTree(update.startState)
-        ) {
+        if (update.docChanged || update.viewportChanged || update.selectionSet) {
           this.decorations = buildWikiLinkDecorations(update.view, config);
         }
       }
     },
     { decorations: (plugin) => plugin.decorations },
   );
+}
+
+// ── Table cell display renderer ─────────────────────────────────────
+
+/**
+ * Builds a renderCellDisplay callback for the markdown table extension.
+ * Parses cell text for wiki links and renders them as clickable DOM elements.
+ */
+export function buildTableCellDisplayRenderer(config: WikiLinkConfig): (cell: string, container: HTMLElement) => void {
+  return (cell: string, container: HTMLElement) => {
+    const files = config.getFiles();
+    const onOpenFile = config.getOnOpenFile();
+
+    const combinedPattern = /\[\[([^\]\n]+)\]\]/g;
+    let lastIndex = 0;
+
+    for (const match of cell.matchAll(combinedPattern)) {
+      const matchStart = match.index ?? 0;
+
+      // Append any plain text before this match
+      if (matchStart > lastIndex) {
+        appendFormattedText(cell.slice(lastIndex, matchStart), container);
+      }
+
+      const rawTarget = match[1] ?? "";
+      const label = wikiLinkLabel(rawTarget);
+      const resolved = resolveWikiLink(rawTarget, files, config.selectedPath);
+
+      if (resolved) {
+        container.appendChild(createLinkElement(label, resolved, onOpenFile));
+      } else {
+        container.appendChild(document.createTextNode(label));
+      }
+
+      lastIndex = matchStart + match[0].length;
+    }
+
+    // Append any remaining text after the last match
+    if (lastIndex < cell.length) {
+      appendFormattedText(cell.slice(lastIndex), container);
+    }
+  };
+}
+
+/**
+ * Appends text with inline markdown formatting (bold, italic, code) to a
+ * container element.
+ */
+function appendFormattedText(text: string, container: HTMLElement) {
+  const formattingPattern = /\*\*(.+?)\*\*|\*([^*\n]+)\*|`([^`\n]+)`/g;
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(formattingPattern)) {
+    const matchStart = match.index ?? 0;
+
+    if (matchStart > lastIndex) {
+      container.appendChild(document.createTextNode(text.slice(lastIndex, matchStart)));
+    }
+
+    if (match[1] !== undefined) {
+      const strong = document.createElement("strong");
+      strong.textContent = match[1];
+      container.appendChild(strong);
+    } else if (match[2] !== undefined) {
+      const em = document.createElement("em");
+      em.textContent = match[2];
+      container.appendChild(em);
+    } else if (match[3] !== undefined) {
+      const code = document.createElement("code");
+      code.className = "shared-md-table-inline-code";
+      code.textContent = match[3];
+      container.appendChild(code);
+    }
+
+    lastIndex = matchStart + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    container.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
+}
+
+function createLinkElement(
+  label: string,
+  resolved: { path: string; resolution: Resolution },
+  onOpenFile: ((path: string) => void) | undefined,
+): HTMLElement {
+  const link = document.createElement("span");
+  link.className = `shared-md-wiki-link shared-md-wiki-link-${resolved.resolution}`;
+  link.textContent = label;
+  link.role = "link";
+  link.tabIndex = 0;
+  link.title = resolved.resolution === "resolved" ? resolved.path : `Not found: ${resolved.path}`;
+
+  if (resolved.resolution === "resolved") {
+    link.style.cursor = "pointer";
+    const open = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (onOpenFile) onOpenFile(resolved.path);
+    };
+    link.addEventListener("mousedown", (e) => e.preventDefault());
+    link.addEventListener("click", open);
+    link.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      open(e);
+    });
+  }
+
+  return link;
 }

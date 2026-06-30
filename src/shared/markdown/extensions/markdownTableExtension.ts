@@ -95,6 +95,7 @@ class TableWidget extends WidgetType {
     private readonly headers: string[],
     private readonly rows: string[][],
     private readonly alignments: ("left" | "center" | "right" | null)[],
+    private readonly renderCellDisplay?: ((cell: string, container: HTMLElement) => void) | null,
   ) {
     super();
   }
@@ -104,6 +105,15 @@ class TableWidget extends WidgetType {
       JSON.stringify(this.headers) === JSON.stringify(other.headers) &&
       JSON.stringify(this.rows) === JSON.stringify(other.rows)
     );
+  }
+
+  private renderCell(container: HTMLElement, text: string) {
+    if (this.renderCellDisplay) {
+      this.renderCellDisplay(text, container);
+      if (!container.childNodes.length) container.textContent = text;
+    } else {
+      container.textContent = text;
+    }
   }
 
   toDOM() {
@@ -118,7 +128,7 @@ class TableWidget extends WidgetType {
     const headerRow = document.createElement("tr");
     for (let i = 0; i < this.headers.length; i++) {
       const th = document.createElement("th");
-      th.textContent = this.headers[i];
+      this.renderCell(th, this.headers[i]);
       const align = this.alignments[i];
       if (align) th.style.textAlign = align;
       headerRow.appendChild(th);
@@ -132,7 +142,7 @@ class TableWidget extends WidgetType {
       const tr = document.createElement("tr");
       for (let i = 0; i < this.headers.length; i++) {
         const td = document.createElement("td");
-        td.textContent = row[i] ?? "";
+        this.renderCell(td, row[i] ?? "");
         const align = this.alignments[i];
         if (align) td.style.textAlign = align;
         tr.appendChild(td);
@@ -173,7 +183,7 @@ function cursorLineNumbers(state: EditorState, editable: boolean): Set<number> {
 
 // ── Decoration builder ──────────────────────────────────────────────
 
-function buildTableDecorations(state: EditorState, editable: boolean): DecorationSet {
+function buildTableDecorations(state: EditorState, editable: boolean, renderCellDisplay?: ((cell: string, container: HTMLElement) => void) | null): DecorationSet {
   const doc = state.doc;
   const cursorLines = cursorLineNumbers(state, editable);
   const builder = new RangeSetBuilder<Decoration>();
@@ -192,7 +202,7 @@ function buildTableDecorations(state: EditorState, editable: boolean): Decoratio
       if (!cursorInTable) {
         builder.add(table.from, table.from, Decoration.widget({
           block: true, side: -1,
-          widget: new TableWidget(table.headers, table.rows, table.alignments),
+          widget: new TableWidget(table.headers, table.rows, table.alignments, renderCellDisplay),
         }));
 
         for (let ln = table.startLineNumber; ln <= table.endLineNumber; ln++) {
@@ -215,12 +225,12 @@ function buildTableDecorations(state: EditorState, editable: boolean): Decoratio
 
 // ── Extension entry point ───────────────────────────────────────────
 
-export function buildMarkdownTableExtension({ editable }: { editable: boolean }): Extension {
+export function buildMarkdownTableExtension({ editable, renderCellDisplay }: { editable: boolean; renderCellDisplay?: ((cell: string, container: HTMLElement) => void) | null }): Extension {
   const tableDecorations = StateField.define<DecorationSet>({
-    create(state) { return buildTableDecorations(state, editable); },
+    create(state) { return buildTableDecorations(state, editable, renderCellDisplay); },
     update(decorations, transaction) {
       if (transaction.docChanged || transaction.selection) {
-        return buildTableDecorations(transaction.state, editable);
+        return buildTableDecorations(transaction.state, editable, renderCellDisplay);
       }
       return decorations;
     },

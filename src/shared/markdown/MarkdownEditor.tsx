@@ -13,7 +13,7 @@ import { useMemo, useRef, useEffect, useCallback } from "react";
 import { buildLivePreviewExtension } from "./extensions/livePreviewExtension";
 import { buildMermaidExtension } from "./extensions/mermaidExtension";
 import { buildMarkdownTableExtension } from "./extensions/markdownTableExtension";
-import { buildWikiLinkExtension } from "./extensions/wikiLinkExtension";
+import { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensions/wikiLinkExtension";
 
 /** File reference for wiki link resolution. */
 export interface MarkdownFileRef {
@@ -112,16 +112,20 @@ export function MarkdownEditor({
   const getOnOpenFile = useCallback(() => onOpenFileRef.current, []);
 
   const extensions = useMemo(
-    () => [
-      markdown(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      EditorView.lineWrapping,
-      darkTheme ? darkEditorTheme : lightEditorTheme,
-      buildLivePreviewExtension({ editable }),
-      buildMermaidExtension({ editable }),
-      buildMarkdownTableExtension({ editable }),
-      buildWikiLinkExtension({ getFiles, selectedPath, getOnOpenFile }),
-    ],
+    () => {
+      const wikiLinkConfig = { getFiles, selectedPath, getOnOpenFile };
+      const renderCellDisplay = buildTableCellDisplayRenderer(wikiLinkConfig);
+      return [
+        markdown(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        EditorView.lineWrapping,
+        darkTheme ? darkEditorTheme : lightEditorTheme,
+        buildLivePreviewExtension({ editable }),
+        buildMermaidExtension({ editable }),
+        buildMarkdownTableExtension({ editable, renderCellDisplay }),
+        buildWikiLinkExtension(wikiLinkConfig),
+      ];
+    },
     [editable, darkTheme, getFiles, selectedPath, getOnOpenFile],
   );
 
