@@ -20,11 +20,18 @@ AIShell is a **multi-application hosting framework** built with React + TypeScri
 
 ```
 ai_shell/
+├── ARCHITECTURE.md               # ← You are here (shell-level)
+├── APP_DEVELOPMENT_GUIDE.md      # How to build apps within the shell
+├── .agents/AGENTS.md             # Shell-level agent development guidelines
 ├── index.html                    # Vite entry HTML
 ├── package.json                  # React 19, Zustand 5, Vite 8
 ├── vite.config.ts                # Vite config with React plugin
 ├── tsconfig.json                 # Project references root
 ├── tsconfig.app.json             # App-level TS config
+├── server/                       # Express backend (routes, services, middleware)
+│   ├── index.ts                  # Server entry point — mounts all routes
+│   ├── routes/                   # API route handlers per domain
+│   └── services/                 # Business logic (module singletons)
 └── src/
     ├── main.tsx                  # React root → <Shell />
     ├── styles.css                # CSS barrel (import order matters)
@@ -38,11 +45,17 @@ ai_shell/
     │   └── landing-page.css      # App launcher landing page styles
     ├── types/
     │   └── app.ts                # AppManifest, PanelRegistration, CommandRegistration
+    ├── shared/                   # Reusable components available to all apps
+    │   ├── markdown/             # Markdown rendering (MarkdownViewer)
+    │   └── folder-picker/        # Filesystem folder selection
     ├── shell/                    # Framework internals (apps import from here)
     │   ├── store.ts              # Zustand store — layout, navigation, preferences
     │   ├── commandBus.ts         # Tier 2 imperative command/event system
     │   ├── hooks.ts              # React hooks for apps (panels, commands, resize)
-    │   └── urlState.ts           # Bidirectional URL ↔ store sync
+    │   ├── urlState.ts           # Bidirectional URL ↔ store sync
+    │   ├── useAppSubRoute.ts     # Per-app sub-route hook
+    │   ├── authContext.tsx       # Auth context (standalone vs server mode)
+    │   └── useSecrets.ts         # Secrets API hook
     ├── app/                      # Shell UI components
     │   ├── Shell.tsx             # Root layout compositor
     │   ├── Topbar.tsx            # Header bar with app breadcrumbs + panel toggles
@@ -54,10 +67,18 @@ ai_shell/
     └── apps/                     # Hosted applications
         ├── registry.ts           # Central app registry (compile-time imports)
         ├── hello-world/          # Demo app — exercises all shell capabilities
-        │   └── ARCHITECTURE.md   # ← App-level architecture doc
-        └── arcade/               # Retro game arcade
-            └── ARCHITECTURE.md   # ← App-level architecture doc
+        │   └── ARCHITECTURE.md
+        ├── arcade/               # Retro game arcade
+        │   └── ARCHITECTURE.md
+        ├── admin/                # User/system administration
+        ├── db-helper/            # Database exploration tools
+        │   └── ARCHITECTURE.md
+        └── codascope/            # AI-powered codebase documentation & analysis
+            ├── ARCHITECTURE.md   # ← App-specific architecture (progressive disclosure)
+            └── AGENTS.md         # ← App-specific agent development rules
 ```
+
+> **Container Principle**: AIShell is a container. Each app is self-governing — its architecture and development conventions live in its own `ARCHITECTURE.md` and `AGENTS.md`. This document covers only the shell framework. For app-specific details, read the app's own docs.
 
 ---
 
@@ -96,8 +117,13 @@ All apps are registered at compile time in [`src/apps/registry.ts`](src/apps/reg
 ```typescript
 import { helloWorldApp } from "./hello-world/manifest";
 import { arcadeApp }     from "./arcade/manifest";
+import { adminApp }      from "./admin/manifest";
+import { dbHelperApp }   from "./db-helper/manifest";
+import { codaScopeApp }  from "./codascope/manifest";
 
-export const apps: AppManifest[] = [helloWorldApp, arcadeApp];
+export const apps: AppManifest[] = [
+  helloWorldApp, arcadeApp, dbHelperApp, codaScopeApp, adminApp,
+];
 ```
 
 **To add a new app:**
@@ -287,7 +313,8 @@ EOF
 # 4. (Optional) Add CSS: create my-app.css, add @import to src/styles.css
 
 # 5. REQUIRED: Create ARCHITECTURE.md for the app
-# 6. REQUIRED: Implement URL deep-linking (pushState/popstate)
+# 6. REQUIRED: Create AGENTS.md with app-specific dev rules
+# 7. REQUIRED: Implement URL deep-linking (pushState/popstate)
 ```
 
-Each application **must** include its own `ARCHITECTURE.md` following the progressive disclosure pattern and **must** implement URL deep-linking. See [`APP_DEVELOPMENT_GUIDE.md`](APP_DEVELOPMENT_GUIDE.md) for detailed requirements and examples.
+Each application **must** include its own `ARCHITECTURE.md` (progressive disclosure format) and `AGENTS.md` (development conventions). App-specific rules, patterns, and constraints belong in these files — not in the shell-level docs. See [`APP_DEVELOPMENT_GUIDE.md`](APP_DEVELOPMENT_GUIDE.md) for detailed requirements and examples.

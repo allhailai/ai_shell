@@ -59,7 +59,7 @@ useEffect(() => {
 
 ---
 
-### 2. Architecture Documentation
+### 2. Architecture & Agent Documentation
 
 **Every application MUST include an `ARCHITECTURE.md`** in its root directory following the **progressive disclosure** pattern:
 
@@ -81,7 +81,14 @@ Key interfaces, contracts, patterns.
 Data flow, state management, persistence, game logic, etc.
 ```
 
-**Why this matters:** AI agents reading the codebase discover `ARCHITECTURE.md` files first. Progressive disclosure lets them stop reading as soon as they have enough context, reducing unnecessary exploration.
+**Every application SHOULD include an `AGENTS.md`** in its root directory with:
+- Reference to the app's `ARCHITECTURE.md`
+- App-specific coding conventions (icons, state, data patterns)
+- File organization rules
+- Common mistakes to avoid
+- Testing/verification checklist
+
+**Why this matters:** AI agents reading the codebase discover `ARCHITECTURE.md` and `AGENTS.md` files first. Progressive disclosure lets them stop reading as soon as they have enough context. App-level `AGENTS.md` keeps app-specific conventions scoped correctly — they don't belong in the shell-level docs.
 
 ---
 
@@ -189,6 +196,7 @@ Dark theme is the default. All colors use HSL.
 - [ ] Registered in `src/apps/registry.ts`
 - [ ] Created `<appId>.css` and imported in `src/styles.css`
 - [ ] Created `ARCHITECTURE.md` with progressive disclosure
+- [ ] Created `AGENTS.md` with app-specific development rules
 - [ ] URL deep-linking: sub-routes sync with `pushState`/`popstate`
 - [ ] CSS classes namespaced with app ID prefix
 - [ ] Design tokens used (no hardcoded colors/spacing)
