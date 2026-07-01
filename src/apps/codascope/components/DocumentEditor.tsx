@@ -1,13 +1,17 @@
 /* ── CodaScope: DocumentEditor Component ─────────────────────────────
    Core document viewing/editing component used for design documents.
    P2a: rendered markdown + edit lock + agent edit trigger.
-   P2b will add: annotation gutter, insertion directives.
+   P2b: block-level rendering, annotation gutter, insertion directives,
+        text selection toolbar.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
-import type { EpicDesignDoc, EditLock } from "../codaScopeTypes";
+import { AnnotationThread } from "./AnnotationThread";
+import { InsertionPrompt } from "./InsertionPrompt";
+import { IconAnnotation, IconCheckmark, IconInsert, IconRewrite, IconExpand, IconBolt } from "./CodaScopeIcons";
+import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, DirectiveType } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -38,10 +42,109 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const lastActivityRef = useRef(Date.now());
   const lockCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // P2b state
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [directives, setDirectives] = useState<InsertionDirective[]>([]);
+  const [blocks, setBlocks] = useState<BlockInfo[]>([]);
+  const [activeThreadBlockId, setActiveThreadBlockId] = useState<string | null>(null);
+  const [insertionBlockId, setInsertionBlockId] = useState<string | null>(null);
+  const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
+  const [selectionInfo, setSelectionInfo] = useState<{
+    blockId: string;
+    text: string;
+    startLine: number;
+    endLine: number;
+  } | null>(null);
+  const selectionToolbarRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
+
   // Sync content when it changes externally
   useEffect(() => {
     if (!editing) setEditContent(content);
   }, [content, editing]);
+
+  /* ── Block computation ───────────────────────────────────────────── */
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    const fetchBlocks = async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epicId}/docs/${doc.id}/blocks`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setBlocks(data.blocks ?? []);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchBlocks();
+  }, [activeProjectId, epicId, doc.id, content]);
+
+  /* ── Annotation & directive loading ──────────────────────────────── */
+
+  const loadAnnotations = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/docs/${doc.id}/annotations`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAnnotations(data.annotations ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [activeProjectId, epicId, doc.id]);
+
+  const loadDirectives = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/docs/${doc.id}/directives`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setDirectives(data.directives ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [activeProjectId, epicId, doc.id]);
+
+  useEffect(() => {
+    loadAnnotations();
+    loadDirectives();
+  }, [loadAnnotations, loadDirectives]);
+
+  /* ── Annotation grouping by block ──────────────────────────────── */
+
+  const annotationsByBlock = useMemo(() => {
+    const map = new Map<string, { roots: Annotation[]; replies: Map<string, Annotation[]> }>();
+    for (const ann of annotations) {
+      const blockId = ann.anchor.blockId;
+      if (!map.has(blockId)) map.set(blockId, { roots: [], replies: new Map() });
+      const group = map.get(blockId)!;
+      if (ann.parentId) {
+        const existing = group.replies.get(ann.parentId) ?? [];
+        existing.push(ann);
+        group.replies.set(ann.parentId, existing);
+      } else {
+        group.roots.push(ann);
+      }
+    }
+    return map;
+  }, [annotations]);
+
+  /* ── Directive grouping by location ────────────────────────────── */
+
+  const directivesByBlock = useMemo(() => {
+    const map = new Map<string, InsertionDirective[]>();
+    for (const dir of directives) {
+      const key = dir.blockId ?? `line_${dir.afterLine}`;
+      const existing = map.get(key) ?? [];
+      existing.push(dir);
+      map.set(key, existing);
+    }
+    return map;
+  }, [directives]);
 
   /* ── Lock management ─────────────────────────────────────────────── */
 
@@ -145,6 +248,83 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     setLockWarning(false);
   }, []);
 
+  /* ── Create annotation on block ──────────────────────────────────── */
+
+  const [commentBlockId, setCommentBlockId] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+
+  const handleAddComment = useCallback(async (blockId: string) => {
+    if (!activeProjectId || !commentText.trim()) return;
+    setCommentSubmitting(true);
+    const block = blocks.find((b) => b.blockId === blockId);
+    try {
+      await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/docs/${doc.id}/annotations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            anchor: {
+              blockId,
+              sectionSlug: block?.sectionSlug ?? "root",
+              anchorText: (block?.content ?? "").slice(0, 100),
+              lineNumber: block?.lineStart ?? 0,
+            },
+            author: "user",
+            body: commentText.trim(),
+          }),
+        },
+      );
+      setCommentText("");
+      setCommentBlockId(null);
+      await loadAnnotations();
+    } catch { /* ignore */ }
+    setCommentSubmitting(false);
+  }, [activeProjectId, epicId, doc.id, commentText, blocks, loadAnnotations]);
+
+  /* ── Selection toolbar ───────────────────────────────────────────── */
+
+  const handleTextSelection = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !viewerRef.current) {
+      setSelectionInfo(null);
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (!text) {
+      setSelectionInfo(null);
+      return;
+    }
+
+    // Find the block containing the selection
+    const anchorNode = selection.anchorNode;
+    if (!anchorNode) { setSelectionInfo(null); return; }
+
+    let blockEl = anchorNode instanceof Element ? anchorNode : anchorNode.parentElement;
+    while (blockEl && !blockEl.getAttribute?.("data-block-id")) {
+      blockEl = blockEl.parentElement;
+    }
+
+    if (!blockEl) { setSelectionInfo(null); return; }
+
+    const blockId = blockEl.getAttribute("data-block-id") ?? "";
+    const block = blocks.find((b) => b.blockId === blockId);
+
+    setSelectionInfo({
+      blockId,
+      text,
+      startLine: block?.lineStart ?? 0,
+      endLine: block?.lineEnd ?? 0,
+    });
+  }, [blocks]);
+
+  useEffect(() => {
+    document.addEventListener("mouseup", handleTextSelection);
+    return () => document.removeEventListener("mouseup", handleTextSelection);
+  }, [handleTextSelection]);
+
   /* ── Word count ──────────────────────────────────────────────────── */
 
   const displayContent = editing ? editContent : content;
@@ -152,6 +332,190 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const lastUpdated = new Date(doc.updatedAt).toLocaleDateString("en-US", {
     month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
+
+  const openAnnotationCount = annotations.filter((a) => a.status === "open" && !a.parentId).length;
+  const pendingDirectiveCount = directives.filter((d) => d.status === "pending").length;
+
+  /* ── Render blocks with annotation gutter ────────────────────────── */
+
+  const renderBlockView = () => {
+    if (!displayContent) {
+      return (
+        <div className="codascope-empty-state">
+          <p>This document is empty. Click Edit to start writing, or ask the agent to draft it.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="codascope-document-blocks">
+        {blocks.map((block, idx) => {
+          const blockAnns = annotationsByBlock.get(block.blockId);
+          const rootAnnotations = blockAnns?.roots ?? [];
+          const openCount = rootAnnotations.filter((a) => a.status === "open").length;
+          const blockDirs = directivesByBlock.get(block.blockId) ?? [];
+          const isThreadOpen = activeThreadBlockId === block.blockId;
+          const isInsertionOpen = insertionBlockId === block.blockId;
+          const isHovered = hoveredBlockId === block.blockId;
+          const isCommentOpen = commentBlockId === block.blockId;
+
+          return (
+            <div key={block.blockId}>
+              {/* Block with gutter */}
+              <div
+                className={`codascope-document-block${isHovered ? " codascope-document-block--hover" : ""}`}
+                data-block-id={block.blockId}
+                onMouseEnter={() => setHoveredBlockId(block.blockId)}
+                onMouseLeave={() => setHoveredBlockId(null)}
+              >
+                {/* Main content */}
+                <div className="codascope-document-block-content">
+                  <MarkdownViewer content={block.content} />
+                </div>
+
+                {/* Annotation gutter */}
+                <div className="codascope-annotation-gutter">
+                  {openCount > 0 && (
+                    <button
+                      className="codascope-annotation-gutter-icon"
+                      onClick={() => setActiveThreadBlockId(isThreadOpen ? null : block.blockId)}
+                      title={`${openCount} open comment${openCount > 1 ? "s" : ""}`}
+                      type="button"
+                    >
+                      <IconAnnotation size={12} /> {openCount}
+                    </button>
+                  )}
+                  {rootAnnotations.length > 0 && openCount === 0 && (
+                    <button
+                      className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--resolved"
+                      onClick={() => setActiveThreadBlockId(isThreadOpen ? null : block.blockId)}
+                      title={`${rootAnnotations.length} resolved`}
+                      type="button"
+                    >
+                      <IconCheckmark size={12} />
+                    </button>
+                  )}
+                  {isHovered && rootAnnotations.length === 0 && (
+                    <button
+                      className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--add"
+                      onClick={() => setCommentBlockId(isCommentOpen ? null : block.blockId)}
+                      title="Add comment"
+                      type="button"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Inline comment input */}
+              {isCommentOpen && (
+                <div className="codascope-annotation-thread codascope-annotation-thread--new">
+                  <textarea
+                    className="codascope-annotation-thread-reply-input"
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Write a comment…"
+                    rows={2}
+                    autoFocus
+                  />
+                  <div className="codascope-annotation-thread-reply-actions">
+                    <button
+                      className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+                      onClick={() => { setCommentBlockId(null); setCommentText(""); }}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="codascope-btn codascope-btn-primary codascope-btn-xs"
+                      onClick={() => handleAddComment(block.blockId)}
+                      disabled={commentSubmitting || !commentText.trim()}
+                      type="button"
+                    >
+                      {commentSubmitting ? "Posting…" : "Comment"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Inline annotation thread */}
+              {isThreadOpen && rootAnnotations.map((root) => (
+                <AnnotationThread
+                  key={root.id}
+                  annotation={root}
+                  replies={blockAnns?.replies.get(root.id) ?? []}
+                  projectId={activeProjectId!}
+                  epicId={epicId}
+                  onUpdate={loadAnnotations}
+                  onClose={() => setActiveThreadBlockId(null)}
+                />
+              ))}
+
+              {/* Existing directives for this block */}
+              {blockDirs.map((dir) => (
+                <InsertionPrompt
+                  key={dir.id}
+                  projectId={activeProjectId!}
+                  epicId={epicId}
+                  documentId={doc.id}
+                  afterLine={dir.afterLine}
+                  blockId={dir.blockId}
+                  existingDirective={dir}
+                  defaultType={dir.type}
+                  startLine={dir.startLine}
+                  endLine={dir.endLine}
+                  onUpdate={() => { loadDirectives(); loadAnnotations(); }}
+                  onClose={() => {}}
+                />
+              ))}
+
+              {/* Insertion trigger between blocks */}
+              {!editing && idx < blocks.length - 1 && (
+                <div
+                  className={`codascope-document-block-insert-trigger${isInsertionOpen ? " codascope-document-block-insert-trigger--active" : ""}`}
+                >
+                  {isInsertionOpen ? (
+                    <InsertionPrompt
+                      projectId={activeProjectId!}
+                      epicId={epicId}
+                      documentId={doc.id}
+                      afterLine={block.lineEnd}
+                      blockId={block.blockId}
+                      onUpdate={() => { loadDirectives(); }}
+                      onClose={() => setInsertionBlockId(null)}
+                    />
+                  ) : (
+                    <button
+                      className="codascope-document-block-insert-btn"
+                      onClick={() => setInsertionBlockId(block.blockId)}
+                      title="Insert content here"
+                      type="button"
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Fallback: if no blocks, render entire content */}
+        {blocks.length === 0 && <MarkdownViewer content={displayContent} />}
+      </div>
+    );
+  };
+
+  /* ── Selection toolbar ───────────────────────────────────────────── */
+
+  const handleSelectionAction = useCallback((action: DirectiveType) => {
+    if (!selectionInfo) return;
+    // Open an insertion prompt for the selection
+    setInsertionBlockId(selectionInfo.blockId);
+    setSelectionInfo(null);
+    window.getSelection()?.removeAllRanges();
+  }, [selectionInfo]);
 
   /* ── Render ──────────────────────────────────────────────────────── */
 
@@ -171,6 +535,16 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
         <div className="codascope-document-editor-toolbar-right">
           <span className="codascope-document-editor-meta">
             {wordCount.toLocaleString()} words · Updated {lastUpdated}
+            {openAnnotationCount > 0 && (
+              <span className="codascope-document-editor-annotation-count">
+                · <IconAnnotation size={12} /> {openAnnotationCount}
+              </span>
+            )}
+            {pendingDirectiveCount > 0 && (
+              <span className="codascope-document-editor-directive-count">
+                · <IconBolt size={12} /> {pendingDirectiveCount} pending
+              </span>
+            )}
           </span>
           {!editing && (
             <button className="codascope-btn codascope-btn-secondary" onClick={startEditing} type="button">
@@ -220,14 +594,39 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
           />
         </div>
       ) : (
-        <div className="codascope-document-editor-viewer">
-          {displayContent ? (
-            <MarkdownViewer content={displayContent} />
-          ) : (
-            <div className="codascope-empty-state">
-              <p>This document is empty. Click Edit to start writing, or ask the agent to draft it.</p>
-            </div>
-          )}
+        <div className="codascope-document-editor-viewer" ref={viewerRef}>
+          {renderBlockView()}
+        </div>
+      )}
+
+      {/* Selection toolbar */}
+      {selectionInfo && !editing && (
+        <div className="codascope-selection-toolbar" ref={selectionToolbarRef}>
+          <button
+            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
+            onClick={() => {
+              setCommentBlockId(selectionInfo.blockId);
+              setSelectionInfo(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            type="button"
+          >
+            <IconAnnotation size={12} /> Comment
+          </button>
+          <button
+            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
+            onClick={() => handleSelectionAction("replace")}
+            type="button"
+          >
+            <IconRewrite size={12} /> Rewrite
+          </button>
+          <button
+            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
+            onClick={() => handleSelectionAction("expand")}
+            type="button"
+          >
+            <IconExpand size={12} /> Expand
+          </button>
         </div>
       )}
     </div>

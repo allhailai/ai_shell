@@ -9,6 +9,7 @@ import { useState, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { CodaScopeAction } from "../codaScopeTypes";
+import { IconInsertContent, IconRewrite, IconExpand } from "./CodaScopeIcons";
 
 // Re-export for existing consumers
 export type { CodaScopeAction };
@@ -45,6 +46,12 @@ function ActionIcon({ type }: { type: string }) {
       return <span className="codascope-action-icon">✏️</span>;
     case "create_version":
       return <span className="codascope-action-icon">📸</span>;
+    case "insert_content":
+      return <span className="codascope-action-icon"><IconInsertContent size={14} /></span>;
+    case "replace_content":
+      return <span className="codascope-action-icon"><IconRewrite size={14} /></span>;
+    case "expand_content":
+      return <span className="codascope-action-icon"><IconExpand size={14} /></span>;
     default:
       return <span className="codascope-action-icon">⚡</span>;
   }
@@ -65,6 +72,9 @@ function actionLabel(type: string): string {
     case "create_design_doc": return "Create Design Doc";
     case "update_design_doc": return "Update Design Doc";
     case "create_version": return "Create Version";
+    case "insert_content": return "Insert Content";
+    case "replace_content": return "Rewrite Content";
+    case "expand_content": return "Expand Content";
     default: return "Action";
   }
 }
@@ -83,6 +93,9 @@ function actionButtonLabel(type: string, status: ActionStatus): string {
     case "create_design_doc": return "Create";
     case "update_design_doc": return "Open";
     case "create_version": return "Snapshot";
+    case "insert_content": return "Insert";
+    case "replace_content": return "Rewrite";
+    case "expand_content": return "Expand";
     default: return "Run";
   }
 }

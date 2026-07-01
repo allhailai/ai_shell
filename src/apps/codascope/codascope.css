@@ -3941,3 +3941,463 @@
   white-space: pre;
 }
 
+/* ── Document Blocks (P2b) ──────────────────────────────────────────── */
+
+.codascope-document-blocks {
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-document-block {
+  display: flex;
+  gap: var(--space-2);
+  position: relative;
+  border-left: 2px solid transparent;
+  padding-left: var(--space-2);
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-document-block--hover {
+  border-left-color: var(--color-accent-primary);
+}
+
+.codascope-document-block-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Annotation Gutter (P2b) ────────────────────────────────────────── */
+
+.codascope-annotation-gutter {
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--space-1);
+}
+
+.codascope-annotation-gutter-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  transition: background var(--transition-fast), color var(--transition-fast);
+  line-height: 1;
+}
+
+.codascope-annotation-gutter-icon:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.codascope-annotation-gutter-icon--resolved {
+  color: var(--color-text-tertiary);
+  opacity: 0.6;
+}
+
+.codascope-annotation-gutter-icon--add {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-accent-primary);
+}
+
+.codascope-document-block--hover .codascope-annotation-gutter-icon--add {
+  opacity: 0.6;
+}
+
+.codascope-document-block--hover .codascope-annotation-gutter-icon--add:hover {
+  opacity: 1;
+}
+
+/* ── Annotation Thread (P2b) ────────────────────────────────────────── */
+
+.codascope-annotation-thread {
+  margin: var(--space-2) 0 var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.codascope-annotation-thread--new {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-annotation-thread-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-annotation-thread-count {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.codascope-annotation-thread-toolbar-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.codascope-annotation-thread-entries {
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-annotation-thread-entry {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-annotation-thread-entry:last-child {
+  border-bottom: none;
+}
+
+.codascope-annotation-thread-entry--reply {
+  padding-left: var(--space-6);
+  background: var(--color-bg-primary);
+}
+
+.codascope-annotation-thread-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.codascope-annotation-thread-author {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-annotation-thread-time {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-annotation-thread-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.codascope-annotation-thread-status--open {
+  background: hsl(220 60% 50% / 0.15);
+  color: hsl(220 70% 65%);
+}
+
+.codascope-annotation-thread-status--resolved {
+  background: hsl(140 40% 40% / 0.15);
+  color: hsl(140 50% 60%);
+}
+
+.codascope-annotation-thread-status--wontfix {
+  background: hsl(0 40% 40% / 0.15);
+  color: hsl(0 50% 60%);
+}
+
+.codascope-annotation-thread-body {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.codascope-annotation-thread-body p {
+  margin: 0 0 var(--space-1) 0;
+}
+
+.codascope-annotation-thread-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.codascope-annotation-thread-entry:hover .codascope-annotation-thread-entry-actions {
+  opacity: 1;
+}
+
+/* ── Annotation Reply Composer ──────────────────────────────────────── */
+
+.codascope-annotation-thread-reply {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-annotation-thread-reply-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-annotation-thread-reply-input:focus {
+  border-color: var(--color-accent-primary);
+}
+
+.codascope-annotation-thread-reply-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.codascope-annotation-thread-reply-trigger {
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.codascope-annotation-thread-reply-trigger:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Insertion Prompt (P2b) ─────────────────────────────────────────── */
+
+.codascope-insertion-prompt {
+  margin: var(--space-2) 0;
+  border: 1px dashed var(--color-accent-primary);
+  border-radius: var(--radius-md);
+  background: hsl(220 60% 50% / 0.05);
+  overflow: hidden;
+}
+
+.codascope-insertion-prompt--applied {
+  border-style: solid;
+  border-color: hsl(140 50% 50% / 0.4);
+  background: hsl(140 50% 50% / 0.05);
+}
+
+.codascope-insertion-prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-insertion-prompt-type-selector {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.codascope-insertion-prompt-input-area {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-insertion-prompt-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-insertion-prompt-input:focus {
+  border-color: var(--color-accent-primary);
+}
+
+.codascope-insertion-prompt-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.codascope-insertion-prompt-pending {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-insertion-prompt-instruction {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.codascope-insertion-prompt-instruction-label {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin-right: var(--space-1);
+}
+
+.codascope-insertion-prompt-applied {
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.codascope-insertion-prompt-applied-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: hsl(140 50% 60%);
+}
+
+/* ── Directive Preview (P2b) ────────────────────────────────────────── */
+
+.codascope-directive-preview {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-directive-preview-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.codascope-directive-preview-content {
+  border: 1px solid hsl(220 60% 50% / 0.2);
+  border-radius: var(--radius-md);
+  background: hsl(220 60% 50% / 0.05);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.codascope-directive-preview-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* ── Insertion Trigger (P2b) ────────────────────────────────────────── */
+
+.codascope-document-block-insert-trigger {
+  position: relative;
+  height: 4px;
+  margin: var(--space-1) 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codascope-document-block-insert-trigger--active {
+  height: auto;
+}
+
+.codascope-document-block-insert-btn {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast), transform var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.codascope-document-block-insert-trigger:hover .codascope-document-block-insert-btn {
+  opacity: 1;
+}
+
+.codascope-document-block-insert-btn:hover {
+  background: var(--color-accent-primary);
+  color: var(--color-text-on-accent);
+  border-color: var(--color-accent-primary);
+  transform: scale(1.1);
+}
+
+/* ── Selection Toolbar (P2b) ────────────────────────────────────────── */
+
+.codascope-selection-toolbar {
+  position: fixed;
+  z-index: 1000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: codascope-toolbar-fade-in 0.15s ease-out;
+}
+
+@keyframes codascope-toolbar-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.codascope-selection-toolbar-btn {
+  white-space: nowrap;
+}
+
+/* ── Document Editor P2b Additions ──────────────────────────────────── */
+
+.codascope-document-editor-annotation-count {
+  color: hsl(220 70% 65%);
+}
+
+.codascope-document-editor-directive-count {
+  color: hsl(35 80% 65%);
+}
+

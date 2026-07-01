@@ -533,18 +533,24 @@ export class CodaScopeEpicService {
   /* ── Health Computation ────────────────────────────────────────────── */
 
   /** Compute epic health from metadata. Computed at read-time, never stored. */
-  computeHealth(epic: EpicDesign): EpicHealthInfo {
+  computeHealth(epic: EpicDesign, openAnnotationCount?: number): EpicHealthInfo {
     const now = Date.now();
     const lastActivityAt = epic.updatedAt;
     const lastActivityMs = new Date(lastActivityAt).getTime();
     const daysSinceActivity = (now - lastActivityMs) / (1000 * 60 * 60 * 24);
     const collaboratorCount = epic.collaborators.length;
+    const annCount = openAnnotationCount ?? 0;
 
     let health: EpicHealth;
     let reason: string;
 
+    // 🔴 Blocked: >5 open annotations AND no activity in 3+ days
+    if (annCount > 5 && daysSinceActivity >= 3) {
+      health = "blocked";
+      reason = `${annCount} open annotations, no activity in ${Math.floor(daysSinceActivity)} days`;
+    }
     // ⚡ Hot: multiple collaborators with recent activity (< 24h)
-    if (collaboratorCount >= 2 && daysSinceActivity < 1) {
+    else if (collaboratorCount >= 2 && daysSinceActivity < 1) {
       health = "hot";
       reason = `${collaboratorCount} collaborators active in last 24h`;
     }
@@ -568,7 +574,7 @@ export class CodaScopeEpicService {
       health,
       reason,
       lastActivityAt,
-      openAnnotationCount: 0,       // P2b
+      openAnnotationCount: annCount,
       activeCollaboratorCount: collaboratorCount,
     };
   }

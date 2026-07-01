@@ -34,6 +34,10 @@ export const VALID_ACTION_TYPES = new Set([
   "create_design_doc",
   "update_design_doc",
   "create_version",
+  // Epic Design actions (P2b)
+  "insert_content",
+  "replace_content",
+  "expand_content",
 ]);
 
 /* ── Parser ────────────────────────────────────────────────────────── */

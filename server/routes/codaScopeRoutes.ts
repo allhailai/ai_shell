@@ -19,6 +19,7 @@ import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService
 import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
 import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
 import { CodaScopeVersionService } from "../services/codaScopeVersionService.js";
+import { CodaScopeAnnotationService } from "../services/codaScopeAnnotationService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
@@ -54,6 +55,7 @@ let wikiStateService: CodaScopeWikiStateService | null = null;
 let epicService: CodaScopeEpicService | null = null;
 let designDocService: CodaScopeDesignDocService | null = null;
 let versionService: CodaScopeVersionService | null = null;
+let annotationService: CodaScopeAnnotationService | null = null;
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -79,6 +81,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   qualitySvc: CodaScopeQualityService;
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
+  designDocSvc: CodaScopeDesignDocService;
+  versionSvc: CodaScopeVersionService;
+  annotationSvc: CodaScopeAnnotationService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -125,6 +130,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!versionService) versionService = new CodaScopeVersionService(root);
   else versionService.setRoot(root);
 
+  if (!annotationService) annotationService = new CodaScopeAnnotationService(root);
+  else annotationService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -140,6 +148,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     epicSvc: epicService,
     designDocSvc: designDocService,
     versionSvc: versionService,
+    annotationSvc: annotationService,
   };
 }
 
@@ -1787,5 +1796,249 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       if (!isAborted()) res.end();
     })().catch(next);
   });
+
+  // ── Annotations (P2b) ──────────────────────────────────────────────
+
+  // List annotations for a document
+  app.get("/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+
+    // Get current document content for re-anchoring
+    let content: string | undefined;
+    if (docId === "definition") {
+      content = (await epicSvc.getDefinition(id, epicId)) ?? undefined;
+    } else {
+      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+      content = result?.content;
+    }
+
+    const annotations = await annotationSvc.listAnnotations(id, epicId, docId, content);
+    res.json({ annotations });
+  }));
+
+  // Create annotation
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const { anchor, author, body, parentId, documentVersion } = req.body as {
+      anchor?: unknown;
+      author?: string;
+      body?: string;
+      parentId?: string;
+      documentVersion?: number;
+    };
+    if (!anchor || !body || typeof body !== "string") {
+      throw httpError("anchor and body are required.", 400, "invalid_input");
+    }
+    const annotation = await annotationSvc.createAnnotation(id, epicId, docId, {
+      anchor: anchor as any,
+      author: author ?? "user",
+      body,
+      parentId,
+      documentVersion,
+    });
+    res.status(201).json({ annotation });
+  }));
+
+  // Update annotation (resolve, edit)
+  app.patch("/api/codascope/projects/:id/epics/:epicId/annotations/:annId", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const annId = param(req, "annId");
+    const { status, body, reactions } = req.body as {
+      status?: string;
+      body?: string;
+      reactions?: Array<{ emoji: string; user: string }>;
+    };
+    const changes: Record<string, unknown> = {};
+    if (status !== undefined) changes.status = status;
+    if (body !== undefined) changes.body = body;
+    if (reactions !== undefined) changes.reactions = reactions;
+    const annotation = await annotationSvc.updateAnnotation(id, epicId, annId, changes as any);
+    if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
+    res.json({ annotation });
+  }));
+
+  // Delete annotation
+  app.delete("/api/codascope/projects/:id/epics/:epicId/annotations/:annId", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const annId = param(req, "annId");
+    const deleted = await annotationSvc.deleteAnnotation(id, epicId, annId);
+    if (!deleted) throw httpError("Annotation not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
+  // ── Directives (P2b) ──────────────────────────────────────────────
+
+  // List directives for a document
+  app.get("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const directives = await annotationSvc.listDirectives(id, epicId, docId);
+    res.json({ directives });
+  }));
+
+  // Create directive
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const { type, afterLine, startLine, endLine, blockId, anchorText, instruction, author } = req.body as {
+      type?: string; afterLine?: number; startLine?: number; endLine?: number;
+      blockId?: string; anchorText?: string; instruction?: string; author?: string;
+    };
+    if (!type || !instruction) {
+      throw httpError("type and instruction are required.", 400, "invalid_input");
+    }
+    if (afterLine === undefined || typeof afterLine !== "number") {
+      throw httpError("afterLine is required.", 400, "invalid_input");
+    }
+    const directive = await annotationSvc.createDirective(id, epicId, docId, {
+      type: type as any,
+      afterLine,
+      startLine,
+      endLine,
+      blockId,
+      anchorText,
+      instruction,
+      author: author ?? "user",
+    });
+    res.status(201).json({ directive });
+  }));
+
+  // Execute directive (agent generates content)
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/execute", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const dirId = param(req, "dirId");
+    const { generatedContent } = req.body as { generatedContent?: string };
+
+    // For now, accept pre-generated content from the client
+    // (In production, this would trigger the agent via do_insert_content.md)
+    if (!generatedContent || typeof generatedContent !== "string") {
+      throw httpError("generatedContent is required.", 400, "invalid_input");
+    }
+
+    const directive = await annotationSvc.updateDirective(id, epicId, dirId, docId, {
+      status: "generating",
+    });
+    if (!directive) throw httpError("Directive not found.", 404, "not_found");
+
+    // Store the generated content
+    const updated = await annotationSvc.updateDirective(id, epicId, dirId, docId, {
+      generatedContent,
+      status: "pending", // back to pending — user must Apply
+    });
+
+    res.json({ directive: updated });
+  }));
+
+  // Apply directive to document
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/apply", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const dirId = param(req, "dirId");
+
+    const getContent = async (): Promise<string> => {
+      if (docId === "definition") {
+        return (await epicSvc.getDefinition(id, epicId)) ?? "";
+      }
+      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+      return result?.content ?? "";
+    };
+
+    const setContent = async (content: string): Promise<void> => {
+      if (docId === "definition") {
+        await epicSvc.updateDefinition(id, epicId, content);
+      } else {
+        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+      }
+    };
+
+    const result = await annotationSvc.applyDirective(id, epicId, docId, dirId, getContent, setContent);
+    if (!result) throw httpError("Directive not found or has no generated content.", 404, "not_found");
+    res.json({ directive: result.directive, content: result.newContent });
+  }));
+
+  // Reject directive
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/reject", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const dirId = param(req, "dirId");
+    const directive = await annotationSvc.rejectDirective(id, epicId, docId, dirId);
+    if (!directive) throw httpError("Directive not found.", 404, "not_found");
+    res.json({ directive });
+  }));
+
+  // Undo applied directive
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/undo", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const dirId = param(req, "dirId");
+
+    const setContent = async (content: string): Promise<void> => {
+      if (docId === "definition") {
+        await epicSvc.updateDefinition(id, epicId, content);
+      } else {
+        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+      }
+    };
+
+    const directive = await annotationSvc.undoDirective(id, epicId, docId, dirId, setContent);
+    if (!directive) throw httpError("Directive not found or not applied.", 404, "not_found");
+    res.json({ directive });
+  }));
+
+  // Delete directive
+  app.delete("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const dirId = param(req, "dirId");
+    const deleted = await annotationSvc.deleteDirective(id, epicId, dirId, docId);
+    if (!deleted) throw httpError("Directive not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
+  // ── Block IDs (P2b) ───────────────────────────────────────────────
+
+  // Get computed block IDs for a document
+  app.get("/api/codascope/projects/:id/epics/:epicId/docs/:docId/blocks", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+
+    let content: string;
+    if (docId === "definition") {
+      content = (await epicSvc.getDefinition(id, epicId)) ?? "";
+    } else {
+      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+      content = result?.content ?? "";
+    }
+
+    const blocks = annotationSvc.computeBlockIds(content);
+    res.json({ blocks });
+  }));
 }
 

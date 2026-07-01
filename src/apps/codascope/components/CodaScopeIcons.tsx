@@ -335,3 +335,154 @@ export function IconEpic({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Speech bubble with line — Comment / Annotation */
+export function IconAnnotation({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v6a1 1 0 01-1 1H6l-3 3V3z" />
+      <line x1="5" y1="5.5" x2="11" y2="5.5" />
+      <line x1="5" y1="7.5" x2="9" y2="7.5" />
+    </svg>
+  );
+}
+
+/** Plus in circle — Insert */
+export function IconInsert({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6" />
+      <line x1="8" y1="5" x2="8" y2="11" />
+      <line x1="5" y1="8" x2="11" y2="8" />
+    </svg>
+  );
+}
+
+/** Two stacked arrows — Rewrite / Replace */
+export function IconRewrite({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M12 4H5.5" />
+      <polyline points="7.5,2 5.5,4 7.5,6" />
+      <path d="M4 12h6.5" />
+      <polyline points="8.5,10 10.5,12 8.5,14" />
+    </svg>
+  );
+}
+
+/** Lines expanding outward — Expand */
+export function IconExpand({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="4" y1="4" x2="12" y2="4" />
+      <line x1="3" y1="8" x2="13" y2="8" />
+      <line x1="2" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+/** Wand / sparkle — Generate */
+export function IconGenerate({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="3" y1="13" x2="13" y2="3" />
+      <path d="M10 2l1.5.5.5 1.5.5-1.5L14 2l-1.5-.5L12 0l-.5 1.5z" />
+      <path d="M4 8l1 .3.3 1 .3-1L6.6 8l-1-.3L5.3 6.7 5 7.7z" />
+    </svg>
+  );
+}
+
+/** X mark — Close */
+export function IconClose({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="4" y1="4" x2="12" y2="12" />
+      <line x1="12" y1="4" x2="4" y2="12" />
+    </svg>
+  );
+}
+
+/** Trash can outline — Delete */
+export function IconDelete({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M3 4h10l-.75 9a1 1 0 01-1 1H4.75a1 1 0 01-1-1L3 4z" />
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <path d="M6 4V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V4" />
+    </svg>
+  );
+}
+
+/** Counterclockwise arrow — Undo */
+export function IconUndo({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M4 7a5 5 0 119 3" />
+      <polyline points="2,4.5 4,7 6.5,4.5" />
+    </svg>
+  );
+}
+
+/** Person outline — User */
+export function IconUser({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="5" r="2.5" />
+      <path d="M3 14c0-2.8 2.2-5 5-5s5 2.2 5 5" />
+    </svg>
+  );
+}
+
+/** Circuit node — Agent / Bot */
+export function IconAgent({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="3" y="4" width="10" height="8" rx="1.5" />
+      <circle cx="6" cy="8" r="1" />
+      <circle cx="10" cy="8" r="1" />
+      <line x1="8" y1="2" x2="8" y2="4" />
+      <line x1="6" y1="1.5" x2="10" y2="1.5" />
+    </svg>
+  );
+}
+
+/** Arrow reply — Reply */
+export function IconReply({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M6 4L2 8l4 4" />
+      <path d="M2 8h8a4 4 0 014 4" />
+    </svg>
+  );
+}
+
+/** Checkmark — Resolve / Done */
+export function IconCheckmark({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="3,8 6.5,11.5 13,5" />
+    </svg>
+  );
+}
+
+/** Hourglass — Pending / Loading */
+export function IconPending({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M4 2h8v3L9 8l3 3v3H4v-3l3-3-3-3V2z" />
+      <line x1="4" y1="2" x2="12" y2="2" />
+      <line x1="4" y1="14" x2="12" y2="14" />
+    </svg>
+  );
+}
+
+/** Horizontal lines with plus — Insert content directive */
+export function IconInsertContent({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <line x1="2" y1="12" x2="14" y2="12" />
+      <line x1="8" y1="6.5" x2="8" y2="9.5" />
+      <line x1="6.5" y1="8" x2="9.5" y2="8" />
+    </svg>
+  );
+}

@@ -8,6 +8,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
+import { IconArchitecture, IconLink, IconPackage, IconBolt, IconClipboard, IconFile } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EpicDesignDoc, DesignDocTemplate } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -19,14 +20,16 @@ interface EpicDesignDocsProps {
 
 /* ── Template icons ──────────────────────────────────────────────────── */
 
-const TEMPLATE_ICONS: Record<string, string> = {
-  architecture: "🏛️",
-  "api-design": "🔌",
-  "data-model": "🗃️",
-  "migration-plan": "🚀",
-  "decision-record": "⚖️",
-  "task-breakdown": "📋",
+const TEMPLATE_ICONS: Record<string, React.ReactNode> = {
+  architecture: <IconArchitecture size={24} />,
+  "api-design": <IconLink size={24} />,
+  "data-model": <IconPackage size={24} />,
+  "migration-plan": <IconBolt size={24} />,
+  "decision-record": <IconClipboard size={24} />,
+  "task-breakdown": <IconFile size={24} />,
 };
+
+const DEFAULT_ICON = <IconFile size={24} />;
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
@@ -193,7 +196,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
               disabled={creating}
               type="button"
             >
-              <span className="codascope-template-card-icon">{TEMPLATE_ICONS[t.id] ?? "📄"}</span>
+              <span className="codascope-template-card-icon">{TEMPLATE_ICONS[t.id] ?? DEFAULT_ICON}</span>
               <span className="codascope-template-card-title">{t.title}</span>
               <span className="codascope-template-card-desc">{t.description}</span>
             </button>
@@ -261,7 +264,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
             <div key={doc.id} className="codascope-design-doc-card" onClick={() => openDoc(doc)}>
               <div className="codascope-design-doc-card-header">
                 <span className="codascope-design-doc-card-icon">
-                  {doc.template ? (TEMPLATE_ICONS[doc.template] ?? "📄") : "📄"}
+                  {doc.template ? (TEMPLATE_ICONS[doc.template] ?? DEFAULT_ICON) : DEFAULT_ICON}
                 </span>
                 <h4 className="codascope-design-doc-card-title">{doc.title}</h4>
               </div>

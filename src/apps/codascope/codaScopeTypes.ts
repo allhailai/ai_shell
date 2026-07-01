@@ -114,7 +114,11 @@ export type CodaScopeActionType =
   // Epic Design actions (P2a)
   | "create_design_doc"
   | "update_design_doc"
-  | "create_version";
+  | "create_version"
+  // Epic Design actions (P2b)
+  | "insert_content"
+  | "replace_content"
+  | "expand_content";
 
 // ── Build State ─────────────────────────────────────────────────────
 
@@ -349,4 +353,65 @@ export interface VersionDiff {
   from: number;
   to: number;
   files: FileDiff[];
+}
+
+// ── Annotations (P2b) ───────────────────────────────────────────────
+
+export type AnnotationStatus = "open" | "resolved" | "wontfix";
+
+export type DirectiveStatus = "pending" | "generating" | "applied" | "rejected";
+
+export type DirectiveType = "insert" | "replace" | "expand";
+
+/** Block-level anchor for annotations and directives */
+export interface BlockAnchor {
+  blockId: string;            // deterministic ID for the markdown block
+  sectionSlug: string;        // parent section heading slug
+  anchorText: string;         // quoted text for fuzzy re-anchoring
+  lineNumber: number;         // line at time of creation
+}
+
+export interface Annotation {
+  id: string;
+  epicId: string;
+  documentId: string;         // 'definition' | design doc ID
+  documentVersion: number;
+  anchor: BlockAnchor;
+  author: string;
+  createdAt: string;
+  body: string;               // markdown content
+  parentId?: string;          // reply threading
+  status: AnnotationStatus;
+  reactions: Array<{ emoji: string; user: string }>;
+}
+
+export interface InsertionDirective {
+  id: string;
+  epicId: string;
+  documentId: string;
+  type: DirectiveType;
+
+  // Anchor
+  afterLine: number;
+  startLine?: number;
+  endLine?: number;
+  blockId?: string;
+  anchorText?: string;
+
+  instruction: string;
+  author: string;
+  createdAt: string;
+  status: DirectiveStatus;
+  generatedContent?: string;
+  preApplySnapshot?: string;  // document content before apply — enables undo
+  appliedAt?: string;
+}
+
+/** Computed block info for a parsed markdown document */
+export interface BlockInfo {
+  blockId: string;
+  sectionSlug: string;
+  lineStart: number;
+  lineEnd: number;
+  content: string;
 }
