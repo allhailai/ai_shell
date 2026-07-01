@@ -530,6 +530,75 @@ export class CodaScopeEpicService {
     return lockFile.locks;
   }
 
+  /**
+   * Heartbeat — refresh lock TTL for active editing (P4).
+   * Called periodically (every 60s) by the client to keep the lock alive.
+   */
+  async heartbeatLock(projectId: string, epicId: string, documentId: string, lockedBy: string): Promise<EditLock | null> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    let lockFile = this.readLocks(projectDir, epicId);
+    lockFile = this.cleanExpiredLocks(lockFile);
+
+    const lock = lockFile.locks.find((l) => l.documentId === documentId && l.lockedBy === lockedBy);
+    if (!lock) return null;
+
+    lock.lastActivityAt = new Date().toISOString();
+    this.writeLocks(projectDir, epicId, lockFile);
+    return lock;
+  }
+
+  /**
+   * Check if a document is currently locked by a human (P4).
+   * Used by the agent to verify before writing — returns the lock holder
+   * or null if unlocked / only locked by agent.
+   */
+  async isDocumentLockedByHuman(projectId: string, epicId: string, documentId: string): Promise<EditLock | null> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    let lockFile = this.readLocks(projectDir, epicId);
+    lockFile = this.cleanExpiredLocks(lockFile);
+    this.writeLocks(projectDir, epicId, lockFile);
+
+    const lock = lockFile.locks.find((l) => l.documentId === documentId);
+    if (!lock) return null;
+
+    // Agent locks (lockedBy starts with "agent_") don't block
+    if (lock.lockedBy.startsWith("agent_")) return null;
+    return lock;
+  }
+
+  /**
+   * Cleanup all expired locks across all epics (P4).
+   * Called on server startup to clear stale locks from crashes.
+   */
+  async cleanupAllExpiredLocks(projectId: string): Promise<number> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return 0;
+
+    const epicsDirectory = this.epicsDir(projectDir);
+    if (!existsSync(epicsDirectory)) return 0;
+
+    let cleaned = 0;
+    const entries = readdirSync(epicsDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith("_") || entry.name.startsWith(".")) continue;
+      const lockPath = this.lockFilePath(projectDir, entry.name);
+      if (!existsSync(lockPath)) continue;
+
+      let lockFile = this.readLocks(projectDir, entry.name);
+      const before = lockFile.locks.length;
+      lockFile = this.cleanExpiredLocks(lockFile);
+      if (lockFile.locks.length < before) {
+        cleaned += before - lockFile.locks.length;
+        this.writeLocks(projectDir, entry.name, lockFile);
+      }
+    }
+    return cleaned;
+  }
+
   /* ── Health Computation ────────────────────────────────────────────── */
 
   /** Compute epic health from metadata. Computed at read-time, never stored. */

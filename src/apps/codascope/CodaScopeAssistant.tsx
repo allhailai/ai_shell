@@ -210,6 +210,49 @@ export function CodaScopeAssistant() {
     return ctx;
   }, [segments, projectName, activeProjectId, wikiTopics, epics]);
 
+  // Phase 3: Detect if user is viewing an epic
+  const currentEpicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
+  const currentEpic = currentEpicId ? epics.find((e) => e.id === currentEpicId) : null;
+  const currentEpicIdRef = useRef<string | null>(null);
+
+  // Auto-switch to epic conversation when navigating into an epic
+  useEffect(() => {
+    if (!activeProjectId || !currentEpicId || !currentEpic) {
+      currentEpicIdRef.current = null;
+      return;
+    }
+    if (currentEpicIdRef.current === currentEpicId) return;
+    currentEpicIdRef.current = currentEpicId;
+
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/conversation`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const conv = data.conversation;
+          setActiveConversationId(conv.id);
+          setActiveTitle(conv.title || `Epic: ${currentEpic.title}`);
+          // Load messages from the epic conversation
+          const msgs = (conv.messages ?? [])
+            .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
+            .map((m: ChatMessage) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              status: m.status ?? "complete",
+              createdAt: m.createdAt,
+              metadata: m.metadata,
+            }));
+          setMessages(msgs);
+          // Update conversation list
+          await loadConversationList();
+        }
+      } catch { /* silently fail */ }
+    })();
+  }, [activeProjectId, currentEpicId, currentEpic, loadConversationList]);
+
   // Get context badge label
   const contextBadge = (() => {
     const ctx = activeProjectId ? assembleContext(segments, projectName, activeProjectId) : null;
@@ -469,6 +512,16 @@ export function CodaScopeAssistant() {
         <div className="codascope-assistant-context">
           <span className="codascope-assistant-context-badge">{contextBadge}</span>
           <span className="codascope-assistant-context-label">Context</span>
+        </div>
+      )}
+
+      {/* Phase 3: Epic Context Banner */}
+      {currentEpic && (
+        <div className="codascope-assistant-epic-banner">
+          <span className="codascope-assistant-epic-banner-icon">📋</span>
+          <span className="codascope-assistant-epic-banner-text">
+            Scoped to <strong>{currentEpic.title}</strong>
+          </span>
         </div>
       )}
 

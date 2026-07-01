@@ -62,7 +62,8 @@ src/apps/codascope/
     ├── do_build_wiki_delta.md  # Incremental wiki update from git changes
     ├── do_explore.md           # Lightweight codebase exploration
     ├── do_quality_scan.md      # Runs quality analysis against golden rules
-    └── do_chat.md              # Codebase Q&A system prompt
+    ├── do_chat.md              # Codebase Q&A system prompt
+    └── do_render_design.md     # Agent-led HTML rendering of design docs (P3)
 ```
 
 **Backend services** (under `server/`):
@@ -83,7 +84,12 @@ server/
     ├── codaScopeConceptService.ts          # Domain concept extraction & storage
     ├── codaScopeGoldenRuleService.ts       # Golden rule CRUD for coding standards
     ├── codaScopeQualityService.ts          # Quality scan result storage & scoring
-    └── codaScopeSkillService.ts            # Framework + project skills management
+    ├── codaScopeSkillService.ts            # Framework + project skills management
+    ├── codaScopeEpicService.ts             # Epic CRUD, lifecycle, scope, locks, health
+    ├── codaScopeDesignDocService.ts        # Design doc CRUD with markdown templates
+    ├── codaScopeVersionService.ts          # Snapshot-based version history
+    ├── codaScopeAnnotationService.ts       # Annotations, directives, batch execution (P4)
+    └── codaScopeEpicRenderService.ts       # HTML rendering + storage (P3)
 ```
 
 ---
@@ -424,3 +430,147 @@ Projects are stored as directories under the configured root:
 │   │   └── 2026_06_30_conv_*.json          # Individual conversation files
 │   └── skills/                             # Project-specific skill prompts
 ```
+
+---
+
+## Level 11 — Epic Design System
+
+### Overview
+
+The Epic Design subsystem provides collaborative document authoring for software design epics. Each epic is a self-contained unit with a lifecycle, design documents, annotations, directives, and version history.
+
+### Service Architecture
+
+| Service | Responsibility |
+|---------|---------------|
+| `codaScopeEpicService.ts` | Epic CRUD, lifecycle, scope management, edit locks, health computation |
+| `codaScopeDesignDocService.ts` | Design document CRUD with markdown templates |
+| `codaScopeVersionService.ts` | Snapshot-based version history for epics |
+| `codaScopeAnnotationService.ts` | Inline annotations (comments), insertion directives, block tracking |
+| `codaScopeEpicRenderService.ts` | HTML rendering of design documents (basic + agent-generated) |
+
+### Storage Layout
+
+```
+<projectDir>/epics/
+├── epics.json                              # Epic index (id, title, status, health)
+├── _archive/                               # Archived epics directory
+└── <epicId>/
+    ├── definition.md                       # Epic definition document
+    ├── locks.json                          # Active edit locks
+    ├── scope.json                          # Topic scope with enrichment data
+    ├── designs/
+    │   ├── <docId>.md                      # Design document content (markdown)
+    │   └── <docId>-rendered/index.html     # Rendered HTML output (P3)
+    ├── annotations/
+    │   └── <docId>-annotations.json        # Inline annotations per document
+    ├── directives/
+    │   └── <docId>-directives.json         # Insertion directives per document
+    └── versions/
+        └── <version>-<timestamp>.json      # Versioned snapshots
+```
+
+### Epic Lifecycle
+
+```
+defining → scoping → designing → in-review → approved → archived
+```
+
+Health is computed at read-time (never stored): `active | hot | stale | blocked`.
+
+### Edit Locks (P4 Hardened)
+
+Locks prevent concurrent edits to the same document:
+- **Acquire**: `POST /epics/:epicId/lock` → returns lock object with TTL
+- **Heartbeat**: `PATCH /epics/:epicId/lock/heartbeat` → refreshes lock TTL (called every 60s)
+- **Release**: `DELETE /epics/:epicId/lock` → explicit unlock
+- **Expiry**: Server-side cleanup of locks older than 5 minutes
+- **Startup cleanup**: `cleanupAllExpiredLocks()` runs on server start to clear stale locks from crashes
+- **Agent safety**: `isDocumentLockedByHuman()` lets the agent check before writing (agent locks prefixed with `agent_` don't block)
+
+### Design Doc Templates
+
+Templates are markdown files with predefined structure. Available templates:
+- `api-spec` — API specification
+- `data-model` — Data model design
+- `system-design` — System architecture
+- `user-flow` — User experience flow
+
+---
+
+## Level 12 — HTML Rendering (Phase 3)
+
+### Rendering Pipeline
+
+Design documents can be rendered as static HTML for presentation/sharing:
+
+1. **Basic fallback**: `CodaScopeEpicRenderService.generateBasicHtml()` converts markdown → HTML with dark-themed styling
+2. **Agent-generated**: The `do_render_design.md` command template prompts the agent to produce polished HTML
+3. **Storage**: Rendered HTML saved to `<epicDir>/designs/<docId>-rendered/index.html`
+
+### API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/epics/:epicId/designs/:docId/render` | Generate/save rendered HTML |
+| `GET` | `/epics/:epicId/designs/:docId/rendered` | Serve rendered HTML |
+
+### Client Integration
+
+- 🖨️ "Render" button on each design doc card in `EpicDesignDocs.tsx`
+- Rendered HTML shown in sandboxed iframe with "Open in New Tab" option
+- Inline preview replaces the design doc list view
+
+---
+
+## Level 13 — Per-Epic Conversations (Phase 3)
+
+### Architecture
+
+Each epic gets a dedicated conversation for design discussions:
+
+- **Server**: `CodaScopeChatService.getOrCreateEpicConversation()` creates/retrieves a conversation tagged with `epicId`
+- **Indexing**: Conversations with `epicId` are stored in the standard conversations index but scoped by epic
+- **Client auto-switch**: `CodaScopeAssistant.tsx` detects epic navigation and auto-switches to the epic's conversation
+- **Context banner**: A "Scoped to {Epic Title}" banner appears below the context badge
+
+### API Endpoint
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/epics/:epicId/conversation` | Get or create epic-scoped conversation |
+
+---
+
+## Level 14 — Epic Brief Export (Phase 3)
+
+### Overview
+
+Quick-share epic status summaries as clipboard-friendly markdown.
+
+- **Server**: `GET /epics/:epicId/brief` → assembles status, health, scope stats, open threads, collaborators
+- **Client**: `EpicBriefExport.tsx` — "Export Brief" button in epic detail header opens a modal with:
+  - Rendered markdown preview (via `MarkdownViewer`)
+  - "Copy to Clipboard" button (with fallback for older browsers)
+  - Hint: "Paste as markdown in Slack, email, or docs"
+
+---
+
+## Level 15 — Batch Directives (Phase 4)
+
+### Architecture
+
+Insertion directives can be executed in batch, applying all pending directives with generated content top-to-bottom:
+
+- **Server**: `CodaScopeAnnotationService.executeBatchDirectives()` handles:
+  - Sorting directives by line position (top-to-bottom)
+  - Cumulative line offset tracking as each directive shifts the document
+  - Atomic execution: all succeed or all roll back to original content
+  - Support for `insert`, `replace`, and `expand` directive types
+- **Client**: `DocumentEditor.tsx` shows a "Apply All" bar when directives are ready
+
+### API Endpoint
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/epics/:epicId/docs/:docId/directives/batch` | Execute all ready directives atomically |

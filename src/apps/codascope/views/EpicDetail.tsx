@@ -16,6 +16,7 @@ import { EpicDefine } from "./EpicDefine";
 import { EpicScope } from "./EpicScope";
 import { EpicDesignDocs } from "./EpicDesignDocs";
 import { EpicHistory } from "./EpicHistory";
+import { EpicBriefExport } from "../components/EpicBriefExport";
 import type { EpicDesignDetail, EpicStatus } from "../codaScopeTypes";
 
 /* ── Status badge helper ─────────────────────────────────────────────── */
@@ -133,6 +134,7 @@ export function EpicDetail() {
           <span className={`codascope-epic-status-badge codascope-epic-status-badge--${epic.status}`}>
             {STATUS_LABELS[epic.status]}
           </span>
+          <EpicBriefExport epicId={epic.id} />
         </div>
       </div>
 

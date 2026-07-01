@@ -20,6 +20,7 @@ import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
 import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
 import { CodaScopeVersionService } from "../services/codaScopeVersionService.js";
 import { CodaScopeAnnotationService } from "../services/codaScopeAnnotationService.js";
+import { CodaScopeEpicRenderService } from "../services/codaScopeEpicRenderService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
@@ -56,6 +57,7 @@ let epicService: CodaScopeEpicService | null = null;
 let designDocService: CodaScopeDesignDocService | null = null;
 let versionService: CodaScopeVersionService | null = null;
 let annotationService: CodaScopeAnnotationService | null = null;
+let renderService: CodaScopeEpicRenderService | null = null;
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -84,6 +86,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   designDocSvc: CodaScopeDesignDocService;
   versionSvc: CodaScopeVersionService;
   annotationSvc: CodaScopeAnnotationService;
+  renderSvc: CodaScopeEpicRenderService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -133,6 +136,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!annotationService) annotationService = new CodaScopeAnnotationService(root);
   else annotationService.setRoot(root);
 
+  if (!renderService) renderService = new CodaScopeEpicRenderService(root);
+  else renderService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -149,6 +155,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     designDocSvc: designDocService,
     versionSvc: versionService,
     annotationSvc: annotationService,
+    renderSvc: renderService,
   };
 }
 
@@ -2040,5 +2047,169 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     const blocks = annotationSvc.computeBlockIds(content);
     res.json({ blocks });
   }));
-}
 
+  // ── Phase 3: Render, Brief, Epic Conversations ──────────────────
+
+  // Render design doc as HTML
+  app.post("/api/codascope/projects/:id/epics/:epicId/designs/:docId/render", wrap(async (req, res) => {
+    const { renderSvc, designDocSvc, epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const { html } = req.body as { html?: string };
+
+    // If HTML is provided (from agent), save it directly
+    if (html && typeof html === "string") {
+      await renderSvc.saveRenderedHtml(id, epicId, docId, html);
+      res.json({ success: true });
+      return;
+    }
+
+    // Otherwise, generate basic HTML from markdown
+    const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+    if (!result) throw httpError("Design doc not found.", 404, "not_found");
+
+    const basicHtml = renderSvc.generateBasicHtml(result.content, result.doc.title);
+    await renderSvc.saveRenderedHtml(id, epicId, docId, basicHtml);
+    res.json({ success: true });
+  }));
+
+  // Serve rendered HTML
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId/rendered", wrap(async (req, res) => {
+    const { renderSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+
+    const html = await renderSvc.getRenderedHtml(id, epicId, docId);
+    if (!html) throw httpError("No rendered version available.", 404, "not_found");
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
+  }));
+
+  // Generate exportable brief
+  app.get("/api/codascope/projects/:id/epics/:epicId/brief", wrap(async (req, res) => {
+    const { epicSvc, annotationSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+
+    const epic = await epicSvc.getEpic(id, epicId);
+    if (!epic) throw httpError("Epic not found.", 404, "not_found");
+
+    const health = epicSvc.computeHealth(epic);
+    const scope = epic.scope;
+    const scopeEntryCount = scope?.entries?.length ?? 0;
+    const enrichedCount = scope?.entries?.filter((e) => e.enrichedAt)?.length ?? 0;
+    const designDocNames = epic.designDocs.map((d) => d.title).join(", ") || "None";
+
+    // Count open annotations across all documents
+    let openAnnotationCount = 0;
+    const docIds = ["definition", ...epic.designDocs.map((d) => d.id)];
+    for (const docId of docIds) {
+      const anns = await annotationSvc.listAnnotations(id, epicId, docId);
+      openAnnotationCount += anns.filter((a) => a.status === "open").length;
+    }
+
+    const statusLabels: Record<string, string> = {
+      defining: "Defining",
+      scoping: "Scoping",
+      designing: "Designing",
+      "in-review": "In Review",
+      approved: "Approved",
+      archived: "Archived",
+    };
+    const healthIcons: Record<string, string> = {
+      active: "🟢",
+      hot: "⚡",
+      stale: "🟡",
+      blocked: "🔴",
+    };
+
+    const lastActivityAgo = (() => {
+      const ms = Date.now() - new Date(health.lastActivityAt).getTime();
+      const hours = Math.floor(ms / (1000 * 60 * 60));
+      if (hours < 1) return "just now";
+      if (hours < 24) return `${hours}h ago`;
+      return `${Math.floor(hours / 24)}d ago`;
+    })();
+
+    const brief = [
+      `## ${epic.title} — Design Brief`,
+      `**Status**: ${statusLabels[epic.status] ?? epic.status} (v${epic.currentVersion})`,
+      `**Health**: ${healthIcons[health.health] ?? ""} ${health.health.charAt(0).toUpperCase() + health.health.slice(1)} (${health.reason})`,
+      `**Scope**: ${scopeEntryCount} topics (${enrichedCount} enriched)`,
+      `**Design Docs**: ${designDocNames}`,
+      `**Open Threads**: ${openAnnotationCount}`,
+      `**Last Activity**: ${lastActivityAgo}`,
+      `**Collaborators**: ${epic.collaborators.join(", ")}`,
+    ].join("\n");
+
+    res.json({ brief });
+  }));
+
+  // Get or create epic conversation
+  app.get("/api/codascope/projects/:id/epics/:epicId/conversation", wrap(async (req, res) => {
+    const { chatSvc, epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+
+    const epic = await epicSvc.getEpic(id, epicId);
+    if (!epic) throw httpError("Epic not found.", 404, "not_found");
+
+    const conversation = await chatSvc.getOrCreateEpicConversation(id, epicId, epic.title);
+
+    // Update epic metadata with conversation ID if not set
+    if (!epic.conversationId) {
+      await epicSvc.updateEpic(id, epicId, {});
+    }
+
+    res.json({ conversation });
+  }));
+
+  // ── Phase 4: Lock Heartbeat & Batch Directives ─────────────────
+
+  // Lock heartbeat
+  app.patch("/api/codascope/projects/:id/epics/:epicId/lock/heartbeat", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { documentId, lockedBy } = req.body as { documentId?: string; lockedBy?: string };
+
+    if (!documentId || !lockedBy) {
+      throw httpError("documentId and lockedBy are required.", 400, "invalid_input");
+    }
+
+    const lock = await epicSvc.heartbeatLock(id, epicId, documentId, lockedBy);
+    if (!lock) throw httpError("Lock not found or expired.", 404, "not_found");
+    res.json({ lock });
+  }));
+
+  // Batch execute all pending directives
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/batch", wrap(async (req, res) => {
+    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+
+    const getContent = async (): Promise<string> => {
+      if (docId === "definition") {
+        return (await epicSvc.getDefinition(id, epicId)) ?? "";
+      }
+      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+      return result?.content ?? "";
+    };
+
+    const setContent = async (content: string): Promise<void> => {
+      if (docId === "definition") {
+        await epicSvc.updateDefinition(id, epicId, content);
+      } else {
+        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+      }
+    };
+
+    const result = await annotationSvc.executeBatchDirectives(id, epicId, docId, getContent, setContent);
+    if (!result) throw httpError("Document not found.", 404, "not_found");
+    res.json({ applied: result.applied, content: result.newContent });
+  }));
+}

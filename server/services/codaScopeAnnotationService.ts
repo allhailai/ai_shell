@@ -702,6 +702,92 @@ export class CodaScopeAnnotationService {
     this.writeDirectives(projectDir, epicId, documentId, file);
     return directive;
   }
+
+  /**
+   * Execute all pending directives with generated content top-to-bottom (P4).
+   * Adjusts line numbers as each directive shifts the document.
+   * Atomic: either all succeed or all roll back.
+   */
+  async executeBatchDirectives(
+    projectId: string,
+    epicId: string,
+    documentId: string,
+    getDocContent: () => Promise<string>,
+    setDocContent: (content: string) => Promise<void>,
+  ): Promise<{
+    applied: InsertionDirective[];
+    newContent: string;
+  } | null> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    const file = this.readDirectives(projectDir, epicId, documentId);
+
+    // Filter to pending directives that have generated content, sorted by line position (top-to-bottom)
+    const pendingWithContent = file.directives
+      .filter((d) => d.status === "pending" && d.generatedContent)
+      .sort((a, b) => a.afterLine - b.afterLine);
+
+    if (pendingWithContent.length === 0) return { applied: [], newContent: await getDocContent() };
+
+    // Save the original document for atomic rollback
+    const originalContent = await getDocContent();
+    let currentContent = originalContent;
+    const applied: InsertionDirective[] = [];
+    let cumulativeShift = 0;
+
+    try {
+      for (const directive of pendingWithContent) {
+        const lines = currentContent.split("\n");
+        const generated = directive.generatedContent!;
+        const generatedLineCount = generated.split("\n").length;
+
+        let newContent: string;
+        let shift: number;
+
+        if (directive.type === "insert") {
+          const insertAt = Math.min(directive.afterLine + cumulativeShift, lines.length);
+          lines.splice(insertAt, 0, generated);
+          newContent = lines.join("\n");
+          shift = generatedLineCount;
+        } else if ((directive.type === "replace" || directive.type === "expand") && directive.startLine !== undefined && directive.endLine !== undefined) {
+          const start = Math.max(0, directive.startLine - 1 + cumulativeShift);
+          const end = Math.min(lines.length, directive.endLine + cumulativeShift);
+          const originalLineCount = end - start;
+          lines.splice(start, originalLineCount, generated);
+          newContent = lines.join("\n");
+          shift = generatedLineCount - originalLineCount;
+        } else {
+          continue; // Skip malformed directives
+        }
+
+        // Store snapshot and mark as applied
+        directive.preApplySnapshot = originalContent; // All point to original for clean rollback
+        directive.status = "applied";
+        directive.appliedAt = new Date().toISOString();
+
+        currentContent = newContent;
+        cumulativeShift += shift;
+        applied.push(directive);
+      }
+
+      // All succeeded — persist everything
+      this.writeDirectives(projectDir, epicId, documentId, file);
+      await setDocContent(currentContent);
+
+      return { applied, newContent: currentContent };
+    } catch (err) {
+      // Rollback: restore original content and reset all directive statuses
+      await setDocContent(originalContent);
+      for (const directive of applied) {
+        directive.status = "pending";
+        directive.preApplySnapshot = undefined;
+        directive.appliedAt = undefined;
+      }
+      this.writeDirectives(projectDir, epicId, documentId, file);
+      throw err;
+    }
+  }
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────── */

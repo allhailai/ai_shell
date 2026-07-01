@@ -4401,3 +4401,185 @@
   color: hsl(35 80% 65%);
 }
 
+/* ── Phase 3: Rendered HTML Preview ────────────────────────────────── */
+
+.codascope-rendered-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.codascope-rendered-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-rendered-preview-header h3 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-rendered-preview-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.codascope-rendered-preview-iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #0d1117;
+  min-height: 400px;
+}
+
+.codascope-render-btn:hover {
+  color: hsl(200 80% 65%);
+}
+
+/* ── Phase 3: Epic Brief Export Modal ──────────────────────────────── */
+
+.codascope-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: codascope-fade-in 0.15s ease-out;
+}
+
+@keyframes codascope-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.codascope-epic-brief-modal {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  max-width: 560px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: codascope-scale-in 0.2s ease-out;
+}
+
+@keyframes codascope-scale-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.codascope-epic-brief-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-epic-brief-modal-header h3 {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-brief-modal-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.codascope-epic-brief-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-epic-brief-modal-footer .codascope-btn {
+  gap: var(--space-1);
+}
+
+.codascope-epic-brief-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.codascope-epic-brief-error {
+  font-size: var(--text-xs);
+  color: hsl(0 80% 65%);
+  margin-left: var(--space-2);
+}
+
+.codascope-btn-success {
+  background: hsl(140 60% 35%);
+  color: white;
+  border-color: hsl(140 60% 45%);
+}
+
+.codascope-btn-sm {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  gap: var(--space-1);
+}
+
+/* ── Phase 4: Lock Heartbeat Warning ─────────────────────────────── */
+
+.codascope-lock-heartbeat-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: hsl(35 80% 20% / 0.4);
+  border: 1px solid hsl(35 80% 40% / 0.4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: hsl(35 80% 70%);
+  margin: var(--space-2) 0;
+  animation: codascope-pulse 2s ease-in-out infinite;
+}
+
+@keyframes codascope-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.codascope-lock-heartbeat-warning-icon {
+  font-size: var(--text-sm);
+}
+
+/* ── Phase 4: Batch Directives ───────────────────────────────────── */
+
+.codascope-batch-directive-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: hsl(250 50% 18% / 0.5);
+  border: 1px solid hsl(250 50% 35% / 0.3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin: var(--space-2) 0;
+}
+
+.codascope-batch-directive-bar-count {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+

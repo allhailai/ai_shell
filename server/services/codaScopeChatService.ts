@@ -100,6 +100,7 @@ export interface Conversation {
   updatedAt: string;
   defaultModelId: string | null;
   messages: ConversationMessage[];
+  epicId?: string;                 // if set, this is a dedicated epic conversation
 }
 
 export interface ConversationSummary {
@@ -111,6 +112,7 @@ export interface ConversationSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  epicId?: string;                 // if set, this is a dedicated epic conversation
 }
 
 interface ConversationIndex {
@@ -166,7 +168,7 @@ function normalizeConversation(projectId: string, value: unknown, fallback: Part
   const updatedAt = typeof source.updatedAt === "string" ? source.updatedAt : fallback.updatedAt ?? createdAt;
   const messages = Array.isArray(source.messages) ? source.messages.map(normalizeMessage) : [];
 
-  return {
+  const conv: Conversation = {
     version: CONVERSATION_VERSION,
     id,
     projectId: typeof source.projectId === "string" ? source.projectId : projectId,
@@ -179,11 +181,20 @@ function normalizeConversation(projectId: string, value: unknown, fallback: Part
       : null,
     messages,
   };
+
+  // Preserve epicId if present
+  if (typeof source.epicId === "string" && source.epicId.trim()) {
+    conv.epicId = source.epicId.trim();
+  } else if (fallback.epicId) {
+    conv.epicId = fallback.epicId;
+  }
+
+  return conv;
 }
 
 function summaryFromConversation(conversation: Conversation, file: string): ConversationSummary {
   const lastModelMsg = [...conversation.messages].reverse().find((m) => m.modelId);
-  return {
+  const summary: ConversationSummary = {
     id: conversation.id,
     file,
     title: conversation.title,
@@ -193,6 +204,8 @@ function summaryFromConversation(conversation: Conversation, file: string): Conv
     updatedAt: conversation.updatedAt,
     messageCount: conversation.messages.length,
   };
+  if (conversation.epicId) summary.epicId = conversation.epicId;
+  return summary;
 }
 
 function normalizeIndexRecord(value: unknown): ConversationSummary | null {
@@ -205,7 +218,7 @@ function normalizeIndexRecord(value: unknown): ConversationSummary | null {
     : "";
   if (!id || !file) return null;
 
-  return {
+  const record: ConversationSummary = {
     id,
     file,
     title: trimText(source.title, MAX_TITLE_LENGTH) || "New conversation",
@@ -215,6 +228,10 @@ function normalizeIndexRecord(value: unknown): ConversationSummary | null {
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt as string : nowIso(),
     messageCount: Number.isFinite(source.messageCount) ? Math.max(0, Number(source.messageCount)) : 0,
   };
+  if (typeof source.epicId === "string" && source.epicId.trim()) {
+    record.epicId = source.epicId.trim();
+  }
+  return record;
 }
 
 function normalizeIndex(value: unknown): ConversationIndex {
@@ -330,7 +347,7 @@ export class CodaScopeChatService {
   /** Create a new conversation. */
   async createConversation(
     projectId: string,
-    opts?: { title?: string; modelId?: string },
+    opts?: { title?: string; modelId?: string; epicId?: string },
   ): Promise<Conversation> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) throw new Error("Project not found.");
@@ -350,7 +367,8 @@ export class CodaScopeChatService {
         updatedAt: createdAt,
         defaultModelId: opts?.modelId?.trim() || null,
         messages: [],
-      }, { id, createdAt, updatedAt: createdAt });
+        epicId: opts?.epicId?.trim() || undefined,
+      }, { id, createdAt, updatedAt: createdAt, epicId: opts?.epicId?.trim() });
 
       const index = await this.readIndex(projectDir);
       const conversations = [
@@ -361,6 +379,35 @@ export class CodaScopeChatService {
       await this.writeJsonAtomic(absoluteFile, conversation);
       await this.writeIndex(projectDir, { version: CONVERSATION_VERSION, conversations });
       return conversation;
+    });
+  }
+
+  /** Get the dedicated conversation for an epic, or null. */
+  async getConversationForEpic(projectId: string, epicId: string): Promise<Conversation | null> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return null;
+
+    const index = await this.readIndex(projectDir);
+    const record = index.conversations.find((c) => c.epicId === epicId);
+    if (!record) return null;
+
+    return this.readConversation(projectId, record.id);
+  }
+
+  /** Get or create the dedicated conversation for an epic. */
+  async getOrCreateEpicConversation(
+    projectId: string,
+    epicId: string,
+    epicTitle: string,
+  ): Promise<Conversation> {
+    // Look for existing dedicated conversation
+    const existing = await this.getConversationForEpic(projectId, epicId);
+    if (existing) return existing;
+
+    // Create a new one
+    return this.createConversation(projectId, {
+      title: `Epic: ${epicTitle}`,
+      epicId,
     });
   }
 

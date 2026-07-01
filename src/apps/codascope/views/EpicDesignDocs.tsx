@@ -43,6 +43,11 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const [customTitle, setCustomTitle] = useState("");
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  // Phase 3: Rendering state
+  const [rendering, setRendering] = useState<string | null>(null);
+  const [renderedDocId, setRenderedDocId] = useState<string | null>(null);
+  const [renderedHtmlUrl, setRenderedHtmlUrl] = useState<string | null>(null);
+
   // Fetch templates on mount
   useEffect(() => {
     if (!activeProjectId) return;
@@ -153,6 +158,62 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
       designDocs: epic.designDocs.map((d) => d.id === updatedDoc.id ? updatedDoc : d),
     });
   }, [activeDoc, epic, setEpic]);
+
+  // Phase 3: Render as HTML
+  const renderAsHtml = useCallback(async (docId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeProjectId || rendering) return;
+    setRendering(docId);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/render`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        // Set the URL for the rendered preview
+        setRenderedDocId(docId);
+        setRenderedHtmlUrl(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/rendered`,
+        );
+      }
+    } catch { /* ignore */ }
+    setRendering(null);
+  }, [activeProjectId, epic.id, rendering]);
+
+  /* ── Rendered HTML preview ─────────────────────────────────────────── */
+
+  if (renderedDocId && renderedHtmlUrl) {
+    const renderedDoc = epic.designDocs.find((d) => d.id === renderedDocId);
+    return (
+      <div className="codascope-rendered-preview">
+        <div className="codascope-rendered-preview-header">
+          <h3>{renderedDoc?.title ?? "Rendered Document"}</h3>
+          <div className="codascope-rendered-preview-actions">
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={() => window.open(renderedHtmlUrl, "_blank")}
+              type="button"
+            >
+              Open in New Tab
+            </button>
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={() => { setRenderedDocId(null); setRenderedHtmlUrl(null); }}
+              type="button"
+            >
+              ✕ Close Preview
+            </button>
+          </div>
+        </div>
+        <iframe
+          className="codascope-rendered-preview-iframe"
+          src={renderedHtmlUrl}
+          title="Rendered Design Document"
+          sandbox="allow-scripts allow-same-origin"
+        />
+      </div>
+    );
+  }
 
   /* ── Active document editor view ───────────────────────────────────── */
 
@@ -280,6 +341,15 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
                 </span>
               </div>
               <div className="codascope-design-doc-card-actions">
+                <button
+                  className="codascope-epic-card-action codascope-render-btn"
+                  onClick={(e) => renderAsHtml(doc.id, e)}
+                  disabled={rendering === doc.id}
+                  title="Render as HTML"
+                  type="button"
+                >
+                  {rendering === doc.id ? "…" : "🖨️"}
+                </button>
                 <button
                   className="codascope-epic-card-action"
                   onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}

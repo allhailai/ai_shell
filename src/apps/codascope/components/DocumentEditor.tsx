@@ -28,6 +28,7 @@ interface DocumentEditorProps {
 const LOCK_CHECK_INTERVAL_MS = 30_000;
 const LOCK_WARNING_MS = 4 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
@@ -180,10 +181,22 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     setLockWarning(false);
   }, [activeProjectId, epicId, doc.id]);
 
-  // Check lock expiry
+  // Check lock expiry + heartbeat (P4)
   useEffect(() => {
-    if (!editing || !lock) return;
+    if (!editing || !lock || !activeProjectId) return;
 
+    // Server heartbeat — keeps the lock alive on the server
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        await fetch(`/api/codascope/projects/${activeProjectId}/epics/${epicId}/lock/heartbeat`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ documentId: doc.id, lockedBy: "user" }),
+        });
+      } catch { /* best effort */ }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    // Client-side expiry check
     lockCheckRef.current = setInterval(() => {
       const elapsed = Date.now() - lastActivityRef.current;
       if (elapsed >= LOCK_TTL_MS) {
@@ -195,9 +208,10 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     }, LOCK_CHECK_INTERVAL_MS);
 
     return () => {
+      clearInterval(heartbeatInterval);
       if (lockCheckRef.current) clearInterval(lockCheckRef.current);
     };
-  }, [editing, lock, releaseLock]);
+  }, [editing, lock, releaseLock, activeProjectId, epicId, doc.id]);
 
   // Release lock on unmount
   useEffect(() => {
@@ -247,6 +261,34 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     lastActivityRef.current = Date.now();
     setLockWarning(false);
   }, []);
+
+  // Phase 4: Batch execute all pending directives
+  const [batchExecuting, setBatchExecuting] = useState(false);
+
+  // Phase 4: Count directives ready for batch apply
+  const readyToApplyCount = useMemo(() => {
+    return directives.filter((d) => d.status === "pending" && d.generatedContent).length;
+  }, [directives]);
+
+  const executeBatchDirectives = useCallback(async () => {
+    if (!activeProjectId || batchExecuting) return;
+    setBatchExecuting(true);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/docs/${doc.id}/directives/batch`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.content !== undefined) {
+          onContentChange(data.content);
+        }
+        // Reload directives
+        await loadDirectives();
+      }
+    } catch { /* ignore */ }
+    setBatchExecuting(false);
+  }, [activeProjectId, epicId, doc.id, batchExecuting, onContentChange, loadDirectives]);
 
   /* ── Create annotation on block ──────────────────────────────────── */
 
@@ -554,10 +596,30 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
         </div>
       </div>
 
-      {/* Lock warning */}
+      {/* Lock warning (P4: heartbeat-aware) */}
       {lockWarning && (
-        <div className="codascope-epic-lock-warning">
-          ⚠️ Lock expires in less than 1 minute. Save your changes or interact to extend.
+        <div className="codascope-lock-heartbeat-warning">
+          <span className="codascope-lock-heartbeat-warning-icon">⚠️</span>
+          Lock expires in less than 1 minute. Save your changes or type to extend.
+        </div>
+      )}
+
+      {/* Phase 4: Batch directive execution bar */}
+      {readyToApplyCount > 0 && !editing && (
+        <div className="codascope-batch-directive-bar">
+          <span>
+            <span className="codascope-batch-directive-bar-count">{readyToApplyCount}</span>
+            {" "}directive{readyToApplyCount !== 1 ? "s" : ""} ready to apply
+          </span>
+          <button
+            className="codascope-btn codascope-btn-primary codascope-btn-sm"
+            onClick={executeBatchDirectives}
+            disabled={batchExecuting}
+            type="button"
+          >
+            <IconBolt size={12} />
+            {batchExecuting ? "Applying…" : "Apply All"}
+          </button>
         </div>
       )}
 

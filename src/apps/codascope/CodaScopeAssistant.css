@@ -730,3 +730,25 @@
 @keyframes codascope-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Phase 3: Epic Context Banner ─────────────────────────────────── */
+
+.codascope-assistant-epic-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: linear-gradient(135deg, hsl(210 60% 15% / 0.8), hsl(250 50% 18% / 0.6));
+  border-bottom: 1px solid hsl(210 60% 30% / 0.3);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.codascope-assistant-epic-banner-icon {
+  font-size: var(--text-sm);
+}
+
+.codascope-assistant-epic-banner-text strong {
+  color: var(--color-text-primary);
+}
