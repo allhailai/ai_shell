@@ -170,6 +170,15 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
       return;
     }
 
+    // P2b content actions — navigate to the design tab where inline directives are used
+    if (type === "insert_content" || type === "replace_content" || type === "expand_content") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/design`);
+      }
+      return;
+    }
+
     // Async actions use loading state
     setStatus("running");
     setErrorMsg(null);
