@@ -19,6 +19,9 @@ import { CodaScopeQualityService } from "./codaScopeQualityService.js";
 import { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
 import { CodaScopeConceptService } from "./codaScopeConceptService.js";
 import { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js";
+import { CodaScopeEpicService } from "./codaScopeEpicService.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
@@ -42,6 +45,9 @@ export function buildReadOnlyTools(
   const goldenRuleService = new CodaScopeGoldenRuleService(projectsRoot);
   const conceptService = new CodaScopeConceptService(projectsRoot);
   const buildStateService = new CodaScopeBuildStateService(projectsRoot);
+  const epicService = new CodaScopeEpicService(projectsRoot);
+  const designDocService = new CodaScopeDesignDocService(projectsRoot);
+  const annotationService = new CodaScopeAnnotationService(projectsRoot);
 
   return {
     list_wiki_topics: {
@@ -392,6 +398,293 @@ export function buildReadOnlyTools(
           );
         } catch {
           return "Failed to read build status.";
+        }
+      },
+    },
+
+    // ── Epic Design Tools (Cross-Cutting) ────────────────────────────
+
+    list_epic_designs: {
+      description:
+        "List all epic designs for this project. Returns epic IDs, titles, statuses, " +
+        "and health indicators. Use this to discover what epics exist before reading " +
+        "specific epic data.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+      execute: async () => {
+        try {
+          const epics = await epicService.listEpics(projectId);
+          if (epics.length === 0) {
+            return "No epic designs exist yet for this project.";
+          }
+          return JSON.stringify(
+            epics.map((e) => ({
+              id: e.id,
+              title: e.title,
+              status: e.status,
+              health: e.health,
+              collaborators: e.collaborators,
+              currentVersion: e.currentVersion,
+              updatedAt: e.updatedAt,
+            })),
+            null,
+            2,
+          );
+        } catch {
+          return "Failed to list epic designs.";
+        }
+      },
+    },
+
+    read_epic_definition: {
+      description:
+        "Read the full definition markdown for a specific epic. The definition contains " +
+        "the epic's goal, context, scope, constraints, and success criteria. " +
+        "Use list_epic_designs first to discover available epic IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID to read (from list_epic_designs)",
+          },
+        },
+        required: ["epicId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        if (!epicId) return "epicId is required.";
+        try {
+          const definition = await epicService.getDefinition(projectId, epicId);
+          if (definition === null) return `Epic "${epicId}" not found or has no definition.`;
+          return definition;
+        } catch {
+          return `Failed to read definition for epic "${epicId}".`;
+        }
+      },
+    },
+
+    read_epic_scope: {
+      description:
+        "Read the scope for a specific epic. The scope lists which wiki topics, concepts, " +
+        "and new topics are relevant to the epic, including enrichment status and depth targets. " +
+        "Use list_epic_designs first to discover available epic IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID (from list_epic_designs)",
+          },
+        },
+        required: ["epicId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        if (!epicId) return "epicId is required.";
+        try {
+          const scope = await epicService.getScope(projectId, epicId);
+          if (scope === null) return `Epic "${epicId}" has no scope yet.`;
+          return JSON.stringify(scope, null, 2);
+        } catch {
+          return `Failed to read scope for epic "${epicId}".`;
+        }
+      },
+    },
+
+    list_design_docs: {
+      description:
+        "List all design documents for a specific epic. Returns doc IDs, titles, " +
+        "templates, word counts, and annotation/directive counts. " +
+        "Use list_epic_designs first to discover available epic IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID (from list_epic_designs)",
+          },
+        },
+        required: ["epicId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        if (!epicId) return "epicId is required.";
+        try {
+          const docs = await designDocService.listDesignDocs(projectId, epicId);
+          if (docs.length === 0) {
+            return `No design documents exist yet for epic "${epicId}".`;
+          }
+          return JSON.stringify(
+            docs.map((d) => ({
+              id: d.id,
+              title: d.title,
+              template: d.template,
+              wordCount: d.wordCount,
+              blockCount: d.blockCount,
+              annotationCount: d.annotationCount,
+              directiveCount: d.directiveCount,
+              updatedAt: d.updatedAt,
+            })),
+            null,
+            2,
+          );
+        } catch {
+          return `Failed to list design docs for epic "${epicId}".`;
+        }
+      },
+    },
+
+    read_design_doc: {
+      description:
+        "Read the full content of a specific design document. Returns the document " +
+        "metadata and full markdown content. Use list_design_docs first to discover " +
+        "available document IDs for an epic.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID (from list_epic_designs)",
+          },
+          docId: {
+            type: "string",
+            description: "The design document ID (from list_design_docs)",
+          },
+        },
+        required: ["epicId", "docId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const docId = args.docId as string;
+        if (!epicId || !docId) return "epicId and docId are required.";
+        try {
+          const result = await designDocService.getDesignDoc(projectId, epicId, docId);
+          if (result === null) return `Design doc "${docId}" not found in epic "${epicId}".`;
+          return `# ${result.doc.title}\n\n` +
+            `_Template: ${result.doc.template || "blank"} | Words: ${result.doc.wordCount} | Updated: ${result.doc.updatedAt}_\n\n` +
+            result.content;
+        } catch {
+          return `Failed to read design doc "${docId}" for epic "${epicId}".`;
+        }
+      },
+    },
+
+    list_annotations: {
+      description:
+        "List all annotations (comments/threads) on a specific document within an epic. " +
+        "The documentId is either 'definition' for the epic definition, or a design doc ID. " +
+        "Returns annotation IDs, authors, anchors, statuses, and body previews.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID (from list_epic_designs)",
+          },
+          documentId: {
+            type: "string",
+            description: "The document ID: 'definition' or a design doc ID (from list_design_docs)",
+          },
+        },
+        required: ["epicId", "documentId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const documentId = args.documentId as string;
+        if (!epicId || !documentId) return "epicId and documentId are required.";
+        try {
+          const annotations = await annotationService.listAnnotations(projectId, epicId, documentId);
+          if (annotations.length === 0) {
+            return `No annotations on document "${documentId}" in epic "${epicId}".`;
+          }
+          return JSON.stringify(
+            annotations.map((a) => ({
+              id: a.id,
+              author: a.author,
+              status: a.status,
+              anchor: {
+                sectionSlug: a.anchor.sectionSlug,
+                anchorText: a.anchor.anchorText?.slice(0, 80),
+                blockId: a.anchor.blockId,
+              },
+              body: a.body.length > 200 ? a.body.slice(0, 200) + "..." : a.body,
+              parentId: a.parentId,
+              createdAt: a.createdAt,
+              reactionCount: a.reactions?.length ?? 0,
+            })),
+            null,
+            2,
+          );
+        } catch {
+          return `Failed to list annotations for document "${documentId}" in epic "${epicId}".`;
+        }
+      },
+    },
+
+    read_annotation_thread: {
+      description:
+        "Read a full annotation thread by its ID, including all replies. Returns the root " +
+        "annotation and all child annotations (replies) with full body content. " +
+        "Use list_annotations first to discover annotation IDs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: {
+            type: "string",
+            description: "The epic ID (from list_epic_designs)",
+          },
+          documentId: {
+            type: "string",
+            description: "The document ID: 'definition' or a design doc ID",
+          },
+          annotationId: {
+            type: "string",
+            description: "The root annotation ID (from list_annotations)",
+          },
+        },
+        required: ["epicId", "documentId", "annotationId"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const documentId = args.documentId as string;
+        const annotationId = args.annotationId as string;
+        if (!epicId || !documentId || !annotationId) {
+          return "epicId, documentId, and annotationId are required.";
+        }
+        try {
+          const allAnnotations = await annotationService.listAnnotations(projectId, epicId, documentId);
+          const root = allAnnotations.find((a) => a.id === annotationId);
+          if (!root) return `Annotation "${annotationId}" not found.`;
+
+          // Collect the thread: root + all replies
+          const replies = allAnnotations.filter((a) => a.parentId === annotationId);
+          const thread = [root, ...replies].map((a) => ({
+            id: a.id,
+            author: a.author,
+            status: a.status,
+            body: a.body,
+            parentId: a.parentId,
+            createdAt: a.createdAt,
+            reactions: a.reactions,
+          }));
+
+          return JSON.stringify(
+            {
+              anchor: {
+                sectionSlug: root.anchor.sectionSlug,
+                anchorText: root.anchor.anchorText,
+                blockId: root.anchor.blockId,
+              },
+              thread,
+            },
+            null,
+            2,
+          );
+        } catch {
+          return `Failed to read annotation thread "${annotationId}".`;
         }
       },
     },
