@@ -25,60 +25,13 @@ import {
   IconChat,
   IconRules,
 } from "../components/CodaScopeIcons";
+import { connectToSseStream } from "../codaScopeSseClient";
+import type { BuildState, BuildLogEntry, PipelineStepStatus, PipelineStepRecord } from "../codaScopeTypes";
 
-/* ── Types ──────────────────────────────────────────────────────────── */
+// Local alias for template simplicity
+type PipelineStep = PipelineStepRecord;
 
-interface BuildState {
-  runId: string;
-  status: "idle" | "building" | "complete" | "error";
-  command: string;
-  modelId: string;
-  startedAt: string;
-  completedAt: string | null;
-  summary: string | null;
-  error: string | null;
-  pipelineSteps?: Array<{ id: string; label: string; status: string; detail?: string }>;
-}
 
-interface BuildLogEntry {
-  runId: string;
-  command: string;
-  status: string;
-  startedAt: string;
-  completedAt: string | null;
-  summary: string | null;
-  error: string | null;
-  durationMs: number | null;
-}
-
-type PipelineStepStatus = "pending" | "running" | "complete" | "skipped" | "error";
-
-interface PipelineStep {
-  id: string;
-  label: string;
-  status: PipelineStepStatus;
-  detail?: string;
-}
-
-/* ── Helpers ─────────────────────────────────────────────────────────── */
-
-/** Parse SSE lines from a streaming response. */
-function parseSseChunk(chunk: string, handler: (event: string, data: string) => void): string {
-  const lines = chunk.split("\n");
-  const remainder = lines.pop() ?? "";
-  let currentEvent = "message";
-
-  for (const line of lines) {
-    if (line.startsWith("event: ")) {
-      currentEvent = line.slice(7).trim();
-    } else if (line.startsWith("data: ")) {
-      handler(currentEvent, line.slice(6));
-      currentEvent = "message";
-    }
-  }
-
-  return remainder;
-}
 
 /** Format a relative timestamp (e.g., "2m 15s ago") */
 function timeAgo(iso: string): string {
@@ -99,115 +52,7 @@ function elapsedSince(iso: string): string {
   return `${min}m ${sec % 60}s`;
 }
 
-/* ── SSE Stream Handler ──────────────────────────────────────────────── */
 
-function connectToSseStream(
-  url: string | { url: string; method: "POST"; body: Record<string, unknown> },
-  callbacks: {
-    onText: (text: string) => void;
-    onRunStarted?: (runId: string, pipeline?: unknown) => void;
-    onDone: (summary: string | null) => void;
-    onError: (error: string) => void;
-    onWikiRefresh?: (topics: unknown[]) => void;
-    onPipelineStep?: (step: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string }) => void;
-  },
-): AbortController {
-  const controller = new AbortController();
-
-  const fetchOpts: RequestInit = {
-    signal: controller.signal,
-  };
-
-  let fetchUrl: string;
-  if (typeof url === "string") {
-    fetchUrl = url;
-  } else {
-    fetchUrl = url.url;
-    fetchOpts.method = url.method;
-    fetchOpts.headers = { "Content-Type": "application/json" };
-    fetchOpts.body = JSON.stringify(url.body);
-  }
-
-  void (async () => {
-    try {
-      const res = await fetch(fetchUrl, fetchOpts);
-
-      if (!res.ok || !res.body) {
-        let errorText = "Failed to connect.";
-        try {
-          const data = await res.json();
-          errorText = data.error ?? data.message ?? errorText;
-        } catch {
-          errorText = await res.text();
-        }
-        callbacks.onError(errorText);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        buffer = parseSseChunk(buffer, (event, data) => {
-          if (event === "run-started") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onRunStarted?.(parsed.runId, parsed.pipeline);
-            } catch { /* skip */ }
-          } else if (event === "pipeline-step") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onPipelineStep?.(parsed);
-            } catch { /* skip */ }
-          } else if (event === "done") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onDone(parsed.buildSummary ?? null);
-            } catch {
-              callbacks.onDone(null);
-            }
-          } else if (event === "error") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onError(parsed.error ?? "Unknown error");
-            } catch {
-              callbacks.onError("Unknown error");
-            }
-          } else if (event === "wiki-refresh") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onWikiRefresh?.(parsed.topics ?? []);
-            } catch { /* skip */ }
-          } else {
-            // Regular data message
-            try {
-              const msg = JSON.parse(data);
-              if (msg.type === "assistant" && msg.message?.content) {
-                for (const block of msg.message.content) {
-                  if (block.type === "text" && block.text) {
-                    callbacks.onText(block.text);
-                  }
-                }
-              }
-            } catch { /* skip malformed */ }
-          }
-        });
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        const message = err instanceof Error ? err.message : "Network error.";
-        callbacks.onError(message);
-      }
-    }
-  })();
-
-  return controller;
-}
 
 /* ── Step Icon helpers ───────────────────────────────────────────────── */
 
@@ -233,7 +78,6 @@ export function ProjectDashboard() {
     agentRunning,
     setAgentRunning,
     setAgentStatus,
-    setActiveRunId,
   } = useCodaScopeStore();
 
   const project = projects.find((p) => p.id === activeProjectId);

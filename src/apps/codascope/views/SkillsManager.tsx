@@ -205,7 +205,7 @@ export function SkillsManager() {
           </div>
           <pre className="codascope-build-log-content">
             {runError && (
-              <span style={{ color: "hsl(0, 70%, 60%)" }}>{runError}</span>
+              <span className="codascope-error-text">{runError}</span>
             )}
             {runOutput}
             <div ref={outputEndRef} />

@@ -8,14 +8,10 @@
 import { useState, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import type { CodaScopeAction } from "../codaScopeTypes";
 
-/* ── Types ───────────────────────────────────────────────────────────── */
-
-export interface CodaScopeAction {
-  type: string;
-  attributes: Record<string, string>;
-  description: string;
-}
+// Re-export for existing consumers
+export type { CodaScopeAction };
 
 type ActionStatus = "idle" | "running" | "success" | "error";
 

@@ -55,14 +55,21 @@ When adding a new icon:
 
 ### 4. SSE Streaming — ReadableStream Pattern
 
-All streaming uses `fetch` + `ReadableStream`, **not** `EventSource`:
+All streaming uses `fetch` + `ReadableStream`, **not** `EventSource`. Use the shared `codaScopeSseClient.ts` module:
 
 ```typescript
-const res = await fetch(url, { method: "POST", ... });
-const reader = res.body!.getReader();
-const decoder = new TextDecoder();
-// ... read loop with line-based SSE parsing
+import { connectToSseStream } from "../codaScopeSseClient";
+
+const controller = connectToSseStream(url, {
+  onText: (text) => { /* handle streaming text */ },
+  onDone: (summary) => { /* handle completion */ },
+  onError: (error) => { /* handle error */ },
+  onPipelineStep: (step) => { /* handle pipeline progress */ },
+  onCancelled: (runId) => { /* handle cancellation */ },
+});
 ```
+
+Do not duplicate the SSE parsing logic — always import from `codaScopeSseClient.ts`.
 
 ### 5. Backend Services — Single Responsibility
 
@@ -181,3 +188,5 @@ Before marking work as complete:
 5. **Using `EventSource` for SSE** — Use `fetch` + `ReadableStream` (supports POST, headers, cancellation)
 6. **Modifying conversation files without atomic writes** — Always use temp → rename pattern
 7. **Adding agent actions without updating the parser** — Both `codaScopeActionParser.ts` AND `ActionCard.tsx` need updates
+8. **Using `codascope-btn--primary` (BEM double-dash)** — Use flat single-dash convention: `codascope-btn-primary`, `codascope-btn-danger`, `codascope-btn-sm`
+9. **Duplicating SSE parsing logic** — Always import from `codaScopeSseClient.ts`, never inline

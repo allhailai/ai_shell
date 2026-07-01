@@ -39,6 +39,7 @@ src/apps/codascope/
 ├── CodaScopeNav.tsx            # Left nav — project picker + view navigation
 ├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant
 ├── CodaScopeAssistant.css      # Styles for the assistant panel
+├── codaScopeSseClient.ts       # Shared SSE streaming utilities
 ├── components/
 │   ├── ActionCard.tsx          # Interactive action cards from agent suggestions
 │   ├── CodaScopeIcons.tsx      # Centralized SVG icon components
@@ -59,11 +60,9 @@ src/apps/codascope/
     ├── do_build_full_wiki.md   # Builds complete wiki from code map
     ├── do_build_wiki_page.md   # Builds/rebuilds a single wiki page
     ├── do_build_wiki_delta.md  # Incremental wiki update from git changes
-    ├── do_enrich_wiki_page.md  # Enriches an existing wiki page
     ├── do_explore.md           # Lightweight codebase exploration
     ├── do_quality_scan.md      # Runs quality analysis against golden rules
-    ├── do_chat.md              # Codebase Q&A system prompt
-    └── do_goal_wiki.md         # Goal-mode: persistent wiki building
+    └── do_chat.md              # Codebase Q&A system prompt
 ```
 
 **Backend services** (under `server/`):
@@ -158,7 +157,7 @@ Icon rules:
 ### Error Handling
 
 - All API calls use try/catch with user-facing error messages
-- Agent runs can be cancelled via `DELETE /api/codascope/projects/:id/runs/current`
+- Agent runs can be cancelled via `POST /api/codascope/projects/:id/build/cancel` (build pipeline) or `POST /api/codascope/projects/:id/assistant/cancel` (chat)
 - Stale streaming detection: conversations stuck in "streaming" for >10 minutes are auto-recovered
 
 ---

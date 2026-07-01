@@ -506,4 +506,33 @@ export class CodaScopeChatService {
       return next;
     });
   }
+
+  /** Delete a conversation by ID. Removes from index and deletes the file. */
+  async deleteConversation(projectId: string, conversationId: string): Promise<boolean> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return false;
+
+    return this.withMutation(projectId, async () => {
+      const index = await this.readIndex(projectDir);
+      const record = index.conversations.find((c) => c.id === conversationId);
+      if (!record) return false;
+
+      // Remove from index
+      await this.writeIndex(projectDir, {
+        ...index,
+        conversations: index.conversations.filter((c) => c.id !== conversationId),
+      });
+
+      // Delete the conversation file
+      const filePath = path.join(projectDir, record.file);
+      try {
+        await fs.unlink(filePath);
+      } catch (err) {
+        // File already gone — not an error
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+
+      return true;
+    });
+  }
 }

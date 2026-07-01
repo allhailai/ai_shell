@@ -122,7 +122,7 @@ export function ConceptExplorer() {
             {concepts.length} concept{concepts.length !== 1 ? "s" : ""} discovered
           </div>
         </div>
-        <button className="codascope-btn codascope-btn--primary" onClick={() => setShowAddModal(true)}>
+        <button className="codascope-btn codascope-btn-primary" onClick={() => setShowAddModal(true)}>
           + Add Concept
         </button>
       </div>
@@ -209,7 +209,7 @@ export function ConceptExplorer() {
                   )}
                   <div className="codascope-concept-card-actions">
                     <button
-                      className="codascope-btn codascope-btn--sm codascope-btn--danger"
+                      className="codascope-btn codascope-btn-sm codascope-btn-danger"
                       onClick={(e) => { e.stopPropagation(); handleDelete(concept.id); }}
                     >
                       Delete
@@ -285,7 +285,7 @@ function AddConceptModal({
         <div className="codascope-modal-footer">
           <button className="codascope-btn" onClick={onClose}>Cancel</button>
           <button
-            className="codascope-btn codascope-btn--primary"
+            className="codascope-btn codascope-btn-primary"
             disabled={!name.trim()}
             onClick={() => onAdd(name.trim(), description.trim(), category)}
           >

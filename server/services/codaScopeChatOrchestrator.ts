@@ -1,0 +1,179 @@
+/* ── CodaScope: Chat Orchestrator ─────────────────────────────────────
+   Shared orchestration logic for the CodaScope assistant chat endpoints.
+
+   Handles:
+   - Building the project manifest from services
+   - Constructing the system prompt (manifest + history + view + message)
+   - Streaming the agent response via SSE
+   - Extracting action tags from the response
+
+   Each route handler manages its own persistence strategy (pre-create
+   placeholder vs. append after-the-fact), SSE setup, and error handling.
+   ──────────────────────────────────────────────────────────────────── */
+
+import type { CodaScopeAgentService } from "./codaScopeAgentService.js";
+import type { CodaScopeChatService } from "./codaScopeChatService.js";
+import type { CodaScopeProjectService } from "./codaScopeProjectService.js";
+import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
+import type { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js";
+import type { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
+import type { CodaScopeConceptService } from "./codaScopeConceptService.js";
+import type { CodaScopeQualityService } from "./codaScopeQualityService.js";
+import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
+import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
+import { buildProjectManifest, formatConversationHistory, formatViewContext, type ManifestInput, type ViewContext } from "./codaScopeChatPromptHelpers.js";
+import { loadCommandTemplate, substituteVars } from "./codaScopeCommandLoader.js";
+import { extractActions, type CodaScopeAction } from "./codaScopeActionParser.js";
+
+// ── Types ───────────────────────────────────────────────────────────
+
+export interface ChatServices {
+  agentSvc: CodaScopeAgentService;
+  chatSvc: CodaScopeChatService;
+  projectSvc: CodaScopeProjectService;
+  wikiSvc: CodaScopeWikiService;
+  buildSvc: CodaScopeBuildStateService;
+  goldenRuleSvc: CodaScopeGoldenRuleService;
+  conceptSvc: CodaScopeConceptService;
+  qualitySvc: CodaScopeQualityService;
+  wikiStateSvc: CodaScopeWikiStateService;
+  codeMapSvc: CodaScopeCodeMapService;
+}
+
+export interface StreamResult {
+  fullResponse: string;
+  actions: CodaScopeAction[];
+  agentResult: unknown;
+}
+
+// ── Manifest Builder ────────────────────────────────────────────────
+
+/**
+ * Build a lightweight project manifest from services.
+ * All lookups are fast (titles/counts only, no full content).
+ */
+export async function buildManifestFromServices(
+  projectId: string,
+  svcs: ChatServices,
+): Promise<ManifestInput> {
+  const project = await svcs.projectSvc.getProject(projectId);
+  const repos = project?.repositories ?? [];
+  const topics = await svcs.wikiSvc.listTopics(projectId);
+  const rules = svcs.goldenRuleSvc.listRules(projectId);
+  const concepts = svcs.conceptSvc.listConcepts(projectId);
+  const qualityScore = svcs.qualitySvc.getOverallScore(projectId);
+  const qualitySummary = svcs.qualitySvc.getLatestSummary(projectId);
+  const buildState = svcs.buildSvc.getBuildState(projectId);
+
+  // Get wiki build freshness from wiki-state
+  const projectDir = svcs.projectSvc.getProjectDir(projectId);
+  let lastWikiBuildTimestamp: string | null = null;
+  let lastCodeMapBuildTimestamp: string | null = null;
+  if (projectDir) {
+    const wikiState = svcs.wikiStateSvc.getWikiState(projectDir);
+    lastWikiBuildTimestamp = wikiState?.lastBuildAt ?? null;
+    // Code map freshness from first repo's meta
+    if (repos.length > 0) {
+      const slug = CodaScopeCodeMapService.repoSlug(repos[0].name || repos[0].path);
+      const meta = svcs.codeMapSvc.getCodeMapMeta(projectId, slug);
+      lastCodeMapBuildTimestamp = meta?.generatedAt ?? null;
+    }
+  }
+
+  return {
+    projectName: project?.name ?? "Unknown",
+    projectId,
+    repositoryCount: repos.length,
+    repositories: repos.map((r: { name: string; path: string }) => ({ name: r.name, path: r.path })),
+    wikiTopicTitles: topics.map((t: { id: string; title: string }) => ({ id: t.id, title: t.title })),
+    goldenRuleNames: rules.map((r: { name: string; enabled: boolean }) => ({ name: r.name, enabled: r.enabled })),
+    conceptNames: concepts.map((c: { name: string; category: string }) => ({ name: c.name, category: c.category })),
+    qualityScore,
+    lastQualityScanTimestamp: qualitySummary?.timestamp ?? null,
+    currentBuildStatus: buildState?.status ?? "idle",
+    lastBuildTimestamp: buildState?.completedAt ?? buildState?.startedAt ?? null,
+    lastBuildCommand: buildState?.command ?? null,
+    lastWikiBuildTimestamp,
+    lastCodeMapBuildTimestamp,
+  };
+}
+
+// ── Prompt Builder ──────────────────────────────────────────────────
+
+/**
+ * Load the assistant system prompt (do_chat.md), substitute all context placeholders.
+ */
+export function buildAssistantPrompt(
+  manifest: string,
+  history: string,
+  viewContext: string,
+  userMessage: string,
+): string {
+  const template = loadCommandTemplate("do_chat");
+  if (!template) {
+    // Fallback if do_chat.md is missing
+    return `You are a helpful CodaScope assistant.\n\n${manifest}\n\n${history}\n\n${viewContext}\n\nUser: ${userMessage}`;
+  }
+  return substituteVars(template, {
+    PROJECT_MANIFEST: manifest,
+    CONVERSATION_HISTORY: history,
+    VIEW_CONTEXT: viewContext,
+    USER_MESSAGE: userMessage,
+  });
+}
+
+// ── Stream Helper ───────────────────────────────────────────────────
+
+/**
+ * Stream an assistant response, accumulating the full text and extracting actions.
+ *
+ * This handles the shared concerns of:
+ * - Calling agentSvc.send with the correct purpose/prompt
+ * - Accumulating text blocks into a full response string
+ * - Extracting action tags from the final response
+ *
+ * The caller is responsible for SSE setup and persistence.
+ */
+export async function streamAssistantResponse(options: {
+  projectId: string;
+  message: string;
+  modelId: string;
+  systemPrompt: string;
+  agentSvc: CodaScopeAgentService;
+  onMessage: (msg: unknown) => void;
+}): Promise<StreamResult> {
+  const { projectId, message, modelId, systemPrompt, agentSvc, onMessage } = options;
+
+  let fullResponse = "";
+
+  return new Promise<StreamResult>((resolve, reject) => {
+    agentSvc.send({
+      projectId,
+      message,
+      modelId,
+      systemPrompt,
+      purpose: "assistant",
+      onMessage: (msg) => {
+        // Accumulate text
+        if (msg.type === "assistant" && msg.message?.content) {
+          for (const block of msg.message.content) {
+            if (block.type === "text") fullResponse += block.text;
+          }
+        }
+        onMessage(msg);
+      },
+      onDone: async (result) => {
+        const actions = extractActions(fullResponse);
+        resolve({ fullResponse, actions, agentResult: result });
+      },
+      onError: async (err) => {
+        reject(Object.assign(err, { fullResponse }));
+      },
+    });
+  });
+}
+
+// ── Re-exports for Route Convenience ────────────────────────────────
+
+export { buildProjectManifest, formatConversationHistory, formatViewContext };
+export type { ViewContext };

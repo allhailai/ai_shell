@@ -6,16 +6,10 @@
 
 import { useRef, useState } from "react";
 import { IconChat } from "./CodaScopeIcons";
+import type { ConversationSummary } from "../codaScopeTypes";
 
-export interface ConversationSummary {
-  id: string;
-  title: string;
-  summary: string;
-  modelId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  messageCount: number;
-}
+// Re-export for existing consumers
+export type { ConversationSummary };
 
 function formatRelativeTime(isoDate: string): string {
   const date = new Date(isoDate);

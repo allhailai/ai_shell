@@ -5,52 +5,18 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { create } from "zustand";
+import type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo } from "./codaScopeTypes";
 
-// ── Types ───────────────────────────────────────────────────────────
+// Re-export shared types for existing consumers
+export type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo };
 
-export interface CodaScopeRepo {
-  id: string;
-  name: string;
-  path: string;
-  branch?: string;
-}
-
-export interface CodaScopeProject {
-  id: string;
-  name: string;
-  description: string;
-  repositories: CodaScopeRepo[];
-  createdAt: string;
-  updatedAt: string;
-  wikiPageCount?: number;
-  qualityScore?: number;
-  conceptCount?: number;
-}
-
-export interface WikiTopic {
-  id: string;
-  title: string;
-  path: string;
-  type?: string;
-  updatedAt?: string;
-}
-
+// Local chat message type (store-specific shape, distinct from API ConversationMessage)
 export interface ChatMessage {
   id: string;
   role: "user" | "agent";
   content: string;
   timestamp: string;
   context?: string[];
-}
-
-export interface SkillInfo {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  tags: string[];
-  tier: "framework" | "project";
-  lockType: "read" | "write";
 }
 
 
@@ -80,7 +46,6 @@ interface CodaScopeState {
   agentRunning: boolean;
   agentStatus: string;
   selectedModel: string;
-  activeRunId: string | null;
   buildSummary: string | null;
 
   // Actions
@@ -97,7 +62,6 @@ interface CodaScopeState {
   setAgentRunning: (running: boolean) => void;
   setAgentStatus: (status: string) => void;
   setSelectedModel: (model: string) => void;
-  setActiveRunId: (runId: string | null) => void;
   setBuildSummary: (summary: string | null) => void;
 }
 
@@ -114,7 +78,6 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   skills: [],
   agentRunning: false,
   agentStatus: "",
-  activeRunId: null,
   buildSummary: null,
   selectedModel: (() => {
     try { return localStorage.getItem("codascope:lastModel") ?? ""; }
@@ -134,8 +97,7 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   setSkills: (skills) => set({ skills }),
   setAgentRunning: (running) => set({ agentRunning: running }),
   setAgentStatus: (status) => set({ agentStatus: status }),
-  setActiveRunId: (runId) => set({ activeRunId: runId }),
-  setBuildSummary: (summary) => set({ buildSummary: summary }),
+  setBuildSummary: (summary: string | null) => set({ buildSummary: summary }),
   setSelectedModel: (model) => {
     try { localStorage.setItem("codascope:lastModel", model); } catch { /* ignore */ }
     set({ selectedModel: model });

@@ -43,7 +43,6 @@ export function CodaScopeNav() {
     setAgentRunning,
     setAgentStatus,
     setBuildSummary,
-    setActiveRunId,
   } = useCodaScopeStore();
   const { isOpen: isAssistantOpen, toggle: toggleAssistant } = useRightPanel("assistant");
 
@@ -88,7 +87,6 @@ export function CodaScopeNav() {
         if (build.status !== "building") {
           setAgentRunning(false);
           setAgentStatus("");
-          setActiveRunId(null);
           if (build.summary) setBuildSummary(build.summary);
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         }
@@ -99,7 +97,7 @@ export function CodaScopeNav() {
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
-  }, [agentRunning, urlProjectId, activeProjectId, setAgentRunning, setAgentStatus, setActiveRunId, setBuildSummary]);
+  }, [agentRunning, urlProjectId, activeProjectId, setAgentRunning, setAgentStatus, setBuildSummary]);
 
   if (!configured) {
     return (

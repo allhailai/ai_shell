@@ -12,13 +12,10 @@
    Pattern modeled on kiss_ai's chatParsers.js allTagContent().
    ──────────────────────────────────────────────────────────────────── */
 
-/* ── Types ──────────────────────────────────────────────────────────── */
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 
-export interface CodaScopeAction {
-  type: string;
-  attributes: Record<string, string>;
-  description: string;
-}
+// Re-export for existing consumers
+export type { CodaScopeAction };
 
 /** Valid action types the agent can suggest */
 export const VALID_ACTION_TYPES = new Set([

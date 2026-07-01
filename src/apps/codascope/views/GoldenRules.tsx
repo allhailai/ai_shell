@@ -135,7 +135,7 @@ export function GoldenRules() {
             {activeCount} active rule{activeCount !== 1 ? "s" : ""} evaluated during quality scans
           </div>
         </div>
-        <button className="codascope-btn codascope-btn--primary" onClick={() => setShowAddModal(true)}>
+        <button className="codascope-btn codascope-btn-primary" onClick={() => setShowAddModal(true)}>
           + Add Rule
         </button>
       </div>
@@ -220,7 +220,7 @@ export function GoldenRules() {
                   )}
                   <div className="codascope-rule-card-actions">
                     <button
-                      className="codascope-btn codascope-btn--sm codascope-btn--danger"
+                      className="codascope-btn codascope-btn-sm codascope-btn-danger"
                       onClick={() => handleDelete(rule.id)}
                     >
                       Delete Rule
@@ -334,7 +334,7 @@ function AddRuleModal({
         <div className="codascope-modal-footer">
           <button className="codascope-btn" onClick={onClose}>Cancel</button>
           <button
-            className="codascope-btn codascope-btn--primary"
+            className="codascope-btn codascope-btn-primary"
             disabled={!name.trim()}
             onClick={() => onAdd({
               name: name.trim(),

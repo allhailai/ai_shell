@@ -24,7 +24,6 @@ const FRAMEWORK_SKILLS: SkillInfo[] = [
   { id: "do_explore", name: "Explore Codebase", description: "Full codebase exploration — discover concepts, architecture, modules", category: "exploration", tags: ["discovery", "architecture"], tier: "framework", lockType: "write" },
   { id: "do_build_wiki_page", name: "Build Wiki Page", description: "Build or update a single wiki topic page with Mermaid diagrams", category: "documentation", tags: ["wiki", "mermaid"], tier: "framework", lockType: "write" },
   { id: "do_build_full_wiki", name: "Build Full Wiki", description: "Orchestrate building the complete wiki from codebase analysis", category: "documentation", tags: ["wiki", "full-build"], tier: "framework", lockType: "write" },
-  { id: "do_goal_wiki", name: "Goal-Directed Wiki", description: "Answer a specific question about the code and generate a wiki page", category: "documentation", tags: ["wiki", "goal-directed"], tier: "framework", lockType: "read" },
   { id: "do_chat", name: "Codebase Q&A", description: "Answer a user's question using wiki and code context", category: "exploration", tags: ["chat", "qa"], tier: "framework", lockType: "read" },
   { id: "do_quality_scan", name: "Quality Scan", description: "Run quality analysis across all categories", category: "review", tags: ["quality", "analysis"], tier: "framework", lockType: "write" },
   { id: "do_check_rules", name: "Check Rules", description: "Validate golden rules against current code", category: "review", tags: ["rules", "validation"], tier: "framework", lockType: "write" },

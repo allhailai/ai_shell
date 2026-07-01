@@ -19,12 +19,8 @@ export function ProjectList() {
     setProjects,
   } = useCodaScopeStore();
 
-  const [loading] = useState(false);
   const [setupPath, setSetupPath] = useState("");
   const [error, setError] = useState("");
-
-  // Config + projects loading is handled by useCodaScopeBootstrap in CodaScopeContent.
-  // ProjectList reads from the store directly.
 
 
   // ── Setup handler ─────────────────────────────────────────────────
@@ -193,9 +189,7 @@ export function ProjectList() {
         </div>
       )}
 
-      {loading ? (
-        <div className="codascope-loading">Loading projects…</div>
-      ) : projects.length === 0 ? (
+      {projects.length === 0 ? (
         <div className="codascope-empty-state">
           <div className="codascope-empty-state-icon"><IconFolder size={32} /></div>
           <div className="codascope-empty-state-title">No Projects Yet</div>

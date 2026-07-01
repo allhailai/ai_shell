@@ -88,7 +88,17 @@ Data flow, state management, persistence, game logic, etc.
 - Common mistakes to avoid
 - Testing/verification checklist
 
-**Why this matters:** AI agents reading the codebase discover `ARCHITECTURE.md` and `AGENTS.md` files first. Progressive disclosure lets them stop reading as soon as they have enough context. App-level `AGENTS.md` keeps app-specific conventions scoped correctly — they don't belong in the shell-level docs.
+**Applications are encouraged to maintain a `development_prompts/` directory** with reusable prompts for periodic health checks. The most common is an architectural review prompt:
+
+```
+src/apps/<appId>/
+├── development_prompts/
+│   └── architectural_review.md    # App-specific boundary, complexity, dead code review
+```
+
+The shell provides a framework-level review at `development_prompts/architectural_review.md` in the project root. App-level review prompts focus on internal architecture — service boundaries, god files, dead code within the app, and documentation drift specific to that app. See `src/apps/codascope/development_prompts/architectural_review.md` for an example.
+
+**Why this matters:** AI agents reading the codebase discover `ARCHITECTURE.md` and `AGENTS.md` files first. Progressive disclosure lets them stop reading as soon as they have enough context. App-level `AGENTS.md` keeps app-specific conventions scoped correctly — they don't belong in the shell-level docs. App-level review prompts enable targeted architectural health checks without reviewing the entire shell.
 
 ---
 
@@ -197,7 +207,9 @@ Dark theme is the default. All colors use HSL.
 - [ ] Created `<appId>.css` and imported in `src/styles.css`
 - [ ] Created `ARCHITECTURE.md` with progressive disclosure
 - [ ] Created `AGENTS.md` with app-specific development rules
+- [ ] (Encouraged) Created `development_prompts/architectural_review.md` for periodic health checks
 - [ ] URL deep-linking: sub-routes sync with `pushState`/`popstate`
 - [ ] CSS classes namespaced with app ID prefix
 - [ ] Design tokens used (no hardcoded colors/spacing)
 - [ ] Type-checked: `npm run check` passes
+

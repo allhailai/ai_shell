@@ -222,6 +222,25 @@
   color: var(--color-text-primary);
 }
 
+.codascope-btn-sm {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.codascope-btn-danger {
+  border-color: hsl(0, 60%, 40%);
+  color: hsl(0, 70%, 68%);
+}
+
+.codascope-btn-danger:hover {
+  background: hsla(0, 60%, 50%, 0.15);
+  border-color: hsl(0, 60%, 50%);
+}
+
+.codascope-error-text {
+  color: var(--color-error);
+}
+
 .codascope-btn-building {
   background: var(--color-accent);
   color: white;
@@ -1741,31 +1760,7 @@
   cursor: not-allowed;
 }
 
-.codascope-btn--primary {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: white;
-}
 
-.codascope-btn--primary:hover {
-  filter: brightness(1.1);
-  color: white;
-}
-
-.codascope-btn--sm {
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--text-xs);
-}
-
-.codascope-btn--danger {
-  border-color: hsl(0, 60%, 40%);
-  color: hsl(0, 70%, 68%);
-}
-
-.codascope-btn--danger:hover {
-  background: hsla(0, 60%, 50%, 0.15);
-  border-color: hsl(0, 60%, 50%);
-}
 
 /* ── Phase 2E: Analyze Panel ───────────────────────────────────────── */
 
