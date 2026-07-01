@@ -17,6 +17,7 @@
 @import "./shared/markdown/extensions/mermaidExtension.css";
 @import "./shared/markdown/extensions/markdownTableExtension.css";
 @import "./shared/folder-picker/FolderPicker.css";
+@import "./shared/confirm-dialog/ConfirmDialog.css";
 
 /* ── App styles ── */
 @import "./apps/hello-world/hello-world.css";

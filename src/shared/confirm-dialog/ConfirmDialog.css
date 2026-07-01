@@ -1,0 +1,131 @@
+/* ── Shared: ConfirmDialog Styles ─────────────────────────────────────
+   Uses AI Shell design tokens and .shared-confirm-dialog-* namespace.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Reset native dialog chrome */
+.shared-confirm-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  max-width: min(420px, 90vw);
+  border-radius: var(--radius-xl);
+  outline: none;
+  margin: auto;
+  position: fixed;
+  inset: 0;
+  width: fit-content;
+  height: fit-content;
+}
+
+/* Backdrop */
+.shared-confirm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Content container */
+.shared-confirm-dialog-content {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Title */
+.shared-confirm-dialog-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* Message */
+.shared-confirm-dialog-message {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Action buttons row */
+.shared-confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Base button */
+.shared-confirm-dialog-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+/* Cancel */
+.shared-confirm-dialog-btn--cancel {
+  background: transparent;
+  border-color: var(--color-border-primary);
+  color: var(--color-text-secondary);
+}
+
+.shared-confirm-dialog-btn--cancel:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+/* Confirm (default) */
+.shared-confirm-dialog-btn--confirm {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.shared-confirm-dialog-btn--confirm:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+/* Confirm (danger variant) */
+.shared-confirm-dialog-btn--danger {
+  background: hsl(0, 60%, 45%);
+  border-color: hsl(0, 60%, 45%);
+  color: white;
+}
+
+.shared-confirm-dialog-btn--danger:hover {
+  background: hsl(0, 60%, 38%);
+  border-color: hsl(0, 60%, 38%);
+}
+
+/* Open animation */
+.shared-confirm-dialog[open] {
+  animation: shared-confirm-dialog-fade-in 150ms ease-out;
+}
+
+.shared-confirm-dialog[open]::backdrop {
+  animation: shared-confirm-dialog-backdrop-in 150ms ease-out;
+}
+
+@keyframes shared-confirm-dialog-fade-in {
+  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes shared-confirm-dialog-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}

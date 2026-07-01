@@ -5,10 +5,10 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { create } from "zustand";
-import type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo } from "./codaScopeTypes";
+import type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo, EpicDesign } from "./codaScopeTypes";
 
 // Re-export shared types for existing consumers
-export type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo };
+export type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo, EpicDesign };
 
 // Local chat message type (store-specific shape, distinct from API ConversationMessage)
 export interface ChatMessage {
@@ -48,6 +48,10 @@ interface CodaScopeState {
   selectedModel: string;
   buildSummary: string | null;
 
+  // Epics
+  epics: EpicDesign[];
+  activeEpicId: string | null;
+
   // Actions
   setProjectsRoot: (root: string) => void;
   setConfigured: (configured: boolean) => void;
@@ -63,6 +67,8 @@ interface CodaScopeState {
   setAgentStatus: (status: string) => void;
   setSelectedModel: (model: string) => void;
   setBuildSummary: (summary: string | null) => void;
+  setEpics: (epics: EpicDesign[]) => void;
+  setActiveEpic: (id: string | null) => void;
 }
 
 export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
@@ -83,6 +89,8 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
     try { return localStorage.getItem("codascope:lastModel") ?? ""; }
     catch { return ""; }
   })(),
+  epics: [],
+  activeEpicId: null,
 
   // Actions
   setProjectsRoot: (root) => set({ projectsRoot: root }),
@@ -102,4 +110,6 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
     try { localStorage.setItem("codascope:lastModel", model); } catch { /* ignore */ }
     set({ selectedModel: model });
   },
+  setEpics: (epics) => set({ epics }),
+  setActiveEpic: (id) => set({ activeEpicId: id }),
 }));

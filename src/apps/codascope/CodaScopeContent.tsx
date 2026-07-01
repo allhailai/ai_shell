@@ -14,6 +14,12 @@
      /codascope/project/:id/concepts      → concept explorer
      /codascope/project/:id/skills        → skills manager
      /codascope/project/:id/settings      → project settings
+     /codascope/project/:id/epics         → epic list
+     /codascope/project/:id/epic/:epicId       → redirects to .../define
+     /codascope/project/:id/epic/:epicId/define  → epic detail (Define tab)
+     /codascope/project/:id/epic/:epicId/scope   → epic detail (Scope tab)
+     /codascope/project/:id/epic/:epicId/design  → epic detail (Design tab)
+     /codascope/project/:id/epic/:epicId/history → epic detail (History tab)
    ──────────────────────────────────────────────────────────────────── */
 
 import { useEffect } from "react";
@@ -28,6 +34,8 @@ import { ConceptExplorer } from "./views/ConceptExplorer";
 import { GoldenRules } from "./views/GoldenRules";
 import { QualityDashboard } from "./views/QualityDashboard";
 import { SetupBanners } from "./components/SetupBanners";
+import { EpicList } from "./views/EpicList";
+import { EpicDetail } from "./views/EpicDetail";
 
 /**
  * Global data loader — fetches config + projects once on mount,
@@ -101,6 +109,10 @@ export function CodaScopeContent() {
     if (section === "project" && segments.length === 2) {
       replace(`project/${segments[1]}/dashboard`);
     }
+    // Redirect /project/:id/epic/:epicId → /project/:id/epic/:epicId/define
+    if (section === "project" && segments[2] === "epic" && segments.length === 4) {
+      replace(`project/${segments[1]}/epic/${segments[3]}/define`);
+    }
   }, [section, segments, replace]);
 
   // ── Sync store with URL-derived project ID ────────────────────────
@@ -157,6 +169,12 @@ export function CodaScopeContent() {
         break;
       case "concepts":
         content = <ConceptExplorer />;
+        break;
+      case "epics":
+        content = <EpicList />;
+        break;
+      case "epic":
+        content = <EpicDetail />;
         break;
       default:
         content = <ProjectDashboard />;

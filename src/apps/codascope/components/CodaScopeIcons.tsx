@@ -322,3 +322,16 @@ export function IconHome({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Layered blueprint — Epic Design */
+export function IconEpic({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="3" y="3" width="8" height="10" rx="1" />
+      <path d="M5 1h8a1 1 0 011 1v10" />
+      <line x1="5.5" y1="6" x2="8.5" y2="6" />
+      <line x1="5.5" y1="8.5" x2="9" y2="8.5" />
+      <line x1="5.5" y1="11" x2="7.5" y2="11" />
+    </svg>
+  );
+}
+

@@ -71,7 +71,7 @@ interface Conversation {
 
 export function CodaScopeAssistant() {
   const { segments, getParam, setParam } = useAppSubRoute("codascope");
-  const { activeProjectId, projects, wikiTopics } = useCodaScopeStore();
+  const { activeProjectId, projects, wikiTopics, epics } = useCodaScopeStore();
 
   // Conversation state
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -201,10 +201,14 @@ export function CodaScopeAssistant() {
     const topicTitle = topicId
       ? (wikiTopics.find((t) => t.id === topicId)?.title ?? null)
       : null;
-    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle });
+    // Resolve epic title from store when viewing an epic
+    const epicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
+    const activeEpic = epicId ? epics.find((e) => e.id === epicId) : null;
+    const epicTitle = activeEpic?.title ?? null;
+    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle, epicId, epicTitle });
     if (!ctx) return undefined;
     return ctx;
-  }, [segments, projectName, activeProjectId, wikiTopics]);
+  }, [segments, projectName, activeProjectId, wikiTopics, epics]);
 
   // Get context badge label
   const contextBadge = (() => {
@@ -224,6 +228,12 @@ export function CodaScopeAssistant() {
       case "quality": return "Quality";
       case "rules": return "Golden Rules";
       case "concepts": return "Concepts";
+      case "epics": return "Epics";
+      case "epic": {
+        const epicId = segments[3] ?? null;
+        const epic = epicId ? epics.find((e) => e.id === epicId) : null;
+        return epic ? `Epic: ${epic.title}` : "Epic";
+      }
       default: return ctx.view;
     }
   })();

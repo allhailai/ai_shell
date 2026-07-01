@@ -38,32 +38,7 @@ export interface TopicState {
   metrics: TopicDepthMetrics;
 }
 
-export interface StudyEntry {
-  id: string;
-  title: string;
-  goal: string;
-  status: "active" | "paused" | "completed";
-  createdAt: string;
-  updatedAt: string;
-  relevantTopics: Array<{
-    topicId: string;
-    relevance: "high" | "medium" | "low";
-    deepenRequested: boolean;
-  }>;
-  discoveredTopics: Array<{
-    topicId: string;
-    reason: string;
-  }>;
-  artifacts: Array<{
-    type: string;
-    path: string;
-  }>;
-  tokenUsage?: {
-    totalTokens: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-  };
-}
+
 
 export interface WikiState {
   version: number;
@@ -71,7 +46,6 @@ export interface WikiState {
   lastBuildMode: string | null;
   gitHeads: Record<string, string>;
   topics: Record<string, TopicState>;
-  studies: StudyEntry[];
 }
 
 /* ── Service ────────────────────────────────────────────────────────── */
@@ -122,7 +96,6 @@ export class CodaScopeWikiStateService {
       lastBuildMode: null,
       gitHeads: {},
       topics: {},
-      studies: [],
     };
   }
 

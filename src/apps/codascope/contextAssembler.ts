@@ -14,6 +14,9 @@ export interface MessageContext {
   recentViews?: Array<{ view: string; label: string }>;
   projectName: string;
   projectId: string;
+  /** Epic context (when viewing an epic) */
+  epicId?: string | null;
+  epicTitle?: string | null;
 }
 
 /* ── Recent Views Ring Buffer ──────────────────────────────────────── */
@@ -52,7 +55,7 @@ export function clearRecentViews(): void {
 
 /* ── View Labels ──────────────────────────────────────────────────── */
 
-function viewLabel(view: string, topicId?: string | null, topicTitle?: string | null): string {
+function viewLabel(view: string, topicId?: string | null, topicTitle?: string | null, epicTitle?: string | null): string {
   switch (view) {
     case "dashboard": return "Dashboard";
     case "wiki":
@@ -63,6 +66,9 @@ function viewLabel(view: string, topicId?: string | null, topicTitle?: string | 
     case "concepts": return "Concepts";
     case "settings": return "Settings";
     case "skills": return "Skills";
+    case "epics": return "Epics";
+    case "epic":
+      return epicTitle ? `Epic: ${epicTitle}` : "Epic";
     default: return view;
   }
 }
@@ -81,6 +87,8 @@ export function assembleContext(
   options?: {
     topicTitle?: string | null;
     filePath?: string | null;
+    epicId?: string | null;
+    epicTitle?: string | null;
   },
 ): MessageContext | null {
   if (!urlSegments.length) return null;
@@ -92,8 +100,12 @@ export function assembleContext(
   const topicId = view === "wiki" ? (urlSegments[3] ?? null) : null;
   const topicTitle = options?.topicTitle ?? null;
 
+  // Epic context: extract epicId from URL /project/:id/epic/:epicId/...
+  const epicId = view === "epic" ? (urlSegments[3] ?? options?.epicId ?? null) : null;
+  const epicTitle = options?.epicTitle ?? null;
+
   // Record this view visit
-  recordViewVisit(view, viewLabel(view, topicId, topicTitle));
+  recordViewVisit(view, viewLabel(view, topicId, topicTitle, epicTitle));
 
   return {
     view,
@@ -103,5 +115,7 @@ export function assembleContext(
     recentViews: getRecentViews(),
     projectName,
     projectId,
+    epicId,
+    epicTitle,
   };
 }

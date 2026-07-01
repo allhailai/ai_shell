@@ -54,6 +54,9 @@ export interface ViewContext {
   recentViews?: Array<{ view: string; label: string }>;
   projectName?: string;
   projectId?: string;
+  /** Epic context (when viewing an epic) */
+  epicId?: string | null;
+  epicTitle?: string | null;
 }
 
 /* ── Constants ──────────────────────────────────────────────────────── */
@@ -275,6 +278,20 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
       lines.push(`The user is viewing the skills manager${project}. Use list_project_skills to see available skills.`);
       break;
 
+    case "epics":
+      lines.push(`The user is viewing the epic designs list${project}. They can see all epics with status and health indicators.`);
+      break;
+
+    case "epic": {
+      const epicLabel = ctx.epicTitle ? `"${ctx.epicTitle}"` : (ctx.epicId ?? "unknown");
+      lines.push(
+        `The user is viewing epic ${epicLabel}${project}.`,
+        `This is an epic design document. The user may ask you to help define, scope, or refine this epic.`,
+        `Use the epic context below (if provided) to understand the current state of this epic.`,
+      );
+      break;
+    }
+
     default:
       lines.push(`The user is viewing the "${view}" section${project}.`);
   }
@@ -291,6 +308,60 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
       .map((rv) => rv.label)
       .join(" → ");
     lines.push(`Recent navigation: ${trail}`);
+  }
+
+  return lines.join("\n");
+}
+
+/* ── Epic Context Builder ────────────────────────────────────────── */
+
+export interface EpicContextInput {
+  epicId: string;
+  title: string;
+  status: string;
+  definition: string;
+  scope: { entryCount: number; lastScopedAt: string | null } | null;
+  designDocCount: number;
+  conversationId: string | null;
+}
+
+/**
+ * Build a concise epic context block (~200 tokens) for injection
+ * into the chat agent system prompt when the user is viewing an epic.
+ */
+export function buildEpicContext(input: EpicContextInput): string {
+  const lines: string[] = [
+    `### Active Epic: ${input.title}`,
+    `- **ID**: ${input.epicId}`,
+    `- **Status**: ${input.status}`,
+  ];
+
+  // Definition summary (first 200 chars)
+  if (input.definition) {
+    const summary = input.definition
+      .replace(/^#.*$/gm, "")          // strip headings
+      .replace(/\n{2,}/g, " ")         // collapse blank lines
+      .replace(/\n/g, " ")             // single line
+      .trim()
+      .slice(0, 200);
+    lines.push(`- **Definition preview**: ${summary}${input.definition.length > 200 ? "..." : ""}`);
+  } else {
+    lines.push(`- **Definition**: _No definition yet — the user may want to start a guided interview_`);
+  }
+
+  // Scope summary
+  if (input.scope) {
+    lines.push(`- **Scope**: ${input.scope.entryCount} topics${input.scope.lastScopedAt ? ` (last scoped: ${input.scope.lastScopedAt})` : ""}`);
+  } else {
+    lines.push(`- **Scope**: _Not scoped yet_`);
+  }
+
+  // Design docs
+  lines.push(`- **Design docs**: ${input.designDocCount}`);
+
+  // Conversation
+  if (input.conversationId) {
+    lines.push(`- **Dedicated conversation**: ${input.conversationId}`);
   }
 
   return lines.join("\n");

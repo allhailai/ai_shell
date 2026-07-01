@@ -25,6 +25,15 @@ export const VALID_ACTION_TYPES = new Set([
   "navigate",
   "create_golden_rule",
   "explore_codebase",
+  // Epic Design actions (P1)
+  "create_epic",
+  "update_epic_definition",
+  "scope_epic",
+  "deepen_wiki",
+  // Epic Design actions (P2a)
+  "create_design_doc",
+  "update_design_doc",
+  "create_version",
 ]);
 
 /* ── Parser ────────────────────────────────────────────────────────── */

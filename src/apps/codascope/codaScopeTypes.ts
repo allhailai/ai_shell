@@ -105,7 +105,16 @@ export type CodaScopeActionType =
   | "run_quality_scan"
   | "navigate"
   | "create_golden_rule"
-  | "explore_codebase";
+  | "explore_codebase"
+  // Epic Design actions (P1)
+  | "create_epic"
+  | "update_epic_definition"
+  | "scope_epic"
+  | "deepen_wiki"
+  // Epic Design actions (P2a)
+  | "create_design_doc"
+  | "update_design_doc"
+  | "create_version";
 
 // ── Build State ─────────────────────────────────────────────────────
 
@@ -206,4 +215,138 @@ export interface GoldenRule {
   description: string;
   enabled: boolean;
   category?: string;
+}
+
+// ── Epic Design ─────────────────────────────────────────────────────
+
+export type EpicStatus = "defining" | "scoping" | "designing" | "in-review" | "approved" | "archived";
+
+export type EpicHealth = "active" | "hot" | "stale" | "blocked";
+
+export interface EpicDesign {
+  id: string;
+  projectId: string;
+  title: string;
+  status: EpicStatus;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  collaborators: string[];
+  currentVersion: number;
+}
+
+export interface EpicDesignDetail extends EpicDesign {
+  definition: string;              // markdown content
+  scope: EpicScope | null;         // null until scoped
+  designDocs: EpicDesignDoc[];
+  versions: EpicVersion[];
+  conversationId: string | null;   // dedicated epic conversation
+}
+
+/** Computed at read-time, not stored — derived from timestamps and annotation counts */
+export interface EpicHealthInfo {
+  health: EpicHealth;
+  reason: string;                  // e.g., "No edits in 9 days"
+  lastActivityAt: string;
+  openAnnotationCount: number;
+  activeCollaboratorCount: number; // within last 48h
+}
+
+export interface EditLock {
+  lockedBy: string;
+  lockedAt: string;
+  lastActivityAt: string;          // auto-expires 5 min after this
+  documentId: string;              // 'definition' | design doc ID
+}
+
+// ── Epic Scope (P1) ─────────────────────────────────────────────────
+
+/** Wiki page depth level — re-exported from wiki state for convenience. */
+export type TopicDepth = "outline" | "developed" | "deep";
+
+export interface EpicScope {
+  entries: EpicScopeEntry[];
+  lastScopedAt: string | null;
+  lastScopedBy: string | null;     // 'agent' | username
+}
+
+export interface EpicScopeEntry {
+  topicId: string;
+  topicTitle: string;
+  type: "existing-wiki" | "existing-concept" | "new";
+  source: "agent" | "user";       // who added this entry
+  included: boolean;
+  previousDepth?: TopicDepth;
+  targetDepth?: TopicDepth;
+  enrichedAt?: string;
+  enrichmentRunId?: string;
+}
+
+/** Returned by re-scan — user reviews before applying */
+export interface ScopeDiff {
+  added: EpicScopeEntry[];         // new topics agent wants to add
+  removed: string[];               // topicIds agent wants to remove
+  changed: Array<{                 // depth target changes
+    topicId: string;
+    oldTargetDepth: TopicDepth;
+    newTargetDepth: TopicDepth;
+    reason: string;
+  }>;
+  unchanged: string[];             // topicIds with no changes
+}
+
+export interface EpicDesignDoc {
+  id: string;
+  epicId: string;
+  title: string;
+  template?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  wordCount: number;
+  blockCount: number;
+  annotationCount: number;
+  directiveCount: number;
+}
+
+export interface EpicVersion {
+  version: number;
+  createdAt: string;
+  createdBy: string;
+  label?: string;
+  note?: string;
+  definitionHash: string;
+  designDocHashes: Record<string, string>;
+  scopeHash: string;
+  status: "draft" | "in-review" | "approved" | "superseded";
+}
+
+// ── Design Doc Templates ────────────────────────────────────────────
+
+export interface DesignDocTemplate {
+  id: string;
+  title: string;
+  description: string;
+  filename: string;
+}
+
+// ── Version Diff ────────────────────────────────────────────────────
+
+export interface DiffLine {
+  type: "add" | "remove" | "same";
+  content: string;
+  lineNumber?: number;
+}
+
+export interface FileDiff {
+  filename: string;
+  lines: DiffLine[];
+  addedCount: number;
+  removedCount: number;
+}
+
+export interface VersionDiff {
+  from: number;
+  to: number;
+  files: FileDiff[];
 }

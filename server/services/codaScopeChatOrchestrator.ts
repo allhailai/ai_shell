@@ -20,8 +20,9 @@ import type { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js
 import type { CodaScopeConceptService } from "./codaScopeConceptService.js";
 import type { CodaScopeQualityService } from "./codaScopeQualityService.js";
 import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
+import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import { buildProjectManifest, formatConversationHistory, formatViewContext, type ManifestInput, type ViewContext } from "./codaScopeChatPromptHelpers.js";
+import { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, type ManifestInput, type ViewContext, type EpicContextInput } from "./codaScopeChatPromptHelpers.js";
 import { loadCommandTemplate, substituteVars } from "./codaScopeCommandLoader.js";
 import { extractActions, type CodaScopeAction } from "./codaScopeActionParser.js";
 
@@ -38,6 +39,7 @@ export interface ChatServices {
   qualitySvc: CodaScopeQualityService;
   wikiStateSvc: CodaScopeWikiStateService;
   codeMapSvc: CodaScopeCodeMapService;
+  epicSvc?: CodaScopeEpicService;
 }
 
 export interface StreamResult {
@@ -175,5 +177,5 @@ export async function streamAssistantResponse(options: {
 
 // ── Re-exports for Route Convenience ────────────────────────────────
 
-export { buildProjectManifest, formatConversationHistory, formatViewContext };
-export type { ViewContext };
+export { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext };
+export type { ViewContext, EpicContextInput };

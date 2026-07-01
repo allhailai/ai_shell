@@ -16,6 +16,9 @@ import { CodaScopeConceptService } from "../services/codaScopeConceptService.js"
 import { CodaScopeGoldenRuleService } from "../services/codaScopeGoldenRuleService.js";
 import { CodaScopeQualityService } from "../services/codaScopeQualityService.js";
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
+import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
+import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
+import { CodaScopeVersionService } from "../services/codaScopeVersionService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
@@ -48,6 +51,9 @@ let conceptService: CodaScopeConceptService | null = null;
 let goldenRuleService: CodaScopeGoldenRuleService | null = null;
 let qualityService: CodaScopeQualityService | null = null;
 let wikiStateService: CodaScopeWikiStateService | null = null;
+let epicService: CodaScopeEpicService | null = null;
+let designDocService: CodaScopeDesignDocService | null = null;
+let versionService: CodaScopeVersionService | null = null;
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -72,6 +78,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   goldenRuleSvc: CodaScopeGoldenRuleService;
   qualitySvc: CodaScopeQualityService;
   wikiStateSvc: CodaScopeWikiStateService;
+  epicSvc: CodaScopeEpicService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -109,6 +116,15 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!wikiStateService) wikiStateService = new CodaScopeWikiStateService(root);
   else wikiStateService.setRoot(root);
 
+  if (!epicService) epicService = new CodaScopeEpicService(root);
+  else epicService.setRoot(root);
+
+  if (!designDocService) designDocService = new CodaScopeDesignDocService(root);
+  else designDocService.setRoot(root);
+
+  if (!versionService) versionService = new CodaScopeVersionService(root);
+  else versionService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -121,6 +137,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     goldenRuleSvc: goldenRuleService,
     qualitySvc: qualityService,
     wikiStateSvc: wikiStateService,
+    epicSvc: epicService,
+    designDocSvc: designDocService,
+    versionSvc: versionService,
   };
 }
 
@@ -786,7 +805,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
       const historyStr = formatConversationHistory(priorMessages);
 
-      // Format view context (enriched with topicTitle, filePath, recentViews)
+      // Format view context (enriched with topicTitle, filePath, recentViews, epicId)
       const ctxRecord = context as Record<string, unknown> | undefined;
       const viewCtx: ViewContext | null = ctxRecord
         ? {
@@ -799,12 +818,34 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
               : undefined,
             projectName: (ctxRecord.projectName as string) ?? "",
             projectId: id,
+            epicId: (ctxRecord.epicId as string) ?? null,
+            epicTitle: (ctxRecord.epicTitle as string) ?? null,
           }
         : null;
       const viewStr = formatViewContext(viewCtx);
 
+      // Build epic context if the user is viewing an epic
+      let epicContextStr = "";
+      if (viewCtx?.view === "epic" && viewCtx.epicId && epicSvc) {
+        try {
+          const epicDetail = await epicSvc.getEpic(id, viewCtx.epicId);
+          if (epicDetail) {
+            const { buildEpicContext } = await import("../services/codaScopeChatOrchestrator.js");
+            epicContextStr = "\n\n## Epic Context\n\n" + buildEpicContext({
+              epicId: epicDetail.id,
+              title: epicDetail.title,
+              status: epicDetail.status,
+              definition: epicDetail.definition,
+              scope: epicDetail.scope ? { entryCount: (epicDetail.scope.entries ?? []).length, lastScopedAt: epicDetail.scope.lastScopedAt } : null,
+              designDocCount: (epicDetail.designDocs ?? []).length,
+              conversationId: epicDetail.conversationId,
+            });
+          }
+        } catch { /* epic context is best-effort */ }
+      }
+
       // Build the full system prompt with all context injected
-      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr, message.trim());
+      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr, message.trim());
 
       // Set up SSE headers
       res.writeHead(200, {
@@ -1212,6 +1253,454 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     const limit = parseInt(String(req.query.limit ?? "20"), 10);
     const trends = qualitySvc.getTrends(id, limit);
     res.json({ trends });
+  }));
+
+  // ── Epics ──────────────────────────────────────────────────────────
+
+  // List epics for a project
+  app.get("/api/codascope/projects/:id/epics", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epics = await epicSvc.listEpics(id);
+    res.json({ epics });
+  }));
+
+  // Create epic
+  app.post("/api/codascope/projects/:id/epics", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const { title, createdBy } = req.body as { title?: string; createdBy?: string };
+    if (!title || typeof title !== "string" || !title.trim()) {
+      throw httpError("title is required.", 400, "invalid_input");
+    }
+    const epic = await epicSvc.createEpic(id, { title: title.trim(), createdBy });
+    res.status(201).json({ epic });
+  }));
+
+  // Get full epic detail
+  app.get("/api/codascope/projects/:id/epics/:epicId", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const epic = await epicSvc.getEpic(id, epicId);
+    if (!epic) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ epic });
+  }));
+
+  // Update epic metadata
+  app.patch("/api/codascope/projects/:id/epics/:epicId", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { title, status, collaborators } = req.body as {
+      title?: string; status?: string; collaborators?: string[];
+    };
+    const epic = await epicSvc.updateEpic(id, epicId, { title, status: status as any, collaborators });
+    if (!epic) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ epic });
+  }));
+
+  // Delete epic
+  app.delete("/api/codascope/projects/:id/epics/:epicId", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const deleted = await epicSvc.deleteEpic(id, epicId);
+    if (!deleted) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
+  // Get definition markdown
+  app.get("/api/codascope/projects/:id/epics/:epicId/definition", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const definition = await epicSvc.getDefinition(id, epicId);
+    if (definition === null) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ definition });
+  }));
+
+  // Update definition markdown
+  app.put("/api/codascope/projects/:id/epics/:epicId/definition", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { content } = req.body as { content?: string };
+    if (content === undefined) throw httpError("content is required.", 400, "invalid_input");
+    const updated = await epicSvc.updateDefinition(id, epicId, content);
+    if (!updated) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ saved: true });
+  }));
+
+  // Acquire edit lock
+  app.post("/api/codascope/projects/:id/epics/:epicId/lock", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { documentId, lockedBy } = req.body as { documentId?: string; lockedBy?: string };
+    if (!documentId) throw httpError("documentId is required.", 400, "invalid_input");
+    const result = await epicSvc.acquireLock(id, epicId, {
+      documentId,
+      lockedBy: lockedBy ?? "user",
+    });
+    if ("error" in result) {
+      res.status(409).json(result);
+      return;
+    }
+    res.json({ lock: result });
+  }));
+
+  // Release edit lock
+  app.delete("/api/codascope/projects/:id/epics/:epicId/lock", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const documentId = req.query.documentId as string ?? "definition";
+    const released = await epicSvc.releaseLock(id, epicId, documentId);
+    res.json({ released });
+  }));
+
+  // Check lock status
+  app.get("/api/codascope/projects/:id/epics/:epicId/lock", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const locks = await epicSvc.getLockStatus(id, epicId);
+    res.json({ locks });
+  }));
+
+  // Get computed health
+  app.get("/api/codascope/projects/:id/epics/:epicId/health", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const health = await epicSvc.getHealth(id, epicId);
+    if (!health) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ health });
+  }));
+
+  // Archive an epic (move to _archive/)
+  app.post("/api/codascope/projects/:id/epics/:epicId/archive", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const archived = await epicSvc.archiveEpic(id, epicId);
+    if (!archived) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ archived: true });
+  }));
+
+  // Restore an archived epic
+  app.post("/api/codascope/projects/:id/epics/:epicId/restore", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const epic = await epicSvc.restoreEpic(id, epicId);
+    if (!epic) throw httpError("Archived epic not found.", 404, "not_found");
+    res.json({ epic });
+  }));
+
+  // List archived epics
+  app.get("/api/codascope/projects/:id/epics-archived", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epics = await epicSvc.listArchivedEpics(id);
+    res.json({ epics });
+  }));
+
+  // ── Epic Scope (P1) ────────────────────────────────────────────────
+
+  // Get scope state
+  app.get("/api/codascope/projects/:id/epics/:epicId/scope", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const scope = await epicSvc.getScope(id, epicId);
+    res.json({ scope: scope ?? { entries: [], lastScopedAt: null, lastScopedBy: null } });
+  }));
+
+  // Update full scope (agent or user)
+  app.put("/api/codascope/projects/:id/epics/:epicId/scope", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { scope } = req.body as { scope?: unknown };
+    if (!scope) throw httpError("scope is required.", 400, "invalid_input");
+    const saved = await epicSvc.setScope(id, epicId, scope as any);
+    if (!saved) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ saved: true });
+  }));
+
+  // Toggle include/exclude for a single topic
+  app.patch("/api/codascope/projects/:id/epics/:epicId/scope/:topicId", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const topicId = param(req, "topicId");
+    const { included, targetDepth } = req.body as { included?: boolean; targetDepth?: string };
+    const changes: Record<string, unknown> = {};
+    if (included !== undefined) changes.included = included;
+    if (targetDepth !== undefined) changes.targetDepth = targetDepth;
+    const entry = await epicSvc.updateScopeEntry(id, epicId, topicId, changes as any);
+    if (!entry) throw httpError("Scope entry not found.", 404, "not_found");
+    res.json({ entry });
+  }));
+
+  // Add a topic to scope
+  app.post("/api/codascope/projects/:id/epics/:epicId/scope/add", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { entry } = req.body as { entry?: unknown };
+    if (!entry) throw httpError("entry is required.", 400, "invalid_input");
+    const added = await epicSvc.addScopeEntry(id, epicId, entry as any);
+    if (!added) {
+      res.status(409).json({ error: "Topic already in scope", code: "duplicate_entry" });
+      return;
+    }
+    res.status(201).json({ added: true });
+  }));
+
+  // Remove a topic from scope
+  app.delete("/api/codascope/projects/:id/epics/:epicId/scope/:topicId", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const topicId = param(req, "topicId");
+    const removed = await epicSvc.removeScopeEntry(id, epicId, topicId);
+    if (!removed) throw httpError("Scope entry not found.", 404, "not_found");
+    res.json({ removed: true });
+  }));
+
+  // Apply approved scope diff
+  app.post("/api/codascope/projects/:id/epics/:epicId/scope/apply-diff", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { accepted, fullDiff } = req.body as {
+      accepted?: { addedTopicIds?: string[]; removedTopicIds?: string[]; changedTopicIds?: string[] };
+      fullDiff?: unknown;
+    };
+    if (!accepted || !fullDiff) throw httpError("accepted and fullDiff are required.", 400, "invalid_input");
+    const scope = await epicSvc.applyScopeDiff(id, epicId, {
+      addedTopicIds: accepted.addedTopicIds ?? [],
+      removedTopicIds: accepted.removedTopicIds ?? [],
+      changedTopicIds: accepted.changedTopicIds ?? [],
+    }, fullDiff as any);
+    if (!scope) throw httpError("Epic not found.", 404, "not_found");
+    res.json({ scope });
+  }));
+
+  // Start wiki enrichment pipeline for scoped topics
+  app.post("/api/codascope/projects/:id/epics/:epicId/deepen", (req: Request, res: Response, next: NextFunction) => {
+    (async () => {
+      const svcs = await ensureServices(secretService, httpError);
+      const { epicSvc, buildSvc, projectSvc } = svcs;
+      const id = param(req, "id");
+      const epicId = param(req, "epicId");
+      const { modelId } = req.body as { modelId?: string };
+
+      if (!modelId || typeof modelId !== "string") {
+        throw httpError("modelId is required.", 400, "invalid_input");
+      }
+
+      const project = await projectSvc.getProject(id);
+      if (!project) throw httpError("Project not found.", 404, "not_found");
+
+      const projectDir = projectSvc.getProjectDir(id);
+      if (!projectDir) throw httpError("Project directory not found.", 404, "not_found");
+
+      const scope = await epicSvc.getScope(id, epicId);
+      if (!scope || scope.entries.length === 0) {
+        throw httpError("No scope entries to deepen.", 400, "empty_scope");
+      }
+
+      const includedEntries = scope.entries.filter((e) => e.included);
+      if (includedEntries.length === 0) {
+        throw httpError("No included scope entries to deepen.", 400, "no_included_entries");
+      }
+
+      // Register project dir and start build
+      buildSvc.registerProjectDir(id, projectDir);
+      const runId = buildSvc.startBuild(id, "epic-deepen", modelId);
+      if (!runId) {
+        res.status(409).json({ error: "A build is already running for this project.", code: "build_in_progress" });
+        return;
+      }
+
+      // SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      res.write(`event: run-started\ndata: ${JSON.stringify({ runId, epicId, entryCount: includedEntries.length })}\n\n`);
+
+      let sseAborted = false;
+      req.on("close", () => { sseAborted = true; });
+
+      const isAborted = () => sseAborted || buildSvc.isCancelled(id);
+      const sendEvent = (event: string, data: unknown) => {
+        if (event === "pipeline-step") {
+          buildSvc.addPipelineStep(id, runId, data as any);
+        }
+        if (isAborted()) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+      const sendMessage = (msg: unknown) => {
+        const msgJson = JSON.stringify(msg);
+        buildSvc.appendOutput(id, runId, msgJson + "\n");
+        if (isAborted()) return;
+        res.write(`data: ${msgJson}\n\n`);
+      };
+
+      try {
+        const { runEpicDeepenPipeline } = await import("../services/codaScopeBuildOrchestrator.js");
+        await runEpicDeepenPipeline(
+          { projectId: id, epicId, modelId, entries: includedEntries },
+          { sendEvent, sendMessage, isAborted },
+          svcs as any,
+          runId,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        buildSvc.failBuild(id, runId, message);
+        sendEvent("error", { error: message });
+      }
+
+      if (!isAborted()) res.end();
+    })().catch(next);
+  });
+
+  // ── Design Documents (P2a) ────────────────────────────────────────
+
+  // List design docs for an epic
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docs = await designDocSvc.listDesignDocs(id, epicId);
+    res.json({ docs });
+  }));
+
+  // List available templates
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/templates", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const templates = designDocSvc.listTemplates();
+    res.json({ templates });
+  }));
+
+  // Create design doc
+  app.post("/api/codascope/projects/:id/epics/:epicId/designs", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { title, template, content, createdBy } = req.body as {
+      title?: string;
+      template?: string;
+      content?: string;
+      createdBy?: string;
+    };
+    if (!title || typeof title !== "string" || !title.trim()) {
+      throw httpError("title is required.", 400, "invalid_input");
+    }
+    const doc = await designDocSvc.createDesignDoc(id, epicId, {
+      title: title.trim(),
+      template,
+      content,
+      createdBy,
+    });
+    res.status(201).json({ doc });
+  }));
+
+  // Get design doc content
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+    if (!result) throw httpError("Design doc not found.", 404, "not_found");
+    res.json(result);
+  }));
+
+  // Update design doc content
+  app.put("/api/codascope/projects/:id/epics/:epicId/designs/:docId", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const { content } = req.body as { content?: string };
+    if (content === undefined || typeof content !== "string") {
+      throw httpError("content is required.", 400, "invalid_input");
+    }
+    const doc = await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+    if (!doc) throw httpError("Design doc not found.", 404, "not_found");
+    res.json({ doc });
+  }));
+
+  // Delete design doc
+  app.delete("/api/codascope/projects/:id/epics/:epicId/designs/:docId", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const deleted = await designDocSvc.deleteDesignDoc(id, epicId, docId);
+    if (!deleted) throw httpError("Design doc not found.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // ── Versions (P2a) ────────────────────────────────────────────────
+
+  // List versions for an epic
+  app.get("/api/codascope/projects/:id/epics/:epicId/versions", wrap(async (req, res) => {
+    const { versionSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const versions = await versionSvc.listVersions(id, epicId);
+    res.json({ versions });
+  }));
+
+  // Create version snapshot
+  app.post("/api/codascope/projects/:id/epics/:epicId/versions", wrap(async (req, res) => {
+    const { versionSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { label, note, createdBy } = req.body as {
+      label?: string;
+      note?: string;
+      createdBy?: string;
+    };
+    const version = await versionSvc.createVersion(id, epicId, { label, note, createdBy });
+    res.status(201).json({ version });
+  }));
+
+  // Get version snapshot
+  app.get("/api/codascope/projects/:id/epics/:epicId/versions/:v", wrap(async (req, res) => {
+    const { versionSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const v = parseInt(param(req, "v"), 10);
+    if (isNaN(v)) throw httpError("Invalid version number.", 400, "invalid_input");
+    const snapshot = await versionSvc.getVersion(id, epicId, v);
+    if (!snapshot) throw httpError("Version not found.", 404, "not_found");
+    res.json(snapshot);
+  }));
+
+  // Diff two versions
+  app.get("/api/codascope/projects/:id/epics/:epicId/versions/diff", wrap(async (req, res) => {
+    const { versionSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const from = parseInt(String(req.query.from ?? ""), 10);
+    const to = parseInt(String(req.query.to ?? ""), 10);
+    if (isNaN(from) || isNaN(to)) {
+      throw httpError("from and to query params are required and must be integers.", 400, "invalid_input");
+    }
+    const diff = await versionSvc.diffVersions(id, epicId, from, to);
+    if (!diff) throw httpError("One or both versions not found.", 404, "not_found");
+    res.json({ diff });
   }));
 
   // ── Unified Analyze ───────────────────────────────────────────────

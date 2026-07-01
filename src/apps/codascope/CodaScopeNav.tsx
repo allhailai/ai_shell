@@ -18,12 +18,14 @@ import {
   IconSettings,
   IconFolder,
   IconLaunch,
+  IconEpic,
 } from "./components/CodaScopeIcons";
 
-type CodaScopeView = "dashboard" | "wiki" | "quality" | "rules" | "concepts" | "skills" | "settings";
+type CodaScopeView = "dashboard" | "epics" | "wiki" | "quality" | "rules" | "concepts" | "skills" | "settings";
 
 const NAV_ITEMS: { view: CodaScopeView; icon: ComponentType<{ size?: number }>; label: string }[] = [
   { view: "dashboard", icon: IconDashboard, label: "Dashboard" },
+  { view: "epics", icon: IconEpic, label: "Epics" },
   { view: "wiki", icon: IconWiki, label: "Wiki" },
   { view: "quality", icon: IconQuality, label: "Quality" },
   { view: "rules", icon: IconRules, label: "Golden Rules" },

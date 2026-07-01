@@ -389,3 +389,182 @@ export async function runAnalyzePipeline(
     sendEvent("done", { runId, buildSummary: buildSvc.getBuildState(projectId)?.summary });
   }
 }
+
+// ── Epic Deepen Pipeline (P1) ───────────────────────────────────────
+
+export interface EpicDeepenOptions {
+  projectId: string;
+  epicId: string;
+  modelId: string;
+  entries: Array<{
+    topicId: string;
+    topicTitle: string;
+    type: "existing-wiki" | "existing-concept" | "new";
+    targetDepth?: string;
+  }>;
+}
+
+export interface EpicDeepenServices extends AnalyzeServices {
+  epicSvc: { updateScopeEntry: (pid: string, eid: string, tid: string, changes: Record<string, unknown>) => Promise<unknown> };
+}
+
+/**
+ * Run the wiki enrichment pipeline for scoped epic topics.
+ *
+ * For each included scope entry:
+ * - "existing-wiki" → run do_build_wiki_page to deepen the topic
+ * - "existing-concept" → run do_build_wiki_page to create a page from the concept
+ * - "new" → run do_build_wiki_page to create a new page
+ *
+ * Updates scope entry status as each completes.
+ */
+export async function runEpicDeepenPipeline(
+  options: EpicDeepenOptions,
+  callbacks: AnalyzeSseCallbacks,
+  services: EpicDeepenServices,
+  runId: string,
+): Promise<void> {
+  const { projectId, epicId, modelId, entries } = options;
+  const { sendEvent, sendMessage, isAborted } = callbacks;
+  const { agentSvc, projectSvc, wikiSvc, buildSvc, epicSvc } = services;
+
+  const project = await projectSvc.getProject(projectId);
+  if (!project) throw new Error("Project not found.");
+
+  const projectDir = projectSvc.getProjectDir(projectId);
+  if (!projectDir) throw new Error("Project directory not found.");
+
+  const repos = project.repositories ?? [];
+
+  sendEvent("pipeline-step", {
+    step: "epic-deepen-start",
+    status: "running",
+    detail: `Deepening ${entries.length} topic(s) for epic`,
+  });
+
+  let completed = 0;
+  let errored = 0;
+
+  for (const entry of entries) {
+    if (isAborted()) break;
+
+    const stepId = `deepen-${entry.topicId}`;
+    sendEvent("pipeline-step", {
+      step: stepId,
+      status: "running",
+      topic: entry.topicTitle,
+      progress: `${completed + 1}/${entries.length}`,
+    });
+
+    // Mark entry as enriching
+    try {
+      await epicSvc.updateScopeEntry(projectId, epicId, entry.topicId, {
+        enrichmentRunId: runId,
+      });
+    } catch { /* best effort */ }
+
+    // Build variables for the wiki page builder
+    const vars = buildBaseVars({
+      projectName: project.name,
+      projectDir,
+      repositories: repos,
+    });
+    vars.TOPIC_NAME = entry.topicTitle;
+    vars.TOPIC_SLUG = entry.topicId;
+
+    // Use the existing wiki page builder command
+    const prompt = loadCommandOrSkill("do_build_wiki_page", projectDir, vars);
+    if (!prompt) {
+      sendEvent("pipeline-step", {
+        step: stepId,
+        status: "error",
+        topic: entry.topicTitle,
+        error: "Wiki page builder command not found",
+      });
+      errored++;
+      continue;
+    }
+
+    try {
+      await agentSvc.send({
+        projectId,
+        message: prompt,
+        modelId,
+        systemPrompt:
+          "You are CodaScope, an AI agent for codebase analysis and documentation. " +
+          "Follow the instructions precisely. Write the wiki page to the project's wiki/ directory. " +
+          `Focus on the topic: "${entry.topicTitle}". ` +
+          (entry.targetDepth
+            ? `Target depth: ${entry.targetDepth}. `
+            : "") +
+          "Do NOT modify files in the source repositories.",
+        purpose: "wiki-build",
+        onMessage: sendMessage,
+        onDone: async (result) => {
+          const tokenUsage = extractTokenUsage(result as { usage?: Record<string, number> });
+          sendEvent("pipeline-step", {
+            step: stepId,
+            status: "complete",
+            topic: entry.topicTitle,
+            tokenUsage,
+          });
+
+          // Mark entry as enriched
+          try {
+            await epicSvc.updateScopeEntry(projectId, epicId, entry.topicId, {
+              enrichedAt: new Date().toISOString(),
+              enrichmentRunId: runId,
+            });
+          } catch { /* best effort */ }
+
+          completed++;
+        },
+        onError: (err) => {
+          sendEvent("pipeline-step", {
+            step: stepId,
+            status: "error",
+            topic: entry.topicTitle,
+            error: err.message,
+          });
+          errored++;
+        },
+      });
+    } catch (err) {
+      sendEvent("pipeline-step", {
+        step: stepId,
+        status: "error",
+        topic: entry.topicTitle,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      errored++;
+    }
+  }
+
+  // Refresh wiki topics
+  let pageCount: number | undefined;
+  try {
+    const topics = await wikiSvc.listTopics(projectId);
+    pageCount = topics.length;
+    sendEvent("wiki-refresh", { topics });
+  } catch { /* ignore */ }
+
+  // Complete or fail based on results
+  if (buildSvc.isCancelled(projectId)) {
+    buildSvc.failBuild(projectId, runId, "Deepen cancelled by user");
+    buildSvc.clearCancellation(projectId);
+    sendEvent("cancelled", { runId });
+  } else {
+    buildSvc.completeBuild(projectId, runId, pageCount, {
+      buildMode: "epic-deepen",
+      topicsRebuilt: completed,
+    });
+    sendEvent("done", {
+      runId,
+      epicId,
+      completed,
+      errored,
+      total: entries.length,
+      buildSummary: buildSvc.getBuildState(projectId)?.summary,
+    });
+  }
+}

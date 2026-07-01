@@ -31,6 +31,20 @@ function ActionIcon({ type }: { type: string }) {
       return <span className="codascope-action-icon">⚖️</span>;
     case "explore_codebase":
       return <span className="codascope-action-icon">🧭</span>;
+    case "create_epic":
+      return <span className="codascope-action-icon">🏗️</span>;
+    case "update_epic_definition":
+      return <span className="codascope-action-icon">📋</span>;
+    case "scope_epic":
+      return <span className="codascope-action-icon">🎯</span>;
+    case "deepen_wiki":
+      return <span className="codascope-action-icon">🔬</span>;
+    case "create_design_doc":
+      return <span className="codascope-action-icon">📐</span>;
+    case "update_design_doc":
+      return <span className="codascope-action-icon">✏️</span>;
+    case "create_version":
+      return <span className="codascope-action-icon">📸</span>;
     default:
       return <span className="codascope-action-icon">⚡</span>;
   }
@@ -44,6 +58,13 @@ function actionLabel(type: string): string {
     case "navigate": return "Go To";
     case "create_golden_rule": return "Create Golden Rule";
     case "explore_codebase": return "Explore Codebase";
+    case "create_epic": return "Create Epic";
+    case "update_epic_definition": return "Update Definition";
+    case "scope_epic": return "Scope Epic";
+    case "deepen_wiki": return "Deepen Wiki";
+    case "create_design_doc": return "Create Design Doc";
+    case "update_design_doc": return "Update Design Doc";
+    case "create_version": return "Create Version";
     default: return "Action";
   }
 }
@@ -55,6 +76,13 @@ function actionButtonLabel(type: string, status: ActionStatus): string {
   switch (type) {
     case "navigate": return "Go";
     case "create_golden_rule": return "Create";
+    case "create_epic": return "Create";
+    case "update_epic_definition": return "Save";
+    case "scope_epic": return "Scope";
+    case "deepen_wiki": return "Deepen";
+    case "create_design_doc": return "Create";
+    case "update_design_doc": return "Open";
+    case "create_version": return "Snapshot";
     default: return "Run";
   }
 }
@@ -83,6 +111,49 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
     }
     if (type === "create_golden_rule") {
       navigate(`project/${activeProjectId}/rules`);
+      return;
+    }
+
+    // Epic actions — navigate to epic views
+    if (type === "create_epic") {
+      navigate(`project/${activeProjectId}/epics`);
+      return;
+    }
+    if (type === "update_epic_definition") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/define`);
+      }
+      return;
+    }
+    if (type === "scope_epic") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/scope`);
+      }
+      return;
+    }
+    if (type === "create_design_doc") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/design`);
+      } else {
+        navigate(`project/${activeProjectId}/epics`);
+      }
+      return;
+    }
+    if (type === "update_design_doc") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/design`);
+      }
+      return;
+    }
+    if (type === "create_version") {
+      const epicId = attributes.epicId;
+      if (epicId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/history`);
+      }
       return;
     }
 
@@ -163,6 +234,28 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: "Exploration failed" }));
+            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
+          }
+          await consumeSSE(res);
+          setStatus("success");
+          return;
+        }
+
+        case "deepen_wiki": {
+          const epicId = attributes.epicId;
+          if (!epicId) {
+            throw new Error("Missing epicId for deepen_wiki");
+          }
+          const res = await fetch(
+            `/api/codascope/projects/${activeProjectId}/epics/${epicId}/deepen`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ modelId: selectedModel ?? "" }),
+            },
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: "Deepen failed" }));
             throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
           }
           await consumeSSE(res);
