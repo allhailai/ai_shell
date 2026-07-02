@@ -15,6 +15,8 @@ import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import type { CodaScopeBuildStateService, TokenUsageRecord } from "./codaScopeBuildStateService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
 import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
+import type { CodaScopeCurationService } from "./codaScopeCurationService.js";
+import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -40,6 +42,8 @@ export interface AnalyzeServices {
   buildSvc: CodaScopeBuildStateService;
   codeMapSvc: CodaScopeCodeMapService;
   wikiStateSvc: CodaScopeWikiStateService;
+  curationSvc?: CodaScopeCurationService;
+  epicSvc?: CodaScopeEpicService;
 }
 
 // ── Token Usage Helper ──────────────────────────────────────────────
@@ -76,7 +80,7 @@ export async function runAnalyzePipeline(
 ): Promise<void> {
   const { projectId, modelId, wiki, quality, scope } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
-  const { agentSvc, projectSvc, wikiSvc, buildSvc, codeMapSvc, wikiStateSvc } = services;
+  const { agentSvc, projectSvc, wikiSvc, buildSvc, codeMapSvc, wikiStateSvc, curationSvc, epicSvc } = services;
 
   const project = await projectSvc.getProject(projectId);
   if (!project) throw new Error("Project not found.");
@@ -370,6 +374,23 @@ export async function runAnalyzePipeline(
         },
       });
     }
+  }
+
+  // ── Post-build: fire code_delta_processed curation reason ──────
+  if (topicsRebuilt > 0 && curationSvc && epicSvc) {
+    try {
+      const epics = await epicSvc.listEpics(projectId);
+      const activeStatuses = new Set(["defining", "curating", "designing", "in-review"]);
+      for (const epic of epics) {
+        if (activeStatuses.has(epic.status)) {
+          await curationSvc.addReason(projectId, epic.id, {
+            type: "code_delta_processed",
+            at: new Date().toISOString(),
+            detail: `Build analysis rebuilt ${topicsRebuilt} wiki topic(s) from code changes`,
+          });
+        }
+      }
+    } catch { /* non-fatal — curation dirs may not exist for old epics */ }
   }
 
   // ── Done / Cancelled ───────────────────────────────────────────
