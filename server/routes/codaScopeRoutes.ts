@@ -1751,14 +1751,25 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json({ doc });
   }));
 
-  // Delete design doc
-  app.delete("/api/codascope/projects/:id/epics/:epicId/designs/:docId", wrap(async (req, res) => {
+  // Archive design doc (soft delete)
+  app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/archive", wrap(async (req, res) => {
     const { designDocSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const deleted = await designDocSvc.deleteDesignDoc(id, epicId, docId);
-    if (!deleted) throw httpError("Design doc not found.", 404, "not_found");
+    const archived = await designDocSvc.archiveDesignDoc(id, epicId, docId);
+    if (!archived) throw httpError("Design doc not found.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // Unarchive design doc (restore)
+  app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/unarchive", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const restored = await designDocSvc.unarchiveDesignDoc(id, epicId, docId);
+    if (!restored) throw httpError("Design doc not found or not archived.", 404, "not_found");
     res.json({ success: true });
   }));
 
@@ -2151,7 +2162,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const { html } = req.body as { html?: string };
+    const { html } = (req.body ?? {}) as { html?: string };
 
     // If HTML is provided (from agent), save it directly
     if (html && typeof html === "string") {
@@ -2694,7 +2705,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
       };
 
-      sendEvent("curation-started", { projectId: id, epicId, modelId });
+      sendEvent("run-started", { projectId: id, epicId, modelId });
 
       await runCurationPipeline(
         { projectId: id, epicId, modelId },

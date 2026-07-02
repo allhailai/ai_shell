@@ -117,6 +117,14 @@ export class CodaScopeCurationService {
     }
   }
 
+  /** Ensure curation directory exists (lazy init for pre-existing epics). */
+  private ensureCurationDir(epicDir: string): void {
+    const cDir = this.curationDir(epicDir);
+    if (!existsSync(cDir)) {
+      this.initializeCurationDir(epicDir);
+    }
+  }
+
   /* ── Curation Reasons ──────────────────────────────────────────────── */
 
   /** Read accumulated curation reasons. */
@@ -132,6 +140,7 @@ export class CodaScopeCurationService {
 
   /** Write curation reasons atomically. */
   private async writeReasons(epicDir: string, reasons: CurationReasons): Promise<void> {
+    this.ensureCurationDir(epicDir);
     await atomicWrite(this.reasonsPath(epicDir), JSON.stringify(reasons, null, 2));
   }
 
@@ -175,6 +184,8 @@ export class CodaScopeCurationService {
   async createLog(projectId: string, epicId: string, entry: Omit<CurationLogEntry, "curationId">): Promise<CurationLogEntry> {
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
+
+    this.ensureCurationDir(epicDir);
 
     const curationId = generateCurationId();
     const fullEntry: CurationLogEntry = { ...entry, curationId };

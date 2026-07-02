@@ -313,6 +313,7 @@ export interface EpicDesignDoc {
   blockCount: number;
   annotationCount: number;
   directiveCount: number;
+  archivedAt?: string;
 }
 
 export interface EpicVersion {

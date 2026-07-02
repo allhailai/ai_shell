@@ -75,7 +75,7 @@ export async function runCurationPipeline(
   try {
     // ── Step 1: Resolve reasons ──────────────────────────────────────
 
-    sendEvent("curation-step", { step: "resolve-reasons", status: "running" });
+    sendEvent("pipeline-step", { step: "resolve-reasons", status: "running" });
 
     let reasons: CurationReason[];
     if (options.manualReasons && options.manualReasons.length > 0) {
@@ -93,7 +93,7 @@ export async function runCurationPipeline(
       }];
     }
 
-    sendEvent("curation-step", {
+    sendEvent("pipeline-step", {
       step: "resolve-reasons",
       status: "complete",
       reasonCount: reasons.length,
@@ -101,7 +101,7 @@ export async function runCurationPipeline(
     });
 
     if (isAborted()) {
-      sendEvent("curation-cancelled", {});
+      sendEvent("cancelled", {});
       return;
     }
 
@@ -116,11 +116,11 @@ export async function runCurationPipeline(
     });
     curationId = logEntry.curationId;
 
-    sendEvent("curation-step", { step: "create-log", status: "complete", curationId });
+    sendEvent("pipeline-step", { step: "create-log", status: "complete", curationId });
 
     // ── Step 3: Build context ────────────────────────────────────────
 
-    sendEvent("curation-step", { step: "build-context", status: "running" });
+    sendEvent("pipeline-step", { step: "build-context", status: "running" });
 
     const project = await projectSvc.getProject(projectId);
     if (!project) throw new Error("Project not found.");
@@ -129,7 +129,7 @@ export async function runCurationPipeline(
     if (!projectDir) throw new Error("Project directory not found.");
 
     // Epic data
-    const epicDetail = await epicSvc.getEpicDetail(projectId, epicId);
+    const epicDetail = await epicSvc.getEpic(projectId, epicId);
     if (!epicDetail) throw new Error(`Epic "${epicId}" not found.`);
 
     // Wiki index
@@ -183,10 +183,10 @@ export async function runCurationPipeline(
       `- **${r.type}**: ${r.detail} (at: ${r.at})`,
     ).join("\n");
 
-    sendEvent("curation-step", { step: "build-context", status: "complete" });
+    sendEvent("pipeline-step", { step: "build-context", status: "complete" });
 
     if (isAborted()) {
-      sendEvent("curation-cancelled", {});
+      sendEvent("cancelled", {});
       await curationSvc.updateLog(projectId, epicId, curationId, {
         status: "error",
         error: "Cancelled by user",
@@ -198,7 +198,7 @@ export async function runCurationPipeline(
 
     // ── Step 4: Build prompt and send to agent ───────────────────────
 
-    sendEvent("curation-step", { step: "agent-curation", status: "running" });
+    sendEvent("pipeline-step", { step: "agent-curation", status: "running" });
 
     const vars = buildBaseVars({
       projectName: project.name,
@@ -257,7 +257,7 @@ export async function runCurationPipeline(
     });
 
     if (isAborted()) {
-      sendEvent("curation-cancelled", {});
+      sendEvent("cancelled", {});
       await curationSvc.updateLog(projectId, epicId, curationId, {
         status: "error",
         error: "Cancelled by user",
@@ -269,7 +269,7 @@ export async function runCurationPipeline(
 
     // ── Step 6: Record results ───────────────────────────────────────
 
-    sendEvent("curation-step", { step: "record-results", status: "running" });
+    sendEvent("pipeline-step", { step: "record-results", status: "running" });
 
     // Parse the summary from the agent response
     const results = parseCurationSummary(fullResponse);
@@ -283,12 +283,8 @@ export async function runCurationPipeline(
       results,
     });
 
-    sendEvent("curation-step", { step: "record-results", status: "complete" });
-    sendEvent("curation-complete", {
-      curationId,
-      durationMs,
-      results,
-    });
+    sendEvent("pipeline-step", { step: "record-results", status: "complete" });
+
 
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -308,7 +304,8 @@ export async function runCurationPipeline(
       }
     }
 
-    sendEvent("curation-error", { error: errorMsg, curationId, durationMs });
+    // Re-throw so the route handler sends the standard `error` SSE event
+    throw err;
   }
 }
 

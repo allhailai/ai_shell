@@ -2225,7 +2225,8 @@
 }
 
 .codascope-epic-card:hover .codascope-epic-card-action,
-.codascope-epic-archive-item:hover .codascope-epic-card-action {
+.codascope-epic-archive-item:hover .codascope-epic-card-action,
+.codascope-design-doc-card .codascope-epic-card-action {
   opacity: 1;
 }
 
@@ -3492,12 +3493,64 @@
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
-  opacity: 0;
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0.5;
   transition: opacity var(--transition-fast);
 }
 
 .codascope-design-doc-card:hover .codascope-design-doc-card-actions {
   opacity: 1;
+}
+
+/* ── Archived Design Docs ────────────────────────────────────────────── */
+
+.codascope-design-doc-archived {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+  padding-top: var(--space-3);
+}
+
+.codascope-design-doc-archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.codascope-design-doc-archived-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  opacity: 0.55;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+}
+
+.codascope-design-doc-archived-item:hover {
+  opacity: 0.85;
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-design-doc-archived-icon {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-design-doc-archived-title {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codascope-design-doc-archived-meta {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
 }
 
 /* ── Template Picker (P2a) ──────────────────────────────────────────── */

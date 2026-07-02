@@ -24,21 +24,32 @@ These principles are **non-negotiable**. They shaped every architectural decisio
 
 ## Critical Rules
 
-### 1. Icons — SVG Only, No Emoji
+### 1. Icons — SVG Only, No Emoji ⚠️ MOST VIOLATED RULE
 
 CodaScope uses **conceptual inline SVG icons**, never emoji or icon fonts. All icons live in [`CodaScopeIcons.tsx`](components/CodaScopeIcons.tsx).
 
+**BEFORE writing any JSX**, check if the icon you need already exists in `CodaScopeIcons.tsx`. Common icons: `IconDelete`, `IconClose`, `IconCheck`, `IconLaunch`, `IconRefresh`, `IconSearch`, `IconFile`, `IconUpload`, `IconDownload`, `IconWarning`, `IconSparkle`.
+
 ```
-✅  Import { IconSomething } from "./components/CodaScopeIcons"
-❌  Using 📝 🔍 ⚡ emoji in JSX (except inside ActionCard.tsx which is legacy)
+✅  Import { IconDelete } from "./components/CodaScopeIcons"
+✅  <IconDelete size={14} />
+
+❌  "🗑️"  "🖨️"  "📐"  "📝"  "🔍"  "⚡"  — NO emoji in JSX
 ❌  Using icon libraries (lucide, heroicons, font-awesome)
+❌  Inline <svg> elements outside CodaScopeIcons.tsx
 ```
+
+**Pre-submit check**: Before finishing any component work, run:
+```bash
+grep -rn '[🗑📐🖨📝🔍⚡🔄💡🎯📊📋🚀✨🛠️🧹]' src/apps/codascope/ --include='*.tsx'
+```
+If any hits outside `ActionCard.tsx` (legacy exception), fix them before submitting.
 
 When adding a new icon:
 - Add it to `CodaScopeIcons.tsx` as a named export
 - Use `viewBox="0 0 16 16"`, `fill="none"`, `stroke="currentColor"`, `strokeWidth="1.5"`
 - Use `strokeLinecap="round"`, `strokeLinejoin="round"`
-- Keep forms geometric and minimal — never photorealistic
+- Keep forms geometric and minimal — never photorealistic or skeuomorphic
 
 ### 2. CSS — Namespaced, Token-Only
 

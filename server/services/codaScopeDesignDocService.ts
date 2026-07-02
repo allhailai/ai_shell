@@ -9,7 +9,7 @@
    - Markdown file I/O with word/block count computation
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicDesignDoc } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -289,20 +289,30 @@ export class CodaScopeDesignDocService {
     return doc;
   }
 
-  /** Delete a design doc. */
-  async deleteDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+  /** Archive a design doc (soft delete — preserves file on disk). */
+  async archiveDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
     const index = this.readIndex(projectDir, epicId);
-    const before = index.docs.length;
-    index.docs = index.docs.filter((d) => d.id !== docId);
-    if (index.docs.length === before) return false;
+    const doc = index.docs.find((d) => d.id === docId);
+    if (!doc) return false;
 
-    // Remove markdown file
-    const filePath = this.docPath(projectDir, epicId, docId);
-    if (existsSync(filePath)) unlinkSync(filePath);
+    doc.archivedAt = new Date().toISOString();
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
 
+  /** Unarchive a design doc (restore from soft delete). */
+  async unarchiveDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const doc = index.docs.find((d) => d.id === docId);
+    if (!doc || !doc.archivedAt) return false;
+
+    delete doc.archivedAt;
     this.writeIndex(projectDir, epicId, index);
     return true;
   }

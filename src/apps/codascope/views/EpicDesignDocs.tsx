@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
-import { IconArchitecture, IconLink, IconPackage, IconBolt, IconClipboard, IconFile } from "../components/CodaScopeIcons";
+import { IconArchitecture, IconLink, IconPackage, IconBolt, IconClipboard, IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EpicDesignDoc, DesignDocTemplate } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -41,7 +41,8 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const [creating, setCreating] = useState(false);
   const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string } | null>(null);
   const [customTitle, setCustomTitle] = useState("");
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
 
   // Phase 3: Rendering state
   const [rendering, setRendering] = useState<string | null>(null);
@@ -130,22 +131,46 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     } catch { /* ignore */ }
   }, [activeProjectId, epic.id]);
 
-  const deleteDoc = useCallback(async (docId: string) => {
+  const archiveDoc = useCallback(async (docId: string) => {
     if (!activeProjectId) return;
-    setDeleting(docId);
+    setArchiving(docId);
     try {
       const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}`,
-        { method: "DELETE" },
+        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/archive`,
+        { method: "PATCH" },
       );
       if (res.ok) {
         setEpic({
           ...epic,
-          designDocs: epic.designDocs.filter((d) => d.id !== docId),
+          designDocs: epic.designDocs.map((d) =>
+            d.id === docId ? { ...d, archivedAt: new Date().toISOString() } : d,
+          ),
         });
       }
     } catch { /* ignore */ }
-    setDeleting(null);
+    setArchiving(null);
+  }, [activeProjectId, epic, setEpic]);
+
+  const unarchiveDoc = useCallback(async (docId: string) => {
+    if (!activeProjectId) return;
+    setArchiving(docId);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/unarchive`,
+        { method: "PATCH" },
+      );
+      if (res.ok) {
+        setEpic({
+          ...epic,
+          designDocs: epic.designDocs.map((d) => {
+            if (d.id !== docId) return d;
+            const { archivedAt: _, ...rest } = d;
+            return rest;
+          }),
+        });
+      }
+    } catch { /* ignore */ }
+    setArchiving(null);
   }, [activeProjectId, epic, setEpic]);
 
   const handleContentChange = useCallback((newContent: string) => {
@@ -291,11 +316,14 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
 
   /* ── Design doc list ───────────────────────────────────────────────── */
 
+  const activeDocs = epic.designDocs.filter((d) => !d.archivedAt);
+  const archivedDocs = epic.designDocs.filter((d) => !!d.archivedAt);
+
   return (
     <div className="codascope-design-doc-list">
       <div className="codascope-design-doc-list-header">
         <span className="codascope-design-doc-list-count">
-          {epic.designDocs.length} document{epic.designDocs.length !== 1 ? "s" : ""}
+          {activeDocs.length} document{activeDocs.length !== 1 ? "s" : ""}
         </span>
         <button
           className="codascope-btn codascope-btn-primary"
@@ -306,9 +334,9 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         </button>
       </div>
 
-      {epic.designDocs.length === 0 ? (
+      {activeDocs.length === 0 ? (
         <div className="codascope-empty-state">
-          <span className="codascope-empty-state-icon">📐</span>
+          <span className="codascope-empty-state-icon"><IconPaintbrush size={32} /></span>
           <h3>No design documents yet</h3>
           <p>Create a design document from a template to start drafting your epic's technical design.</p>
           <button
@@ -321,7 +349,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         </div>
       ) : (
         <div className="codascope-design-doc-grid">
-          {epic.designDocs.map((doc) => (
+          {activeDocs.map((doc) => (
             <div key={doc.id} className="codascope-design-doc-card" onClick={() => openDoc(doc)}>
               <div className="codascope-design-doc-card-header">
                 <span className="codascope-design-doc-card-icon">
@@ -348,20 +376,56 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
                   title="Render as HTML"
                   type="button"
                 >
-                  {rendering === doc.id ? "…" : "🖨️"}
+                  {rendering === doc.id ? "…" : <IconLaunch size={14} />}
                 </button>
                 <button
                   className="codascope-epic-card-action"
-                  onClick={(e) => { e.stopPropagation(); deleteDoc(doc.id); }}
-                  disabled={deleting === doc.id}
-                  title="Delete document"
+                  onClick={(e) => { e.stopPropagation(); archiveDoc(doc.id); }}
+                  disabled={archiving === doc.id}
+                  title="Archive document"
                   type="button"
                 >
-                  {deleting === doc.id ? "…" : "🗑️"}
+                  {archiving === doc.id ? "…" : <IconDelete size={14} />}
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {archivedDocs.length > 0 && (
+        <div className="codascope-design-doc-archived">
+          <button
+            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+            onClick={() => setShowArchived(!showArchived)}
+            type="button"
+          >
+            {showArchived ? "▾" : "▸"} {archivedDocs.length} archived
+          </button>
+          {showArchived && (
+            <div className="codascope-design-doc-archived-list">
+              {archivedDocs.map((doc) => (
+                <div key={doc.id} className="codascope-design-doc-archived-item">
+                  <span className="codascope-design-doc-archived-icon">
+                    {doc.template ? (TEMPLATE_ICONS[doc.template] ?? DEFAULT_ICON) : DEFAULT_ICON}
+                  </span>
+                  <span className="codascope-design-doc-archived-title">{doc.title}</span>
+                  <span className="codascope-design-doc-archived-meta">
+                    {doc.wordCount.toLocaleString()} words
+                  </span>
+                  <button
+                    className="codascope-epic-card-action codascope-epic-card-action--restore"
+                    onClick={() => unarchiveDoc(doc.id)}
+                    disabled={archiving === doc.id}
+                    title="Restore document"
+                    type="button"
+                  >
+                    {archiving === doc.id ? "…" : <IconUndo size={14} />}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
