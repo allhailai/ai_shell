@@ -223,7 +223,7 @@ export interface GoldenRule {
 
 // ── Epic Design ─────────────────────────────────────────────────────
 
-export type EpicStatus = "defining" | "scoping" | "designing" | "in-review" | "approved" | "archived";
+export type EpicStatus = "defining" | "curating" | "designing" | "in-review" | "approved" | "archived";
 
 export type EpicHealth = "active" | "hot" | "stale" | "blocked";
 
@@ -265,8 +265,9 @@ export interface EditLock {
 
 // ── Epic Scope (P1) ─────────────────────────────────────────────────
 
-/** Wiki page depth level — re-exported from wiki state for convenience. */
-export type TopicDepth = "outline" | "developed" | "deep";
+/** Topic enrichment depth — tracks how well a topic is documented.
+ *  Extended for curation tracking: none → stub → outline → developed → comprehensive */
+export type TopicDepth = "none" | "stub" | "outline" | "developed" | "comprehensive";
 
 export interface EpicScope {
   entries: EpicScopeEntry[];
@@ -282,6 +283,7 @@ export interface EpicScopeEntry {
   included: boolean;
   previousDepth?: TopicDepth;
   targetDepth?: TopicDepth;
+  currentDepth?: TopicDepth;       // actual depth after curation enrichment
   enrichedAt?: string;
   enrichmentRunId?: string;
 }
@@ -414,4 +416,130 @@ export interface BlockInfo {
   lineStart: number;
   lineEnd: number;
   content: string;
+}
+
+// ── Knowledge Directory ─────────────────────────────────────────────
+
+export interface EpicKnowledgeSource {
+  id: string;                     // hash-based ID
+  epicId: string;
+  type: "machine" | "human";      // how it was acquired
+  origin: "download" | "upload" | "human-resolved";  // more specific
+  url?: string;                   // for downloaded content
+  filename: string;               // original filename
+  contentType: string;            // MIME type
+  title: string;                  // human-readable title
+  status: "pending" | "processing" | "ready" | "error";
+  addedAt: string;
+  processedAt?: string;
+  sizeBytesOriginal: number;
+  sizeBytesMarkdown?: number;
+  topicAssociations: string[];    // scope topic IDs this source relates to
+}
+
+export interface EpicKnowledgeManifest {
+  sources: EpicKnowledgeSource[];
+  lastUpdatedAt: string;
+}
+
+export interface BlockedDownload {
+  id: string;
+  url: string;
+  reason: string;                 // "robots.txt", "paywall", "timeout", etc.
+  attemptedAt: string;
+  status: "blocked" | "dismissed" | "resolved";
+  dismissedAt?: string;
+  resolvedAt?: string;
+  resolvedSourceId?: string;      // links to the source that resolved it
+}
+
+export interface BlockedDownloadList {
+  items: BlockedDownload[];
+}
+
+export interface EpicWikiPage {
+  id: string;                     // slug
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  wordCount: number;
+  sourceRefs: string[];           // source IDs that contributed to this page
+}
+
+export interface ResearchPlan {
+  queries: ResearchQuery[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResearchQuery {
+  topic: string;
+  query: string;
+  urls: ResearchUrl[];
+}
+
+export interface ResearchUrl {
+  url: string;
+  type: "corporate" | "government" | "trade_press" | "academic" | "news" | "documentation";
+  relevance: string;
+  status: "pending" | "downloaded" | "blocked" | "error";
+}
+
+// ── Curation ────────────────────────────────────────────────────────
+
+export type CurationReasonType =
+  | "definition_changed"
+  | "code_delta_processed"
+  | "research_sources_added"
+  | "human_content_added"
+  | "blocked_download_resolved"
+  | "research_topics_changed"
+  | "manual";
+
+export interface CurationReason {
+  type: CurationReasonType;
+  at: string;
+  detail: string;
+}
+
+export interface CurationReasons {
+  reasons: CurationReason[];
+}
+
+export interface CurationLogEntry {
+  curationId: string;
+  epicId: string;
+  triggeredAt: string;
+  completedAt?: string;
+  status: "running" | "complete" | "error";
+  resolvedReasons: CurationReason[];
+  results?: CurationResults;
+  modelId: string;
+  durationMs?: number;
+  error?: string;
+}
+
+export interface CurationResults {
+  mainWiki: {
+    enriched: Array<{ topicId: string; previousDepth: string; newDepth: string }>;
+    created: Array<{ topicId: string; depth: string }>;
+  };
+  epicWiki: {
+    created: string[];
+    updated: string[];
+  };
+  scope: { added: number; removed: number };
+  concepts: { created: number; enriched: number };
+}
+
+// ── Wiki Deletion Confirmation ──────────────────────────────────────
+
+export interface PendingWikiDeletion {
+  topicId: string;
+  requestedBy: "agent" | "user";
+  requestedAt: string;
+  reason: string;
+  epicId?: string;
+  curationId?: string;
+  status: "pending" | "approved" | "rejected";
 }

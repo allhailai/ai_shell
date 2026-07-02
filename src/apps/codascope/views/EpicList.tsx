@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
+import { useShellStore } from "../../../shell/store";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { IconEpic } from "../components/CodaScopeIcons";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
@@ -14,7 +15,7 @@ import type { EpicDesign, EpicStatus, EpicHealth, EpicHealthInfo } from "../coda
 
 const STATUS_LABELS: Record<EpicStatus, { label: string; className: string }> = {
   defining:    { label: "Defining",   className: "codascope-epic-status-badge--defining" },
-  scoping:     { label: "Scoping",    className: "codascope-epic-status-badge--scoping" },
+  curating:     { label: "Curating",    className: "codascope-epic-status-badge--curating" },
   designing:   { label: "Designing",  className: "codascope-epic-status-badge--designing" },
   "in-review": { label: "In Review",  className: "codascope-epic-status-badge--in-review" },
   approved:    { label: "Approved",   className: "codascope-epic-status-badge--approved" },
@@ -97,8 +98,10 @@ export function EpicList() {
         setEpics([...epics, { ...epic, health: { health: "active", reason: "Just created", lastActivityAt: epic.createdAt, openAnnotationCount: 0, activeCollaboratorCount: 1 } }]);
         setNewTitle("");
         setShowNewForm(false);
-        // Navigate to the new epic
-        navigate(`project/${activeProjectId}/epic/${epic.id}/define`);
+        // Navigate to the new epic with ?new=1 to trigger auto-interview
+        navigate(`project/${activeProjectId}/epic/${epic.id}/define?new=1`);
+        // Open the right panel (chat assistant)
+        useShellStore.getState().openRightPanel("assistant");
       }
     } catch { /* ignore */ }
     setCreating(false);
@@ -225,7 +228,7 @@ export function EpicList() {
         >
           <option value="all">All Statuses</option>
           <option value="defining">Defining</option>
-          <option value="scoping">Scoping</option>
+          <option value="curating">Curating</option>
           <option value="designing">Designing</option>
           <option value="in-review">In Review</option>
           <option value="approved">Approved</option>

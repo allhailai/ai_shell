@@ -9,7 +9,10 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useShellStore } from "../../../shell/store";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { MarkdownViewer } from "../../../shared/markdown";
+import { IconChat, IconSparkle } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EditLock } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -58,6 +61,8 @@ What does success look like?
 
 export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { getParam } = useAppSubRoute("codascope");
+  const isNewEpic = getParam("new") === "1";
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(epic.definition);
   const [saving, setSaving] = useState(false);
@@ -230,27 +235,43 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
     } catch { /* ignore */ }
   }, [activeProjectId, epic, setEpic]);
 
-  // ── No definition yet — empty state ──────────────────────────────────
+  // ── Interview handler ──────────────────────────────────────────────────
+
+  const handleStartInterview = useCallback(() => {
+    // Open the right panel (chat assistant)
+    useShellStore.getState().openRightPanel("assistant");
+    // The assistant will detect the epic context and auto-send the interview prompt
+    // via the ?new=1 URL param mechanism in CodaScopeAssistant
+  }, []);
+
+  const handleOpenRefine = useCallback(() => {
+    useShellStore.getState().openRightPanel("assistant");
+  }, []);
+
+  // ── No definition yet — CTA empty state ───────────────────────────────
 
   if (!epic.definition && !editing) {
     return (
       <div className="codascope-epic-define-empty">
-        <div className="codascope-empty-state">
-          <div className="codascope-epic-define-empty-icon">📝</div>
-          <h3>No definition yet</h3>
-          <p>Start by using the chat agent for a guided interview, or write the definition directly.</p>
-          <div className="codascope-epic-define-empty-actions">
-            <button
-              className="codascope-btn codascope-btn-primary"
-              onClick={handleStartEdit}
-              type="button"
-            >
-              Start Writing
-            </button>
-            <span className="codascope-epic-define-empty-hint">
-              or ask the agent to <strong>"help me define this epic"</strong> in the chat panel →
-            </span>
+        <div className={`codascope-epic-define-cta${isNewEpic ? " codascope-epic-define-cta-new" : ""}`}>
+          <div className="codascope-epic-define-cta-icon">
+            <IconChat size={32} />
           </div>
+          <h3>Let's define this epic</h3>
+          <p>The AI agent will interview you to build a structured definition —
+             covering goals, scope, constraints, and success criteria.</p>
+          <button
+            className="codascope-btn codascope-btn-primary codascope-epic-define-cta-btn"
+            onClick={handleStartInterview}
+            type="button"
+          >
+            <IconSparkle size={14} /> Start Interview →
+          </button>
+          <span className="codascope-epic-define-cta-alt">
+            or <button className="codascope-btn-link" onClick={handleStartEdit} type="button">
+              write it manually
+            </button>
+          </span>
         </div>
       </div>
     );
@@ -337,9 +358,15 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
           </button>
         </div>
         <div className="codascope-epic-define-toolbar-right">
-          <span className="codascope-epic-define-hint">
-            💡 Use the chat panel to ask the agent to interview, refine, or edit this definition
-          </span>
+          <div className="codascope-epic-define-agent-hint">
+            <button
+              className="codascope-btn codascope-btn-secondary"
+              onClick={handleOpenRefine}
+              type="button"
+            >
+              <IconSparkle size={14} /> Ask Agent to Refine →
+            </button>
+          </div>
         </div>
       </div>
 

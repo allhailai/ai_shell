@@ -31,12 +31,14 @@ interface EpicScopeProps {
 /* ── Depth badge helpers ─────────────────────────────────────────────── */
 
 const DEPTH_LABELS: Record<string, string> = {
+  none: "None",
+  stub: "Stub",
   outline: "Outline",
   developed: "Developed",
-  deep: "Deep",
+  comprehensive: "Comprehensive",
 };
 
-const DEPTH_ORDER: TopicDepth[] = ["outline", "developed", "deep"];
+const DEPTH_ORDER: TopicDepth[] = ["none", "stub", "outline", "developed", "comprehensive"];
 
 function DepthBadge({ depth, size = "sm" }: { depth?: TopicDepth; size?: "sm" | "md" }) {
   if (!depth) return null;

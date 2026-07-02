@@ -323,11 +323,26 @@ export interface EpicContextInput {
   scope: { entryCount: number; lastScopedAt: string | null } | null;
   designDocCount: number;
   conversationId: string | null;
+  /** Knowledge context (Phase 3) */
+  epicWikiPageCount?: number;
+  epicWikiPageTitles?: Array<{ id: string; title: string }>;
+  researchSources?: {
+    total: number;
+    ready: number;
+    pending: number;
+    error: number;
+  };
+  curation?: {
+    pendingReasonCount: number;
+    lastCuratedAt: string | null;
+    lastCurationStatus: string | null;
+  };
 }
 
 /**
- * Build a concise epic context block (~200 tokens) for injection
+ * Build a concise epic context block (~300 tokens) for injection
  * into the chat agent system prompt when the user is viewing an epic.
+ * Enhanced with knowledge and curation status data.
  */
 export function buildEpicContext(input: EpicContextInput): string {
   const lines: string[] = [
@@ -358,6 +373,35 @@ export function buildEpicContext(input: EpicContextInput): string {
 
   // Design docs
   lines.push(`- **Design docs**: ${input.designDocCount}`);
+
+  // Knowledge context (Phase 3)
+  if (input.epicWikiPageCount !== undefined) {
+    lines.push(`- **Epic wiki pages**: ${input.epicWikiPageCount}`);
+    if (input.epicWikiPageTitles && input.epicWikiPageTitles.length > 0) {
+      const shown = input.epicWikiPageTitles.slice(0, 5);
+      const titleList = shown.map((p) => p.title).join(", ");
+      lines.push(`  - _Pages: ${titleList}${input.epicWikiPageTitles.length > 5 ? ` (+${input.epicWikiPageTitles.length - 5} more)` : ""}_`);
+    }
+  }
+
+  // Research sources
+  if (input.researchSources) {
+    const rs = input.researchSources;
+    lines.push(`- **Research sources**: ${rs.total} (${rs.ready} ready, ${rs.pending} pending, ${rs.error} error)`);
+  }
+
+  // Curation status
+  if (input.curation) {
+    const cur = input.curation;
+    if (cur.lastCuratedAt) {
+      lines.push(`- **Last curated**: ${cur.lastCuratedAt} (${cur.lastCurationStatus})`);
+    } else {
+      lines.push(`- **Curation**: _Not yet curated_`);
+    }
+    if (cur.pendingReasonCount > 0) {
+      lines.push(`- **Curation triggers pending**: ${cur.pendingReasonCount}`);
+    }
+  }
 
   // Conversation
   if (input.conversationId) {

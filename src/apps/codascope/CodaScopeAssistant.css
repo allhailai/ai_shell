@@ -752,3 +752,62 @@
 .codascope-assistant-epic-banner-text strong {
   color: var(--color-text-primary);
 }
+
+/* ── Prompt Chips ───────────────────────────────────────────────────── */
+
+.codascope-prompt-chips {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  animation: codascope-chips-in 0.25s ease-out;
+}
+
+@keyframes codascope-chips-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.codascope-prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.codascope-prompt-chip:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-prompt-chip-primary {
+  color: var(--color-accent-text);
+  border-color: var(--color-accent-muted);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.codascope-prompt-chip-primary:hover {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+

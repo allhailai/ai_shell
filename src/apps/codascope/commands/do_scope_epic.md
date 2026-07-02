@@ -49,7 +49,7 @@ Analyze the epic definition above and produce a structured scope recommendation.
 When an existing scope is present, produce a **ScopeDiff** instead of a fresh scope — showing what changed and why:
 - **Added**: New topics to add that weren't in the previous scope
 - **Removed**: Topics to remove that are no longer relevant
-- **Changed**: Depth target changes (e.g., a topic was "outline" but now needs "deep")
+- **Changed**: Depth target changes (e.g., a topic was "outline" but now needs "comprehensive")
 - **Unchanged**: Topics that remain as-is
 
 ---
@@ -65,7 +65,7 @@ Respond with a structured scope recommendation using the following action tag:
 I've analyzed the epic definition and identified the following scope:
 
 **Wiki Pages to Enrich:**
-- [topic-title] — Currently at [outline/developed/deep], recommend deepening to [target]. Reason: [rationale]
+- [topic-title] — Currently at [none/stub/outline/developed/comprehensive], recommend deepening to [target]. Reason: [rationale]
 - ...
 
 **Relevant Concepts:**
@@ -90,7 +90,7 @@ Then output the scope data as a JSON code block:
       "source": "agent",
       "included": true,
       "previousDepth": "outline",
-      "targetDepth": "deep"
+      "targetDepth": "comprehensive"
     },
     {
       "topicId": "concept-name-slug",
@@ -125,7 +125,7 @@ For re-scans, output the diff as a JSON code block:
   ],
   "removed": ["topic-id-no-longer-relevant"],
   "changed": [
-    { "topicId": "...", "oldTargetDepth": "outline", "newTargetDepth": "deep", "reason": "Epic scope expanded to include..." }
+    { "topicId": "...", "oldTargetDepth": "outline", "newTargetDepth": "comprehensive", "reason": "Epic scope expanded to include..." }
   ],
   "unchanged": ["topic-id-1", "topic-id-2"]
 }
@@ -137,6 +137,6 @@ For re-scans, output the diff as a JSON code block:
 
 - **Be selective** — only include topics genuinely relevant to the epic. Don't pad the scope.
 - **Prefer existing wiki pages** over new topics when coverage already exists.
-- **Match depth to need** — "outline" for peripheral context, "developed" for important areas, "deep" for core systems the epic will modify.
+- **Match depth to need** — "none"/"stub" for context-only items, "outline" for peripheral context, "developed" for important areas, "comprehensive" for core systems the epic will modify.
 - **Consider dependencies** — if the epic modifies authentication, include related middleware, session management, and token handling topics.
 - **Explain reasoning** — the engineer needs to understand why each topic is relevant to approve the scope.

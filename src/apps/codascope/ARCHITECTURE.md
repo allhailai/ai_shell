@@ -473,7 +473,7 @@ The Epic Design subsystem provides collaborative document authoring for software
 ### Epic Lifecycle
 
 ```
-defining → scoping → designing → in-review → approved → archived
+defining → curating → designing → in-review → approved → archived
 ```
 
 Health is computed at read-time (never stored): `active | hot | stale | blocked`.

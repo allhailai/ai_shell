@@ -2260,7 +2260,7 @@
   color: hsl(210, 60%, 65%);
 }
 
-.codascope-epic-status-badge--scoping {
+.codascope-epic-status-badge--curating {
   background: hsla(270, 50%, 50%, 0.15);
   color: hsl(270, 50%, 65%);
 }
@@ -2565,7 +2565,7 @@
   border-color: var(--color-accent-text);
 }
 
-/* ── Definition Empty State ──────────────────────────────────────────── */
+/* ── Definition Empty State — CTA Banner ─────────────────────────────── */
 
 .codascope-epic-define-empty {
   display: flex;
@@ -2574,24 +2574,137 @@
   min-height: 300px;
 }
 
-.codascope-epic-define-empty-icon {
-  font-size: 2.5rem;
-  margin-bottom: var(--space-3);
-}
-
-.codascope-epic-define-empty-actions {
+.codascope-epic-define-cta {
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
   gap: var(--space-3);
-  margin-top: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  max-width: 480px;
+  border-radius: var(--radius-lg);
+  position: relative;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  transition: border-color var(--transition-normal);
 }
 
-.codascope-epic-define-empty-hint {
+/* Animated gradient border for new epics */
+.codascope-epic-define-cta-new {
+  border-color: transparent;
+  background-clip: padding-box;
+}
+
+.codascope-epic-define-cta-new::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: calc(var(--radius-lg) + 2px);
+  padding: 2px;
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    hsl(280 80% 60%) 33%,
+    hsl(340 80% 55%) 66%,
+    var(--color-accent) 100%
+  );
+  background-size: 300% 300%;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: codascope-cta-gradient-pulse 4s ease infinite;
+  z-index: 0;
+}
+
+@keyframes codascope-cta-gradient-pulse {
+  0%, 100% {
+    background-position: 0% 50%;
+    opacity: 0.8;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+  }
+}
+
+.codascope-epic-define-cta-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+}
+
+.codascope-epic-define-cta h3 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.codascope-epic-define-cta p {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 360px;
+}
+
+.codascope-epic-define-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-2);
+  transition: all var(--transition-normal);
+}
+
+.codascope-epic-define-cta-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+.codascope-epic-define-cta-alt {
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
-  text-align: center;
-  max-width: 280px;
+}
+
+.codascope-btn-link {
+  background: none;
+  border: none;
+  color: var(--color-accent-text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--transition-fast);
+}
+
+.codascope-btn-link:hover {
+  color: var(--color-accent-hover);
+}
+
+/* ── Agent Hint / Refine Button ──────────────────────────────────────── */
+
+.codascope-epic-define-agent-hint {
+  display: flex;
+  align-items: center;
+}
+
+.codascope-epic-define-agent-hint .codascope-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 /* ── Scope View (P1) ─────────────────────────────────────────────────── */
@@ -2748,6 +2861,17 @@
   padding: 2px 8px;
 }
 
+.codascope-scope-depth-badge--none {
+  background: color-mix(in srgb, var(--color-text-tertiary) 8%, transparent);
+  color: var(--color-text-tertiary);
+  opacity: 0.7;
+}
+
+.codascope-scope-depth-badge--stub {
+  background: color-mix(in srgb, var(--color-text-tertiary) 12%, transparent);
+  color: var(--color-text-tertiary);
+}
+
 .codascope-scope-depth-badge--outline {
   background: color-mix(in srgb, var(--color-text-tertiary) 15%, transparent);
   color: var(--color-text-tertiary);
@@ -2758,7 +2882,7 @@
   color: var(--color-accent-text);
 }
 
-.codascope-scope-depth-badge--deep {
+.codascope-scope-depth-badge--comprehensive {
   background: color-mix(in srgb, var(--color-success-text, #4ade80) 15%, transparent);
   color: var(--color-success-text, #4ade80);
 }

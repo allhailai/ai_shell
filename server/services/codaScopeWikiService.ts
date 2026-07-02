@@ -1,11 +1,12 @@
 /* ── CodaScope: Wiki Service ──────────────────────────────────────────
    Manages wiki pages stored as markdown files in each project's
-   wiki/ directory. Handles topic listing, content read/write, and
-   index generation.
+   wiki/ directory. Handles topic listing, content read/write,
+   index generation, and pending deletion confirmation flow.
    ──────────────────────────────────────────────────────────────────── */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import type { PendingWikiDeletion } from "../../src/apps/codascope/codaScopeTypes.js";
 
 interface WikiTopic {
   id: string;
@@ -112,6 +113,88 @@ export class CodaScopeWikiService {
       const { unlinkSync } = await import("node:fs");
       unlinkSync(filePath);
     }
+  }
+
+  // ── Pending Wiki Deletions ────────────────────────────────────────
+
+  private pendingDeletionsPath(projectId: string): string | null {
+    const wikiDir = this.getWikiDir(projectId);
+    if (!wikiDir) return null;
+    return path.join(wikiDir, "pending-deletions.json");
+  }
+
+  private readPendingDeletions(projectId: string): PendingWikiDeletion[] {
+    const p = this.pendingDeletionsPath(projectId);
+    if (!p || !existsSync(p)) return [];
+    try {
+      return JSON.parse(readFileSync(p, "utf-8"));
+    } catch {
+      return [];
+    }
+  }
+
+  private writePendingDeletions(projectId: string, items: PendingWikiDeletion[]): void {
+    const p = this.pendingDeletionsPath(projectId);
+    if (!p) return;
+    const dir = path.dirname(p);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(p, JSON.stringify(items, null, 2), "utf-8");
+  }
+
+  /** Add a pending deletion request (does NOT delete the page). */
+  async addPendingDeletion(
+    projectId: string,
+    deletion: Omit<PendingWikiDeletion, "status">,
+  ): Promise<PendingWikiDeletion> {
+    const items = this.readPendingDeletions(projectId);
+
+    // If there's already a pending deletion for this topic, update it
+    const existing = items.find((d) => d.topicId === deletion.topicId && d.status === "pending");
+    if (existing) {
+      existing.reason = deletion.reason;
+      existing.requestedAt = deletion.requestedAt;
+      existing.requestedBy = deletion.requestedBy;
+      existing.epicId = deletion.epicId;
+      existing.curationId = deletion.curationId;
+      this.writePendingDeletions(projectId, items);
+      return existing;
+    }
+
+    const record: PendingWikiDeletion = { ...deletion, status: "pending" };
+    items.push(record);
+    this.writePendingDeletions(projectId, items);
+    return record;
+  }
+
+  /** List all pending deletions. */
+  async listPendingDeletions(projectId: string): Promise<PendingWikiDeletion[]> {
+    return this.readPendingDeletions(projectId).filter((d) => d.status === "pending");
+  }
+
+  /** Approve a pending deletion — actually deletes the page. */
+  async approveDeletion(projectId: string, topicId: string): Promise<boolean> {
+    const items = this.readPendingDeletions(projectId);
+    const item = items.find((d) => d.topicId === topicId && d.status === "pending");
+    if (!item) return false;
+
+    // Delete the actual page
+    await this.deleteTopic(projectId, topicId);
+
+    // Mark as approved
+    item.status = "approved";
+    this.writePendingDeletions(projectId, items);
+    return true;
+  }
+
+  /** Reject a pending deletion — page stays, record removed. */
+  async rejectDeletion(projectId: string, topicId: string): Promise<boolean> {
+    const items = this.readPendingDeletions(projectId);
+    const item = items.find((d) => d.topicId === topicId && d.status === "pending");
+    if (!item) return false;
+
+    item.status = "rejected";
+    this.writePendingDeletions(projectId, items);
+    return true;
   }
 
   // ── Extract title from markdown content ───────────────────────────

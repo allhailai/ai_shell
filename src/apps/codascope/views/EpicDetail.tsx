@@ -23,7 +23,7 @@ import type { EpicDesignDetail, EpicStatus } from "../codaScopeTypes";
 
 const STATUS_LABELS: Record<EpicStatus, string> = {
   defining: "Defining",
-  scoping: "Scoping",
+  curating: "Curating",
   designing: "Designing",
   "in-review": "In Review",
   approved: "Approved",

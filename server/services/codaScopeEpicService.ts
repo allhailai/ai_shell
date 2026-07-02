@@ -9,6 +9,8 @@
    - Edit lock management (acquire, release, check, auto-expire after 5 min)
    - Storage layout management (creates epics/ directory structure)
    - Epic health computation (derived from timestamps and annotation counts)
+   - Integration: initializes knowledge/ and curation/ dirs on creation,
+     fires curation reasons on definition changes
    ──────────────────────────────────────────────────────────────────── */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync, cpSync } from "node:fs";
@@ -27,6 +29,8 @@ import type {
   EpicDesignDoc,
   EpicVersion,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
+import { CodaScopeCurationService } from "./codaScopeCurationService.js";
 
 /* ── Storage Schema ────────────────────────────────────────────────── */
 
@@ -46,15 +50,21 @@ interface LockFile {
 
 export class CodaScopeEpicService {
   private root: string;
+  private knowledgeService: CodaScopeEpicKnowledgeService;
+  private curationService: CodaScopeCurationService;
   /** Lock expiry in milliseconds — 5 minutes */
   private static readonly LOCK_TTL_MS = 5 * 60 * 1000;
 
   constructor(root: string) {
     this.root = root;
+    this.knowledgeService = new CodaScopeEpicKnowledgeService(root);
+    this.curationService = new CodaScopeCurationService(root);
   }
 
   setRoot(root: string): void {
     this.root = root;
+    this.knowledgeService.setRoot(root);
+    this.curationService.setRoot(root);
   }
 
   /* ── Path helpers ──────────────────────────────────────────────────── */
@@ -193,6 +203,10 @@ export class CodaScopeEpicService {
 
     // Write empty definition
     writeFileSync(this.definitionPath(projectDir, id), "", "utf-8");
+
+    // Initialize knowledge/ and curation/ directory structures
+    this.knowledgeService.initializeKnowledgeDir(epicDirectory);
+    this.curationService.initializeCurationDir(epicDirectory);
 
     // Update index
     const index = this.readIndex(projectDir);
@@ -441,6 +455,15 @@ export class CodaScopeEpicService {
         this.writeIndex(projectDir, index);
       }
     }
+
+    // Fire curation reason for definition change
+    try {
+      await this.curationService.addReason(projectId, epicId, {
+        type: "definition_changed",
+        at: new Date().toISOString(),
+        detail: "Epic definition was updated",
+      });
+    } catch { /* non-fatal — curation dir may not exist for old epics */ }
 
     return true;
   }
