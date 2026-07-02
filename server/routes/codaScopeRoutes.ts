@@ -28,7 +28,13 @@ import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js
 import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
 import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.js";
+import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
+import { CodaScopeContentService } from "../services/codaScopeContentService.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import multer from "multer";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
 
 type HttpErrorFn = (message: string, status: number, code: string) => Error;
 
@@ -63,6 +69,13 @@ let annotationService: CodaScopeAnnotationService | null = null;
 let renderService: CodaScopeEpicRenderService | null = null;
 let epicKnowledgeService: CodaScopeEpicKnowledgeService | null = null;
 let curationService: CodaScopeCurationService | null = null;
+let contentService: CodaScopeContentService | null = null;
+
+/** Multer instance for file upload handling. */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+});
 
 const CONFIG_KEY = "codascope_projects_root";
 const APP_ID = "codascope";
@@ -94,6 +107,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   renderSvc: CodaScopeEpicRenderService;
   epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
   curationSvc: CodaScopeCurationService;
+  contentSvc: CodaScopeContentService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -152,6 +166,8 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   if (!curationService) curationService = new CodaScopeCurationService(root);
   else curationService.setRoot(root);
 
+  if (!contentService) contentService = new CodaScopeContentService();
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -171,6 +187,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     renderSvc: renderService,
     epicKnowledgeSvc: epicKnowledgeService,
     curationSvc: curationService,
+    contentSvc: contentService,
   };
 }
 
@@ -2292,29 +2309,64 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json({ markdown: content.markdown });
   }));
 
-  // Add source (placeholder for upload — full upload handling comes in Phase 5)
-  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/sources", wrap(async (req, res) => {
-    const { epicKnowledgeSvc } = await ensureServices(secretService, httpError);
+  // Add source via file upload (multipart/form-data)
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/sources", upload.single("file"), wrap(async (req, res) => {
+    const { epicKnowledgeSvc, curationSvc, contentSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { title, url, filename, contentType, type, origin, topicAssociations } = req.body as {
-      title?: string; url?: string; filename?: string; contentType?: string;
-      type?: string; origin?: string; topicAssociations?: string[];
-    };
-    if (!title || !filename) throw httpError("title and filename are required.", 400, "invalid_input");
+
+    // Support both multipart upload and JSON-only metadata
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    const title = (req.body.title as string) ?? file?.originalname ?? "Untitled";
+    const topicAssociations = req.body.topicAssociations
+      ? (typeof req.body.topicAssociations === "string"
+        ? JSON.parse(req.body.topicAssociations)
+        : req.body.topicAssociations) as string[]
+      : [];
+
+    // Create source entry
     const source = await epicKnowledgeSvc.addSource(id, epicId, {
       epicId,
-      type: (type as "machine" | "human") ?? "human",
-      origin: (origin as "download" | "upload" | "human-resolved") ?? "upload",
-      url: url ?? undefined,
-      filename,
-      contentType: contentType ?? "application/octet-stream",
+      type: "human",
+      origin: "upload",
+      url: (req.body.url as string) ?? undefined,
+      filename: file?.originalname ?? (req.body.filename as string) ?? "unknown",
+      contentType: file?.mimetype ?? (req.body.contentType as string) ?? "application/octet-stream",
       title,
-      status: "pending",
+      status: file ? "processing" : "pending",
       addedAt: new Date().toISOString(),
-      sizeBytesOriginal: 0,
-      topicAssociations: topicAssociations ?? [],
+      sizeBytesOriginal: file?.size ?? 0,
+      topicAssociations,
     });
+
+    // If a file was uploaded, store and extract
+    if (file) {
+      try {
+        const ext = path.extname(file.originalname).replace(/^\./, "") || "bin";
+        await epicKnowledgeSvc.storeOriginalFile(id, epicId, source.id, file.buffer, ext);
+
+        // Extract content to markdown — write to temp file first
+        const tmpPath = path.join(os.tmpdir(), `codascope-extract-${crypto.randomBytes(4).toString("hex")}.${ext}`);
+        const { writeFileSync: wfs } = await import("node:fs");
+        wfs(tmpPath, file.buffer);
+        const markdown = await contentSvc.extractToMarkdown(tmpPath, file.mimetype);
+
+        await epicKnowledgeSvc.storeExtractedMarkdown(id, epicId, source.id, markdown);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "ready");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Source extraction failed for ${source.id}: ${msg}`);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "error");
+      }
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "human_content_added",
+        at: new Date().toISOString(),
+        detail: `Human uploaded content: "${title}"`,
+      });
+    }
+
     res.status(201).json({ source });
   }));
 
@@ -2356,16 +2408,75 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     }
   }));
 
-  // Resolve a blocked download (placeholder — full upload handling in Phase 5)
-  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/blocked/:blockId/resolve", wrap(async (req, res) => {
-    const { epicKnowledgeSvc } = await ensureServices(secretService, httpError);
+  // Resolve a blocked download by uploading the content
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/blocked/:blockId/resolve", upload.single("file"), wrap(async (req, res) => {
+    const { epicKnowledgeSvc, curationSvc, contentSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const blockId = param(req, "blockId");
-    const { sourceId } = req.body as { sourceId?: string };
-    if (!sourceId) throw httpError("sourceId is required.", 400, "invalid_input");
-    await epicKnowledgeSvc.resolveBlockedDownload(id, epicId, blockId, sourceId);
-    res.json({ resolved: true });
+
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+
+    // Support both file upload and sourceId reference
+    if (file) {
+      const title = (req.body.title as string) ?? file.originalname ?? "Resolved content";
+
+      // Create a new source from the uploaded file
+      const source = await epicKnowledgeSvc.addSource(id, epicId, {
+        epicId,
+        type: "human",
+        origin: "human-resolved",
+        filename: file.originalname,
+        contentType: file.mimetype,
+        title,
+        status: "processing",
+        addedAt: new Date().toISOString(),
+        sizeBytesOriginal: file.size,
+        topicAssociations: [],
+      });
+
+      // Store original file
+      const ext = path.extname(file.originalname).replace(/^\./, "") || "bin";
+      await epicKnowledgeSvc.storeOriginalFile(id, epicId, source.id, file.buffer, ext);
+
+      // Extract content
+      try {
+        const tmpPath = path.join(os.tmpdir(), `codascope-resolve-${crypto.randomBytes(4).toString("hex")}.${ext}`);
+        const { writeFileSync: wfs } = await import("node:fs");
+        wfs(tmpPath, file.buffer);
+        const markdown = await contentSvc.extractToMarkdown(tmpPath, file.mimetype);
+        await epicKnowledgeSvc.storeExtractedMarkdown(id, epicId, source.id, markdown);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "ready");
+      } catch {
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "error");
+      }
+
+      // Mark blocked download as resolved
+      await epicKnowledgeSvc.resolveBlockedDownload(id, epicId, blockId, source.id);
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "blocked_download_resolved",
+        at: new Date().toISOString(),
+        detail: `Blocked download resolved with uploaded content: "${title}"`,
+      });
+
+      res.json({ resolved: true, sourceId: source.id });
+    } else {
+      // Fallback: accept sourceId in body (for linking an existing source)
+      const { sourceId } = req.body as { sourceId?: string };
+      if (!sourceId) throw httpError("Either a file upload or sourceId is required.", 400, "invalid_input");
+      await epicKnowledgeSvc.resolveBlockedDownload(id, epicId, blockId, sourceId);
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "blocked_download_resolved",
+        at: new Date().toISOString(),
+        detail: `Blocked download resolved with existing source: ${sourceId}`,
+      });
+
+      res.json({ resolved: true });
+    }
   }));
 
   // ── Epic Wiki (Research Synthesis) ─────────────────────────────────
@@ -2434,6 +2545,76 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     await epicKnowledgeSvc.updateResearchPlan(id, epicId, plan);
     res.json({ saved: true });
   }));
+
+  // ── Research Pipeline ─────────────────────────────────────────────
+
+  // Trigger research pipeline (SSE streaming)
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/research", async (req, res) => {
+    try {
+      const svcs = await ensureServices(secretService, httpError);
+      const id = param(req, "id");
+      const epicId = param(req, "epicId");
+      const { modelId, topics } = req.body as { modelId?: string; topics?: string[] };
+
+      if (!modelId) {
+        res.status(400).json({ error: "modelId is required." });
+        return;
+      }
+      if (!topics || topics.length === 0) {
+        res.status(400).json({ error: "topics array is required." });
+        return;
+      }
+
+      // Set up SSE
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let aborted = false;
+      req.on("close", () => { aborted = true; });
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (aborted) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const sendMessage = (msg: unknown) => {
+        if (aborted) return;
+        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+      };
+
+      sendEvent("research-started", { projectId: id, epicId, modelId, topics });
+
+      await runResearchPipeline(
+        { projectId: id, epicId, modelId, topics },
+        { sendEvent, sendMessage, isAborted: () => aborted },
+        {
+          agentSvc: svcs.agentSvc,
+          projectSvc: svcs.projectSvc,
+          epicSvc: svcs.epicSvc,
+          epicKnowledgeSvc: svcs.epicKnowledgeSvc,
+          curationSvc: svcs.curationSvc,
+          contentSvc: svcs.contentSvc,
+        },
+      );
+
+      if (!aborted) {
+        sendEvent("done", {});
+        res.end();
+      }
+    } catch (err) {
+      if (!res.headersSent) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: message });
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
+        res.end();
+      }
+    }
+  });
 
   // ── Curation ───────────────────────────────────────────────────────
 

@@ -29,7 +29,7 @@ export interface AgentSendOptions {
   modelId: string;
   systemPrompt?: string;
   context?: string;
-  purpose: "chat" | "assistant" | "wiki-build";
+  purpose: "chat" | "assistant" | "wiki-build" | "curation" | "research";
   onMessage: (msg: SDKMessage) => void;
   onDone: (result: RunResult) => void;
   onError: (err: Error) => void;

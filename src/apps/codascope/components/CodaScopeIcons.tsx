@@ -486,3 +486,37 @@ export function IconInsertContent({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Layered arrows with center dot — Curation/synthesis */
+export function IconCurate({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M3 8a5 5 0 018.5-3.5" />
+      <polyline points="11.5,2 11.5,4.5 9,4.5" />
+      <path d="M13 8a5 5 0 01-8.5 3.5" />
+      <polyline points="4.5,14 4.5,11.5 7,11.5" />
+      <circle cx="8" cy="8" r="1.25" />
+    </svg>
+  );
+}
+
+/** Checkmark circle — Success/complete */
+export function IconCheckCircle({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6" />
+      <polyline points="5.5,8 7.5,10 10.5,6" />
+    </svg>
+  );
+}
+
+/** Warning triangle — Error/warning */
+export function IconWarning({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 2L1.5 13h13L8 2z" />
+      <line x1="8" y1="6" x2="8" y2="9.5" />
+      <circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

@@ -30,7 +30,7 @@ import type { TopicDepth, CurationReasonType } from "../../src/apps/codascope/co
 
 // ── Types ───────────────────────────────────────────────────────────
 
-export type AgentPurpose = "chat" | "assistant" | "wiki-build" | "curation";
+export type AgentPurpose = "chat" | "assistant" | "wiki-build" | "curation" | "research";
 
 // ── Read-Only Tools ─────────────────────────────────────────────────
 
@@ -1047,17 +1047,18 @@ export function buildEpicTools(
         const epicId = args.epicId as string;
         const topics = args.topics as string[];
         if (!epicId || !topics?.length) return "epicId and topics are required.";
-        // Research pipeline is Phase 5 — return a helpful message
+        // Research pipeline runs via SSE — direct to the API
         return `Research pipeline for epic "${epicId}" on topics [${topics.join(", ")}] ` +
-          `should be triggered via the UI or the research API. ` +
+          `should be triggered via the UI or ` +
+          `POST /api/codascope/projects/${projectId}/epics/${epicId}/knowledge/research. ` +
           `The pipeline runs autonomously: plan → download → process.`;
       },
     },
 
     search_web: {
       description:
-        "Search the web for research content. Returns web search results that " +
-        "can inform research plans and epic wiki pages.",
+        "Search the web for research content. Returns web search results " +
+        "with titles, URLs, and snippets that can inform research plans.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1068,9 +1069,67 @@ export function buildEpicTools(
       execute: async (args) => {
         const query = args.query as string;
         if (!query) return "query is required.";
-        // Web search is Phase 5 — return a helpful message
-        return `Web search for "${query}" is not yet available. ` +
-          `The research pipeline (Phase 5) will implement web search capabilities.`;
+
+        try {
+          // Use DuckDuckGo HTML search as a free, no-API-key approach
+          const encodedQuery = encodeURIComponent(query);
+          const searchUrl = `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
+
+          const response = await fetch(searchUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (compatible; CodaScopeResearch/1.0)",
+              "Accept": "text/html",
+            },
+          });
+
+          if (!response.ok) {
+            return `Web search failed: HTTP ${response.status}. Try a different query.`;
+          }
+
+          const html = await response.text();
+
+          // Parse results from DuckDuckGo HTML response
+          const results: { title: string; url: string; snippet: string }[] = [];
+          const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+          let match;
+          while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
+            const rawUrl = match[1];
+            const title = match[2].replace(/<[^>]+>/g, "").trim();
+            const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+            // DuckDuckGo wraps URLs in a redirect — extract the actual URL
+            const urlMatch = rawUrl.match(/uddg=([^&]+)/);
+            const url = urlMatch ? decodeURIComponent(urlMatch[1]) : rawUrl;
+            if (url && title) {
+              results.push({ title, url, snippet });
+            }
+          }
+
+          if (results.length === 0) {
+            // Fallback: try simpler regex for different HTML structure
+            const simpleRegex = /<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+            while ((match = simpleRegex.exec(html)) !== null && results.length < 10) {
+              const url = match[1];
+              const title = match[2].replace(/<[^>]+>/g, "").trim();
+              if (url && title && url.startsWith("http")) {
+                results.push({ title, url, snippet: "" });
+              }
+            }
+          }
+
+          if (results.length === 0) {
+            return `No web search results found for "${query}". Try a different or broader query.`;
+          }
+
+          // Format results
+          const formatted = results.map((r, i) =>
+            `${i + 1}. **${r.title}**\n   URL: ${r.url}${r.snippet ? `\n   ${r.snippet}` : ""}`,
+          ).join("\n\n");
+
+          return `Web search results for "${query}":\n\n${formatted}`;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return `Web search failed: ${msg}. Try again or use a different query.`;
+        }
       },
     },
 
@@ -1367,7 +1426,7 @@ export function getToolsForPurpose(
     return { ...readOnly, ...write };
   }
 
-  if (purpose === "curation") {
+  if (purpose === "curation" || purpose === "research") {
     return { ...readOnly, ...epicTools };
   }
 

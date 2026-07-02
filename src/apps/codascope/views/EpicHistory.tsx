@@ -1,5 +1,6 @@
 /* ── CodaScope: EpicHistory View ─────────────────────────────────────
    The History tab content. Shows:
+   - Curation history (collapsible section)
    - Version timeline (vertical list, newest first)
    - Each version: number, label, note, author, timestamp, status badge
    - "Compare" button → diff view between two versions
@@ -9,7 +10,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DiffViewer } from "../components/DiffViewer";
-import type { EpicDesignDetail, EpicVersion, VersionDiff } from "../codaScopeTypes";
+import { IconCurate, IconCheckCircle, IconWarning, IconClock } from "../components/CodaScopeIcons";
+import type { EpicDesignDetail, EpicVersion, VersionDiff, CurationLogEntry, CurationResults } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -27,6 +29,58 @@ const VERSION_STATUS_LABELS: Record<string, string> = {
   superseded: "Superseded",
 };
 
+/* ── Curation helpers ────────────────────────────────────────────────── */
+
+const REASON_TYPE_LABELS: Record<string, string> = {
+  definition_changed: "Definition updated",
+  code_delta_processed: "Code changes",
+  research_sources_added: "Research sources",
+  human_content_added: "Human upload",
+  blocked_download_resolved: "Blocked resolved",
+  research_topics_changed: "Topics changed",
+  manual: "Manual",
+};
+
+function formatDuration(ms?: number): string {
+  if (!ms) return "—";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSec = seconds % 60;
+  return `${minutes}m ${remainSec}s`;
+}
+
+function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function summarizeResults(results?: CurationResults): string {
+  if (!results) return "No results recorded";
+  const parts: string[] = [];
+  const wikiEnriched = results.mainWiki.enriched.length;
+  const wikiCreated = results.mainWiki.created.length;
+  if (wikiEnriched > 0) parts.push(`${wikiEnriched} wiki page${wikiEnriched !== 1 ? "s" : ""} enriched`);
+  if (wikiCreated > 0) parts.push(`${wikiCreated} created`);
+
+  const epicCreated = results.epicWiki.created.length;
+  const epicUpdated = results.epicWiki.updated.length;
+  if (epicCreated + epicUpdated > 0) parts.push(`${epicCreated + epicUpdated} epic wiki`);
+
+  const scopeChanges = results.scope.added + results.scope.removed;
+  if (scopeChanges > 0) parts.push(`${scopeChanges} scope change${scopeChanges !== 1 ? "s" : ""}`);
+
+  const conceptChanges = results.concepts.created + results.concepts.enriched;
+  if (conceptChanges > 0) parts.push(`${conceptChanges} concept${conceptChanges !== 1 ? "s" : ""}`);
+
+  return parts.length > 0 ? parts.join(" · ") : "No changes";
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
@@ -42,7 +96,34 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
   const [diff, setDiff] = useState<VersionDiff | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
 
+  // Curation history state
+  const [curationLogs, setCurationLogs] = useState<CurationLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+  const [curationExpanded, setCurationExpanded] = useState(false);
+
   const versions = [...epic.versions].sort((a, b) => b.version - a.version);
+
+  /* ── Fetch curation logs ─────────────────────────────────────────────── */
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    let cancelled = false;
+    setLoadingLogs(true);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/curation/logs`,
+        );
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          setCurationLogs(data.logs ?? []);
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setLoadingLogs(false);
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, epic.id]);
 
   /* ── Create snapshot ───────────────────────────────────────────────── */
 
@@ -128,10 +209,117 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
     return <DiffViewer diff={diff} onClose={closeDiff} />;
   }
 
+  /* ── Sort curation logs newest first ───────────────────────────────── */
+
+  const sortedLogs = [...curationLogs].sort(
+    (a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime(),
+  );
+
   /* ── Main view ─────────────────────────────────────────────────────── */
 
   return (
     <div className="codascope-version-timeline">
+      {/* ── Curation History Section ─────────────────────────────────── */}
+      <div className="codascope-curation-history">
+        <button
+          className="codascope-curation-history-header"
+          onClick={() => setCurationExpanded(!curationExpanded)}
+          type="button"
+        >
+          <div className="codascope-curation-history-header-left">
+            <IconCurate size={14} />
+            <span className="codascope-curation-history-title">
+              Curation History
+            </span>
+            {!loadingLogs && (
+              <span className="codascope-curation-history-count">
+                {curationLogs.length} run{curationLogs.length !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+          <span className={`codascope-curation-history-chevron${curationExpanded ? " codascope-curation-history-chevron-open" : ""}`}>
+            ▸
+          </span>
+        </button>
+
+        {curationExpanded && (
+          <div className="codascope-curation-history-body">
+            {loadingLogs ? (
+              <p className="codascope-curation-history-loading">Loading curation logs…</p>
+            ) : sortedLogs.length === 0 ? (
+              <div className="codascope-curation-history-empty">
+                <IconCurate size={20} />
+                <p>No curation runs yet</p>
+                <span>Curation runs will appear here after they complete.</span>
+              </div>
+            ) : (
+              <div className="codascope-curation-log-list">
+                {sortedLogs.map((log) => (
+                  <div key={log.curationId} className="codascope-curation-log-card">
+                    <div className="codascope-curation-log-card-header">
+                      {/* Status icon */}
+                      <span className={`codascope-curation-log-status codascope-curation-log-status-${log.status}`}>
+                        {log.status === "running" && (
+                          <span className="codascope-curation-log-status-spinner">
+                            <IconCurate size={13} />
+                          </span>
+                        )}
+                        {log.status === "complete" && <IconCheckCircle size={13} />}
+                        {log.status === "error" && <IconWarning size={13} />}
+                      </span>
+
+                      {/* Timestamp + duration */}
+                      <span className="codascope-curation-log-time">
+                        {formatTimestamp(log.triggeredAt)}
+                      </span>
+                      {log.durationMs != null && (
+                        <span className="codascope-curation-log-duration">
+                          <IconClock size={11} />
+                          {formatDuration(log.durationMs)}
+                        </span>
+                      )}
+
+                      {/* Model */}
+                      <span className="codascope-curation-log-model" title={log.modelId}>
+                        {log.modelId.split("/").pop() ?? log.modelId}
+                      </span>
+                    </div>
+
+                    {/* Resolved reasons */}
+                    {log.resolvedReasons.length > 0 && (
+                      <div className="codascope-curation-log-reasons">
+                        <span className="codascope-curation-log-reasons-label">Triggers:</span>
+                        {log.resolvedReasons.map((r, i) => (
+                          <span key={`${r.type}-${i}`} className="codascope-curation-log-reason-tag">
+                            {REASON_TYPE_LABELS[r.type] ?? r.type}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Results summary */}
+                    {log.status === "complete" && (
+                      <div className="codascope-curation-log-results">
+                        {summarizeResults(log.results)}
+                      </div>
+                    )}
+
+                    {/* Error */}
+                    {log.status === "error" && log.error && (
+                      <div className="codascope-curation-log-error">
+                        {log.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Version Timeline Section ────────────────────────────────── */}
+
       {/* Header */}
       <div className="codascope-version-timeline-header">
         <span className="codascope-version-timeline-count">

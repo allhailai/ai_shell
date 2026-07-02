@@ -4707,3 +4707,531 @@
   font-weight: var(--weight-semibold);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   Curation UI — CurateButton, ReasonsModal, ProgressBanner, History
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── CurateButton ────────────────────────────────────────────────────── */
+
+.codascope-curate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid hsl(270 40% 35% / 0.4);
+  border-radius: var(--radius-md);
+  background: hsl(270 40% 20% / 0.25);
+  color: hsl(270, 50%, 72%);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.codascope-curate-btn:hover:not(:disabled) {
+  background: hsl(270 40% 25% / 0.4);
+  border-color: hsl(270 50% 50% / 0.5);
+  color: hsl(270, 60%, 80%);
+}
+
+.codascope-curate-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.codascope-curate-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+.codascope-curate-btn-spinning {
+  animation: codascope-curate-spin 1.2s linear infinite;
+}
+
+@keyframes codascope-curate-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.codascope-curate-btn-label {
+  line-height: 1;
+}
+
+.codascope-curate-btn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: hsl(270, 60%, 55%);
+  color: hsl(0, 0%, 100%);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.codascope-curate-btn-has-reasons .codascope-curate-btn-badge {
+  animation: codascope-curate-pulse 2s ease-in-out infinite;
+}
+
+@keyframes codascope-curate-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(270 60% 55% / 0.5); }
+  50% { box-shadow: 0 0 0 5px hsl(270 60% 55% / 0); }
+}
+
+.codascope-curate-btn-curating {
+  border-color: hsl(270 50% 45% / 0.5);
+  background: hsl(270 40% 22% / 0.35);
+}
+
+/* ── CurationReasonsModal ────────────────────────────────────────────── */
+
+.codascope-curation-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsl(0 0% 0% / 0.6);
+  backdrop-filter: blur(4px);
+  animation: codascope-modal-fade-in 0.15s ease-out;
+}
+
+.codascope-curation-modal-backdrop-closing {
+  animation: codascope-modal-fade-out 0.15s ease-in forwards;
+}
+
+@keyframes codascope-modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes codascope-modal-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.codascope-curation-modal {
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px hsl(0 0% 0% / 0.4);
+  animation: codascope-modal-slide-up 0.2s ease-out;
+  overflow: hidden;
+}
+
+.codascope-curation-modal-closing {
+  animation: codascope-modal-slide-down 0.15s ease-in forwards;
+}
+
+@keyframes codascope-modal-slide-up {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes codascope-modal-slide-down {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(12px); opacity: 0; }
+}
+
+.codascope-curation-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-curation-modal-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: hsl(270, 50%, 72%);
+}
+
+.codascope-curation-modal-header-left h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-curation-modal-close {
+  padding: var(--space-1);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-curation-modal-body {
+  padding: var(--space-3) var(--space-4);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.codascope-curation-modal-subtitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.codascope-curation-modal-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-curation-modal-reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid hsl(270, 50%, 50%);
+  font-size: var(--text-sm);
+}
+
+.codascope-curation-modal-reason-label {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-curation-modal-reason-detail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  flex-basis: 100%;
+}
+
+.codascope-curation-modal-reason-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.codascope-curation-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-curation-modal-curate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ── CurationProgressBanner ──────────────────────────────────────────── */
+
+.codascope-curation-progress {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  overflow: hidden;
+}
+
+.codascope-curation-progress-running {
+  background: hsl(270 40% 18% / 0.5);
+  border: 1px solid hsl(270 40% 35% / 0.3);
+  color: hsl(270, 50%, 78%);
+}
+
+.codascope-curation-progress-complete {
+  background: hsl(142 40% 14% / 0.5);
+  border: 1px solid hsl(142 40% 30% / 0.3);
+  color: hsl(142, 50%, 70%);
+}
+
+.codascope-curation-progress-error {
+  background: hsl(0 40% 14% / 0.5);
+  border: 1px solid hsl(0 40% 30% / 0.3);
+  color: hsl(0, 50%, 70%);
+}
+
+.codascope-curation-progress-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.codascope-curation-progress-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.codascope-curation-progress-spinner {
+  display: inline-flex;
+  animation: codascope-curate-spin 1.2s linear infinite;
+}
+
+.codascope-curation-progress-icon-success {
+  display: inline-flex;
+  color: var(--color-success);
+}
+
+.codascope-curation-progress-icon-error {
+  display: inline-flex;
+  color: var(--color-danger);
+}
+
+.codascope-curation-progress-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-curation-progress-error-msg {
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-curation-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: hsl(270 30% 25% / 0.4);
+  overflow: hidden;
+}
+
+.codascope-curation-progress-bar-fill {
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, hsl(270, 60%, 55%), hsl(270, 80%, 70%), hsl(270, 60%, 55%));
+  animation: codascope-progress-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes codascope-progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ── Curation History (in EpicHistory) ───────────────────────────────── */
+
+.codascope-curation-history {
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.codascope-curation-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-3) var(--space-3);
+  background: var(--color-bg-tertiary);
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.codascope-curation-history-header:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-curation-history-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: hsl(270, 50%, 72%);
+}
+
+.codascope-curation-history-title {
+  color: var(--color-text-primary);
+}
+
+.codascope-curation-history-count {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+}
+
+.codascope-curation-history-chevron {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+
+.codascope-curation-history-chevron-open {
+  transform: rotate(90deg);
+}
+
+.codascope-curation-history-body {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-curation-history-loading {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+.codascope-curation-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.codascope-curation-history-empty p {
+  margin: 0;
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.codascope-curation-history-empty span {
+  font-size: var(--text-xs);
+}
+
+.codascope-curation-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-curation-log-card {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.codascope-curation-log-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.codascope-curation-log-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.codascope-curation-log-status-complete {
+  color: var(--color-success);
+}
+
+.codascope-curation-log-status-error {
+  color: var(--color-danger);
+}
+
+.codascope-curation-log-status-running {
+  color: hsl(270, 50%, 65%);
+}
+
+.codascope-curation-log-status-spinner {
+  display: inline-flex;
+  animation: codascope-curate-spin 1.2s linear infinite;
+}
+
+.codascope-curation-log-time {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-curation-log-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-curation-log-model {
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-curation-log-reasons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.codascope-curation-log-reasons-label {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  margin-right: var(--space-1);
+}
+
+.codascope-curation-log-reason-tag {
+  display: inline-block;
+  padding: 1px var(--space-1);
+  background: hsl(270 30% 25% / 0.3);
+  border: 1px solid hsl(270 30% 35% / 0.2);
+  border-radius: var(--radius-sm);
+  color: hsl(270, 40%, 70%);
+  font-size: var(--text-2xs);
+}
+
+.codascope-curation-log-results {
+  margin-top: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.codascope-curation-log-error {
+  margin-top: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--text-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

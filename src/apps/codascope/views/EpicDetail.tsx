@@ -2,14 +2,14 @@
    Tabbed container for a single epic. Manages tab bar and renders
    the active tab component.
 
-   Tabs (P0 ships Define only — others show placeholder empty states):
+   Tabs:
    - Define  — definition document viewer (EpicDefine)
-   - Scope   — wiki scope & enrichment (P1)
-   - Design  — design documents (P2a)
-   - History  — version timeline (P2a)
+   - Scope   — wiki scope & enrichment
+   - Design  — design documents
+   - History  — version timeline + curation history
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { EpicDefine } from "./EpicDefine";
@@ -17,7 +17,10 @@ import { EpicScope } from "./EpicScope";
 import { EpicDesignDocs } from "./EpicDesignDocs";
 import { EpicHistory } from "./EpicHistory";
 import { EpicBriefExport } from "../components/EpicBriefExport";
-import type { EpicDesignDetail, EpicStatus } from "../codaScopeTypes";
+import { CurateButton } from "../components/CurateButton";
+import { CurationReasonsModal } from "../components/CurationReasonsModal";
+import { CurationProgressBanner } from "../components/CurationProgressBanner";
+import type { EpicDesignDetail, EpicStatus, CurationReason } from "../codaScopeTypes";
 
 /* ── Status badge helper ─────────────────────────────────────────────── */
 
@@ -29,6 +32,18 @@ const STATUS_LABELS: Record<EpicStatus, string> = {
   approved: "Approved",
   archived: "Archived",
 };
+
+/* ── Model ID helper ─────────────────────────────────────────────────── */
+
+const MODEL_STORAGE_KEY = "codascope:lastModel";
+
+function getLastModelId(): string | null {
+  try {
+    return localStorage.getItem(MODEL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /* ── Tab definitions ─────────────────────────────────────────────────── */
 
@@ -54,6 +69,13 @@ export function EpicDetail() {
   const [epic, setEpic] = useState<EpicDesignDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Curation state
+  const [curationReasons, setCurationReasons] = useState<CurationReason[]>([]);
+  const [isCurating, setIsCurating] = useState(false);
+  const [showCurationModal, setShowCurationModal] = useState(false);
+  const [curationModelId, setCurationModelId] = useState<string | null>(null);
+  const fetchReasonsRef = useRef(0); // generation counter to avoid stale fetches
 
   // Sync active epic to store
   useEffect(() => {
@@ -85,6 +107,35 @@ export function EpicDetail() {
     return () => { cancelled = true; };
   }, [activeProjectId, epicId]);
 
+  // Fetch curation reasons
+  const fetchCurationReasons = useCallback(async () => {
+    if (!activeProjectId || !epicId) return;
+    const gen = ++fetchReasonsRef.current;
+    try {
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics/${epicId}/curation/reasons`);
+      if (gen !== fetchReasonsRef.current) return;
+      if (res.ok) {
+        const data = await res.json();
+        setCurationReasons(data.reasons ?? []);
+      }
+    } catch {
+      // Silently fail — reasons are non-critical
+    }
+  }, [activeProjectId, epicId]);
+
+  useEffect(() => {
+    void fetchCurationReasons();
+  }, [fetchCurationReasons]);
+
+  // Periodically refresh reasons (every 60 seconds)
+  useEffect(() => {
+    if (!activeProjectId || !epicId) return;
+    const interval = setInterval(() => {
+      void fetchCurationReasons();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [activeProjectId, epicId, fetchCurationReasons]);
+
   const handleTabChange = useCallback((tab: EpicTab) => {
     if (activeProjectId && epicId) {
       navigate(`project/${activeProjectId}/epic/${epicId}/${tab}`);
@@ -96,6 +147,44 @@ export function EpicDetail() {
       navigate(`project/${activeProjectId}/epics`);
     }
   }, [navigate, activeProjectId]);
+
+  // ── Curation handlers ───────────────────────────────────────────────
+
+  const handleStartCuration = useCallback(() => {
+    const modelId = getLastModelId();
+    if (!modelId) {
+      // Fallback: open chat panel to let user select a model first
+      // For now, we'll still try — the backend will return an error if no model
+      alert("Please select a model in the chat assistant first (use the model picker).");
+      return;
+    }
+    setCurationModelId(modelId);
+    setIsCurating(true);
+    setShowCurationModal(false);
+  }, []);
+
+  const handleCurationComplete = useCallback(() => {
+    setIsCurating(false);
+    setCurationModelId(null);
+    // Refresh epic data and curation reasons
+    void fetchCurationReasons();
+    if (activeProjectId && epicId) {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics/${epicId}`);
+          if (res.ok) {
+            const data = await res.json();
+            setEpic(data.epic);
+          }
+        } catch { /* ignore */ }
+      })();
+    }
+  }, [activeProjectId, epicId, fetchCurationReasons]);
+
+  const handleCurationCancel = useCallback(() => {
+    setIsCurating(false);
+    setCurationModelId(null);
+  }, []);
 
   // ── Loading / Error ─────────────────────────────────────────────────
 
@@ -134,9 +223,27 @@ export function EpicDetail() {
           <span className={`codascope-epic-status-badge codascope-epic-status-badge--${epic.status}`}>
             {STATUS_LABELS[epic.status]}
           </span>
+          <CurateButton
+            epicId={epic.id}
+            reasonCount={curationReasons.length}
+            onCurate={handleStartCuration}
+            onShowReasons={() => setShowCurationModal(true)}
+            curating={isCurating}
+          />
           <EpicBriefExport epicId={epic.id} />
         </div>
       </div>
+
+      {/* Curation progress banner */}
+      {isCurating && activeProjectId && curationModelId && (
+        <CurationProgressBanner
+          projectId={activeProjectId}
+          epicId={epic.id}
+          modelId={curationModelId}
+          onComplete={handleCurationComplete}
+          onCancel={handleCurationCancel}
+        />
+      )}
 
       {/* Tab Bar */}
       <div className="codascope-epic-tab-bar">
@@ -161,22 +268,17 @@ export function EpicDetail() {
         {activeTab === "design" && <EpicDesignDocs epic={epic} setEpic={setEpic} />}
         {activeTab === "history" && <EpicHistory epic={epic} setEpic={setEpic} />}
       </div>
+
+      {/* Curation reasons modal */}
+      {showCurationModal && activeProjectId && (
+        <CurationReasonsModal
+          epicId={epic.id}
+          projectId={activeProjectId}
+          reasons={curationReasons}
+          onCurate={handleStartCuration}
+          onClose={() => setShowCurationModal(false)}
+        />
+      )}
     </div>
   );
 }
-
-
-/* ── Placeholder Tab ─────────────────────────────────────────────────── */
-
-function PlaceholderTab({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="codascope-empty-state">
-      <h3>{title}</h3>
-      <p style={{ maxWidth: 440, lineHeight: 1.6 }}>{description}</p>
-      <span className="codascope-epic-tab-coming-soon" style={{ fontSize: "var(--text-sm)", marginTop: "var(--space-2)" }}>
-        Coming in a future phase
-      </span>
-    </div>
-  );
-}
-
