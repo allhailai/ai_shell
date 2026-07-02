@@ -587,7 +587,7 @@ export function ProjectDashboard() {
                 className={`codascope-pipeline-step codascope-pipeline-step--${step.status}`}
               >
                 <div className="codascope-pipeline-step-icon">
-                  {stepIcon(step.status)}
+                  {stepIcon(step.status as PipelineStepStatus)}
                 </div>
                 <div className="codascope-pipeline-step-label">{step.label}</div>
                 {step.detail && (

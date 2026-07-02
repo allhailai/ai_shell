@@ -38,7 +38,6 @@ const DEPTH_LABELS: Record<string, string> = {
   comprehensive: "Comprehensive",
 };
 
-const DEPTH_ORDER: TopicDepth[] = ["none", "stub", "outline", "developed", "comprehensive"];
 
 function DepthBadge({ depth, size = "sm" }: { depth?: TopicDepth; size?: "sm" | "md" }) {
   if (!depth) return null;
@@ -80,7 +79,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
   const [scope, setScope] = useState<EpicScopeType>(
     epic.scope ?? { entries: [], lastScopedAt: null, lastScopedBy: null },
   );
-  const [loading, setLoading] = useState(false);
+  const [loading, _setLoading] = useState(false);
   const [deepening, setDeepening] = useState(false);
   const [deepenProgress, setDeepenProgress] = useState<string>("");
 

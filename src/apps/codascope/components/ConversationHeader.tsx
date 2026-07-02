@@ -30,7 +30,7 @@ export function ConversationHeader({
   activeTitle,
   conversations,
   disabled,
-  onNewConversation,
+  onNewConversation: _onNewConversation,
   onSelectConversation,
 }: {
   activeConversationId: string | undefined;
@@ -60,13 +60,6 @@ export function ConversationHeader({
     setFilter("");
     onSelectConversation(id);
     titleRef.current?.focus();
-  };
-
-  const handleNew = () => {
-    if (disabled) return;
-    setHistoryOpen(false);
-    setFilter("");
-    onNewConversation();
   };
 
   return (

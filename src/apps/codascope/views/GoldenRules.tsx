@@ -290,7 +290,7 @@ function AddRuleModal({
               Category
               <select className="codascope-form-select" value={category} onChange={(e) => setCategory(e.target.value)}>
                 {CATEGORIES.map((c) => (
-                  <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+                  <option key={c.key} value={c.key}>{c.label}</option>
                 ))}
               </select>
             </label>

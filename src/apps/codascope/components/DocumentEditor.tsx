@@ -10,7 +10,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
-import { IconAnnotation, IconCheckmark, IconInsert, IconRewrite, IconExpand, IconBolt } from "./CodaScopeIcons";
+import { IconAnnotation, IconCheckmark, IconRewrite, IconExpand, IconBolt } from "./CodaScopeIcons";
 import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, DirectiveType } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -551,7 +551,7 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
 
   /* ── Selection toolbar ───────────────────────────────────────────── */
 
-  const handleSelectionAction = useCallback((action: DirectiveType) => {
+  const handleSelectionAction = useCallback((_action: DirectiveType) => {
     if (!selectionInfo) return;
     // Open an insertion prompt for the selection
     setInsertionBlockId(selectionInfo.blockId);

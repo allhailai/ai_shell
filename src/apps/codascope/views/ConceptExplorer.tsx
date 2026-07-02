@@ -277,7 +277,7 @@ function AddConceptModal({
               onChange={(e) => setCategory(e.target.value)}
             >
               {CATEGORIES.filter((c) => c.key !== "all").map((c) => (
-                <option key={c.key} value={c.key}>{c.icon} {c.label}</option>
+                <option key={c.key} value={c.key}>{c.label}</option>
               ))}
             </select>
           </label>
