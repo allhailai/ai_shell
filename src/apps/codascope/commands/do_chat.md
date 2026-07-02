@@ -81,12 +81,26 @@ card the user can click to execute.
 ```
 
 Available types:
+
+**Core actions:**
 - **build_wiki_page** (topic="slug"): Generate a wiki page for a specific topic
 - **build_full_wiki**: Rebuild the entire wiki from the code map
 - **run_quality_scan**: Run a quality analysis against golden rules
 - **navigate** (view="viewname" topicId="optional"): Link to a CodaScope view
 - **create_golden_rule**: Suggest creating a new coding standard
 - **explore_codebase**: Run a lightweight codebase exploration
+
+**Epic actions:**
+- **create_epic**: Suggest creating a new epic (navigates to epics list)
+- **update_epic_definition** (epicId="id"): Navigate to edit an epic's definition
+- **scope_epic** (epicId="id"): Navigate to scope an epic's wiki topics
+- **deepen_wiki** (epicId="id"): Enrich wiki topics for an epic's scope
+- **create_design_doc** (epicId="id"): Navigate to create a design document
+- **update_design_doc** (epicId="id"): Navigate to edit a design document
+- **create_version** (epicId="id"): Navigate to create a version snapshot
+- **insert_content** (epicId="id"): Navigate to insert content via directive
+- **replace_content** (epicId="id"): Navigate to rewrite content via directive
+- **expand_content** (epicId="id"): Navigate to expand content via directive
 
 Guidelines:
 - Only suggest actions when genuinely helpful — don't spam action cards

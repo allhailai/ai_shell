@@ -101,7 +101,7 @@ The chat agent is built on a **manifest + tool use** architecture:
 - The agent receives a **lightweight manifest** (~500 tokens) — project name, repo list, wiki topic titles, golden rule names, concept names, quality score, build status, and freshness timestamps
 - The agent has **read-only tools** to fetch full content on demand (wiki pages, quality reports, code maps, etc.)
 - The agent **decides what to read** based on the user's question — it is not force-fed content
-- **Tool safety**: assistant/chat = read-only tools only. Wiki-build = read + write tools. Never mix these.
+- **Tool safety**: assistant/chat = ALL tools (full autonomy — read + write + epic). Wiki-build = read + write. Curation/research = read + epic tools.
 
 When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
@@ -190,3 +190,4 @@ Before marking work as complete:
 7. **Adding agent actions without updating the parser** — Both `codaScopeActionParser.ts` AND `ActionCard.tsx` need updates
 8. **Using `codascope-btn--primary` (BEM double-dash)** — Use flat single-dash convention: `codascope-btn-primary`, `codascope-btn-danger`, `codascope-btn-sm`
 9. **Duplicating SSE parsing logic** — Always import from `codaScopeSseClient.ts`, never inline
+10. **Not updating `do_chat.md` Available Actions** — When adding new action types to the parser and ActionCard, also update the Available Actions section in `do_chat.md` so the agent knows about them
