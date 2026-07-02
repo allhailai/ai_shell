@@ -84,15 +84,25 @@ function resolveChips(context: PromptChipContext): PromptChip[] {
 
       case "design":
         if (context.hasDefinition) {
-          chips.push({
-            label: "Suggest Design Docs",
-            prompt: "Based on the epic definition and scope, suggest which design documents we should create",
-            primary: true,
-          });
           if (context.hasCuratedKnowledge) {
             chips.push({
+              label: "Suggest Design Docs",
+              prompt: "Based on the epic definition, scope, and curated knowledge, suggest which design documents we should create and explain why each would be valuable",
+              primary: true,
+            });
+            chips.push({
               label: "Draft Based on Research",
-              prompt: "Create a design document draft based on the curated knowledge and research",
+              prompt: "Create a design document draft grounded in the curated knowledge and research — reference epic wiki pages, research sources, and relevant findings",
+            });
+            chips.push({
+              label: "Review \u0026 Annotate Design",
+              prompt: "Review the current design document against curated knowledge and scope. Use annotations to flag gaps, suggest improvements, and reference research findings. Be selective and meaningful.",
+            });
+          } else {
+            chips.push({
+              label: "Suggest Design Docs",
+              prompt: "Based on the epic definition and scope, suggest which design documents we should create",
+              primary: true,
             });
           }
         }

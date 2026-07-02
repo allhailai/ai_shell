@@ -17,6 +17,8 @@ export interface MessageContext {
   /** Epic context (when viewing an epic) */
   epicId?: string | null;
   epicTitle?: string | null;
+  /** Current epic tab (define/scope/knowledge/design/history) */
+  epicTab?: string | null;
 }
 
 /* ── Recent Views Ring Buffer ──────────────────────────────────────── */
@@ -89,6 +91,7 @@ export function assembleContext(
     filePath?: string | null;
     epicId?: string | null;
     epicTitle?: string | null;
+    epicTab?: string | null;
   },
 ): MessageContext | null {
   if (!urlSegments.length) return null;
@@ -103,6 +106,8 @@ export function assembleContext(
   // Epic context: extract epicId from URL /project/:id/epic/:epicId/...
   const epicId = view === "epic" ? (urlSegments[3] ?? options?.epicId ?? null) : null;
   const epicTitle = options?.epicTitle ?? null;
+  // Epic tab: /project/:id/epic/:epicId/:tab
+  const epicTab = view === "epic" ? (urlSegments[4] ?? options?.epicTab ?? "define") : null;
 
   // Record this view visit
   recordViewVisit(view, viewLabel(view, topicId, topicTitle, epicTitle));
@@ -117,5 +122,6 @@ export function assembleContext(
     projectId,
     epicId,
     epicTitle,
+    epicTab,
   };
 }

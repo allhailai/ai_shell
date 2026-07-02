@@ -883,7 +883,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
       const historyStr = formatConversationHistory(priorMessages);
 
-      // Format view context (enriched with topicTitle, filePath, recentViews, epicId)
+      // Format view context (enriched with topicTitle, filePath, recentViews, epicId, epicTab)
       const ctxRecord = context as Record<string, unknown> | undefined;
       const viewCtx: ViewContext | null = ctxRecord
         ? {
@@ -898,6 +898,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
             projectId: id,
             epicId: (ctxRecord.epicId as string) ?? null,
             epicTitle: (ctxRecord.epicTitle as string) ?? null,
+            epicTab: (ctxRecord.epicTab as string) ?? null,
           }
         : null;
       const viewStr = formatViewContext(viewCtx);
@@ -908,6 +909,34 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         try {
           const epicDetail = await epicSvc.getEpic(id, viewCtx.epicId);
           if (epicDetail) {
+            // Fetch knowledge + curation data in parallel (best-effort)
+            let epicWikiPages: Array<{ id: string; title: string }> = [];
+            let researchSourceSummary: { total: number; ready: number; pending: number; error: number } | undefined;
+            let curationSummary: { pendingReasonCount: number; lastCuratedAt: string | null; lastCurationStatus: string | null } | undefined;
+
+            try {
+              const { epicKnowledgeSvc, curationSvc } = await ensureServices(secretService, httpError);
+              const [wikiPages, sources, reasons, latestLog] = await Promise.all([
+                epicKnowledgeSvc.listEpicWikiPages(id, viewCtx.epicId),
+                epicKnowledgeSvc.listSources(id, viewCtx.epicId),
+                curationSvc.getReasons(id, viewCtx.epicId),
+                curationSvc.getLatestLog(id, viewCtx.epicId),
+              ]);
+              epicWikiPages = (wikiPages ?? []).map((p: { id: string; title: string }) => ({ id: p.id, title: p.title }));
+              const srcList = sources ?? [];
+              researchSourceSummary = {
+                total: srcList.length,
+                ready: srcList.filter((s: { status: string }) => s.status === "ready").length,
+                pending: srcList.filter((s: { status: string }) => s.status === "pending" || s.status === "processing").length,
+                error: srcList.filter((s: { status: string }) => s.status === "error").length,
+              };
+              curationSummary = {
+                pendingReasonCount: (reasons ?? []).length,
+                lastCuratedAt: latestLog?.completedAt ?? null,
+                lastCurationStatus: latestLog?.status ?? null,
+              };
+            } catch { /* knowledge/curation data is best-effort */ }
+
             const { buildEpicContext } = await import("../services/codaScopeChatOrchestrator.js");
             epicContextStr = "\n\n## Epic Context\n\n" + buildEpicContext({
               epicId: epicDetail.id,
@@ -917,6 +946,10 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
               scope: epicDetail.scope ? { entryCount: (epicDetail.scope.entries ?? []).length, lastScopedAt: epicDetail.scope.lastScopedAt } : null,
               designDocCount: (epicDetail.designDocs ?? []).length,
               conversationId: epicDetail.conversationId,
+              epicWikiPageCount: epicWikiPages.length,
+              epicWikiPageTitles: epicWikiPages,
+              researchSources: researchSourceSummary,
+              curation: curationSummary,
             });
           }
         } catch { /* epic context is best-effort */ }

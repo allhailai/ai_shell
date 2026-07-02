@@ -208,7 +208,7 @@ export function CodaScopeAssistant() {
     const epicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
     const activeEpic = epicId ? epics.find((e) => e.id === epicId) : null;
     const epicTitle = activeEpic?.title ?? null;
-    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle, epicId, epicTitle });
+    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle, epicId, epicTitle, epicTab: segments[2] === "epic" ? (segments[4] ?? "define") : null });
     if (!ctx) return undefined;
     return ctx;
   }, [segments, projectName, activeProjectId, wikiTopics, epics]);
@@ -217,6 +217,47 @@ export function CodaScopeAssistant() {
   const currentEpicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
   const currentEpic = currentEpicId ? epics.find((e) => e.id === currentEpicId) : null;
   const currentEpicIdRef = useRef<string | null>(null);
+
+  // ── Epic knowledge summary for prompt chips & context ──────────────
+  const [epicKnowledge, setEpicKnowledge] = useState<{
+    sourceCount: number;
+    wikiPageCount: number;
+    curationReasonCount: number;
+    wikiPageTitles: Array<{ id: string; title: string }>;
+  }>({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
+
+  useEffect(() => {
+    if (!activeProjectId || !currentEpicId) {
+      setEpicKnowledge({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        // Fetch sources, wiki pages, and curation reasons in parallel
+        const [sourcesRes, wikiRes, reasonsRes] = await Promise.all([
+          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/knowledge/sources`),
+          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/knowledge/wiki`),
+          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/curation/reasons`),
+        ]);
+        if (cancelled) return;
+        const sources = sourcesRes.ok ? await sourcesRes.json() : { sources: [] };
+        const wiki = wikiRes.ok ? await wikiRes.json() : { pages: [] };
+        const reasons = reasonsRes.ok ? await reasonsRes.json() : { reasons: [] };
+        setEpicKnowledge({
+          sourceCount: (sources.sources ?? []).length,
+          wikiPageCount: (wiki.pages ?? []).length,
+          curationReasonCount: (reasons.reasons ?? []).length,
+          wikiPageTitles: (wiki.pages ?? []).map((p: { id: string; title: string }) => ({ id: p.id, title: p.title })),
+        });
+      } catch {
+        if (!cancelled) {
+          setEpicKnowledge({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, currentEpicId]);
 
   // Auto-switch to epic conversation when navigating into an epic
   useEffect(() => {
@@ -665,14 +706,14 @@ export function CodaScopeAssistant() {
       currentView,
       hasDefinition: !!epicDetail?.definition,
       hasScope: !!(epicDetail?.scope?.entries && (epicDetail.scope.entries as unknown[]).length > 0),
-      hasResearch: false,          // Phase 5+
-      hasCuratedKnowledge: false,  // Phase 3+
-      curationReasonCount: 0,      // Phase 2+
+      hasResearch: epicKnowledge.sourceCount > 0,
+      hasCuratedKnowledge: epicKnowledge.wikiPageCount > 0,
+      curationReasonCount: epicKnowledge.curationReasonCount,
       epicStatus: (epicDetail?.status ?? null) as EpicStatus | null,
       epicTab,
       isEpicView: !!currentEpicId,
     };
-  }, [currentEpicId, currentEpic, segments]);
+  }, [currentEpicId, currentEpic, segments, epicKnowledge]);
 
   // ── Render ────────────────────────────────────────────────────────
 

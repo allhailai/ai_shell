@@ -57,6 +57,8 @@ export interface ViewContext {
   /** Epic context (when viewing an epic) */
   epicId?: string | null;
   epicTitle?: string | null;
+  /** Current epic tab (define/scope/knowledge/design/history) */
+  epicTab?: string | null;
 }
 
 /* ── Constants ──────────────────────────────────────────────────────── */
@@ -284,11 +286,20 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
 
     case "epic": {
       const epicLabel = ctx.epicTitle ? `"${ctx.epicTitle}"` : (ctx.epicId ?? "unknown");
+      const tabLabel = ctx.epicTab ?? "define";
       lines.push(
-        `The user is viewing epic ${epicLabel}${project}.`,
+        `The user is viewing epic ${epicLabel}${project}, currently on the **${tabLabel}** tab.`,
         `This is an epic design document. The user may ask you to help define, scope, or refine this epic.`,
         `Use the epic context below (if provided) to understand the current state of this epic.`,
       );
+      if (tabLabel === "design") {
+        lines.push(
+          `The user is on the Design tab. If curated knowledge or research exists, you can:`,
+          `- Suggest which design document templates are most relevant based on the epic's scope and definition`,
+          `- Draft design docs grounded in curated research (reference epic wiki pages and research sources)`,
+          `- Review existing design documents and use create_annotation to leave targeted feedback`,
+        );
+      }
       break;
     }
 
