@@ -520,3 +520,67 @@ export function IconWarning({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Open book — Knowledge/research */
+export function IconKnowledge({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 3c1.5-1 3.5-1 6 0v10c-2.5-1-4.5-1-6 0V3z" />
+      <path d="M14 3c-1.5-1-3.5-1-6 0v10c2.5-1 4.5-1 6 0V3z" />
+    </svg>
+  );
+}
+
+/** Upload arrow — File upload */
+export function IconUpload({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 11V3" />
+      <path d="M4.5 6.5L8 3l3.5 3.5" />
+      <path d="M3 13h10" />
+    </svg>
+  );
+}
+
+/** Download arrow — File download */
+export function IconDownload({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 3v8" />
+      <path d="M4.5 7.5L8 11l3.5-3.5" />
+      <path d="M3 13h10" />
+    </svg>
+  );
+}
+
+/** External link — Open in new tab */
+export function IconExternalLink({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M12 9v3.5a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1H7" />
+      <path d="M10 2.5h3.5V6" />
+      <path d="M7 9L13.5 2.5" />
+    </svg>
+  );
+}
+
+/** Eye — View/preview */
+export function IconEye({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}
+
+/** Shield with X — Blocked download */
+export function IconBlocked({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 1.5L2.5 4v4c0 3.5 2.5 5.5 5.5 6.5 3-1 5.5-3 5.5-6.5V4L8 1.5z" />
+      <path d="M6 6l4 4" />
+      <path d="M10 6l-4 4" />
+    </svg>
+  );
+}

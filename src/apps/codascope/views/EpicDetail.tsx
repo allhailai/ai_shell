@@ -3,10 +3,11 @@
    the active tab component.
 
    Tabs:
-   - Define  — definition document viewer (EpicDefine)
-   - Scope   — wiki scope & enrichment
-   - Design  — design documents
-   - History  — version timeline + curation history
+   - Define     — definition document viewer (EpicDefine)
+   - Scope      — wiki scope & enrichment
+   - Knowledge  — research sources, epic wiki, blocked downloads
+   - Design     — design documents
+   - History    — version timeline + curation history
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -14,6 +15,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { EpicDefine } from "./EpicDefine";
 import { EpicScope } from "./EpicScope";
+import { EpicKnowledge } from "./EpicKnowledge";
 import { EpicDesignDocs } from "./EpicDesignDocs";
 import { EpicHistory } from "./EpicHistory";
 import { EpicBriefExport } from "../components/EpicBriefExport";
@@ -47,11 +49,12 @@ function getLastModelId(): string | null {
 
 /* ── Tab definitions ─────────────────────────────────────────────────── */
 
-type EpicTab = "define" | "scope" | "design" | "history";
+type EpicTab = "define" | "scope" | "knowledge" | "design" | "history";
 
 const TABS: { id: EpicTab; label: string; enabled: boolean }[] = [
   { id: "define", label: "Define", enabled: true },
   { id: "scope", label: "Scope", enabled: true },
+  { id: "knowledge", label: "Knowledge", enabled: true },
   { id: "design", label: "Design", enabled: true },
   { id: "history", label: "History", enabled: true },
 ];
@@ -265,6 +268,7 @@ export function EpicDetail() {
       <div className="codascope-epic-tab-content">
         {activeTab === "define" && <EpicDefine epic={epic} setEpic={setEpic} />}
         {activeTab === "scope" && <EpicScope epic={epic} setEpic={setEpic} />}
+        {activeTab === "knowledge" && <EpicKnowledge epic={epic} setEpic={setEpic} />}
         {activeTab === "design" && <EpicDesignDocs epic={epic} setEpic={setEpic} />}
         {activeTab === "history" && <EpicHistory epic={epic} setEpic={setEpic} />}
       </div>
