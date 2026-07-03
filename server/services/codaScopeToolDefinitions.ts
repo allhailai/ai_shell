@@ -1427,8 +1427,9 @@ export function buildEpicTools(
           try { await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary); } catch { /* best effort */ }
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
+          if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
 
-          const resultText = `Updated design document "${updated.title}" — ${updated.wordCount} words. Summary: ${editSummary}\n\n` +
+          const resultText = `Updated design document "${updated.doc.title}" — ${updated.doc.wordCount} words. Summary: ${editSummary}\n\n` +
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;
@@ -1482,8 +1483,9 @@ export function buildEpicTools(
 
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, updatedContent);
           if (!updated) return `Failed to update design doc "${docId}".`;
+          if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
 
-          const resultText = `Updated lines ${startLine}-${endLine} of "${updated.title}". Summary: ${editSummary}\n\n` +
+          const resultText = `Updated lines ${startLine}-${endLine} of "${updated.doc.title}". Summary: ${editSummary}\n\n` +
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}" startLine="${startLine}" endLine="${endLine}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;

@@ -7,6 +7,8 @@
    - Design doc CRUD (create, read, update, delete, list)
    - Markdown file I/O with word/block count computation
    - Per-doc version history (create, list, get, revert)
+   - Server-side resize metadata mutation (mermaid height, image dimensions)
+   - Content hashing for optimistic concurrency control
    - Storage migration: flat <docId>.md → <docId>/content.md
 
    Storage layout (post-migration):
@@ -45,6 +47,12 @@ interface DesignDocVersionsIndex {
   versions: DesignDocVersion[];
   maxVersions: number;
 }
+
+/* ── Resize types ─────────────────────────────────────────────────── */
+
+export type ResizeOp =
+  | { type: "mermaid"; index: number; height: number }
+  | { type: "image"; index: number; width: number; height: number };
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
@@ -172,6 +180,11 @@ export class CodaScopeDesignDocService {
 
   /* ── Content helpers ──────────────────────────────────────────────── */
 
+  /** Compute a short SHA-256 hash of the given text (first 16 hex chars). */
+  private computeHash(text: string): string {
+    return crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
+  }
+
   /** Count words in markdown text. */
   private countWords(text: string): number {
     if (!text.trim()) return 0;
@@ -282,8 +295,8 @@ export class CodaScopeDesignDocService {
     return doc;
   }
 
-  /** Get design doc content (markdown). */
-  async getDesignDoc(projectId: string, epicId: string, docId: string): Promise<{ doc: EpicDesignDoc; content: string } | null> {
+  /** Get design doc content (markdown) with content hash for concurrency control. */
+  async getDesignDoc(projectId: string, epicId: string, docId: string): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -293,12 +306,24 @@ export class CodaScopeDesignDocService {
 
     const filePath = this.docPath(projectDir, epicId, docId);
     const content = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
+    const contentHash = this.computeHash(content);
 
-    return { doc, content };
+    return { doc, content, contentHash };
   }
 
-  /** Update design doc content. */
-  async updateDesignDoc(projectId: string, epicId: string, docId: string, content: string): Promise<EpicDesignDoc | null> {
+  /**
+   * Update design doc content.
+   * If `expectedHash` is provided, the update is rejected if the current
+   * on-disk content hash doesn't match (optimistic concurrency control).
+   * Returns `{ doc, contentHash }` on success, or `{ conflict: true, currentHash, currentContent }` on mismatch.
+   */
+  async updateDesignDoc(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    content: string,
+    expectedHash?: string,
+  ): Promise<{ doc: EpicDesignDoc; contentHash: string } | { conflict: true; currentHash: string; currentContent: string } | null> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -310,6 +335,16 @@ export class CodaScopeDesignDocService {
     const filePath = this.docPath(projectDir, epicId, docId);
     const docDirectory = path.dirname(filePath);
     if (!existsSync(docDirectory)) mkdirSync(docDirectory, { recursive: true });
+
+    // Optimistic concurrency check
+    if (expectedHash) {
+      const currentContent = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
+      const currentHash = this.computeHash(currentContent);
+      if (currentHash !== expectedHash) {
+        return { conflict: true, currentHash, currentContent };
+      }
+    }
+
     writeFileSync(filePath, content, "utf-8");
 
     // Update metadata
@@ -318,7 +353,8 @@ export class CodaScopeDesignDocService {
     doc.blockCount = this.countBlocks(content);
     this.writeIndex(projectDir, epicId, index);
 
-    return doc;
+    const contentHash = this.computeHash(content);
+    return { doc, contentHash };
   }
 
   /** Archive a design doc (soft delete — preserves file on disk). */
@@ -347,6 +383,87 @@ export class CodaScopeDesignDocService {
     delete doc.archivedAt;
     this.writeIndex(projectDir, epicId, index);
     return true;
+  }
+
+  /* ── Server-Side Resize ─────────────────────────────────────────────── */
+
+  /**
+   * Apply resize metadata to the document content server-side.
+   * Reads the current content.md from disk, applies the resize transformation,
+   * and writes it back. Does NOT create a version snapshot (resizes are cosmetic).
+   * Returns the updated content + hash, or null if the doc doesn't exist.
+   */
+  async applyResizeMetadata(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    resize: ResizeOp,
+  ): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    const index = this.readIndex(projectDir, epicId);
+    const doc = index.docs.find((d) => d.id === docId);
+    if (!doc) return null;
+
+    const filePath = this.docPath(projectDir, epicId, docId);
+    if (!existsSync(filePath)) return null;
+
+    let content = readFileSync(filePath, "utf-8");
+    let updated = false;
+
+    if (resize.type === "mermaid") {
+      const roundedHeight = Math.round(resize.height);
+      let mermaidIdx = 0;
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const fenceMatch = lines[i].match(/^(\s*(`{3,}|~{3,})\s*mermaid)\s*(?:\{height=\d+\})?\s*$/);
+        if (fenceMatch) {
+          if (mermaidIdx === resize.index) {
+            lines[i] = `${fenceMatch[1]} {height=${roundedHeight}}`;
+            updated = true;
+            break;
+          }
+          mermaidIdx++;
+        }
+      }
+      if (updated) content = lines.join("\n");
+    } else if (resize.type === "image") {
+      const rw = Math.round(resize.width);
+      const rh = Math.round(resize.height);
+      let imgIdx = 0;
+      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+      let match: RegExpExecArray | null;
+
+      while ((match = imgRegex.exec(content)) !== null) {
+        if (imgIdx === resize.index) {
+          const fullMatch = match[0];
+          let alt = match[1];
+          const url = match[2];
+          // Strip existing |WxH from alt
+          alt = alt.replace(/\|\d+x\d+$/, "").trim();
+          const newTag = `![${alt}|${rw}x${rh}](${url})`;
+          content = content.slice(0, match.index) + newTag + content.slice(match.index + fullMatch.length);
+          updated = true;
+          break;
+        }
+        imgIdx++;
+      }
+    }
+
+    if (!updated) return null;
+
+    // Write updated content (no version snapshot for resize)
+    writeFileSync(filePath, content, "utf-8");
+
+    // Update metadata
+    doc.updatedAt = new Date().toISOString();
+    doc.wordCount = this.countWords(content);
+    doc.blockCount = this.countBlocks(content);
+    this.writeIndex(projectDir, epicId, index);
+
+    const contentHash = this.computeHash(content);
+    return { doc, content, contentHash };
   }
 
   /* ── Bulk read (used by version service and getEpic) ──────────────── */
@@ -457,9 +574,9 @@ export class CodaScopeDesignDocService {
       projectId, epicId, docId, "user", `Reverted to version ${versionNum}`,
     );
 
-    // Write the reverted content
+    // Write the reverted content (no expectedHash — revert always wins)
     const updated = await this.updateDesignDoc(projectId, epicId, docId, target.content);
-    if (!updated) return null;
+    if (!updated || "conflict" in updated) return null;
 
     return { content: target.content, revertVersion };
   }

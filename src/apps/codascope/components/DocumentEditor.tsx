@@ -11,7 +11,7 @@ import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh } from "./CodaScopeIcons";
+import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh, IconWarning } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useEditorDiff } from "../hooks/useEditorDiff";
 import { useEditorResize } from "../hooks/useEditorResize";
@@ -23,7 +23,8 @@ interface DocumentEditorProps {
   epicId: string;
   doc: EpicDesignDoc;
   content: string;
-  onContentChange: (content: string) => void;
+  contentHash?: string;
+  onContentChange: (content: string, contentHash?: string) => void;
   onClose: () => void;
 }
 
@@ -38,7 +39,7 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function DocumentEditor({ epicId, doc, content, onContentChange, onClose }: DocumentEditorProps) {
+export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose }: DocumentEditorProps) {
   const { activeProjectId } = useCodaScopeStore();
   const commandBus = useCommandBus();
 
@@ -49,6 +50,10 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const [lockWarning, setLockWarning] = useState(false);
   const lastActivityRef = useRef(Date.now());
   const lockCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Content hash tracking for optimistic concurrency
+  const [contentHash, setContentHash] = useState<string | undefined>(initialContentHash);
+  const [conflictData, setConflictData] = useState<{ currentHash: string; currentContent: string } | null>(null);
 
   // P2b state
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -62,12 +67,18 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
 
   // Extracted hooks
   const { changedBlockIds, fadingBlockIds, trackContentChange } = useEditorDiff();
+
+  // Resize callback: updates content AND contentHash from server response
+  const handleResizeContentChange = useCallback((newContent: string, newHash: string) => {
+    setContentHash(newHash);
+    onContentChange(newContent, newHash);
+  }, [onContentChange]);
+
   const { handleMermaidResize, handleImageResize } = useEditorResize({
     activeProjectId,
     epicId,
     docId: doc.id,
-    content,
-    onContentChange,
+    onContentChange: handleResizeContentChange,
   });
 
   // Phase 4: Undo state
@@ -113,7 +124,8 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
         if (res.ok) {
           const data = await res.json();
           if (data.content !== undefined) {
-            onContentChange(data.content);
+            if (data.contentHash) setContentHash(data.contentHash);
+            onContentChange(data.content, data.contentHash);
           }
         }
         // Fetch the latest version list to get the pre-edit version number for undo
@@ -284,23 +296,30 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const saveAndClose = useCallback(async () => {
     if (!activeProjectId) return;
     setSaving(true);
+    setConflictData(null);
     try {
       const res = await fetch(
         `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: editContent }),
+          body: JSON.stringify({ content: editContent, expectedHash: contentHash }),
         },
       );
       if (res.ok) {
-        onContentChange(editContent);
+        const data = await res.json();
+        setContentHash(data.contentHash);
+        onContentChange(editContent, data.contentHash);
         setEditing(false);
         await releaseLock();
+      } else if (res.status === 409) {
+        // Conflict — document was modified since we loaded it
+        const data = await res.json();
+        setConflictData({ currentHash: data.currentHash, currentContent: data.currentContent });
       }
     } catch { /* ignore */ }
     setSaving(false);
-  }, [activeProjectId, epicId, doc.id, editContent, onContentChange, releaseLock]);
+  }, [activeProjectId, epicId, doc.id, editContent, contentHash, onContentChange, releaseLock]);
 
   const cancelEditing = useCallback(async () => {
     setEditing(false);
@@ -463,6 +482,26 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
       );
     }
 
+    // Count mermaid fences and images in a block's content
+    const countMermaidFences = (text: string): number => {
+      const matches = text.match(/^[ \t]*(?:`{3,}|~{3,})\s*mermaid/gm);
+      return matches ? matches.length : 0;
+    };
+    const countImages = (text: string): number => {
+      const matches = text.match(/!\[[^\]]*\]\([^)]+\)/g);
+      return matches ? matches.length : 0;
+    };
+
+    // Pre-compute cumulative offsets for each block
+    let mermaidOffset = 0;
+    let imageOffset = 0;
+    const blockOffsets = blocks.map((block) => {
+      const offset = { mermaid: mermaidOffset, image: imageOffset };
+      mermaidOffset += countMermaidFences(block.content);
+      imageOffset += countImages(block.content);
+      return offset;
+    });
+
     return (
       <div className="codascope-document-blocks">
         {blocks.map((block, idx) => {
@@ -478,6 +517,13 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
           const isChanged = changedBlockIds.has(block.blockId);
           const isFading = fadingBlockIds.has(block.blockId);
 
+          // Offset-adjusted resize callbacks for this block
+          const offsets = blockOffsets[idx];
+          const blockMermaidResize = (withinBlockIndex: number, height: number) =>
+            handleMermaidResize(offsets.mermaid + withinBlockIndex, height);
+          const blockImageResize = (withinBlockIndex: number, width: number, height: number) =>
+            handleImageResize(offsets.image + withinBlockIndex, width, height);
+
           return (
             <div key={block.blockId}>
               {/* Block with gutter */}
@@ -491,8 +537,8 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
                 <div className="codascope-document-block-content">
                   <MarkdownViewer
                     content={block.content}
-                    onMermaidResize={handleMermaidResize}
-                    onImageResize={handleImageResize}
+                    onMermaidResize={blockMermaidResize}
+                    onImageResize={blockImageResize}
                   />
                 </div>
 
@@ -691,6 +737,62 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
         <div className="codascope-lock-heartbeat-warning">
           <span className="codascope-lock-heartbeat-warning-icon">⚠️</span>
           Lock expires in less than 1 minute. Save your changes or type to extend.
+        </div>
+      )}
+
+      {/* Conflict resolution banner */}
+      {conflictData && (
+        <div className="codascope-conflict-banner">
+          <div className="codascope-conflict-banner-text">
+            <IconWarning size={14} />
+            <span>This document was modified by another user or agent. Your save was blocked to prevent overwriting their changes.</span>
+          </div>
+          <div className="codascope-conflict-banner-actions">
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              type="button"
+              onClick={() => {
+                // Reload: accept the server version
+                setEditContent(conflictData.currentContent);
+                setContentHash(conflictData.currentHash);
+                onContentChange(conflictData.currentContent, conflictData.currentHash);
+                setConflictData(null);
+                setEditing(false);
+                void releaseLock();
+              }}
+            >
+              Reload
+            </button>
+            <button
+              className="codascope-btn codascope-btn-danger codascope-btn-sm"
+              type="button"
+              onClick={async () => {
+                // Force save: retry without expectedHash
+                setConflictData(null);
+                setSaving(true);
+                try {
+                  const res = await fetch(
+                    `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}`,
+                    {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ content: editContent }),
+                    },
+                  );
+                  if (res.ok) {
+                    const data = await res.json();
+                    setContentHash(data.contentHash);
+                    onContentChange(editContent, data.contentHash);
+                    setEditing(false);
+                    await releaseLock();
+                  }
+                } catch { /* ignore */ }
+                setSaving(false);
+              }}
+            >
+              Force Save
+            </button>
+          </div>
         </div>
       )}
 

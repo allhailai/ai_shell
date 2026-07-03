@@ -384,7 +384,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const docId = param(req, "docId");
     const result = await designDocSvc.getDesignDoc(id, epicId, docId);
     if (!result) throw httpError("Design doc not found.", 404, "not_found");
-    res.json(result);
+    res.json(result); // includes { doc, content, contentHash }
   }));
 
   // Update design doc content (manual save — creates a version snapshot)
@@ -393,15 +393,48 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const { content } = req.body as { content?: string };
+    const { content, expectedHash } = req.body as { content?: string; expectedHash?: string };
     if (content === undefined || typeof content !== "string") {
       throw httpError("content is required.", 400, "invalid_input");
     }
     // Create a version snapshot before saving (best effort — don't fail the save)
     try { await designDocSvc.createVersion(id, epicId, docId, "user", "Manual save"); } catch { /* ignore */ }
-    const doc = await designDocSvc.updateDesignDoc(id, epicId, docId, content);
-    if (!doc) throw httpError("Design doc not found.", 404, "not_found");
-    res.json({ doc });
+    const result = await designDocSvc.updateDesignDoc(id, epicId, docId, content, expectedHash);
+    if (!result) throw httpError("Design doc not found.", 404, "not_found");
+    if ("conflict" in result) {
+      res.status(409).json({
+        error: "conflict",
+        message: "Document was modified by another user or agent since you loaded it.",
+        currentHash: result.currentHash,
+        currentContent: result.currentContent,
+      });
+      return;
+    }
+    res.json({ doc: result.doc, contentHash: result.contentHash });
+  }));
+
+  // Resize metadata — server-side atomic mutation (no lock, no version snapshot)
+  app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/resize", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const resize = req.body as { type: string; index: number; width?: number; height?: number };
+    if (!resize || !resize.type || resize.index === undefined) {
+      throw httpError("type and index are required.", 400, "invalid_input");
+    }
+    if (resize.type === "mermaid" && resize.height === undefined) {
+      throw httpError("height is required for mermaid resize.", 400, "invalid_input");
+    }
+    if (resize.type === "image" && (resize.width === undefined || resize.height === undefined)) {
+      throw httpError("width and height are required for image resize.", 400, "invalid_input");
+    }
+    const resizeOp = resize.type === "mermaid"
+      ? { type: "mermaid" as const, index: resize.index, height: resize.height! }
+      : { type: "image" as const, index: resize.index, width: resize.width!, height: resize.height! };
+    const result = await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);
+    if (!result) throw httpError("Design doc not found or resize target not found.", 404, "not_found");
+    res.json({ doc: result.doc, content: result.content, contentHash: result.contentHash });
   }));
 
   // Archive design doc (soft delete)

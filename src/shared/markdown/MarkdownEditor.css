@@ -229,11 +229,12 @@
 /* ── Resizable Mermaid Container (Viewer) ────────────────────────────── */
 
 .shared-md-mermaid-rendered-pre {
-  margin: 0 0 var(--space-4);
+  margin: 0 auto var(--space-4);
   padding: 0;
   border: none;
   background: transparent;
   overflow: visible;
+  max-width: fit-content;
 }
 
 .shared-md-viewer .shared-md-mermaid-resizable {
@@ -321,6 +322,11 @@
 .shared-md-image-resizable {
   display: inline-block;
   position: relative;
+}
+
+/* Center images within paragraphs */
+.shared-md-viewer p:has(.shared-md-image-resizable) {
+  text-align: center;
 }
 
 .shared-md-image-resize-handle {

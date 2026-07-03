@@ -28,7 +28,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
   const { getParam, setParam } = useAppSubRoute("codascope");
 
-  const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string } | null>(null);
+  const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string; contentHash?: string } | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -75,7 +75,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         );
         if (res.ok) {
           const data = await res.json();
-          setActiveDoc({ doc: data.doc, content: data.content });
+          setActiveDoc({ doc: data.doc, content: data.content, contentHash: data.contentHash });
         }
       } catch { /* ignore — doc may have been deleted */ }
     })();
@@ -95,7 +95,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         );
         if (res.ok) {
           const result = await res.json();
-          setActiveDoc({ doc: result.doc, content: result.content });
+          setActiveDoc({ doc: result.doc, content: result.content, contentHash: result.contentHash });
           setParam("doc", data.docId);
           // Refresh the epic doc list
           const listRes = await fetch(
@@ -125,7 +125,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
       );
       if (res.ok) {
         const data = await res.json();
-        setActiveDoc({ doc: data.doc, content: data.content });
+        setActiveDoc({ doc: data.doc, content: data.content, contentHash: data.contentHash });
         setParam("doc", doc.id);
       }
     } catch { /* ignore */ }
@@ -173,11 +173,11 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     setArchiving(null);
   }, [activeProjectId, epic, setEpic]);
 
-  const handleContentChange = useCallback((newContent: string) => {
+  const handleContentChange = useCallback((newContent: string, newContentHash?: string) => {
     if (!activeDoc) return;
     const wordCount = newContent.trim() ? newContent.trim().split(/\s+/).length : 0;
     const updatedDoc = { ...activeDoc.doc, wordCount, updatedAt: new Date().toISOString() };
-    setActiveDoc({ doc: updatedDoc, content: newContent });
+    setActiveDoc({ doc: updatedDoc, content: newContent, contentHash: newContentHash ?? activeDoc.contentHash });
     setEpic({
       ...epic,
       designDocs: epic.designDocs.map((d) => d.id === updatedDoc.id ? updatedDoc : d),
@@ -248,6 +248,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         epicId={epic.id}
         doc={activeDoc.doc}
         content={activeDoc.content}
+        contentHash={activeDoc.contentHash}
         onContentChange={handleContentChange}
         onClose={() => { setActiveDoc(null); setParam("doc", null); }}
       />

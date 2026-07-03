@@ -1,17 +1,17 @@
 /* ── useEditorResize ────────────────────────────────────────────────
    Mermaid diagram and image resize handlers for the DocumentEditor.
-   Updates markdown source (fence metadata or alt-text dimensions)
-   and auto-persists changes to the server API.
+   Delegates resize mutations to the server-side PATCH endpoint, which
+   reads → mutates → writes content.md atomically. This eliminates
+   stale-closure bugs and ensures resizes persist across page refresh.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 interface UseEditorResizeOptions {
   activeProjectId: string | null;
   epicId: string;
   docId: string;
-  content: string;
-  onContentChange: (content: string) => void;
+  onContentChange: (content: string, contentHash: string) => void;
 }
 
 interface UseEditorResizeResult {
@@ -23,93 +23,66 @@ export function useEditorResize({
   activeProjectId,
   epicId,
   docId,
-  content,
   onContentChange,
 }: UseEditorResizeOptions): UseEditorResizeResult {
+  // Use refs for values that change frequently to avoid re-creating callbacks
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+  const onContentChangeRef = useRef(onContentChange);
+  onContentChangeRef.current = onContentChange;
+
   /**
-   * When user drags a mermaid resize handle, update the markdown source
-   * with {height=N} on the corresponding fence line and auto-save.
+   * When user drags a mermaid resize handle, send a PATCH to the server
+   * which atomically reads content.md, inserts {height=N} on the matching
+   * fence line, and writes it back. The server returns the updated content.
    */
   const handleMermaidResize = useCallback(async (index: number, height: number) => {
-    if (!activeProjectId) return;
-    const roundedHeight = Math.round(height);
-    let mermaidIdx = 0;
-    const lines = content.split("\n");
-    let updated = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fenceMatch = line.match(/^(\s*(`{3,}|~{3,})\s*mermaid)\s*(?:\{height=\d+\})?\s*$/);
-      if (fenceMatch) {
-        if (mermaidIdx === index) {
-          // Replace or insert {height=N}
-          lines[i] = `${fenceMatch[1]} {height=${roundedHeight}}`;
-          updated = true;
-          break;
-        }
-        mermaidIdx++;
-      }
-    }
-    if (!updated) return;
-    const newContent = lines.join("\n");
-    onContentChange(newContent);
-    // Persist to server
+    const projId = activeProjectIdRef.current;
+    if (!projId) return;
     try {
-      await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${docId}`,
+      const res = await fetch(
+        `/api/codascope/projects/${projId}/epics/${epicId}/designs/${docId}/resize`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: newContent }),
+          body: JSON.stringify({ type: "mermaid", index, height: Math.round(height) }),
         },
       );
+      if (res.ok) {
+        const data = await res.json();
+        onContentChangeRef.current(data.content, data.contentHash);
+      }
     } catch { /* best effort */ }
-  }, [activeProjectId, epicId, docId, content, onContentChange]);
+  }, [epicId, docId]);
 
   /**
-   * When user drags an image resize handle, update the markdown source
-   * with |WxH in the alt text (Obsidian convention) and auto-save.
+   * When user drags an image resize handle, send a PATCH to the server
+   * which atomically reads content.md, updates |WxH in the alt text
+   * (Obsidian convention), and writes it back.
    */
   const handleImageResize = useCallback(async (index: number, width: number, height: number) => {
-    if (!activeProjectId) return;
-    const rw = Math.round(width);
-    const rh = Math.round(height);
-    // Find the Nth image in the markdown
-    let imgIdx = 0;
-    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-    let match: RegExpExecArray | null;
-    const replacements: { from: number; to: number; replacement: string }[] = [];
-
-    while ((match = imgRegex.exec(content)) !== null) {
-      if (imgIdx === index) {
-        const fullMatch = match[0];
-        let alt = match[1];
-        const url = match[2];
-        // Strip existing |WxH from alt
-        alt = alt.replace(/\|\d+x\d+$/, "").trim();
-        const newTag = `![${alt}|${rw}x${rh}](${url})`;
-        replacements.push({ from: match.index, to: match.index + fullMatch.length, replacement: newTag });
-        break;
-      }
-      imgIdx++;
-    }
-
-    if (replacements.length === 0) return;
-    // Apply replacements (only one for now)
-    const r = replacements[0];
-    const newContent = content.slice(0, r.from) + r.replacement + content.slice(r.to);
-    onContentChange(newContent);
-    // Persist to server
+    const projId = activeProjectIdRef.current;
+    if (!projId) return;
     try {
-      await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${docId}`,
+      const res = await fetch(
+        `/api/codascope/projects/${projId}/epics/${epicId}/designs/${docId}/resize`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: newContent }),
+          body: JSON.stringify({
+            type: "image",
+            index,
+            width: Math.round(width),
+            height: Math.round(height),
+          }),
         },
       );
+      if (res.ok) {
+        const data = await res.json();
+        onContentChangeRef.current(data.content, data.contentHash);
+      }
     } catch { /* best effort */ }
-  }, [activeProjectId, epicId, docId, content, onContentChange]);
+  }, [epicId, docId]);
 
   return { handleMermaidResize, handleImageResize };
 }

@@ -166,12 +166,17 @@ describe("CodaScopeDesignDocService", () => {
       );
 
       expect(updated).not.toBeNull();
-      expect(updated!.wordCount).toBeGreaterThan(created.wordCount);
-      expect(updated!.blockCount).toBeGreaterThan(created.blockCount);
+      expect("conflict" in updated!).toBe(false);
+      const result = updated as { doc: any; contentHash: string };
+      expect(result.doc.wordCount).toBeGreaterThan(created.wordCount);
+      expect(result.doc.blockCount).toBeGreaterThan(created.blockCount);
+      expect(result.contentHash).toBeDefined();
+      expect(typeof result.contentHash).toBe("string");
 
       // Verify content persisted
       const read = await svc.getDesignDoc("proj-update", "epic-update", created.id);
       expect(read!.content).toContain("Updated Title");
+      expect(read!.contentHash).toBe(result.contentHash);
     });
 
     it("returns null for nonexistent doc", async () => {
