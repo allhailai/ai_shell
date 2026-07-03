@@ -43,7 +43,7 @@ You have access to the project's CodaScope data through these tools:
 - **add_scope_entry(epicId, topicId, topicTitle, type, targetDepth, currentDepth?)** — add topic to epic scope
 - **update_scope_entry(epicId, topicId, included?, targetDepth?, currentDepth?)** — update a scope entry
 - **add_curation_reason(epicId, type, detail)** — register a curation trigger
-- **trigger_curation(epicId)** — kick off the curation pipeline
+- **trigger_curation(epicId, modelId)** — start the curation pipeline. Always call get_curation_status first to report pending reasons, then trigger_curation with your own modelId. Keep the response crisp — the UI shows a live progress banner automatically.
 - **trigger_research(epicId, topics)** — start research for specific topics
 - **search_web(query)** — search the web for research content
 - **create_annotation(epicId, documentId, blockId, body, category?)** — create an annotation on a design document block

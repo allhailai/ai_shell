@@ -1,7 +1,12 @@
 /* ── CodaScope: CurationProgressBanner ───────────────────────────────
    Inline progress banner shown below the tab bar during an active
-   curation run. Connects to the curation SSE endpoint and displays
-   live step-by-step updates.
+   curation run. Two modes:
+
+   1. SSE mode (default): Connects to the curation SSE endpoint, starts
+      a new run, and displays live step-by-step updates.
+   2. Reconnect mode (reconnect=true): Polls the build-status API to
+      track an already-running curation build (e.g., after page refresh
+      or when triggered by the chat agent).
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -16,9 +21,71 @@ interface CurationProgressBannerProps {
   modelId: string;
   onComplete: () => void;
   onCancel: () => void;
+  /** If true, poll build-status instead of starting a new SSE stream */
+  reconnect?: boolean;
 }
 
 type BannerState = "running" | "complete" | "error";
+
+/* ── Reconnect Polling ───────────────────────────────────────────────── */
+
+function useReconnectPolling(
+  projectId: string,
+  epicId: string,
+  enabled: boolean,
+  onStepUpdate: (text: string) => void,
+  onComplete: () => void,
+  onError: (msg: string) => void,
+) {
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${projectId}/build-status?scope=curation::${epicId}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const build = data.build;
+
+        if (!build) {
+          // No build found — curation may have completed before we started polling
+          onComplete();
+          return;
+        }
+
+        if (build.status === "building") {
+          // Extract latest pipeline step for display
+          const steps = build.pipelineSteps;
+          if (Array.isArray(steps) && steps.length > 0) {
+            const latest = steps[steps.length - 1];
+            const desc = latest.detail ?? latest.label ?? latest.id ?? "Processing…";
+            onStepUpdate(desc);
+          } else {
+            onStepUpdate("Curation in progress…");
+          }
+        } else if (build.status === "complete") {
+          onComplete();
+        } else if (build.status === "error") {
+          onError(build.error ?? "Curation failed");
+        }
+      } catch {
+        // Network error — keep polling
+      }
+    };
+
+    // Initial poll immediately
+    void poll();
+    intervalRef.current = setInterval(() => void poll(), 3000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [projectId, epicId, enabled, onStepUpdate, onComplete, onError]);
+}
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
@@ -28,14 +95,46 @@ export function CurationProgressBanner({
   modelId,
   onComplete,
   onCancel,
+  reconnect = false,
 }: CurationProgressBannerProps) {
   const [state, setState] = useState<BannerState>("running");
-  const [stepText, setStepText] = useState("Initializing curation…");
+  const [stepText, setStepText] = useState(
+    reconnect ? "Curation in progress…" : "Initializing curation…",
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
-  // Connect to SSE on mount
+  // ── Reconnect polling callbacks (stable refs) ─────────────────────
+  const handleReconnectStep = useCallback((text: string) => {
+    setStepText(text);
+  }, []);
+
+  const handleReconnectComplete = useCallback(() => {
+    setState("complete");
+    setStepText("Curation complete");
+    setTimeout(onComplete, 3000);
+  }, [onComplete]);
+
+  const handleReconnectError = useCallback((msg: string) => {
+    setState("error");
+    setErrorMsg(msg);
+    setStepText("Curation failed");
+  }, []);
+
+  // ── Reconnect mode: poll build-status ─────────────────────────────
+  useReconnectPolling(
+    projectId,
+    epicId,
+    reconnect && state === "running",
+    handleReconnectStep,
+    handleReconnectComplete,
+    handleReconnectError,
+  );
+
+  // ── SSE mode: connect to SSE on mount ─────────────────────────────
   useEffect(() => {
+    if (reconnect) return; // Skip SSE in reconnect mode
+
     const url = `/api/codascope/projects/${projectId}/epics/${epicId}/curation/run`;
 
     const controller = connectToSseStream(
@@ -73,7 +172,7 @@ export function CurationProgressBanner({
     return () => {
       controller.abort();
     };
-  }, [projectId, epicId, modelId, onComplete]);
+  }, [projectId, epicId, modelId, onComplete, reconnect]);
 
   const handleCancel = useCallback(() => {
     controllerRef.current?.abort();

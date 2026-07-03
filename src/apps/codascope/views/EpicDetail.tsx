@@ -98,11 +98,11 @@ export function EpicDetail() {
     () => section === "knowledge",
   );
 
-  // ── Curation state ───────────────────────────────────────────────────
   const [curationReasons, setCurationReasons] = useState<CurationReason[]>([]);
   const [isCurating, setIsCurating] = useState(false);
   const [showCurationModal, setShowCurationModal] = useState(false);
   const [curationModelId, setCurationModelId] = useState<string | null>(null);
+  const [curationReconnect, setCurationReconnect] = useState(false);
   const fetchReasonsRef = useRef(0);
 
   // ── Knowledge data (lifted from EpicKnowledge) ───────────────────────
@@ -248,6 +248,29 @@ export function EpicDetail() {
     void fetchBlocked();
   }, [fetchWikiPages, fetchSources, fetchBlocked]);
 
+  // ── Detect running curation on mount (survives refresh) ──────────────
+  useEffect(() => {
+    if (!activeProjectId || !epicId || isCurating) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/build-status?scope=curation::${epicId}`,
+        );
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.build?.status === "building") {
+            setCurationModelId(data.build.modelId ?? null);
+            setCurationReconnect(true);
+            setIsCurating(true);
+          }
+        }
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, epicId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Navigation handlers ──────────────────────────────────────────────
   const handleBack = useCallback(() => {
     if (activeProjectId) {
@@ -284,6 +307,7 @@ export function EpicDetail() {
       return;
     }
     setCurationModelId(modelId);
+    setCurationReconnect(false);
     setIsCurating(true);
     setShowCurationModal(false);
   }, []);
@@ -291,6 +315,7 @@ export function EpicDetail() {
   const handleCurationComplete = useCallback(() => {
     setIsCurating(false);
     setCurationModelId(null);
+    setCurationReconnect(false);
     void fetchCurationReasons();
     void fetchWikiPages();
     if (activeProjectId && epicId) {
@@ -313,6 +338,7 @@ export function EpicDetail() {
   const handleCurationCancel = useCallback(() => {
     setIsCurating(false);
     setCurationModelId(null);
+    setCurationReconnect(false);
   }, []);
 
   // ── Source uploaded callback ──────────────────────────────────────────
@@ -475,6 +501,7 @@ export function EpicDetail() {
             modelId={curationModelId}
             onComplete={handleCurationComplete}
             onCancel={handleCurationCancel}
+            reconnect={curationReconnect}
           />
         )}
 

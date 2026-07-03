@@ -1023,23 +1023,71 @@ export function buildEpicTools(
     trigger_curation: {
       description:
         "Trigger a curation run for an epic. This kicks off the curation pipeline " +
-        "which analyzes the codebase and enriches wiki pages. The run is asynchronous " +
-        "and streams progress events.",
+        "which processes pending reasons and enriches wiki pages. The pipeline runs " +
+        "asynchronously — the UI will show a progress banner automatically. " +
+        "Always call get_curation_status first to check pending reasons before triggering.",
       inputSchema: {
         type: "object",
         properties: {
           epicId: { type: "string", description: "The epic ID to curate" },
+          modelId: { type: "string", description: "The model ID to use for curation (use the same model you are running on)" },
         },
-        required: ["epicId"],
+        required: ["epicId", "modelId"],
       },
       execute: async (args) => {
         const epicId = args.epicId as string;
+        const modelId = args.modelId as string;
         if (!epicId) return "epicId is required.";
-        // The actual orchestration happens via the SSE route.
-        // This tool returns a message directing the user to use the API.
-        return `Curation pipeline for epic "${epicId}" should be triggered via the UI or ` +
-          `POST /api/codascope/projects/${projectId}/epics/${epicId}/curation/run. ` +
-          `The pipeline runs asynchronously with SSE streaming.`;
+        if (!modelId) return "modelId is required. Pass the model ID you are running on.";
+
+        // Check if already running via build state
+        const scope = `curation::${epicId}`;
+        const buildService = new CodaScopeBuildStateService(projectsRoot);
+        const existing = buildService.getBuildState(projectId, scope);
+        if (existing?.status === "building") {
+          return `Curation is already running for this epic (run ${existing.runId}). The UI should show a progress banner.`;
+        }
+
+        // Fire the curation pipeline via internal HTTP POST to the SSE endpoint.
+        // We consume the SSE stream in the background so the connection stays alive
+        // and the pipeline runs to completion.
+        const port = process.env.AISHELL_PORT ?? "5175";
+        const url = `http://localhost:${port}/api/codascope/projects/${projectId}/epics/${epicId}/curation/run`;
+
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ modelId }),
+          });
+
+          if (!res.ok) {
+            const text = await res.text();
+            let errorMsg: string;
+            try {
+              const parsed = JSON.parse(text);
+              errorMsg = parsed.error ?? text;
+            } catch {
+              errorMsg = text;
+            }
+            return `Failed to start curation: ${errorMsg}`;
+          }
+
+          // Consume the SSE stream in the background so the connection stays alive.
+          // The pipeline runs server-side; we just need to keep the client connection open.
+          if (res.body) {
+            const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader();
+            const pump = (): void => {
+              void reader.read().then(({ done }) => { if (!done) pump(); });
+            };
+            pump();
+          }
+
+          return `Curation pipeline started for epic "${epicId}". The UI will show a progress ` +
+            `banner with live step-by-step updates. Pending curation reasons are being processed.`;
+        } catch (err) {
+          return `Failed to trigger curation: ${err instanceof Error ? err.message : String(err)}`;
+        }
       },
     },
 
