@@ -116,9 +116,18 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
     if (type === "navigate") {
       const view = attributes.view ?? "dashboard";
       const topicId = attributes.topicId;
-      const path = topicId
-        ? `project/${activeProjectId}/${view}/${topicId}`
-        : `project/${activeProjectId}/${view}`;
+      const epicId = attributes.epicId;
+      let path: string;
+      if (epicId) {
+        // Epic-scoped navigation (e.g. design tab within an epic)
+        path = topicId
+          ? `project/${activeProjectId}/epic/${epicId}/${view}/${topicId}`
+          : `project/${activeProjectId}/epic/${epicId}/${view}`;
+      } else {
+        path = topicId
+          ? `project/${activeProjectId}/${view}/${topicId}`
+          : `project/${activeProjectId}/${view}`;
+      }
       navigate(path);
       return;
     }
