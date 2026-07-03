@@ -17,7 +17,7 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext, clearRecentViews } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch } from "./components/CodaScopeIcons";
+import { IconSearch, IconCopy, IconCheck } from "./components/CodaScopeIcons";
 import { ConversationHeader, type ConversationSummary } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
@@ -95,6 +95,7 @@ export function CodaScopeAssistant() {
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [helpModalOpen, setHelpModalOpen] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // @-mention picker state
   const [atPickerOpen, setAtPickerOpen] = useState(false);
@@ -103,6 +104,7 @@ export function CodaScopeAssistant() {
   const commandBus = useCommandBus();
 
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastProjectRef = useRef<string | null>(null);
@@ -762,6 +764,19 @@ export function CodaScopeAssistant() {
       await cancelStream(activeProjectId);
     }
   }, [activeProjectId, cancelStream]);
+
+  // ── Copy message to clipboard ──────────────────────────────────────
+
+  const handleCopyMessage = useCallback((msgId: string, content: string, role: string) => {
+    const textToCopy = role === "assistant" ? stripActionTagsClient(content) : content;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopiedMessageId(msgId);
+      if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = setTimeout(() => setCopiedMessageId(null), 2000);
+    }).catch(() => {
+      // Silently fail if clipboard access is denied
+    });
+  }, []);
   // ── Prompt chip context ────────────────────────────────────────────
 
   const promptChipContext: PromptChipContext = useMemo(() => {
@@ -874,6 +889,15 @@ export function CodaScopeAssistant() {
                       <p>{msg.content}</p>
                     </>
                   )}
+                  <button
+                    className={`codascope-msg-copy-btn${copiedMessageId === msg.id ? " codascope-msg-copy-btn-copied" : ""}`}
+                    onClick={() => handleCopyMessage(msg.id, msg.content, msg.role)}
+                    type="button"
+                    title={copiedMessageId === msg.id ? "Copied!" : "Copy message"}
+                    aria-label={copiedMessageId === msg.id ? "Copied!" : "Copy message"}
+                  >
+                    {copiedMessageId === msg.id ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                  </button>
                 </div>
               </div>
               {actions.length > 0 && (

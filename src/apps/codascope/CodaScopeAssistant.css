@@ -425,6 +425,44 @@
   padding: 0;
 }
 
+/* ── Copy Message Button ───────────────────────────────────────── */
+
+.codascope-assistant-msg-content {
+  position: relative;
+}
+
+.codascope-msg-copy-btn {
+  position: absolute;
+  bottom: var(--space-1);
+  right: var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.codascope-assistant-msg:hover .codascope-msg-copy-btn {
+  opacity: 1;
+}
+
+.codascope-msg-copy-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.codascope-msg-copy-btn-copied {
+  opacity: 1;
+  color: var(--color-success, #4ade80);
+}
+
 /* ── Thinking Indicator ─────────────────────────────────────────── */
 
 .codascope-assistant-thinking {
