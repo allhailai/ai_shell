@@ -1,0 +1,183 @@
+/* ── AIShell Shared: RichChatInput Styles ─────────────────────────────
+   Styles for the growing textarea, attachment chips, drop zone overlay.
+   Uses shell design tokens. Prefixed with `shared-rich-input-`.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Container ───────────────────────────────────────────────────── */
+
+.shared-rich-input-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  transition: border-color var(--transition-fast);
+}
+
+.shared-rich-input-container:focus-within {
+  border-color: var(--color-accent);
+}
+
+.shared-rich-input-container--drag-over {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-primary));
+}
+
+/* ── Textarea ────────────────────────────────────────────────────── */
+
+.shared-rich-input-textarea {
+  flex: 1;
+  resize: none;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  line-height: 1.5;
+  min-height: 36px;
+  max-height: none; /* controlled by JS */
+  outline: none;
+  overflow-y: auto;
+}
+
+.shared-rich-input-textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.shared-rich-input-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shared-rich-input-textarea::-webkit-scrollbar {
+  width: 4px;
+}
+.shared-rich-input-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.shared-rich-input-textarea::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: var(--radius-full);
+}
+
+/* ── Attachment Chips ────────────────────────────────────────────── */
+
+.shared-rich-input-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3) 0;
+  animation: shared-rich-input-chips-in 0.2s ease-out;
+}
+
+@keyframes shared-rich-input-chips-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.shared-rich-input-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  color: var(--color-text-secondary);
+  max-width: 200px;
+  animation: shared-rich-input-chips-in 0.15s ease-out;
+}
+
+.shared-rich-input-chip--image {
+  border-color: color-mix(in srgb, var(--color-info) 30%, var(--color-border-primary));
+  background: color-mix(in srgb, var(--color-info) 8%, var(--color-bg-tertiary));
+}
+
+.shared-rich-input-chip--reference {
+  border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border-primary));
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-tertiary));
+}
+
+.shared-rich-input-chip--selection {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, var(--color-border-primary));
+  background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-tertiary));
+}
+
+.shared-rich-input-chip-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.shared-rich-input-chip-icon {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  color: var(--color-accent-text);
+  width: 16px;
+  text-align: center;
+}
+
+.shared-rich-input-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.shared-rich-input-chip-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+
+.shared-rich-input-chip-remove:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-danger);
+}
+
+/* ── Drop Overlay ────────────────────────────────────────────────── */
+
+.shared-rich-input-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-primary) 90%);
+  border-radius: var(--radius-md);
+  border: 2px dashed var(--color-accent);
+  pointer-events: none;
+}
+
+.shared-rich-input-drop-overlay-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent-text);
+}

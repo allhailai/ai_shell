@@ -1,11 +1,10 @@
 /* ── CodaScope: Design Doc Service ───────────────────────────────────
-   CRUD and template management for epic design documents.
+   CRUD for epic design documents.
    Follows existing service patterns (module singleton, atomic writes,
    project-directory-based storage).
 
    Responsibilities:
-   - Design doc CRUD (create from template, read, update, delete, list)
-   - Template loading (built-in templates for common doc types)
+   - Design doc CRUD (create, read, update, delete, list)
    - Markdown file I/O with word/block count computation
    ──────────────────────────────────────────────────────────────────── */
 
@@ -13,54 +12,6 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicDesignDoc } from "../../src/apps/codascope/codaScopeTypes.js";
-
-/* ── Template metadata ────────────────────────────────────────────── */
-
-export interface DesignDocTemplate {
-  id: string;
-  title: string;
-  description: string;
-  filename: string;
-}
-
-const TEMPLATES: DesignDocTemplate[] = [
-  {
-    id: "architecture",
-    title: "Architecture",
-    description: "System diagram, component boundaries, data flow, and technology choices.",
-    filename: "architecture.md",
-  },
-  {
-    id: "api-design",
-    title: "API Design",
-    description: "Endpoint specs, request/response schemas, authentication, and error handling.",
-    filename: "api-design.md",
-  },
-  {
-    id: "data-model",
-    title: "Data Model",
-    description: "Schema diagrams, entity relationships, migrations, indexes, and backward compatibility.",
-    filename: "data-model.md",
-  },
-  {
-    id: "migration-plan",
-    title: "Migration Plan",
-    description: "Phased rollout, feature flags, rollback strategy, and monitoring plan.",
-    filename: "migration-plan.md",
-  },
-  {
-    id: "decision-record",
-    title: "Decision Record",
-    description: "Context, options considered, decision, and consequences (ADR format).",
-    filename: "decision-record.md",
-  },
-  {
-    id: "task-breakdown",
-    title: "Task Breakdown",
-    description: "Ordered implementation tasks with dependencies, estimates, and owners.",
-    filename: "task-breakdown.md",
-  },
-];
 
 /* ── Storage schema ───────────────────────────────────────────────── */
 
@@ -109,11 +60,6 @@ export class CodaScopeDesignDocService {
 
   private docPath(projectDir: string, epicId: string, docId: string): string {
     return path.join(this.designsDir(projectDir, epicId), `${docId}.md`);
-  }
-
-  private templatesDir(): string {
-    // Templates are stored relative to the source tree
-    return path.resolve(import.meta.dirname, "../../src/apps/codascope/commands/templates");
   }
 
   /* ── Index helpers ────────────────────────────────────────────────── */
@@ -206,10 +152,9 @@ export class CodaScopeDesignDocService {
     return this.readIndex(projectDir, epicId).docs;
   }
 
-  /** Create a new design doc, optionally from a template. */
+  /** Create a new design doc with optional initial content. */
   async createDesignDoc(projectId: string, epicId: string, opts: {
     title: string;
-    template?: string;
     content?: string;
     createdBy?: string;
   }): Promise<EpicDesignDoc> {
@@ -219,25 +164,19 @@ export class CodaScopeDesignDocService {
     const now = new Date().toISOString();
     const id = `doc_${crypto.randomBytes(6).toString("hex")}`;
 
-    // Get initial content from template or provided content
-    let initialContent = opts.content ?? "";
-    if (opts.template && !opts.content) {
-      const templateContent = this.loadTemplateContent(opts.template);
-      if (templateContent) initialContent = templateContent;
-    }
+    const initialContent = opts.content ?? "";
 
     const doc: EpicDesignDoc = {
       id,
       epicId,
       title: opts.title,
-      template: opts.template,
       createdAt: now,
       updatedAt: now,
       createdBy: opts.createdBy ?? "user",
       wordCount: this.countWords(initialContent),
       blockCount: this.countBlocks(initialContent),
-      annotationCount: 0,  // P2b
-      directiveCount: 0,   // P2b
+      annotationCount: 0,
+      directiveCount: 0,
     };
 
     // Write markdown file
@@ -315,28 +254,6 @@ export class CodaScopeDesignDocService {
     delete doc.archivedAt;
     this.writeIndex(projectDir, epicId, index);
     return true;
-  }
-
-  /* ── Templates ────────────────────────────────────────────────────── */
-
-  /** List available templates. */
-  listTemplates(): DesignDocTemplate[] {
-    return TEMPLATES;
-  }
-
-  /** Load a template's markdown content by template ID. */
-  loadTemplateContent(templateId: string): string | null {
-    const template = TEMPLATES.find((t) => t.id === templateId);
-    if (!template) return null;
-
-    const filePath = path.join(this.templatesDir(), template.filename);
-    if (!existsSync(filePath)) return null;
-
-    try {
-      return readFileSync(filePath, "utf-8");
-    } catch {
-      return null;
-    }
   }
 
   /* ── Bulk read (used by version service and getEpic) ──────────────── */

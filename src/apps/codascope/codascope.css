@@ -3553,99 +3553,14 @@
   flex-shrink: 0;
 }
 
-/* ── Template Picker (P2a) ──────────────────────────────────────────── */
+/* ── Design Doc Card Creator Metadata ──────────────────────────────── */
 
-.codascope-template-picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.codascope-template-picker-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.codascope-template-picker-header h3 {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.codascope-template-picker-hint {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-
-.codascope-template-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-3);
-}
-
-.codascope-template-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-primary);
-  background: var(--color-bg-secondary);
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
-  font-family: inherit;
-  text-align: left;
-}
-
-.codascope-template-card:hover:not(:disabled) {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-accent-muted);
-  box-shadow: var(--shadow-sm);
-}
-
-.codascope-template-card:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.codascope-template-card-icon {
-  font-size: var(--text-xl);
-}
-
-.codascope-template-card-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.codascope-template-card-desc {
+.codascope-design-doc-card-creator {
   font-size: var(--text-2xs);
-  color: var(--color-text-secondary);
-  line-height: 1.5;
+  color: var(--color-text-tertiary);
+  font-style: italic;
 }
 
-.codascope-template-picker-blank {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border-primary);
-}
-
-.codascope-template-picker-blank-label {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  font-weight: var(--weight-medium);
-}
-
-.codascope-template-picker-blank-form {
-  display: flex;
-  gap: var(--space-2);
-}
 
 /* ── Document Editor (P2a) ──────────────────────────────────────────── */
 

@@ -21,6 +21,8 @@ import { IconSearch } from "./components/CodaScopeIcons";
 import { ConversationHeader, type ConversationSummary } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
+import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
+import { ChatHelpModal } from "./components/ChatHelpModal";
 import type { EpicStatus } from "./codaScopeTypes";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -83,6 +85,10 @@ export function CodaScopeAssistant() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+
+  // Attachment state for RichChatInput
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
 
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -394,11 +400,17 @@ export function CodaScopeAssistant() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachments([]);
     setStreaming(true);
     setStreamingContent("");
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    // Build attachments payload
+    const imageAttachments = attachments
+      .filter((a) => a.type === "image")
+      .map((a) => ({ type: "image" as const, path: a.metadata?.path as string }));
 
     try {
       const response = await fetch(
@@ -410,6 +422,7 @@ export function CodaScopeAssistant() {
             message: trimmed,
             modelId: selectedModelId,
             context: getContext(),
+            ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
           }),
           signal: controller.signal,
         },
@@ -669,6 +682,62 @@ export function CodaScopeAssistant() {
     autoSendRef.current = false;
   }, [currentEpicId]);
 
+  // ── Image upload handler ─────────────────────────────────────────
+
+  const handleImageFile = useCallback(async (file: File) => {
+    if (!activeProjectId || !activeConversationId) return;
+
+    // Create a local preview URL
+    const previewUrl = URL.createObjectURL(file);
+    const tempId = `img-${Date.now()}`;
+
+    // Add chip immediately with preview
+    setAttachments((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        type: "image",
+        label: file.name || "Pasted image",
+        preview: previewUrl,
+        metadata: { uploading: true },
+      },
+    ]);
+
+    // Upload to server
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/conversations/${activeConversationId}/images`,
+        { method: "POST", body: formData },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        // Update chip with server path
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === tempId
+              ? { ...a, metadata: { path: data.path, filename: data.filename } }
+              : a,
+          ),
+        );
+      } else {
+        // Remove chip on failure
+        setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      }
+    } catch {
+      setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+    }
+  }, [activeProjectId, activeConversationId]);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const handleClearAttachments = useCallback(() => {
+    setAttachments([]);
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -857,29 +926,44 @@ export function CodaScopeAssistant() {
           </div>
         </div>
         <div className="codascope-assistant-input-row">
-          <textarea
-            ref={inputRef}
-            className="codascope-assistant-input"
+          <RichChatInput
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask about your codebase..."
-            rows={1}
+            onChange={setInput}
+            onSend={sendMessage}
+            onImagePaste={handleImageFile}
+            onImageDrop={handleImageFile}
+            attachments={attachments}
+            onRemoveAttachment={handleRemoveAttachment}
+            onClearAttachments={handleClearAttachments}
+            placeholder="Message the agent... (@ to add context)"
             disabled={streaming || !selectedModelId}
+            sendDisabled={!input.trim() || streaming || !selectedModelId}
           />
-          <button
-            className="codascope-assistant-send-btn"
-            onClick={sendMessage}
-            disabled={!input.trim() || streaming || !selectedModelId}
-            type="button"
-            title="Send message"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
+          <div className="codascope-assistant-input-actions-row">
+            <button
+              className="codascope-assistant-help-btn"
+              onClick={() => setHelpModalOpen(true)}
+              type="button"
+              title="Chat help"
+              aria-label="Chat help"
+            >
+              ?
+            </button>
+            <button
+              className="codascope-assistant-send-btn"
+              onClick={sendMessage}
+              disabled={!input.trim() || streaming || !selectedModelId}
+              type="button"
+              title="Send message"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
         </div>
+        <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
       </div>
     </div>
   );

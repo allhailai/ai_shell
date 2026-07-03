@@ -18,6 +18,7 @@
 @import "./shared/markdown/extensions/markdownTableExtension.css";
 @import "./shared/folder-picker/FolderPicker.css";
 @import "./shared/confirm-dialog/ConfirmDialog.css";
+@import "./shared/rich-chat-input/RichChatInput.css";
 
 /* ── App styles ── */
 @import "./apps/hello-world/hello-world.css";

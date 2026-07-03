@@ -23,6 +23,7 @@ import { CodaScopeAnnotationService } from "../services/codaScopeAnnotationServi
 import { CodaScopeEpicRenderService } from "../services/codaScopeEpicRenderService.js";
 import { CodaScopeEpicKnowledgeService } from "../services/codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "../services/codaScopeCurationService.js";
+import { CodaScopeImageService } from "../services/codaScopeImageService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
@@ -70,6 +71,7 @@ let renderService: CodaScopeEpicRenderService | null = null;
 let epicKnowledgeService: CodaScopeEpicKnowledgeService | null = null;
 let curationService: CodaScopeCurationService | null = null;
 let contentService: CodaScopeContentService | null = null;
+let imageService: CodaScopeImageService | null = null;
 
 /** Multer instance for file upload handling. */
 const upload = multer({
@@ -108,6 +110,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
   epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
   curationSvc: CodaScopeCurationService;
   contentSvc: CodaScopeContentService;
+  imageSvc: CodaScopeImageService;
 }> {
   const root = await getProjectsRoot(secretService);
   if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
@@ -168,6 +171,9 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
 
   if (!contentService) contentService = new CodaScopeContentService();
 
+  if (!imageService) imageService = new CodaScopeImageService(root);
+  else imageService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -188,6 +194,7 @@ async function ensureServices(secretService: SecretService, httpError: HttpError
     epicKnowledgeSvc: epicKnowledgeService,
     curationSvc: curationService,
     contentSvc: contentService,
+    imageSvc: imageService,
   };
 }
 
@@ -822,11 +829,13 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
   // Delete a conversation
   app.delete("/api/codascope/projects/:id/conversations/:convId", wrap(async (req, res) => {
-    const { chatSvc } = await ensureServices(secretService, httpError);
+    const { chatSvc, imageSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
     const convId = param(req, "convId");
     const deleted = await chatSvc.deleteConversation(id, convId);
     if (!deleted) throw httpError("Conversation not found.", 404, "not_found");
+    // Clean up associated images
+    await imageSvc.pruneConversationImages(id, convId);
     res.json({ ok: true });
   }));
 
@@ -1686,6 +1695,17 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
 
   // ── Design Documents (P2a) ────────────────────────────────────────
 
+  // Upload image for a conversation
+  app.post("/api/codascope/projects/:id/conversations/:convId/images", upload.single("image"), wrap(async (req, res) => {
+    const { imageSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const convId = param(req, "convId");
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    if (!file) throw httpError("No image file provided.", 400, "invalid_input");
+    const result = await imageSvc.uploadImage(id, convId, file.buffer, file.mimetype, file.originalname);
+    res.status(201).json(result);
+  }));
+
   // List design docs for an epic
   app.get("/api/codascope/projects/:id/epics/:epicId/designs", wrap(async (req, res) => {
     const { designDocSvc } = await ensureServices(secretService, httpError);
@@ -1695,21 +1715,13 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json({ docs });
   }));
 
-  // List available templates
-  app.get("/api/codascope/projects/:id/epics/:epicId/designs/templates", wrap(async (req, res) => {
-    const { designDocSvc } = await ensureServices(secretService, httpError);
-    const templates = designDocSvc.listTemplates();
-    res.json({ templates });
-  }));
-
   // Create design doc
   app.post("/api/codascope/projects/:id/epics/:epicId/designs", wrap(async (req, res) => {
     const { designDocSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { title, template, content, createdBy } = req.body as {
+    const { title, content, createdBy } = req.body as {
       title?: string;
-      template?: string;
       content?: string;
       createdBy?: string;
     };
@@ -1718,7 +1730,6 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     }
     const doc = await designDocSvc.createDesignDoc(id, epicId, {
       title: title.trim(),
-      template,
       content,
       createdBy,
     });

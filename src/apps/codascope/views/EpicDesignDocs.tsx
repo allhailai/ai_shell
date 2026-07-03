@@ -1,15 +1,17 @@
 /* ── CodaScope: EpicDesignDocs View ──────────────────────────────────
    The Design tab content. Shows:
-   - List of design documents with title, template badge, word count
-   - "New Design Doc" button with template picker
+   - List of design documents with title, creator metadata, word count
+   - "New Design" button → opens chat panel
+   - Empty state points to chat for design doc creation
    - Click doc → opens DocumentEditor in-page
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
-import { IconArchitecture, IconLink, IconPackage, IconBolt, IconClipboard, IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
-import type { EpicDesignDetail, EpicDesignDoc, DesignDocTemplate } from "../codaScopeTypes";
+import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
+import { useShellStore } from "../../../shell/store";
+import type { EpicDesignDetail, EpicDesignDoc } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -18,29 +20,12 @@ interface EpicDesignDocsProps {
   setEpic: (e: EpicDesignDetail) => void;
 }
 
-/* ── Template icons ──────────────────────────────────────────────────── */
-
-const TEMPLATE_ICONS: Record<string, React.ReactNode> = {
-  architecture: <IconArchitecture size={24} />,
-  "api-design": <IconLink size={24} />,
-  "data-model": <IconPackage size={24} />,
-  "migration-plan": <IconBolt size={24} />,
-  "decision-record": <IconClipboard size={24} />,
-  "task-breakdown": <IconFile size={24} />,
-};
-
-const DEFAULT_ICON = <IconFile size={24} />;
-
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
 
-  const [templates, setTemplates] = useState<DesignDocTemplate[]>([]);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string } | null>(null);
-  const [customTitle, setCustomTitle] = useState("");
   const [archiving, setArchiving] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -49,74 +34,19 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const [renderedDocId, setRenderedDocId] = useState<string | null>(null);
   const [renderedHtmlUrl, setRenderedHtmlUrl] = useState<string | null>(null);
 
-  // Fetch templates on mount
+  // Auto-open chat panel when Design tab mounts with zero docs
+  const activeDocs = epic.designDocs.filter((d) => !d.archivedAt);
   useEffect(() => {
-    if (!activeProjectId) return;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/templates`,
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setTemplates(data.templates ?? []);
-        }
-      } catch { /* ignore */ }
-    })();
-  }, [activeProjectId, epic.id]);
+    if (activeDocs.length === 0) {
+      useShellStore.getState().openRightPanel("assistant");
+    }
+  }, []); // Only on mount
 
   /* ── Handlers ──────────────────────────────────────────────────────── */
 
-  const createFromTemplate = useCallback(async (template: DesignDocTemplate) => {
-    if (!activeProjectId || creating) return;
-    setCreating(true);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: template.title,
-            template: template.id,
-          }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const newDoc: EpicDesignDoc = data.doc;
-        setEpic({ ...epic, designDocs: [...epic.designDocs, newDoc] });
-        setShowTemplatePicker(false);
-        // Open the new doc immediately
-        void openDoc(newDoc);
-      }
-    } catch { /* ignore */ }
-    setCreating(false);
-  }, [activeProjectId, epic, setEpic, creating]);
-
-  const createBlank = useCallback(async () => {
-    if (!activeProjectId || creating || !customTitle.trim()) return;
-    setCreating(true);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: customTitle.trim() }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const newDoc: EpicDesignDoc = data.doc;
-        setEpic({ ...epic, designDocs: [...epic.designDocs, newDoc] });
-        setShowTemplatePicker(false);
-        setCustomTitle("");
-        void openDoc(newDoc);
-      }
-    } catch { /* ignore */ }
-    setCreating(false);
-  }, [activeProjectId, epic, setEpic, creating, customTitle]);
+  const openChatPanel = useCallback(() => {
+    useShellStore.getState().openRightPanel("assistant");
+  }, []);
 
   const openDoc = useCallback(async (doc: EpicDesignDoc) => {
     if (!activeProjectId) return;
@@ -254,70 +184,21 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     );
   }
 
-  /* ── Template picker modal ─────────────────────────────────────────── */
-
-  if (showTemplatePicker) {
-    return (
-      <div className="codascope-template-picker">
-        <div className="codascope-template-picker-header">
-          <h3>Choose a Template</h3>
-          <button
-            className="codascope-btn codascope-btn-ghost"
-            onClick={() => { setShowTemplatePicker(false); setCustomTitle(""); }}
-            type="button"
-          >
-            ✕ Cancel
-          </button>
-        </div>
-        <p className="codascope-template-picker-hint">
-          Select a template to start with a structured outline, or create a blank document.
-        </p>
-
-        <div className="codascope-template-picker-grid">
-          {templates.map((t) => (
-            <button
-              key={t.id}
-              className="codascope-template-card"
-              onClick={() => createFromTemplate(t)}
-              disabled={creating}
-              type="button"
-            >
-              <span className="codascope-template-card-icon">{TEMPLATE_ICONS[t.id] ?? DEFAULT_ICON}</span>
-              <span className="codascope-template-card-title">{t.title}</span>
-              <span className="codascope-template-card-desc">{t.description}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="codascope-template-picker-blank">
-          <span className="codascope-template-picker-blank-label">Or create a blank document:</span>
-          <div className="codascope-template-picker-blank-form">
-            <input
-              className="codascope-input"
-              type="text"
-              placeholder="Document title…"
-              value={customTitle}
-              onChange={(e) => setCustomTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createBlank()}
-            />
-            <button
-              className="codascope-btn codascope-btn-primary"
-              onClick={createBlank}
-              disabled={creating || !customTitle.trim()}
-              type="button"
-            >
-              {creating ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   /* ── Design doc list ───────────────────────────────────────────────── */
 
-  const activeDocs = epic.designDocs.filter((d) => !d.archivedAt);
   const archivedDocs = epic.designDocs.filter((d) => !!d.archivedAt);
+
+  /** Render creator metadata line */
+  const renderCreatedBy = (doc: EpicDesignDoc) => {
+    const creator = doc.createdBy;
+    if (creator === "agent") {
+      return <span className="codascope-design-doc-card-creator">Created by agent</span>;
+    }
+    if (creator) {
+      return <span className="codascope-design-doc-card-creator">Created by {creator}</span>;
+    }
+    return null;
+  };
 
   return (
     <div className="codascope-design-doc-list">
@@ -327,10 +208,10 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         </span>
         <button
           className="codascope-btn codascope-btn-primary"
-          onClick={() => setShowTemplatePicker(true)}
+          onClick={openChatPanel}
           type="button"
         >
-          + New Design Doc
+          + New Design
         </button>
       </div>
 
@@ -338,13 +219,13 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         <div className="codascope-empty-state">
           <span className="codascope-empty-state-icon"><IconPaintbrush size={32} /></span>
           <h3>No design documents yet</h3>
-          <p>Create a design document from a template to start drafting your epic's technical design.</p>
+          <p>Use the chat assistant to create your first design document. Describe what you need and the agent will draft it for you.</p>
           <button
             className="codascope-btn codascope-btn-primary"
-            onClick={() => setShowTemplatePicker(true)}
+            onClick={openChatPanel}
             type="button"
           >
-            + New Design Doc
+            Open Chat to Start Designing
           </button>
         </div>
       ) : (
@@ -353,14 +234,12 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
             <div key={doc.id} className="codascope-design-doc-card" onClick={() => openDoc(doc)}>
               <div className="codascope-design-doc-card-header">
                 <span className="codascope-design-doc-card-icon">
-                  {doc.template ? (TEMPLATE_ICONS[doc.template] ?? DEFAULT_ICON) : DEFAULT_ICON}
+                  <IconFile size={24} />
                 </span>
                 <h4 className="codascope-design-doc-card-title">{doc.title}</h4>
               </div>
               <div className="codascope-design-doc-card-meta">
-                {doc.template && (
-                  <span className="codascope-design-doc-card-template">{doc.template}</span>
-                )}
+                {renderCreatedBy(doc)}
                 <span>{doc.wordCount.toLocaleString()} words</span>
                 <span>
                   {new Date(doc.updatedAt).toLocaleDateString("en-US", {
@@ -407,7 +286,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
               {archivedDocs.map((doc) => (
                 <div key={doc.id} className="codascope-design-doc-archived-item">
                   <span className="codascope-design-doc-archived-icon">
-                    {doc.template ? (TEMPLATE_ICONS[doc.template] ?? DEFAULT_ICON) : DEFAULT_ICON}
+                    <IconFile size={18} />
                   </span>
                   <span className="codascope-design-doc-archived-title">{doc.title}</span>
                   <span className="codascope-design-doc-archived-meta">
