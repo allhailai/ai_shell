@@ -20,6 +20,7 @@ export function LeftNav({
   activeApp: AppManifest | null;
 }) {
   const collapsed = useShellStore((s) => s.leftNavCollapsed);
+  const toggleLeftNav = useShellStore((s) => s.toggleLeftNav);
 
   const { regularApps, systemApps } = useMemo(() => {
     const regular: AppManifest[] = [];
@@ -44,14 +45,17 @@ export function LeftNav({
               <AppNavItem key={app.id} app={app} collapsed={collapsed} />
             ))}
           </div>
-          {systemApps.length > 0 && (
-            <div className="left-nav-bottom">
-              <div className="nav-divider" />
-              {systemApps.map((app) => (
-                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-              ))}
-            </div>
-          )}
+          <div className="left-nav-bottom">
+            {systemApps.length > 0 && (
+              <>
+                <div className="nav-divider" />
+                {systemApps.map((app) => (
+                  <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+                ))}
+              </>
+            )}
+            <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
+          </div>
         </div>
       </nav>
     );
@@ -69,14 +73,17 @@ export function LeftNav({
             <div className="nav-divider" />
             <AppNav />
           </div>
-          {systemApps.length > 0 && (
-            <div className="left-nav-bottom">
-              <div className="nav-divider" />
-              {systemApps.map((app) => (
-                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-              ))}
-            </div>
-          )}
+          <div className="left-nav-bottom">
+            {systemApps.length > 0 && (
+              <>
+                <div className="nav-divider" />
+                {systemApps.map((app) => (
+                  <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+                ))}
+              </>
+            )}
+            <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
+          </div>
         </div>
       </nav>
     );
@@ -89,14 +96,17 @@ export function LeftNav({
         <div className="left-nav-top">
           <HomeNavItem collapsed={collapsed} />
         </div>
-        {systemApps.length > 0 && (
-          <div className="left-nav-bottom">
-            <div className="nav-divider" />
-            {systemApps.map((app) => (
-              <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-            ))}
-          </div>
-        )}
+        <div className="left-nav-bottom">
+          {systemApps.length > 0 && (
+            <>
+              <div className="nav-divider" />
+              {systemApps.map((app) => (
+                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+              ))}
+            </>
+          )}
+          <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
+        </div>
       </div>
     </nav>
   );
@@ -175,3 +185,40 @@ function BackArrowIcon() {
   );
 }
 
+/**
+ * Small collapse/expand toggle button at the bottom of the left nav.
+ */
+function NavCollapseToggle({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className="nav-collapse-toggle"
+      onClick={onToggle}
+      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      type="button"
+      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+    >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {collapsed ? (
+          <polyline points="9 18 15 12 9 6" />
+        ) : (
+          <polyline points="15 18 9 12 15 6" />
+        )}
+      </svg>
+    </button>
+  );
+}

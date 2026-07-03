@@ -2188,85 +2188,456 @@
   gap: var(--space-2);
 }
 
-/* ── Epic Detail ─────────────────────────────────────────────────────── */
+/* ── Epic Detail — Sidebar Layout ────────────────────────────────────── */
 
 .codascope-epic-detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  height: 100%;
+  min-height: 0;
   gap: 0;
 }
 
-.codascope-epic-detail-header {
+.codascope-epic-detail-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
 }
 
-.codascope-epic-back-btn {
-  align-self: flex-start;
-  padding: var(--space-1) 0;
-  font-size: var(--text-sm);
-}
+/* ── Epic Sidebar ────────────────────────────────────────────────────── */
 
-.codascope-epic-detail-title-row {
+.codascope-epic-sidebar {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  border-right: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+  overflow: hidden;
+  height: 100%;
+  min-height: 0;
 }
 
-/* ── Epic Tab Bar ────────────────────────────────────────────────────── */
+/* ── Sidebar Header ──────────────────────────────────────────────────── */
 
-.codascope-epic-tab-bar {
+.codascope-epic-sidebar-header {
   display: flex;
-  gap: var(--space-1);
-  border-bottom: 1px solid var(--color-border-primary);
-  margin-bottom: var(--space-4);
-}
-
-.codascope-epic-tab {
-  display: inline-flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
-  border: none;
-  background: none;
-  font-family: inherit;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
-  margin-bottom: -1px;
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
 }
 
-.codascope-epic-tab:hover:not(:disabled) {
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-header {
+  padding: var(--space-2) var(--space-1);
+  align-items: center;
+}
+
+.codascope-epic-sidebar-back-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.codascope-epic-sidebar-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-collapse-btn:hover {
+  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
-.codascope-epic-tab--active {
+.codascope-epic-sidebar-title-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-title-area {
+  display: none;
+}
+
+.codascope-epic-sidebar-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.codascope-epic-sidebar-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* ── Sidebar Section Nav ─────────────────────────────────────────────── */
+
+.codascope-epic-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) 0;
+  gap: 1px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-epic-sidebar-nav-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-nav-toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.codascope-epic-sidebar-nav-toggle-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-epic-sidebar-nav-toggle-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-nav-toggle:hover .codascope-epic-sidebar-nav-toggle-chevron {
+  color: var(--color-text-secondary);
+}
+
+.codascope-epic-sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-nav-item {
+  justify-content: center;
+  padding: var(--space-2);
+}
+
+.codascope-epic-sidebar-nav-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-sidebar-nav-item--active {
+  background: var(--color-accent-muted);
   color: var(--color-accent-text);
-  border-bottom-color: var(--color-accent-text);
   font-weight: var(--weight-medium);
 }
 
-.codascope-epic-tab--disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.codascope-epic-sidebar-nav-icon {
+  flex-shrink: 0;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.codascope-epic-tab-coming-soon {
+.codascope-epic-sidebar-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-nav-label {
+  display: none;
+}
+
+/* Knowledge sub-group (indented) */
+.codascope-epic-sidebar-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.codascope-epic-sidebar-subgroup-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-subgroup {
+  display: none;
+}
+
+.codascope-epic-sidebar-subgroup-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-sidebar-subgroup-item--active {
+  color: var(--color-accent-text);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-epic-sidebar-subgroup-icon {
+  flex-shrink: 0;
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codascope-epic-sidebar-chevron {
+  margin-left: auto;
   font-size: var(--text-2xs);
-  padding: 1px var(--space-1);
-  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.codascope-epic-sidebar-badge {
+  margin-left: auto;
+  font-size: var(--text-2xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-tertiary);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  min-width: 16px;
+  text-align: center;
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-badge {
+  display: none;
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-chevron {
+  display: none;
+}
+
+/* ── Sidebar Sub-Items List ──────────────────────────────────────────── */
+
+.codascope-epic-sidebar-subitems {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-subitems {
+  display: none;
+}
+
+.codascope-epic-sidebar-subitems-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.codascope-epic-sidebar-subitems-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-2);
+}
+
+/* Wiki page items in sidebar */
+.codascope-epic-sidebar-wiki-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-wiki-item:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-sidebar-wiki-item--active {
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
   font-weight: var(--weight-medium);
 }
 
-/* ── Epic Tab Content ────────────────────────────────────────────────── */
+.codascope-epic-sidebar-wiki-item-icon {
+  flex-shrink: 0;
+  width: 14px;
+  display: inline-flex;
+  align-items: center;
+}
 
-.codascope-epic-tab-content {
+.codascope-epic-sidebar-wiki-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex: 1;
-  min-height: 0;
+}
+
+/* Compact source cards in sidebar */
+.codascope-epic-sidebar-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-source-card:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-epic-sidebar-source-card--active {
+  border-color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+}
+
+.codascope-epic-sidebar-source-card-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.codascope-epic-sidebar-source-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Blocked items in sidebar */
+.codascope-epic-sidebar-blocked-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  margin-bottom: var(--space-1);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.codascope-epic-sidebar-blocked-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-epic-sidebar-blocked-item-url {
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Sidebar Resize Handle ───────────────────────────────────────────── */
+
+.codascope-epic-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: var(--z-panel, 10);
+  touch-action: none;
+  user-select: none;
+}
+
+.codascope-epic-sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.codascope-epic-sidebar-resize-handle:hover::after,
+.codascope-epic-sidebar-resize-handle:active::after {
+  background: var(--color-accent);
 }
 
 /* ── Definition Viewer ───────────────────────────────────────────────── */

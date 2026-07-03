@@ -1,0 +1,550 @@
+/* ── CodaScope: EpicSidebar Component ───────────────────────────────
+   Collapsible, resizable left panel for Epic Detail view. Handles
+   section navigation (Define, Scope, Knowledge→Wiki/Sources/Blocked,
+   Design, History) and contextual sub-item listing.
+   ──────────────────────────────────────────────────────────────────── */
+
+import { useState, useCallback, useRef, type ComponentType } from "react";
+import {
+  IconFile,
+  IconSearch,
+  IconKnowledge,
+  IconWiki,
+  IconUpload,
+  IconBlocked,
+  IconWarning,
+  IconPaintbrush,
+  IconClock,
+} from "./CodaScopeIcons";
+import { CurateButton } from "./CurateButton";
+import type {
+  EpicDesignDetail,
+  EpicKnowledgeSource,
+  EpicWikiPage,
+  BlockedDownload,
+  EpicStatus,
+  CurationReason,
+} from "../codaScopeTypes";
+
+/* ── Constants ───────────────────────────────────────────────────────── */
+
+const MIN_WIDTH = 160;
+const MAX_WIDTH = 400;
+const DEFAULT_WIDTH = 220;
+const COLLAPSED_WIDTH = 44;
+const WIDTH_STORAGE_KEY = "codascope:epicSidebarWidth";
+
+function getStoredWidth(): number {
+  try {
+    const v = localStorage.getItem(WIDTH_STORAGE_KEY);
+    if (v) {
+      const n = parseInt(v, 10);
+      if (n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_WIDTH;
+}
+
+function storeWidth(w: number): void {
+  try { localStorage.setItem(WIDTH_STORAGE_KEY, String(w)); } catch { /* ignore */ }
+}
+
+/* ── Types ───────────────────────────────────────────────────────────── */
+
+interface EpicSidebarProps {
+  epic: EpicDesignDetail;
+  activeSection: string;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  // Sub-item data
+  wikiPages: EpicWikiPage[];
+  sources: EpicKnowledgeSource[];        // non-error sources only
+  errorSources: EpicKnowledgeSource[];   // error-status sources
+  blockedItems: BlockedDownload[];
+  activeSubItemId: string | null;
+  onNavigate: (section: string, subItemId?: string) => void;
+  // Curation
+  curationReasons: CurationReason[];
+  isCurating: boolean;
+  onStartCuration: () => void;
+  onShowReasons: () => void;
+  // Knowledge expand state
+  knowledgeExpanded: boolean;
+  onToggleKnowledge: () => void;
+}
+
+/* ── Status badge ────────────────────────────────────────────────────── */
+
+const STATUS_LABELS: Record<EpicStatus, string> = {
+  defining: "Defining",
+  curating: "Curating",
+  designing: "Designing",
+  "in-review": "In Review",
+  approved: "Approved",
+  archived: "Archived",
+};
+
+/* ── Section nav config ──────────────────────────────────────────────── */
+
+interface SectionItem {
+  id: string;
+  label: string;
+  icon: ComponentType<{ size?: number }>;
+  hasChildren?: boolean;
+}
+
+const SECTIONS: SectionItem[] = [
+  { id: "define", label: "Define", icon: IconFile },
+  { id: "scope", label: "Scope", icon: IconSearch },
+  { id: "knowledge", label: "Knowledge", icon: IconKnowledge, hasChildren: true },
+  { id: "design", label: "Design", icon: IconPaintbrush },
+  { id: "history", label: "History", icon: IconClock },
+];
+
+const KNOWLEDGE_CHILDREN = [
+  { id: "knowledge/wiki", label: "Wiki", icon: IconWiki },
+  { id: "knowledge/sources", label: "Source Data", icon: IconUpload },
+  { id: "knowledge/failed", label: "Failed Sources", icon: IconWarning },
+];
+
+/* ── Component ───────────────────────────────────────────────────────── */
+
+export function EpicSidebar({
+  epic,
+  activeSection,
+  collapsed,
+  onToggleCollapse,
+  wikiPages,
+  sources,
+  errorSources,
+  blockedItems,
+  activeSubItemId,
+  onNavigate,
+  curationReasons,
+  isCurating,
+  onStartCuration,
+  onShowReasons,
+  knowledgeExpanded,
+  onToggleKnowledge,
+}: EpicSidebarProps) {
+  /* ── Resize state ─────────────────────────────────────────────────── */
+  const [width, setWidth] = useState(getStoredWidth);
+  const draggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const startWidthRef = useRef(0);
+
+  const handleResizePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (collapsed) return;
+      e.preventDefault();
+      draggingRef.current = true;
+      startXRef.current = e.clientX;
+      startWidthRef.current = width;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [collapsed, width],
+  );
+
+  const handleResizePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingRef.current) return;
+      // Dragging right = increase width (opposite of right panel)
+      const delta = e.clientX - startXRef.current;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidthRef.current + delta));
+      setWidth(newWidth);
+    },
+    [],
+  );
+
+  const handleResizePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      storeWidth(width);
+    },
+    [width],
+  );
+
+  /* ── Nav section collapsed state ──────────────────────────────────── */
+  const [navCollapsed, setNavCollapsed] = useState(false);
+
+  /* ── Helpers ──────────────────────────────────────────────────────── */
+
+  const isActive = useCallback(
+    (sectionId: string) => activeSection === sectionId,
+    [activeSection],
+  );
+
+  const isKnowledgeActive = activeSection.startsWith("knowledge");
+
+  const handleSectionClick = useCallback(
+    (sectionId: string, hasChildren?: boolean) => {
+      if (collapsed) {
+        onToggleCollapse();
+      }
+      if (hasChildren) {
+        onToggleKnowledge();
+      } else {
+        onNavigate(sectionId);
+      }
+    },
+    [collapsed, onToggleCollapse, onToggleKnowledge, onNavigate],
+  );
+
+  /* ── Determine what sub-items to show ─────────────────────────────── */
+
+  const showWikiSubItems = activeSection === "knowledge/wiki";
+  const showSourceSubItems = activeSection === "knowledge/sources";
+  const showFailedSubItems = activeSection === "knowledge/failed";
+  const showSubItems = showWikiSubItems || showSourceSubItems || showFailedSubItems;
+
+  const failedCount = errorSources.length + blockedItems.length;
+
+  /* ── Render ─────────────────────────────────────────────────────────── */
+
+  const sidebarWidth = collapsed ? COLLAPSED_WIDTH : width;
+
+  return (
+    <div
+      className={`codascope-epic-sidebar ${collapsed ? "codascope-epic-sidebar--collapsed" : ""}`}
+      style={{ width: sidebarWidth, position: "relative" }}
+    >
+      {/* ── Header: Epic title + collapse ─────────────────────────────── */}
+      <div className="codascope-epic-sidebar-header">
+        <div className="codascope-epic-sidebar-back-row">
+          {!collapsed && (
+            <span className="codascope-epic-sidebar-title" title={epic.title}>
+              {epic.title}
+            </span>
+          )}
+          <button
+            className="codascope-epic-sidebar-collapse-btn"
+            onClick={onToggleCollapse}
+            type="button"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? "▶" : "◀"}
+          </button>
+        </div>
+        {!collapsed && (
+          <div className="codascope-epic-sidebar-title-row">
+            <span
+              className={`codascope-epic-status-badge codascope-epic-status-badge--${epic.status}`}
+            >
+              {STATUS_LABELS[epic.status]}
+            </span>
+            <CurateButton
+              epicId={epic.id}
+              reasonCount={curationReasons.length}
+              onCurate={onStartCuration}
+              onShowReasons={onShowReasons}
+              curating={isCurating}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* ── Section Navigation ────────────────────────────────────────── */}
+      <div className="codascope-epic-sidebar-nav">
+        {/* Collapsible nav header */}
+        {!collapsed && (
+          <button
+            className="codascope-epic-sidebar-nav-toggle"
+            onClick={() => setNavCollapsed((p) => !p)}
+            type="button"
+            title={navCollapsed ? "Show sections" : "Hide sections"}
+          >
+            <span className="codascope-epic-sidebar-nav-toggle-label">Sections</span>
+            <svg className="codascope-epic-sidebar-nav-toggle-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {navCollapsed ? (
+                <polyline points="9 18 15 12 9 6" />
+              ) : (
+                <polyline points="6 9 12 15 18 9" />
+              )}
+            </svg>
+          </button>
+        )}
+
+        {!navCollapsed && SECTIONS.map((section) => (
+          <div key={section.id}>
+            <button
+              className={`codascope-epic-sidebar-nav-item ${
+                section.hasChildren
+                  ? isKnowledgeActive
+                    ? "codascope-epic-sidebar-nav-item--active"
+                    : ""
+                  : isActive(section.id)
+                    ? "codascope-epic-sidebar-nav-item--active"
+                    : ""
+              }`}
+              onClick={() => handleSectionClick(section.id, section.hasChildren)}
+              type="button"
+              title={collapsed ? section.label : undefined}
+            >
+              <span className="codascope-epic-sidebar-nav-icon">
+                <section.icon size={16} />
+              </span>
+              <span className="codascope-epic-sidebar-nav-label">
+                {section.label}
+              </span>
+              {section.hasChildren && (
+                <span className="codascope-epic-sidebar-chevron">
+                  {knowledgeExpanded ? "▾" : "▸"}
+                </span>
+              )}
+            </button>
+
+            {/* Knowledge sub-group */}
+            {section.hasChildren && knowledgeExpanded && (
+              <div className="codascope-epic-sidebar-subgroup">
+                {KNOWLEDGE_CHILDREN.map((child) => {
+                  const badge =
+                    child.id === "knowledge/failed" && failedCount > 0
+                      ? failedCount
+                      : null;
+
+                  return (
+                    <button
+                      key={child.id}
+                      className={`codascope-epic-sidebar-subgroup-item ${
+                        isActive(child.id)
+                          ? "codascope-epic-sidebar-subgroup-item--active"
+                          : ""
+                      }`}
+                      onClick={() => onNavigate(child.id)}
+                      type="button"
+                    >
+                      <span className="codascope-epic-sidebar-subgroup-icon">
+                        <child.icon size={13} />
+                      </span>
+                      {child.label}
+                      {badge !== null && (
+                        <span className="codascope-epic-sidebar-badge">
+                          {badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* ── Sub-Item List ──────────────────────────────────────────────── */}
+      {showSubItems && !collapsed && (
+        <div className="codascope-epic-sidebar-subitems">
+          {/* Wiki pages */}
+          {showWikiSubItems && (
+            <>
+              <div className="codascope-epic-sidebar-subitems-header">
+                <span>Wiki Pages</span>
+                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                  {wikiPages.length}
+                </span>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {wikiPages.length === 0 && (
+                  <div
+                    style={{
+                      padding: "var(--space-3)",
+                      textAlign: "center",
+                      color: "var(--color-text-tertiary)",
+                      fontSize: "var(--text-xs)",
+                    }}
+                  >
+                    No wiki pages yet
+                  </div>
+                )}
+                {wikiPages.map((page) => (
+                  <button
+                    key={page.id}
+                    className={`codascope-epic-sidebar-wiki-item ${
+                      activeSubItemId === page.id
+                        ? "codascope-epic-sidebar-wiki-item--active"
+                        : ""
+                    }`}
+                    onClick={() => onNavigate("knowledge/wiki", page.id)}
+                    type="button"
+                  >
+                    <span className="codascope-epic-sidebar-wiki-item-icon">
+                      <IconFile size={12} />
+                    </span>
+                    <span className="codascope-epic-sidebar-wiki-item-title">
+                      {page.title}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Source data */}
+          {showSourceSubItems && (
+            <>
+              <div className="codascope-epic-sidebar-subitems-header">
+                <span>Sources</span>
+                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                  {sources.length}
+                </span>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {sources.length === 0 && (
+                  <div
+                    style={{
+                      padding: "var(--space-3)",
+                      textAlign: "center",
+                      color: "var(--color-text-tertiary)",
+                      fontSize: "var(--text-xs)",
+                    }}
+                  >
+                    No sources yet
+                  </div>
+                )}
+                {sources.map((source) => (
+                  <div
+                    key={source.id}
+                    className={`codascope-epic-sidebar-source-card ${
+                      activeSubItemId === source.id
+                        ? "codascope-epic-sidebar-source-card--active"
+                        : ""
+                    }`}
+                    onClick={() => onNavigate("knowledge/sources", source.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        onNavigate("knowledge/sources", source.id);
+                      }
+                    }}
+                  >
+                    <span className="codascope-epic-sidebar-source-card-title">
+                      {source.title}
+                    </span>
+                    <div className="codascope-epic-sidebar-source-card-meta">
+                      <span
+                        className={`codascope-knowledge-source-type codascope-knowledge-source-type-${source.type}`}
+                      >
+                        {source.type === "machine" ? "Machine" : "Human"}
+                      </span>
+                      <span
+                        className={`codascope-knowledge-source-status codascope-knowledge-source-status-${source.status}`}
+                      >
+                        {source.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Failed sources (error sources + blocked downloads) */}
+          {showFailedSubItems && (
+            <>
+              <div className="codascope-epic-sidebar-subitems-header">
+                <span>Failed Sources</span>
+                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                  {failedCount}
+                </span>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {failedCount === 0 && (
+                  <div
+                    style={{
+                      padding: "var(--space-3)",
+                      textAlign: "center",
+                      color: "var(--color-text-tertiary)",
+                      fontSize: "var(--text-xs)",
+                    }}
+                  >
+                    No failed sources
+                  </div>
+                )}
+                {/* Error sources */}
+                {errorSources.map((source) => (
+                  <div
+                    key={source.id}
+                    className={`codascope-epic-sidebar-source-card ${
+                      activeSubItemId === source.id
+                        ? "codascope-epic-sidebar-source-card--active"
+                        : ""
+                    }`}
+                    onClick={() => onNavigate("knowledge/failed", `source:${source.id}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        onNavigate("knowledge/failed", `source:${source.id}`);
+                      }
+                    }}
+                  >
+                    <span className="codascope-epic-sidebar-source-card-title">
+                      {source.title}
+                    </span>
+                    <div className="codascope-epic-sidebar-source-card-meta">
+                      <span
+                        className={`codascope-knowledge-source-type codascope-knowledge-source-type-${source.type}`}
+                      >
+                        {source.type === "machine" ? "Machine" : "Human"}
+                      </span>
+                      <span className="codascope-knowledge-source-status codascope-knowledge-source-status-error">
+                        Error
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {/* Blocked downloads */}
+                {blockedItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="codascope-epic-sidebar-blocked-item"
+                    onClick={() => onNavigate("knowledge/failed", `blocked:${item.id}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        onNavigate("knowledge/failed", `blocked:${item.id}`);
+                      }
+                    }}
+                  >
+                    <span className="codascope-epic-sidebar-blocked-item-url">
+                      {item.url}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "var(--text-2xs)",
+                        color: "var(--color-text-tertiary)",
+                      }}
+                    >
+                      {item.reason}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Resize handle (right edge) ────────────────────────────────── */}
+      {!collapsed && (
+        <div
+          className="codascope-epic-sidebar-resize-handle"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onPointerCancel={handleResizePointerUp}
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_WIDTH}
+          aria-valuemax={MAX_WIDTH}
+          aria-valuenow={Math.round(width)}
+          title="Drag to resize"
+        />
+      )}
+    </div>
+  );
+}
