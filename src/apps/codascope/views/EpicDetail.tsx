@@ -248,28 +248,39 @@ export function EpicDetail() {
     void fetchBlocked();
   }, [fetchWikiPages, fetchSources, fetchBlocked]);
 
-  // ── Detect running curation on mount (survives refresh) ──────────────
+  // ── Continuous curation build-status poll (detects agent-triggered runs) ──
   useEffect(() => {
-    if (!activeProjectId || !epicId || isCurating) return;
-    let cancelled = false;
-    void (async () => {
+    if (!activeProjectId || !epicId) return;
+    // Don't poll while we're running SSE-based curation (user-initiated)
+    if (isCurating && !curationReconnect) return;
+
+    const poll = async () => {
       try {
         const res = await fetch(
           `/api/codascope/projects/${activeProjectId}/build-status?scope=curation::${epicId}`,
         );
-        if (cancelled) return;
-        if (res.ok) {
-          const data = await res.json();
-          if (data.build?.status === "building") {
-            setCurationModelId(data.build.modelId ?? null);
-            setCurationReconnect(true);
-            setIsCurating(true);
-          }
+        if (!res.ok) return;
+        const data = await res.json();
+        const build = data.build;
+
+        if (build?.status === "building" && !isCurating) {
+          // Curation started externally (e.g. agent tool) — enter reconnect mode
+          setCurationModelId(build.modelId ?? null);
+          setCurationReconnect(true);
+          setIsCurating(true);
+        } else if (build?.status !== "building" && isCurating && curationReconnect) {
+          // Curation finished while we were in reconnect polling — dismiss
+          handleCurationComplete();
         }
       } catch { /* silent */ }
-    })();
-    return () => { cancelled = true; };
-  }, [activeProjectId, epicId]); // eslint-disable-line react-hooks/exhaustive-deps
+    };
+
+    // Initial check immediately
+    void poll();
+    const id = setInterval(() => void poll(), 3000);
+    return () => clearInterval(id);
+  }, [activeProjectId, epicId, isCurating, curationReconnect, handleCurationComplete]);
+
 
   // ── Navigation handlers ──────────────────────────────────────────────
   const handleBack = useCallback(() => {

@@ -524,6 +524,40 @@
   transform: scale(1.02);
 }
 
+/* ── Curation Status Bar ──────────────────────────────────────────── */
+
+.codascope-assistant-curation-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: hsl(270 40% 18% / 0.6);
+  border-left: 3px solid hsl(270 70% 60%);
+  font-size: var(--text-xs);
+  color: hsl(270 60% 82%);
+  animation: codascope-curation-bar-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes codascope-curation-bar-pulse {
+  0%, 100% { border-left-color: hsl(270 70% 60%); background: hsl(270 40% 18% / 0.6); }
+  50% { border-left-color: hsl(270 80% 72%); background: hsl(270 40% 22% / 0.7); }
+}
+
+.codascope-assistant-curation-bar-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  animation: codascope-curate-spin 1.2s linear infinite;
+  color: hsl(270 70% 70%);
+}
+
+.codascope-assistant-curation-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
 /* ── Input Area ─────────────────────────────────────────────────── */
 
 .codascope-assistant-input-area {

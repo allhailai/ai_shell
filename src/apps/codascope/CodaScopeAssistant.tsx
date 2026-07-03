@@ -17,7 +17,7 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext, clearRecentViews } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch, IconCopy, IconCheck } from "./components/CodaScopeIcons";
+import { IconSearch, IconCopy, IconCheck, IconCurate } from "./components/CodaScopeIcons";
 import { ConversationHeader, type ConversationSummary } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
@@ -285,6 +285,46 @@ export function CodaScopeAssistant() {
       }
     })();
     return () => { cancelled = true; };
+  }, [activeProjectId, currentEpicId]);
+
+  // ── Curation build-status poll (for chat status bar) ─────────────────
+  const [curationStatus, setCurationStatus] = useState<{
+    running: boolean;
+    step: string;
+  }>({ running: false, step: "" });
+
+  useEffect(() => {
+    if (!activeProjectId || !currentEpicId) {
+      setCurationStatus({ running: false, step: "" });
+      return;
+    }
+
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/build-status?scope=curation::${currentEpicId}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const build = data.build;
+
+        if (build?.status === "building") {
+          const steps = build.pipelineSteps;
+          let desc = "Curation in progress…";
+          if (Array.isArray(steps) && steps.length > 0) {
+            const latest = steps[steps.length - 1];
+            desc = latest.detail ?? latest.label ?? latest.id ?? desc;
+          }
+          setCurationStatus({ running: true, step: desc });
+        } else {
+          setCurationStatus((prev) => prev.running ? { running: false, step: "" } : prev);
+        }
+      } catch { /* silent */ }
+    };
+
+    void poll();
+    const id = setInterval(() => void poll(), 3000);
+    return () => clearInterval(id);
   }, [activeProjectId, currentEpicId]);
 
   // Auto-switch to epic conversation when navigating into an epic
@@ -927,6 +967,18 @@ export function CodaScopeAssistant() {
           </div>
         )}
       </div>
+
+      {/* Curation status bar */}
+      {curationStatus.running && (
+        <div className="codascope-assistant-curation-bar">
+          <span className="codascope-assistant-curation-bar-icon">
+            <IconCurate size={13} />
+          </span>
+          <span className="codascope-assistant-curation-bar-text">
+            {curationStatus.step}
+          </span>
+        </div>
+      )}
 
       {/* Prompt Chips */}
       <PromptChips

@@ -5018,8 +5018,22 @@
 }
 
 .codascope-curate-btn-curating {
-  border-color: hsl(270 50% 45% / 0.5);
-  background: hsl(270 40% 22% / 0.35);
+  border-color: hsl(270 70% 60% / 0.7);
+  background: hsl(270 50% 25% / 0.5);
+  color: hsl(270 80% 85%);
+  box-shadow: 0 0 8px hsl(270 70% 55% / 0.4), 0 0 16px hsl(270 70% 55% / 0.15);
+  animation: codascope-curate-glow 2s ease-in-out infinite;
+}
+
+@keyframes codascope-curate-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px hsl(270 70% 55% / 0.4), 0 0 16px hsl(270 70% 55% / 0.15);
+    border-color: hsl(270 70% 60% / 0.7);
+  }
+  50% {
+    box-shadow: 0 0 12px hsl(270 70% 60% / 0.6), 0 0 24px hsl(270 70% 55% / 0.25);
+    border-color: hsl(270 80% 70% / 0.85);
+  }
 }
 
 /* ── CurationReasonsModal ────────────────────────────────────────────── */
