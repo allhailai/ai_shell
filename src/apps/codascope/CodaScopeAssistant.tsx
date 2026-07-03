@@ -25,6 +25,7 @@ import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input
 import { ChatHelpModal } from "./components/ChatHelpModal";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
 import { useCommandBus } from "../../shell/hooks";
+import { useAssistantStream } from "./hooks/useAssistantStream";
 import type { EpicStatus } from "./codaScopeTypes";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -87,8 +88,9 @@ export function CodaScopeAssistant() {
   const [activeTitle, setActiveTitle] = useState("New conversation");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [streamingContent, setStreamingContent] = useState("");
+
+  // Streaming via extracted hook
+  const { streaming, streamingContent, streamMessage, cancelStream } = useAssistantStream(setActiveConversationId);
 
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
@@ -103,7 +105,6 @@ export function CodaScopeAssistant() {
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const lastProjectRef = useRef<string | null>(null);
   const autoSendRef = useRef(false); // Prevents double auto-send
 
@@ -444,20 +445,16 @@ export function CodaScopeAssistant() {
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    const currentAttachments = [...attachments];
     setAttachments([]);
-    setStreaming(true);
-    setStreamingContent("");
-
-    const controller = new AbortController();
-    abortRef.current = controller;
 
     // Build attachments payload
-    const imageAttachments = attachments
+    const imageAttachments = currentAttachments
       .filter((a) => a.type === "image")
       .map((a) => ({ type: "image" as const, path: a.metadata?.path as string }));
 
     // Build references payload from @-mention chips
-    const referenceAttachments = attachments
+    const referenceAttachments = currentAttachments
       .filter((a) => a.type === "reference")
       .map((a) => ({
         category: a.metadata?.category as string,
@@ -466,7 +463,7 @@ export function CodaScopeAssistant() {
       }));
 
     // Build selection context from selection chips (Phase 3)
-    const selectionChip = attachments.find((a) => a.type === "selection");
+    const selectionChip = currentAttachments.find((a) => a.type === "selection");
     const selectionContext = selectionChip
       ? {
           blockId: selectionChip.metadata?.blockId as string,
@@ -478,112 +475,30 @@ export function CodaScopeAssistant() {
         }
       : undefined;
 
-    try {
-      const response = await fetch(
-        `/api/codascope/projects/${activeProjectId}/conversations/${convId}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: trimmed,
-            modelId: selectedModelId,
-            context: getContext(),
-            ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
-            ...(referenceAttachments.length > 0 ? { references: referenceAttachments } : {}),
-            ...(selectionContext ? { selectionContext } : {}),
-          }),
-          signal: controller.signal,
-        },
-      );
+    const isFirstMessage = messages.length === 0;
+    const result = await streamMessage({
+      projectId: activeProjectId,
+      conversationId: convId,
+      message: trimmed,
+      modelId: selectedModelId,
+      context: getContext(),
+      attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
+      references: referenceAttachments.length > 0 ? referenceAttachments : undefined,
+      selectionContext,
+    });
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Request failed" }));
-        throw new Error((err as { error?: string }).error ?? `HTTP ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      let buffer = "";
-      let newTitle: string | undefined;
-
-      let parsedActions: CodaScopeAction[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === "assistant" && data.message?.content) {
-                for (const block of data.message.content) {
-                  if (block.type === "text") {
-                    accumulated += block.text;
-                    setStreamingContent(accumulated);
-                  }
-                }
-              }
-              // Capture actions + conversation ID from done event
-              if (data.actions && Array.isArray(data.actions)) {
-                parsedActions = data.actions as CodaScopeAction[];
-              }
-              if (data.conversationId && !activeConversationId) {
-                setActiveConversationId(data.conversationId);
-              }
-            } catch {
-              // Skip malformed JSON
-            }
-          } else if (line.startsWith("event: done")) {
-            // Next data line contains result with conversationId + actions
-          }
-        }
-      }
-
-      // Finalize the assistant message with actions metadata
-      if (accumulated) {
-        const assistantMsg: ChatMessage = {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          content: accumulated,
-          status: "complete",
-          metadata: parsedActions.length > 0 ? { actions: parsedActions } : undefined,
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
-      }
-
-      // Auto-update title if this was the first message
-      if (messages.length === 0 && trimmed) {
-        const firstLine = trimmed.split("\n").map((l) => l.trim()).find(Boolean) ?? trimmed;
-        newTitle = firstLine.length > 72 ? `${firstLine.slice(0, 69)}...` : firstLine;
-        setActiveTitle(newTitle);
-      }
-
-      // Refresh conversation list to get updated titles/summaries
-      await loadConversationList();
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-
-      const errorMsg: ChatMessage = {
-        id: `error-${Date.now()}`,
-        role: "assistant",
-        content: `**Error:** ${(err as Error).message}`,
-        status: "error",
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setStreaming(false);
-      setStreamingContent("");
-      abortRef.current = null;
+    if (result.assistantMessage) {
+      setMessages((prev) => [...prev, result.assistantMessage!]);
     }
-  }, [input, streaming, selectedModelId, activeProjectId, activeConversationId, getContext, messages.length, loadConversationList]);
+
+    // Auto-update title if this was the first message
+    if (isFirstMessage && result.newTitle) {
+      setActiveTitle(result.newTitle);
+    }
+
+    // Refresh conversation list to get updated titles/summaries
+    await loadConversationList();
+  }, [input, streaming, selectedModelId, activeProjectId, activeConversationId, attachments, getContext, messages.length, loadConversationList, streamMessage]);
 
   // ── Send prompt (for prompt chips + auto-send) ────────────────────
 
@@ -591,7 +506,6 @@ export function CodaScopeAssistant() {
     setInput(prompt);
     // Use a microtask to let React update input state before sending
     queueMicrotask(() => {
-      // Re-implement send logic inline since we need the specific prompt
       const sendPrompt = async () => {
         if (streaming || !selectedModelId || !activeProjectId) return;
 
@@ -624,110 +538,29 @@ export function CodaScopeAssistant() {
 
         setMessages((prev) => [...prev, userMsg]);
         setInput("");
-        setStreaming(true);
-        setStreamingContent("");
 
-        const controller = new AbortController();
-        abortRef.current = controller;
+        const isFirstMessage = messages.length === 0;
+        const result = await streamMessage({
+          projectId: activeProjectId,
+          conversationId: convId,
+          message: prompt,
+          modelId: selectedModelId,
+          context: getContext(),
+        });
 
-        try {
-          const response = await fetch(
-            `/api/codascope/projects/${activeProjectId}/conversations/${convId}/messages`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                message: prompt,
-                modelId: selectedModelId,
-                context: getContext(),
-              }),
-              signal: controller.signal,
-            },
-          );
-
-          if (!response.ok) {
-            const err = await response.json().catch(() => ({ error: "Request failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${response.status}`);
-          }
-
-          const reader = response.body?.getReader();
-          if (!reader) throw new Error("No response body");
-
-          const decoder = new TextDecoder();
-          let accumulated = "";
-          let buffer = "";
-          let parsedActions: CodaScopeAction[] = [];
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  if (data.type === "assistant" && data.message?.content) {
-                    for (const block of data.message.content) {
-                      if (block.type === "text") {
-                        accumulated += block.text;
-                        setStreamingContent(accumulated);
-                      }
-                    }
-                  }
-                  if (data.actions && Array.isArray(data.actions)) {
-                    parsedActions = data.actions as CodaScopeAction[];
-                  }
-                  if (data.conversationId && !activeConversationId) {
-                    setActiveConversationId(data.conversationId);
-                  }
-                } catch {
-                  // Skip malformed JSON
-                }
-              }
-            }
-          }
-
-          if (accumulated) {
-            const assistantMsg: ChatMessage = {
-              id: `assistant-${Date.now()}`,
-              role: "assistant",
-              content: accumulated,
-              status: "complete",
-              metadata: parsedActions.length > 0 ? { actions: parsedActions } : undefined,
-            };
-            setMessages((prev) => [...prev, assistantMsg]);
-          }
-
-          if (messages.length === 0 && prompt) {
-            const firstLine = prompt.split("\n").map((l) => l.trim()).find(Boolean) ?? prompt;
-            const newTitle = firstLine.length > 72 ? `${firstLine.slice(0, 69)}...` : firstLine;
-            setActiveTitle(newTitle);
-          }
-
-          await loadConversationList();
-        } catch (err) {
-          if ((err as Error).name === "AbortError") return;
-
-          const errorMsg: ChatMessage = {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: `**Error:** ${(err as Error).message}`,
-            status: "error",
-          };
-          setMessages((prev) => [...prev, errorMsg]);
-        } finally {
-          setStreaming(false);
-          setStreamingContent("");
-          abortRef.current = null;
+        if (result.assistantMessage) {
+          setMessages((prev) => [...prev, result.assistantMessage!]);
         }
+
+        if (isFirstMessage && result.newTitle) {
+          setActiveTitle(result.newTitle);
+        }
+
+        await loadConversationList();
       };
       sendPrompt();
     });
-  }, [streaming, selectedModelId, activeProjectId, activeConversationId, getContext, messages.length, loadConversationList]);
+  }, [streaming, selectedModelId, activeProjectId, activeConversationId, getContext, messages.length, loadConversationList, streamMessage]);
 
   // ── Auto-send interview for new epics (?new=1) ────────────────────
 
@@ -925,18 +758,10 @@ export function CodaScopeAssistant() {
   );
 
   const stopStreaming = useCallback(async () => {
-    abortRef.current?.abort();
-    // Also cancel server-side agent
     if (activeProjectId) {
-      try {
-        await fetch(`/api/codascope/projects/${activeProjectId}/assistant/cancel`, {
-          method: "POST",
-        });
-      } catch { /* best effort */ }
+      await cancelStream(activeProjectId);
     }
-    setStreaming(false);
-    setStreamingContent("");
-  }, [activeProjectId]);
+  }, [activeProjectId, cancelStream]);
   // ── Prompt chip context ────────────────────────────────────────────
 
   const promptChipContext: PromptChipContext = useMemo(() => {

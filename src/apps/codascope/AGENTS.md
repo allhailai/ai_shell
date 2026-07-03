@@ -118,7 +118,7 @@ When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
 - Add corresponding card rendering in `ActionCard.tsx`
 - Actions must dispatch through existing CodaScope APIs — never bypass the API layer
-- New tools go in `buildReadOnlyTools()` or `buildWriteTools()` in `codaScopeAgentService.ts`
+- New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, or `buildWriteTools()` in `codaScopeToolDefinitions.ts`
 - Update `do_chat.md` system prompt with new tool descriptions and behavioral guidance
 
 ---
@@ -131,7 +131,7 @@ When extending agent capabilities:
 | New reusable component | `components/<ComponentName>.tsx` |
 | New agent command | `commands/do_<action>.md` |
 | New backend service | `server/services/codaScope<Domain>Service.ts` |
-| New API endpoints | Add to `server/routes/codaScopeRoutes.ts` |
+| New API endpoints | Add to the appropriate domain route file in `server/routes/codaScope*Routes.ts` |
 | New styles | Add to `codascope.css` (or `CodaScopeAssistant.css` for assistant) |
 | New icons | Add to `components/CodaScopeIcons.tsx` |
 

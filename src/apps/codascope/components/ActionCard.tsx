@@ -10,6 +10,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { CodaScopeAction } from "../codaScopeTypes";
 import { IconInsertContent, IconRewrite, IconExpand } from "./CodaScopeIcons";
+import { connectToSseStream } from "../codaScopeSseClient";
 
 // Re-export for existing consumers
 export type { CodaScopeAction };
@@ -203,71 +204,41 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           if (attributes.topic) {
             commandPayload.topicName = attributes.topic;
           }
-          const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+          await awaitSseStream({
+            url: `/api/codascope/projects/${activeProjectId}/runs`,
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(commandPayload),
+            body: commandPayload,
           });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Build failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-          }
-          // Consume the SSE stream but don't render it — just wait for completion
-          await consumeSSE(res);
           setStatus("success");
           return;
         }
 
         case "build_full_wiki": {
-          const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+          await awaitSseStream({
+            url: `/api/codascope/projects/${activeProjectId}/runs`,
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              command: "do_build_full_wiki",
-              modelId: selectedModel ?? "",
-            }),
+            body: { command: "do_build_full_wiki", modelId: selectedModel ?? "" },
           });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Build failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-          }
-          await consumeSSE(res);
           setStatus("success");
           return;
         }
 
         case "run_quality_scan": {
-          const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+          await awaitSseStream({
+            url: `/api/codascope/projects/${activeProjectId}/runs`,
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              command: "do_quality_scan",
-              modelId: selectedModel ?? "",
-            }),
+            body: { command: "do_quality_scan", modelId: selectedModel ?? "" },
           });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Scan failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-          }
-          await consumeSSE(res);
           setStatus("success");
           return;
         }
 
         case "explore_codebase": {
-          const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+          await awaitSseStream({
+            url: `/api/codascope/projects/${activeProjectId}/runs`,
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              command: "do_explore",
-              modelId: selectedModel ?? "",
-            }),
+            body: { command: "do_explore", modelId: selectedModel ?? "" },
           });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Exploration failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-          }
-          await consumeSSE(res);
           setStatus("success");
           return;
         }
@@ -277,19 +248,11 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           if (!epicId) {
             throw new Error("Missing epicId for deepen_wiki");
           }
-          const res = await fetch(
-            `/api/codascope/projects/${activeProjectId}/epics/${epicId}/deepen`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ modelId: selectedModel ?? "" }),
-            },
-          );
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ error: "Deepen failed" }));
-            throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
-          }
-          await consumeSSE(res);
+          await awaitSseStream({
+            url: `/api/codascope/projects/${activeProjectId}/epics/${epicId}/deepen`,
+            method: "POST",
+            body: { modelId: selectedModel ?? "" },
+          });
           setStatus("success");
           return;
         }
@@ -348,30 +311,19 @@ export function ActionCardList({ actions }: { actions: CodaScopeAction[] }) {
 
 /* ── SSE Consumer Helper ─────────────────────────────────────────────── */
 
+import type { SseStreamTarget } from "../codaScopeSseClient";
+
 /**
- * Consume an SSE response stream without rendering it.
- * Resolves when the stream ends, rejects on error events.
+ * Consume an SSE stream without rendering it.
+ * Resolves when the stream ends (onDone), rejects on error (onError).
+ * Uses the shared connectToSseStream client.
  */
-async function consumeSSE(response: Response): Promise<void> {
-  const reader = response.body?.getReader();
-  if (!reader) return;
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (line.startsWith("event: error")) {
-        // Next data line will contain the error
-        // But we can't easily peek — let the stream end naturally
-      }
-    }
-  }
+function awaitSseStream(target: SseStreamTarget): Promise<void> {
+  return new Promise((resolve, reject) => {
+    connectToSseStream(target, {
+      onText: () => { /* discard — action cards don't render stream output */ },
+      onDone: () => resolve(),
+      onError: (error) => reject(new Error(error)),
+    });
+  });
 }

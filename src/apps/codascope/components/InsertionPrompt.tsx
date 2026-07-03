@@ -108,7 +108,7 @@ export function InsertionPrompt({
     setGenerating(true);
     try {
       // For now, send a placeholder generated content request
-      // In production, this triggers the agent via do_insert_content.md
+      // In production, this triggers the agent for content generation
       const res = await fetch(
         `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${directive.id}/execute`,
         {

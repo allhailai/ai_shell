@@ -2,8 +2,8 @@
    The Define tab content for an epic. Shows:
    - Rendered definition markdown (using MarkdownViewer)
    - Edit lock indicator
-   - "Ask Agent to Edit" button → triggers do_refine_definition chat flow
-   - "Re-interview" button → triggers do_interview_epic chat flow
+   - "Ask Agent to Edit" button → opens chat panel for agent-assisted editing
+   - "Re-interview" button → opens chat panel for agent interview
    - Lock-based direct edit mode (textarea)
    ──────────────────────────────────────────────────────────────────── */
 

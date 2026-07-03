@@ -1,0 +1,244 @@
+/* ── CodaScope: Shared Service Context ────────────────────────────────
+   Singleton service instances, initialization, and shared helpers used
+   by all CodaScope sub-route files.
+   ──────────────────────────────────────────────────────────────────── */
+
+import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
+import type { SecretService } from "../services/secretService.js";
+import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
+import { CodaScopeWikiService } from "../services/codaScopeWikiService.js";
+import { CodaScopeChatService } from "../services/codaScopeChatService.js";
+import { CodaScopeSkillService } from "../services/codaScopeSkillService.js";
+import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
+import { CodaScopeBuildStateService } from "../services/codaScopeBuildStateService.js";
+import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js";
+import { CodaScopeConceptService } from "../services/codaScopeConceptService.js";
+import { CodaScopeGoldenRuleService } from "../services/codaScopeGoldenRuleService.js";
+import { CodaScopeQualityService } from "../services/codaScopeQualityService.js";
+import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
+import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
+import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
+import { CodaScopeVersionService } from "../services/codaScopeVersionService.js";
+import { CodaScopeAnnotationService } from "../services/codaScopeAnnotationService.js";
+import { CodaScopeEpicRenderService } from "../services/codaScopeEpicRenderService.js";
+import { CodaScopeEpicKnowledgeService } from "../services/codaScopeEpicKnowledgeService.js";
+import { CodaScopeCurationService } from "../services/codaScopeCurationService.js";
+import { CodaScopeContentService } from "../services/codaScopeContentService.js";
+import { CodaScopeImageService } from "../services/codaScopeImageService.js";
+import multer from "multer";
+
+// ── Types ────────────────────────────────────────────────────────────
+
+export type HttpErrorFn = (message: string, status: number, code: string) => Error;
+
+export interface CodaScopeRoutesDeps {
+  secretService: SecretService;
+  authMiddleware: Record<string, unknown>;
+  httpError: HttpErrorFn;
+}
+
+export interface CodaScopeServices {
+  projectSvc: CodaScopeProjectService;
+  wikiSvc: CodaScopeWikiService;
+  chatSvc: CodaScopeChatService;
+  skillSvc: CodaScopeSkillService;
+  agentSvc: CodaScopeAgentService;
+  buildSvc: CodaScopeBuildStateService;
+  codeMapSvc: CodaScopeCodeMapService;
+  conceptSvc: CodaScopeConceptService;
+  goldenRuleSvc: CodaScopeGoldenRuleService;
+  qualitySvc: CodaScopeQualityService;
+  wikiStateSvc: CodaScopeWikiStateService;
+  epicSvc: CodaScopeEpicService;
+  designDocSvc: CodaScopeDesignDocService;
+  versionSvc: CodaScopeVersionService;
+  annotationSvc: CodaScopeAnnotationService;
+  renderSvc: CodaScopeEpicRenderService;
+  epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
+  curationSvc: CodaScopeCurationService;
+  contentSvc: CodaScopeContentService;
+  imageSvc: CodaScopeImageService;
+}
+
+/** Everything a sub-route file needs to register its endpoints. */
+export interface CodaScopeRouteContext {
+  app: Express;
+  secretService: SecretService;
+  httpError: HttpErrorFn;
+  ensureServices: () => Promise<CodaScopeServices>;
+  wrap: (fn: (req: Request, res: Response) => Promise<void>) => RequestHandler;
+  param: (req: Request, name: string) => string;
+  upload: multer.Multer;
+}
+
+// ── Constants ────────────────────────────────────────────────────────
+
+export const CONFIG_KEY = "codascope_projects_root";
+export const APP_ID = "codascope";
+
+// ── Singleton Service Instances ──────────────────────────────────────
+
+let projectService: CodaScopeProjectService | null = null;
+let wikiService: CodaScopeWikiService | null = null;
+let chatService: CodaScopeChatService | null = null;
+let skillService: CodaScopeSkillService | null = null;
+let agentService: CodaScopeAgentService | null = null;
+let buildStateService: CodaScopeBuildStateService | null = null;
+let codeMapService: CodaScopeCodeMapService | null = null;
+let conceptService: CodaScopeConceptService | null = null;
+let goldenRuleService: CodaScopeGoldenRuleService | null = null;
+let qualityService: CodaScopeQualityService | null = null;
+let wikiStateService: CodaScopeWikiStateService | null = null;
+let epicService: CodaScopeEpicService | null = null;
+let designDocService: CodaScopeDesignDocService | null = null;
+let versionService: CodaScopeVersionService | null = null;
+let annotationService: CodaScopeAnnotationService | null = null;
+let renderService: CodaScopeEpicRenderService | null = null;
+let epicKnowledgeService: CodaScopeEpicKnowledgeService | null = null;
+let curationService: CodaScopeCurationService | null = null;
+let contentService: CodaScopeContentService | null = null;
+let imageService: CodaScopeImageService | null = null;
+
+// ── Multer ──────────────────────────────────────────────────────────
+
+/** Multer instance for file upload handling. */
+export const uploadInstance = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+});
+
+// ── Config Helpers ──────────────────────────────────────────────────
+
+export async function getProjectsRoot(secretService: SecretService): Promise<string | null> {
+  return secretService.getAppSecret(APP_ID, CONFIG_KEY);
+}
+
+export async function setProjectsRoot(secretService: SecretService, value: string): Promise<void> {
+  return secretService.setAppSecret(APP_ID, CONFIG_KEY, value);
+}
+
+// ── Param Helper ────────────────────────────────────────────────────
+
+/** Safely extract a string route param. */
+export function param(req: Request, name: string): string {
+  const val = req.params[name];
+  return Array.isArray(val) ? val[0] ?? "" : val ?? "";
+}
+
+// ── Service Initialization ──────────────────────────────────────────
+
+async function ensureServicesImpl(secretService: SecretService, httpError: HttpErrorFn): Promise<CodaScopeServices> {
+  const root = await getProjectsRoot(secretService);
+  if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
+
+  if (!projectService) projectService = new CodaScopeProjectService(root);
+  else projectService.setRoot(root);
+
+  if (!wikiService) wikiService = new CodaScopeWikiService(root);
+  else wikiService.setRoot(root);
+
+  if (!chatService) chatService = new CodaScopeChatService(root);
+  else chatService.setRoot(root);
+
+  if (!skillService) skillService = new CodaScopeSkillService(root);
+  else skillService.setRoot(root);
+
+  if (!agentService) agentService = new CodaScopeAgentService(secretService, root);
+  else agentService.setProjectsRoot(root);
+
+  if (!buildStateService) buildStateService = new CodaScopeBuildStateService(root);
+  else buildStateService.setRoot(root);
+
+  if (!codeMapService) codeMapService = new CodaScopeCodeMapService(root);
+  else codeMapService.setRoot(root);
+
+  if (!conceptService) conceptService = new CodaScopeConceptService(root);
+  else conceptService.setRoot(root);
+
+  if (!goldenRuleService) goldenRuleService = new CodaScopeGoldenRuleService(root);
+  else goldenRuleService.setRoot(root);
+
+  if (!qualityService) qualityService = new CodaScopeQualityService(root);
+  else qualityService.setRoot(root);
+
+  if (!wikiStateService) wikiStateService = new CodaScopeWikiStateService(root);
+  else wikiStateService.setRoot(root);
+
+  if (!epicService) epicService = new CodaScopeEpicService(root);
+  else epicService.setRoot(root);
+
+  if (!designDocService) designDocService = new CodaScopeDesignDocService(root);
+  else designDocService.setRoot(root);
+
+  if (!versionService) versionService = new CodaScopeVersionService(root);
+  else versionService.setRoot(root);
+
+  if (!annotationService) annotationService = new CodaScopeAnnotationService(root);
+  else annotationService.setRoot(root);
+
+  if (!renderService) renderService = new CodaScopeEpicRenderService(root);
+  else renderService.setRoot(root);
+
+  if (!epicKnowledgeService) epicKnowledgeService = new CodaScopeEpicKnowledgeService(root);
+  else epicKnowledgeService.setRoot(root);
+
+  if (!curationService) curationService = new CodaScopeCurationService(root);
+  else curationService.setRoot(root);
+
+  if (!contentService) contentService = new CodaScopeContentService();
+
+  if (!imageService) imageService = new CodaScopeImageService(root);
+  else imageService.setRoot(root);
+
+  return {
+    projectSvc: projectService,
+    wikiSvc: wikiService,
+    chatSvc: chatService,
+    skillSvc: skillService,
+    agentSvc: agentService,
+    buildSvc: buildStateService,
+    codeMapSvc: codeMapService,
+    conceptSvc: conceptService,
+    goldenRuleSvc: goldenRuleService,
+    qualitySvc: qualityService,
+    wikiStateSvc: wikiStateService,
+    epicSvc: epicService,
+    designDocSvc: designDocService,
+    versionSvc: versionService,
+    annotationSvc: annotationService,
+    renderSvc: renderService,
+    epicKnowledgeSvc: epicKnowledgeService,
+    curationSvc: curationService,
+    contentSvc: contentService,
+    imageSvc: imageService,
+  };
+}
+
+// ── Exported: agentService accessor (used by validate-api-key route) ─
+
+export function getAgentServiceSingleton(): CodaScopeAgentService | null {
+  return agentService;
+}
+
+// ── Route Context Factory ───────────────────────────────────────────
+
+/** Build a CodaScopeRouteContext from the raw deps — called once in the hub. */
+export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): CodaScopeRouteContext {
+  const { secretService, httpError } = deps;
+
+  const wrap = (fn: (req: Request, res: Response) => Promise<void>): RequestHandler => {
+    return (req: Request, res: Response, next: NextFunction) => {
+      fn(req, res).catch(next);
+    };
+  };
+
+  return {
+    app,
+    secretService,
+    httpError,
+    ensureServices: () => ensureServicesImpl(secretService, httpError),
+    wrap,
+    param,
+    upload: uploadInstance,
+  };
+}

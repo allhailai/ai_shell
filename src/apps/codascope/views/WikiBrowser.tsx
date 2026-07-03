@@ -9,6 +9,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
 import { IconWiki, IconRefresh, IconFile, IconHome } from "../components/CodaScopeIcons";
+import { connectToSseStream } from "../codaScopeSseClient";
 
 export function WikiBrowser() {
   const { segments, navigate } = useAppSubRoute("codascope");
@@ -141,65 +142,26 @@ export function WikiBrowser() {
     setAgentStatus(`Running ${command}…`);
 
     try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command, modelId: selectedModel, ...extra }),
+      await new Promise<void>((resolve, reject) => {
+        connectToSseStream(
+          {
+            url: `/api/codascope/projects/${activeProjectId}/runs`,
+            method: "POST",
+            body: { command, modelId: selectedModel, ...extra },
+          },
+          {
+            onText: (text) => setBuildLog((prev) => prev + text),
+            onDone: () => resolve(),
+            onError: (error) => reject(new Error(error)),
+          },
+        );
       });
-
-      if (!res.ok || !res.body) {
-        let errorText = "Failed to start agent.";
-        try {
-          const data = await res.json();
-          errorText = data.error ?? data.message ?? errorText;
-        } catch {
-          errorText = await res.text();
-        }
-        setBuildError(errorText);
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const msg = JSON.parse(line.slice(6));
-              if (msg.type === "assistant" && msg.message?.content) {
-                for (const block of msg.message.content) {
-                  if (block.type === "text" && block.text) {
-                    setBuildLog((prev) => prev + block.text);
-                  }
-                }
-              }
-            } catch {
-              // Skip malformed SSE
-            }
-          } else if (line.startsWith("event: wiki-refresh")) {
-            // Next data: line has updated topics
-          } else if (line.startsWith("event: done")) {
-            // Stream complete
-          } else if (line.startsWith("event: error")) {
-            // Next data: line has error
-          }
-        }
-      }
 
       // Refresh topics after build
       await refreshTopics();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
-      setBuildLog((prev) => prev + `\n\nFetch error: ${message}`);
+      setBuildLog((prev) => prev + `\n\nError: ${message}`);
     } finally {
       setAgentRunning(false);
       setAgentStatus("");

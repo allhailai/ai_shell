@@ -44,7 +44,10 @@ src/apps/codascope/
 ├── components/
 │   ├── ActionCard.tsx          # Interactive action cards from agent suggestions
 │   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs
+│   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input
+│   ├── AtMentionPicker.css     # Styles for the @-mention picker
 │   ├── BlockedDownloadItem.tsx # Blocked download resolution UI
+│   ├── ChatHelpModal.tsx       # Help modal for chat commands and tips
 │   ├── CodaScopeIcons.tsx      # Centralized SVG icon components
 │   ├── ConversationHeader.tsx  # Chat header with history popover & search
 │   ├── CurateButton.tsx        # Curation trigger button with status
@@ -52,6 +55,7 @@ src/apps/codascope/
 │   ├── CurationReasonsModal.tsx # Modal showing curation trigger reasons
 │   ├── DiffViewer.tsx          # Side-by-side version diff viewer
 │   ├── DocumentEditor.tsx      # Rich markdown editor for design docs
+│   ├── EditorSelectionToolbar.tsx # Floating toolbar on text selection
 │   ├── EpicBriefExport.tsx     # Epic brief export modal + clipboard
 │   ├── InsertionPrompt.tsx     # Inline directive prompt UI
 │   ├── ModelPicker.tsx         # AI model selection dropdown
@@ -59,6 +63,10 @@ src/apps/codascope/
 │   ├── SetupBanners.tsx        # Inline banners for missing config
 │   ├── SourceUpload.tsx        # File upload for knowledge sources
 │   └── SourceViewer.tsx        # Research source content viewer
+├── hooks/
+│   ├── useAssistantStream.ts   # Chat SSE streaming, action parsing, auto-title
+│   ├── useEditorDiff.ts        # Diff highlighting with fade-out timer
+│   └── useEditorResize.ts      # Mermaid/image resize handlers + API persistence
 ├── views/
 │   ├── ProjectList.tsx         # Project cards + first-launch setup wizard
 │   ├── ProjectDashboard.tsx    # Project overview, analyze pipeline, build state
@@ -83,45 +91,53 @@ src/apps/codascope/
     ├── do_explore.md           # Lightweight codebase exploration
     ├── do_quality_scan.md      # Runs quality analysis against golden rules
     ├── do_chat.md              # Codebase Q&A system prompt
-    ├── do_render_design.md     # Agent-led HTML rendering of design docs
     ├── do_curate_epic.md       # Curation pipeline prompt
-    ├── do_insert_content.md    # Directive content generation prompt
     ├── do_process_source.md    # Research source processing prompt
     └── do_research_epic.md     # Web research pipeline prompt
 ```
 
-**Backend services** (under `server/`):
+**Backend** (under `server/`):
 ```
 server/
-├── routes/codaScopeRoutes.ts                   # Express routes for all CodaScope APIs
+├── routes/
+│   ├── codaScopeRoutes.ts              # Thin hub — assembles all sub-route modules
+│   ├── codaScopeServiceContext.ts      # Shared service context, ensureServices(), helpers
+│   ├── codaScopeCoreRoutes.ts          # Config, projects, repositories, models, API key
+│   ├── codaScopeWikiRoutes.ts          # Wiki CRUD, state, concepts, golden rules, quality, code map
+│   ├── codaScopeBuildRoutes.ts         # Skills, runs, build status, log streaming, analyze
+│   ├── codaScopeChatRoutes.ts          # Conversations, messages, assistant, images
+│   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief
+│   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution
+│   └── codaScopeKnowledgeRoutes.ts     # Knowledge sources, blocked sources, research, curation
 └── services/
-    ├── codaScopeProjectService.ts              # Project CRUD, repository management
-    ├── codaScopeWikiService.ts                 # Wiki topic CRUD (markdown files on disk)
-    ├── codaScopeAgentService.ts                # Cursor SDK agent lifecycle (pool, cancel, send)
-    ├── codaScopeToolDefinitions.ts             # Agent tool factory — read/write/epic tool sets
-    ├── codaScopeBuildStateService.ts            # Build state tracking (in-memory + disk)
-    ├── codaScopeBuildOrchestrator.ts            # Multi-step build pipeline orchestration
-    ├── codaScopeChatService.ts                 # Conversation CRUD, auto-title, streaming detection
-    ├── codaScopeChatOrchestrator.ts             # Chat prompt assembly + streaming dispatch
-    ├── codaScopeChatPromptHelpers.ts            # System prompt assembly & context formatting
-    ├── codaScopeActionParser.ts                # Extracts <codascope_action> tags from agent output
-    ├── codaScopeCodeMapService.ts              # Progressive code map builder & staleness detection
-    ├── codaScopeWikiStateService.ts             # Wiki depth tracking, delta detection, study schema
-    ├── codaScopeCommandLoader.ts               # Template loader with {{VAR}} substitution
-    ├── codaScopeConceptService.ts              # Domain concept extraction & storage
-    ├── codaScopeGoldenRuleService.ts           # Golden rule CRUD for coding standards
-    ├── codaScopeQualityService.ts              # Quality scan result storage & scoring
-    ├── codaScopeSkillService.ts                # Framework + project skills management
-    ├── codaScopeEpicService.ts                 # Epic CRUD, lifecycle, scope, locks, health
-    ├── codaScopeDesignDocService.ts            # Design doc CRUD with markdown templates
-    ├── codaScopeVersionService.ts              # Snapshot-based version history
-    ├── codaScopeAnnotationService.ts           # Annotations, directives, batch execution
-    ├── codaScopeEpicRenderService.ts           # HTML rendering + storage
-    ├── codaScopeEpicKnowledgeService.ts        # Epic knowledge directory + source management
-    ├── codaScopeContentService.ts              # Content extraction & processing
-    ├── codaScopeCurationService.ts             # Curation trigger tracking & log persistence
-    ├── codaScopeCurationOrchestrator.ts        # Curation pipeline orchestration
-    └── codaScopeResearchOrchestrator.ts        # Web research pipeline orchestration
+    ├── codaScopeProjectService.ts      # Project CRUD, repository management
+    ├── codaScopeWikiService.ts         # Wiki topic CRUD (markdown files on disk)
+    ├── codaScopeAgentService.ts        # Cursor SDK agent lifecycle (pool, cancel, send)
+    ├── codaScopeToolDefinitions.ts     # Agent tool factory — read/write/epic tool sets
+    ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk)
+    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration
+    ├── codaScopeChatService.ts         # Conversation CRUD, auto-title, streaming detection
+    ├── codaScopeChatOrchestrator.ts    # Chat prompt assembly + streaming dispatch
+    ├── codaScopeChatPromptHelpers.ts   # System prompt assembly & context formatting
+    ├── codaScopeActionParser.ts        # Extracts <codascope_action> tags from agent output
+    ├── codaScopeCodeMapService.ts      # Progressive code map builder & staleness detection
+    ├── codaScopeWikiStateService.ts    # Wiki depth tracking, delta detection, study schema
+    ├── codaScopeCommandLoader.ts       # Template loader with {{VAR}} substitution
+    ├── codaScopeConceptService.ts      # Domain concept extraction & storage
+    ├── codaScopeGoldenRuleService.ts   # Golden rule CRUD for coding standards
+    ├── codaScopeQualityService.ts      # Quality scan result storage & scoring
+    ├── codaScopeSkillService.ts        # Framework + project skills management
+    ├── codaScopeImageService.ts        # Image upload, storage, and serving
+    ├── codaScopeEpicService.ts         # Epic CRUD, lifecycle, scope, locks, health
+    ├── codaScopeDesignDocService.ts    # Design doc CRUD with markdown templates
+    ├── codaScopeVersionService.ts      # Snapshot-based version history
+    ├── codaScopeAnnotationService.ts   # Annotations, directives, batch execution
+    ├── codaScopeEpicRenderService.ts   # HTML rendering + storage
+    ├── codaScopeEpicKnowledgeService.ts # Epic knowledge directory + source management
+    ├── codaScopeContentService.ts      # Content extraction & processing
+    ├── codaScopeCurationService.ts     # Curation trigger tracking & log persistence
+    ├── codaScopeCurationOrchestrator.ts # Curation pipeline orchestration
+    └── codaScopeResearchOrchestrator.ts # Web research pipeline orchestration
 ```
 
 ---
@@ -150,6 +166,21 @@ server/
 ```
 
 Chat is **not** a routed view — it lives in `CodaScopeAssistant.tsx` as a persistent right panel visible across all project views.
+
+### Route Architecture
+
+Backend API routes are split into domain-specific sub-modules under `server/routes/`. The hub file `codaScopeRoutes.ts` (~34 lines) imports and calls registration functions from each sub-route module:
+
+- `codaScopeServiceContext.ts` — shared service context, `ensureServices()`, helper utilities
+- `codaScopeCoreRoutes.ts` — config, projects, repositories, models
+- `codaScopeWikiRoutes.ts` — wiki CRUD, concepts, golden rules, quality, code map
+- `codaScopeBuildRoutes.ts` — skills, runs, build status, log streaming, analyze
+- `codaScopeChatRoutes.ts` — conversations, messages, assistant, images
+- `codaScopeEpicRoutes.ts` — epic CRUD, scope, designs, versions, rendering
+- `codaScopeAnnotationRoutes.ts` — annotations, directives, blocks, batch
+- `codaScopeKnowledgeRoutes.ts` — knowledge sources, research, curation
+
+New endpoints should be added to the appropriate domain route file, not to the hub.
 
 ### Agent Pipeline
 
@@ -254,10 +285,17 @@ This hybrid approach avoids token waste (no guessing at relevance) and gives the
 
 ### Tool Set
 
-Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`:
+Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool definitions are organized into three builder functions:
+- `buildReadOnlyTools()` — wiki, quality, code map, concepts, golden rules, build status
+- `buildEpicTools()` — epic CRUD, scope management, design doc operations
+- `buildWriteTools()` — wiki write, code map write, quality write
+
+Purpose-based filtering:
 - **Assistant/chat** → ALL tools (read + write + epic) — full agent autonomy
-- **Wiki-build** → read-only + code map write tools
+- **Wiki-build** → read-only + write tools
 - **Curation/research** → read-only + epic tools
+
+The table below is a representative subset of read-only tools:
 
 | Tool | Returns |
 |------|---------|
@@ -271,6 +309,8 @@ Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinition
 | `list_concepts` | Extracted domain concepts |
 | `read_build_status` | Current and historical build state |
 | `list_project_skills` | Available framework commands |
+
+Epic tools include `create_design_doc`, `edit_design_doc`, `edit_design_doc_section`, and epic scope/definition tools. See `codaScopeToolDefinitions.ts` for the full list.
 
 ### Action Tags
 
@@ -425,6 +465,7 @@ Unresolved variables are left as-is (the agent can still see them as placeholder
 | `codaScopeGoldenRuleService.ts` | CRUD for coding/architectural standards used in quality scans |
 | `codaScopeQualityService.ts` | Quality scan result persistence, scoring, and category breakdown |
 | `codaScopeSkillService.ts` | Framework + project skills management and listing |
+| `codaScopeImageService.ts` | Image upload, storage, and serving for design docs and chat |
 
 ---
 

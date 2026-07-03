@@ -30,7 +30,7 @@ const recentViewsBuffer: Array<{ view: string; label: string }> = [];
  * Record a view visit into the ring buffer.
  * Called each time the user navigates to a new view.
  */
-export function recordViewVisit(view: string, label: string): void {
+function recordViewVisit(view: string, label: string): void {
   // Don't record duplicate consecutive views
   const last = recentViewsBuffer[recentViewsBuffer.length - 1];
   if (last?.view === view && last?.label === label) return;
@@ -44,7 +44,7 @@ export function recordViewVisit(view: string, label: string): void {
 /**
  * Get the current recent views snapshot.
  */
-export function getRecentViews(): Array<{ view: string; label: string }> {
+function getRecentViews(): Array<{ view: string; label: string }> {
   return [...recentViewsBuffer];
 }
 

@@ -7,12 +7,14 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
-import { IconAnnotation, IconCheckmark, IconBolt, IconSparkle, IconRefresh } from "./CodaScopeIcons";
+import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
+import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
+import { useEditorDiff } from "../hooks/useEditorDiff";
+import { useEditorResize } from "../hooks/useEditorResize";
 import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -32,16 +34,7 @@ const LOCK_WARNING_MS = 4 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
-/* ── Helpers ─────────────────────────────────────────────────────────── */
 
-/** Simple string hash for diff comparison (djb2 algorithm) */
-function simpleHash(str: string): number {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 33) ^ str.charCodeAt(i);
-  }
-  return hash >>> 0;
-}
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
@@ -64,20 +57,18 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const [activeThreadBlockId, setActiveThreadBlockId] = useState<string | null>(null);
   const [insertionBlockId, setInsertionBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
-  const [selectionInfo, setSelectionInfo] = useState<{
-    blockId: string;
-    text: string;
-    startLine: number;
-    endLine: number;
-  } | null>(null);
-  const selectionToolbarRef = useRef<HTMLDivElement>(null);
+  const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
 
-  // Phase 3: Diff highlighting state
-  const [changedBlockIds, setChangedBlockIds] = useState<Set<string>>(new Set());
-  const [fadingBlockIds, setFadingBlockIds] = useState<Set<string>>(new Set());
-  const previousContentRef = useRef<string>("");
-  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Extracted hooks
+  const { changedBlockIds, fadingBlockIds, trackContentChange } = useEditorDiff();
+  const { handleMermaidResize, handleImageResize } = useEditorResize({
+    activeProjectId,
+    epicId,
+    docId: doc.id,
+    content,
+    onContentChange,
+  });
 
   // Phase 4: Undo state
   const [lastAgentEditVersion, setLastAgentEditVersion] = useState<number | null>(null);
@@ -101,54 +92,12 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
           const data = await res.json();
           const newBlocks = data.blocks ?? [];
           setBlocks(newBlocks);
-
-          // Phase 3: Diff highlighting — compare with previous content
-          if (previousContentRef.current && previousContentRef.current !== content) {
-            const oldBlockHashes = new Map<string, number>();
-            // Simple hash per block from previous render's blocks
-            const oldLines = previousContentRef.current.split("\n");
-            for (const block of newBlocks) {
-              const blockContent = oldLines.slice(block.lineStart - 1, block.lineEnd).join("\n");
-              oldBlockHashes.set(block.blockId, simpleHash(blockContent));
-            }
-            const changed = new Set<string>();
-            for (const block of newBlocks) {
-              const newBlockContent = content.split("\n").slice(block.lineStart - 1, block.lineEnd).join("\n");
-              const newHash = simpleHash(newBlockContent);
-              const oldHash = oldBlockHashes.get(block.blockId);
-              if (oldHash !== undefined && oldHash !== newHash) {
-                changed.add(block.blockId);
-              }
-            }
-            // Also mark any blocks that exist in new but not old
-            if (changed.size > 0) {
-              setChangedBlockIds(changed);
-              setFadingBlockIds(new Set());
-              // Start fade-out timer
-              if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-              fadeTimerRef.current = setTimeout(() => {
-                setFadingBlockIds(changed);
-                // After transition completes, clear everything
-                setTimeout(() => {
-                  setChangedBlockIds(new Set());
-                  setFadingBlockIds(new Set());
-                }, 1000);
-              }, 5000);
-            }
-          }
-          previousContentRef.current = content;
+          trackContentChange(newBlocks, content);
         }
       } catch { /* ignore */ }
     };
     fetchBlocks();
-  }, [activeProjectId, epicId, doc.id, content]);
-
-  // Cleanup fade timer on unmount
-  useEffect(() => {
-    return () => {
-      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    };
-  }, []);
+  }, [activeProjectId, epicId, doc.id, content, trackContentChange]);
 
   /* ── Phase 3: Agent edit refresh via command bus ──────────────────── */
 
@@ -413,93 +362,7 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     setUndoing(false);
   }, [activeProjectId, epicId, doc.id, lastAgentEditVersion, undoing, onContentChange]);
 
-  /* ── Mermaid & image resize persistence ───────────────────────────── */
-
-  /**
-   * When user drags a mermaid resize handle, update the markdown source
-   * with {height=N} on the corresponding fence line and auto-save.
-   */
-  const handleMermaidResize = useCallback(async (index: number, height: number) => {
-    if (!activeProjectId) return;
-    const roundedHeight = Math.round(height);
-    let mermaidIdx = 0;
-    const lines = content.split("\n");
-    let updated = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const fenceMatch = line.match(/^(\s*(`{3,}|~{3,})\s*mermaid)\s*(?:\{height=\d+\})?\s*$/);
-      if (fenceMatch) {
-        if (mermaidIdx === index) {
-          // Replace or insert {height=N}
-          lines[i] = `${fenceMatch[1]} {height=${roundedHeight}}`;
-          updated = true;
-          break;
-        }
-        mermaidIdx++;
-      }
-    }
-    if (!updated) return;
-    const newContent = lines.join("\n");
-    onContentChange(newContent);
-    // Persist to server
-    try {
-      await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: newContent }),
-        },
-      );
-    } catch { /* best effort */ }
-  }, [activeProjectId, epicId, doc.id, content, onContentChange]);
-
-  /**
-   * When user drags an image resize handle, update the markdown source
-   * with |WxH in the alt text (Obsidian convention) and auto-save.
-   */
-  const handleImageResize = useCallback(async (index: number, width: number, height: number) => {
-    if (!activeProjectId) return;
-    const rw = Math.round(width);
-    const rh = Math.round(height);
-    // Find the Nth image in the markdown
-    let imgIdx = 0;
-    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-    let match: RegExpExecArray | null;
-    let newContent = content;
-    const replacements: { from: number; to: number; replacement: string }[] = [];
-
-    while ((match = imgRegex.exec(content)) !== null) {
-      if (imgIdx === index) {
-        const fullMatch = match[0];
-        let alt = match[1];
-        const url = match[2];
-        // Strip existing |WxH from alt
-        alt = alt.replace(/\|\d+x\d+$/, "").trim();
-        const newTag = `![${alt}|${rw}x${rh}](${url})`;
-        replacements.push({ from: match.index, to: match.index + fullMatch.length, replacement: newTag });
-        break;
-      }
-      imgIdx++;
-    }
-
-    if (replacements.length === 0) return;
-    // Apply replacements (only one for now)
-    const r = replacements[0];
-    newContent = content.slice(0, r.from) + r.replacement + content.slice(r.to);
-    onContentChange(newContent);
-    // Persist to server
-    try {
-      await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: newContent }),
-        },
-      );
-    } catch { /* best effort */ }
-  }, [activeProjectId, epicId, doc.id, content, onContentChange]);
+  /* ── Mermaid & image resize persistence (via useEditorResize hook) ── */
 
   /* ── Create annotation on block ──────────────────────────────────── */
 
@@ -536,7 +399,7 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     setCommentSubmitting(false);
   }, [activeProjectId, epicId, doc.id, commentText, blocks, loadAnnotations]);
 
-  /* ── Selection toolbar ───────────────────────────────────────────── */
+  /* ── Selection detection ──────────────────────────────────────────── */
 
   const handleTextSelection = useCallback(() => {
     const selection = window.getSelection();
@@ -773,25 +636,7 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     );
   };
 
-  /* ── Selection toolbar ───────────────────────────────────────────── */
 
-  const handleEditWithAgent = useCallback(() => {
-    if (!selectionInfo) return;
-    // Package selection context and emit to chat
-    commandBus?.emit("codascope:design-selection-to-chat", {
-      blockId: selectionInfo.blockId,
-      text: selectionInfo.text,
-      startLine: selectionInfo.startLine,
-      endLine: selectionInfo.endLine,
-      docId: doc.id,
-      epicId,
-    });
-    // Open the right panel to the assistant
-    useShellStore.getState().openRightPanel("assistant");
-    // Clear selection
-    setSelectionInfo(null);
-    window.getSelection()?.removeAllRanges();
-  }, [selectionInfo, commandBus, doc.id, epicId]);
 
   /* ── Render ──────────────────────────────────────────────────────── */
 
@@ -908,26 +753,13 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
 
       {/* Selection toolbar */}
       {selectionInfo && !editing && (
-        <div className="codascope-selection-toolbar" ref={selectionToolbarRef}>
-          <button
-            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn codascope-selection-toolbar-btn--primary"
-            onClick={handleEditWithAgent}
-            type="button"
-          >
-            <IconSparkle size={12} /> Edit with Agent
-          </button>
-          <button
-            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
-            onClick={() => {
-              setCommentBlockId(selectionInfo.blockId);
-              setSelectionInfo(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-            type="button"
-          >
-            <IconAnnotation size={12} /> Comment
-          </button>
-        </div>
+        <EditorSelectionToolbar
+          selectionInfo={selectionInfo}
+          epicId={epicId}
+          docId={doc.id}
+          onComment={(blockId) => setCommentBlockId(blockId)}
+          onDismiss={() => setSelectionInfo(null)}
+        />
       )}
     </div>
   );
