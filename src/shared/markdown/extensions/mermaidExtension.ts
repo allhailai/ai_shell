@@ -101,6 +101,25 @@ function computeAdaptiveMaxHeight(width: number, height: number): number {
   return 600;                    // tall/portrait (ER diagrams, flowcharts)
 }
 
+// ── SVG viewBox tightening ───────────────────────────────────────────
+
+/**
+ * Rewrites the SVG's viewBox, width, and height to tightly wrap the actual
+ * drawn content (via getBBox()), eliminating Mermaid v11's generous internal
+ * padding. Returns the tightened dimensions.
+ */
+function tightenSvgViewBox(svgEl: SVGSVGElement, padding = 8): { width: number; height: number } {
+  const bbox = svgEl.getBBox();
+  const x = bbox.x - padding;
+  const y = bbox.y - padding;
+  const w = bbox.width + padding * 2;
+  const h = bbox.height + padding * 2;
+  svgEl.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+  svgEl.setAttribute("width", `${w}`);
+  svgEl.setAttribute("height", `${h}`);
+  return { width: w, height: h };
+}
+
 // ── Resize handle helper ────────────────────────────────────────────
 
 /**
@@ -111,11 +130,8 @@ function scaleMermaidToHeight(container: HTMLElement, targetHeight: number): voi
   const svgEl = container.querySelector<SVGSVGElement>("svg");
   if (!svgEl) return;
 
-  const vb = svgEl.viewBox?.baseVal;
-  const naturalHeight = vb?.height || svgEl.getAttribute("height")?.replace("px", "") || 0;
-  const naturalWidth = vb?.width || svgEl.getAttribute("width")?.replace("px", "") || 0;
-  const natH = typeof naturalHeight === "string" ? parseFloat(naturalHeight) : naturalHeight;
-  const natW = typeof naturalWidth === "string" ? parseFloat(naturalWidth) : naturalWidth;
+  // Tighten the viewBox to actual content bounds before reading dimensions
+  const { width: natW, height: natH } = tightenSvgViewBox(svgEl);
 
   if (natH <= 0) return;
 
@@ -221,15 +237,12 @@ class MermaidWidget extends WidgetType {
       wrapper.appendChild(resizable);
 
       // Determine target height and scale diagram to fit
-      const svgEl = diagram.querySelector("svg");
+      const svgEl = diagram.querySelector<SVGSVGElement>("svg");
       let targetHeight: number;
       if (this.explicitHeight) {
         targetHeight = this.explicitHeight;
       } else if (svgEl) {
-        const bbox = svgEl.getBBox?.();
-        const vb = svgEl.viewBox?.baseVal;
-        const w = bbox?.width || vb?.width || svgEl.clientWidth || 0;
-        const h = bbox?.height || vb?.height || svgEl.clientHeight || 0;
+        const { width: w, height: h } = tightenSvgViewBox(svgEl);
         targetHeight = computeAdaptiveMaxHeight(w, h);
       } else {
         targetHeight = 500;
