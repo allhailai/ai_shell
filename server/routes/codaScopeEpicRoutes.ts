@@ -234,11 +234,27 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
       accepted?: { addedTopicIds?: string[]; removedTopicIds?: string[]; changedTopicIds?: string[] };
       fullDiff?: unknown;
     };
-    if (!accepted || !fullDiff) throw httpError("accepted and fullDiff are required.", 400, "invalid_input");
+    if (!accepted || typeof accepted !== "object") {
+      throw httpError("accepted must be an object with addedTopicIds, removedTopicIds, and/or changedTopicIds arrays.", 400, "invalid_input");
+    }
+    if (!fullDiff || typeof fullDiff !== "object") {
+      throw httpError("fullDiff is required and must be an object.", 400, "invalid_input");
+    }
+    // Validate array fields within accepted
+    const { addedTopicIds, removedTopicIds, changedTopicIds } = accepted;
+    if (addedTopicIds !== undefined && !Array.isArray(addedTopicIds)) {
+      throw httpError("accepted.addedTopicIds must be an array.", 400, "invalid_input");
+    }
+    if (removedTopicIds !== undefined && !Array.isArray(removedTopicIds)) {
+      throw httpError("accepted.removedTopicIds must be an array.", 400, "invalid_input");
+    }
+    if (changedTopicIds !== undefined && !Array.isArray(changedTopicIds)) {
+      throw httpError("accepted.changedTopicIds must be an array.", 400, "invalid_input");
+    }
     const scope = await epicSvc.applyScopeDiff(id, epicId, {
-      addedTopicIds: accepted.addedTopicIds ?? [],
-      removedTopicIds: accepted.removedTopicIds ?? [],
-      changedTopicIds: accepted.changedTopicIds ?? [],
+      addedTopicIds: addedTopicIds ?? [],
+      removedTopicIds: removedTopicIds ?? [],
+      changedTopicIds: changedTopicIds ?? [],
     }, fullDiff as any);
     if (!scope) throw httpError("Epic not found.", 404, "not_found");
     res.json({ scope });

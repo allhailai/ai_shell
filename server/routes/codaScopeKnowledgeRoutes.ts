@@ -56,12 +56,29 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
 
     // Support both multipart upload and JSON-only metadata
     const file = (req as Request & { file?: Express.Multer.File }).file;
+
+    // Validate: either a file or at least a title must be provided
+    if (!file && (!req.body.title || typeof req.body.title !== "string" || !req.body.title.trim())) {
+      throw httpError("A file upload or a non-empty title is required.", 400, "invalid_input");
+    }
+
     const title = (req.body.title as string) ?? file?.originalname ?? "Untitled";
-    const topicAssociations = req.body.topicAssociations
-      ? (typeof req.body.topicAssociations === "string"
-        ? JSON.parse(req.body.topicAssociations)
-        : req.body.topicAssociations) as string[]
-      : [];
+
+    // Validate topicAssociations if present
+    let topicAssociations: string[] = [];
+    if (req.body.topicAssociations) {
+      try {
+        topicAssociations = typeof req.body.topicAssociations === "string"
+          ? JSON.parse(req.body.topicAssociations)
+          : req.body.topicAssociations;
+        if (!Array.isArray(topicAssociations)) {
+          throw httpError("topicAssociations must be an array of strings.", 400, "invalid_input");
+        }
+      } catch (e) {
+        if (e instanceof Error && "statusCode" in e) throw e; // re-throw httpError
+        throw httpError("topicAssociations must be a valid JSON array.", 400, "invalid_input");
+      }
+    }
 
     // Create source entry
     const source = await epicKnowledgeSvc.addSource(id, epicId, {

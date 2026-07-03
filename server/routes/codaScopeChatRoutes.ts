@@ -98,6 +98,9 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       if (!modelId || typeof modelId !== "string") {
         throw httpError("modelId is required.", 400, "invalid_input");
       }
+      if (attachments !== undefined && !Array.isArray(attachments)) {
+        throw httpError("attachments must be an array.", 400, "invalid_input");
+      }
 
       // Resolve image attachments: read from disk and base64-encode for the SDK
       const imageAttachmentPaths: Array<{ path: string; filename: string }> = [];
