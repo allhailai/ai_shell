@@ -65,6 +65,8 @@ interface ChatMessage {
   status?: "complete" | "streaming" | "error";
   createdAt?: string;
   metadata?: Record<string, unknown>;
+  /** Image attachment URLs (for display in the chat bubble) */
+  images?: Array<{ url: string; filename: string }>;
 }
 
 interface Conversation {
@@ -138,14 +140,23 @@ export function CodaScopeAssistant() {
         setMessages(
           conv.messages
             .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              status: m.status ?? "complete",
-              createdAt: m.createdAt,
-              metadata: m.metadata,
-            })),
+            .map((m: ChatMessage) => {
+              // Restore image URLs from metadata for conversation history
+              const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
+              const images = metaImages?.map((img) => ({
+                url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${img.filename}`,
+                filename: img.filename,
+              }));
+              return {
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                status: m.status ?? "complete",
+                createdAt: m.createdAt,
+                metadata: m.metadata,
+                images,
+              };
+            }),
         );
       }
     } catch {
@@ -296,14 +307,23 @@ export function CodaScopeAssistant() {
           // Load messages from the epic conversation
           const msgs = (conv.messages ?? [])
             .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              status: m.status ?? "complete",
-              createdAt: m.createdAt,
-              metadata: m.metadata,
-            }));
+            .map((m: ChatMessage) => {
+              // Restore image URLs from metadata for conversation history
+              const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
+              const images = metaImages?.map((img) => ({
+                url: `/api/codascope/projects/${activeProjectId}/conversations/${conv.id}/images/${img.filename}`,
+                filename: img.filename,
+              }));
+              return {
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                status: m.status ?? "complete",
+                createdAt: m.createdAt,
+                metadata: m.metadata,
+                images,
+              };
+            });
           setMessages(msgs);
           // Update conversation list
           await loadConversationList();
@@ -400,11 +420,27 @@ export function CodaScopeAssistant() {
 
     if (!convId) return;
 
+    // Build image URLs from attachments for display in the chat bubble
+    const imageUrls = attachments
+      .filter((a) => a.type === "image" && a.metadata?.path)
+      .map((a) => ({
+        url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${(a.metadata?.path as string).split("/").pop()}`,
+        filename: a.label,
+      }));
+    // Also capture blob previews for immediate display (before server URL is available)
+    const imagePreviews = attachments
+      .filter((a) => a.type === "image" && a.preview)
+      .map((a) => ({
+        url: a.preview!,
+        filename: a.label,
+      }));
+
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
       content: trimmed,
       status: "complete",
+      images: imageUrls.length > 0 ? imageUrls : imagePreviews.length > 0 ? imagePreviews : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -1000,7 +1036,22 @@ export function CodaScopeAssistant() {
                   {msg.role === "assistant" ? (
                     <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId)} />
                   ) : (
-                    <p>{msg.content}</p>
+                    <>
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="codascope-msg-images">
+                          {msg.images.map((img, i) => (
+                            <img
+                              key={i}
+                              src={img.url}
+                              alt={img.filename}
+                              className="codascope-msg-image-thumb"
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <p>{msg.content}</p>
+                    </>
                   )}
                 </div>
               </div>
@@ -1046,16 +1097,6 @@ export function CodaScopeAssistant() {
             disabled={modelsLoading || streaming}
             compact
           />
-          <button
-            className="codascope-conv-new-btn"
-            disabled={streaming}
-            onClick={createNewConversation}
-            title="New conversation"
-            type="button"
-            style={{ marginLeft: "auto" }}
-          >
-            + New Chat
-          </button>
           <div className="codascope-assistant-input-actions">
             {streaming && (
               <button
@@ -1067,6 +1108,24 @@ export function CodaScopeAssistant() {
                 ■
               </button>
             )}
+            <button
+              className="codascope-assistant-help-btn"
+              onClick={() => setHelpModalOpen(true)}
+              type="button"
+              title="Chat help"
+              aria-label="Chat help"
+            >
+              ?
+            </button>
+            <button
+              className="codascope-conv-new-btn"
+              disabled={streaming}
+              onClick={createNewConversation}
+              title="New conversation"
+              type="button"
+            >
+              + New Chat
+            </button>
           </div>
         </div>
         <div className="codascope-assistant-input-row">
@@ -1084,29 +1143,18 @@ export function CodaScopeAssistant() {
             disabled={streaming || !selectedModelId}
             sendDisabled={!input.trim() || streaming || !selectedModelId}
           />
-          <div className="codascope-assistant-input-actions-row">
-            <button
-              className="codascope-assistant-help-btn"
-              onClick={() => setHelpModalOpen(true)}
-              type="button"
-              title="Chat help"
-              aria-label="Chat help"
-            >
-              ?
-            </button>
-            <button
-              className="codascope-assistant-send-btn"
-              onClick={sendMessage}
-              disabled={!input.trim() || streaming || !selectedModelId}
-              type="button"
-              title="Send message"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
-          </div>
+          <button
+            className="codascope-assistant-send-btn"
+            onClick={sendMessage}
+            disabled={!input.trim() || streaming || !selectedModelId}
+            type="button"
+            title="Send message"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
         </div>
         <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
         {atPickerOpen && atPickerPosition && activeProjectId && (

@@ -9,6 +9,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-width: 0;
   gap: 0;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);
@@ -28,7 +30,7 @@
 /* ── Textarea ────────────────────────────────────────────────────── */
 
 .shared-rich-input-textarea {
-  flex: 1;
+  width: 100%;
   resize: none;
   border: none;
   border-radius: var(--radius-md);

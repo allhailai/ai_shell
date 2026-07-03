@@ -78,23 +78,22 @@ export function RichChatInput({
 
   const adjustHeight = useCallback(() => {
     const textarea = textareaRef.current;
-    const container = containerRef.current;
-    if (!textarea || !container) return;
+    if (!textarea) return;
 
     // Reset to get accurate scrollHeight
     textarea.style.height = "auto";
 
-    // Calculate max height: % of parent container
-    const parent = container.closest(".codascope-assistant-input-area") ?? container.parentElement;
-    const parentHeight = parent?.clientHeight ?? 400;
-    const maxHeight = Math.max(80, (parentHeight * maxHeightPercent) / 100);
+    // Calculate max height: % of viewport height (avoids circular parent sizing)
+    const viewportHeight = window.innerHeight;
+    const maxHeight = Math.max(120, Math.min((viewportHeight * maxHeightPercent) / 100, 400));
 
     const newHeight = Math.min(textarea.scrollHeight, maxHeight);
     textarea.style.height = `${newHeight}px`;
   }, [maxHeightPercent]);
 
+  // Run after React commits DOM changes (synchronous, before paint)
   useEffect(() => {
-    requestAnimationFrame(adjustHeight);
+    adjustHeight();
   }, [value, adjustHeight]);
 
   /* ── Keyboard handling ────────────────────────────────────────── */
@@ -121,6 +120,9 @@ export function RichChatInput({
       const newValue = e.target.value;
       onChange(newValue);
 
+      // Immediately adjust height for responsive feel
+      requestAnimationFrame(adjustHeight);
+
       // Detect @ trigger
       if (onAtTrigger && textareaRef.current) {
         const pos = e.target.selectionStart;
@@ -138,7 +140,7 @@ export function RichChatInput({
         }
       }
     },
-    [onChange, onAtTrigger],
+    [onChange, onAtTrigger, adjustHeight],
   );
 
   /* ── Paste handler (images) ───────────────────────────────────── */

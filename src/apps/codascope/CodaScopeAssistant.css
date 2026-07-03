@@ -461,6 +461,31 @@
   }
 }
 
+/* ── Message Image Thumbnails ──────────────────────────────────── */
+
+.codascope-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.codascope-msg-image-thumb {
+  max-width: 200px;
+  max-height: 150px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  object-fit: cover;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-msg-image-thumb:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md);
+  transform: scale(1.02);
+}
+
 /* ── Input Area ─────────────────────────────────────────────────── */
 
 .codascope-assistant-input-area {
@@ -479,7 +504,31 @@
 
 .codascope-assistant-input-actions {
   display: flex;
-  gap: var(--space-1);
+  gap: var(--space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+.codascope-assistant-help-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border-primary);
+  background: transparent;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.codascope-assistant-help-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-text-tertiary);
+  background: var(--color-bg-hover);
 }
 
 .codascope-assistant-stop-btn,

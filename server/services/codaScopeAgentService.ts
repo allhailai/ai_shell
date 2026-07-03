@@ -14,6 +14,8 @@ import type {
   SDKAgent,
   SDKCustomTool,
   SDKMessage,
+  SDKUserMessage,
+  SDKImage,
   RunResult,
   ModelListItem,
 } from "@cursor/sdk";
@@ -29,6 +31,7 @@ export interface AgentSendOptions {
   modelId: string;
   systemPrompt?: string;
   context?: string;
+  images?: Array<{ data: string; mimeType: string }>;
   purpose: "chat" | "assistant" | "wiki-build" | "curation" | "research";
   onMessage: (msg: SDKMessage) => void;
   onDone: (result: RunResult) => void;
@@ -243,7 +246,7 @@ export class CodaScopeAgentService {
   /* ── Send Message ─────────────────────────────────────────────────── */
 
   async send(options: AgentSendOptions): Promise<void> {
-    const { projectId, message, modelId, systemPrompt, context, purpose, onMessage, onDone, onError } = options;
+    const { projectId, message, modelId, systemPrompt, context, images, purpose, onMessage, onDone, onError } = options;
 
     const key = this.poolKey(projectId, purpose);
 
@@ -271,7 +274,18 @@ export class CodaScopeAgentService {
       }
       fullMessage += message;
 
-      const run = await agent.send(fullMessage, {
+      // Build the message payload: use SDKUserMessage when images are present
+      const messagePayload: string | SDKUserMessage = images && images.length > 0
+        ? {
+            text: fullMessage,
+            images: images.map((img): SDKImage => ({
+              data: img.data,
+              mimeType: img.mimeType,
+            })),
+          }
+        : fullMessage;
+
+      const run = await agent.send(messagePayload, {
         model: { id: modelId },
         onDelta: ({ update }) => {
           // Check if cancelled

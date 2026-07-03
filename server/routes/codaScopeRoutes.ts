@@ -843,13 +843,14 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   app.post("/api/codascope/projects/:id/conversations/:convId/messages", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
       const svcs = await ensureServices(secretService, httpError);
-      const { agentSvc, chatSvc } = svcs;
+      const { agentSvc, chatSvc, epicSvc, imageSvc } = svcs;
       const id = param(req, "id");
       const convId = param(req, "convId");
-      const { message, modelId, context, references, selectionContext } = req.body as {
+      const { message, modelId, context, attachments, references, selectionContext } = req.body as {
         message?: string;
         modelId?: string;
         context?: Record<string, unknown>;
+        attachments?: Array<{ type: string; path: string }>;
         references?: Array<{ category: string; id: string; label?: string }>;
         selectionContext?: { blockId: string; text: string; startLine: number; endLine: number; docId: string; epicId?: string };
       };
@@ -861,7 +862,32 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         throw httpError("modelId is required.", 400, "invalid_input");
       }
 
-      // Persist user message
+      // Resolve image attachments: read from disk and base64-encode for the SDK
+      const imageAttachmentPaths: Array<{ path: string; filename: string }> = [];
+      const sdkImages: Array<{ data: string; mimeType: string }> = [];
+      if (attachments && Array.isArray(attachments)) {
+        for (const att of attachments) {
+          if (att.type !== "image" || !att.path) continue;
+          // att.path is relative like "conversations/<convId>/images/<filename>"
+          const filename = path.basename(att.path);
+          const absPath = imageSvc.getImagePath(id, convId, filename);
+          if (absPath && existsSync(absPath)) {
+            const buffer = readFileSync(absPath);
+            const ext = path.extname(filename).toLowerCase();
+            const mimeMap: Record<string, string> = {
+              ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".gif": "image/gif", ".webp": "image/webp",
+            };
+            sdkImages.push({
+              data: buffer.toString("base64"),
+              mimeType: mimeMap[ext] ?? "image/png",
+            });
+            imageAttachmentPaths.push({ path: att.path, filename });
+          }
+        }
+      }
+
+      // Persist user message (with image metadata if present)
       const userMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       await chatSvc.appendMessage(id, convId, {
         id: userMsgId,
@@ -870,6 +896,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         modelId: null,
         status: "complete",
         context: context ?? null,
+        ...(imageAttachmentPaths.length > 0 ? { metadata: { images: imageAttachmentPaths } } : {}),
       });
 
       // Create a placeholder for the assistant message
@@ -999,6 +1026,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
           modelId,
           systemPrompt,
           agentSvc,
+          ...(sdkImages.length > 0 ? { images: sdkImages } : {}),
           onMessage: (msg) => {
             if (aborted) return;
             res.write(`data: ${JSON.stringify(msg)}\n\n`);
@@ -1716,6 +1744,29 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     if (!file) throw httpError("No image file provided.", 400, "invalid_input");
     const result = await imageSvc.uploadImage(id, convId, file.buffer, file.mimetype, file.originalname);
     res.status(201).json(result);
+  }));
+
+  // Serve a conversation image
+  app.get("/api/codascope/projects/:id/conversations/:convId/images/:filename", wrap(async (req, res) => {
+    const { imageSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const convId = param(req, "convId");
+    const filename = param(req, "filename");
+    const filePath = imageSvc.getImagePath(id, convId, filename);
+    if (!filePath) throw httpError("Image not found.", 404, "not_found");
+
+    // Determine content type from extension
+    const ext = path.extname(filename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+    };
+    res.setHeader("Content-Type", mimeTypes[ext] ?? "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.sendFile(filePath);
   }));
 
   // List design docs for an epic

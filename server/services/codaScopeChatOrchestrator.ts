@@ -142,9 +142,10 @@ export async function streamAssistantResponse(options: {
   modelId: string;
   systemPrompt: string;
   agentSvc: CodaScopeAgentService;
+  images?: Array<{ data: string; mimeType: string }>;
   onMessage: (msg: unknown) => void;
 }): Promise<StreamResult> {
-  const { projectId, message, modelId, systemPrompt, agentSvc, onMessage } = options;
+  const { projectId, message, modelId, systemPrompt, agentSvc, images, onMessage } = options;
 
   let fullResponse = "";
 
@@ -154,6 +155,7 @@ export async function streamAssistantResponse(options: {
       message,
       modelId,
       systemPrompt,
+      images,
       purpose: "assistant",
       onMessage: (msg) => {
         // Accumulate text
