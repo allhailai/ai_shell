@@ -430,6 +430,19 @@ export function CodaScopeAssistant() {
         label: a.label,
       }));
 
+    // Build selection context from selection chips (Phase 3)
+    const selectionChip = attachments.find((a) => a.type === "selection");
+    const selectionContext = selectionChip
+      ? {
+          blockId: selectionChip.metadata?.blockId as string,
+          text: selectionChip.metadata?.text as string,
+          startLine: selectionChip.metadata?.startLine as number,
+          endLine: selectionChip.metadata?.endLine as number,
+          docId: selectionChip.metadata?.docId as string,
+          epicId: selectionChip.metadata?.epicId as string,
+        }
+      : undefined;
+
     try {
       const response = await fetch(
         `/api/codascope/projects/${activeProjectId}/conversations/${convId}/messages`,
@@ -442,6 +455,7 @@ export function CodaScopeAssistant() {
             context: getContext(),
             ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
             ...(referenceAttachments.length > 0 ? { references: referenceAttachments } : {}),
+            ...(selectionContext ? { selectionContext } : {}),
           }),
           signal: controller.signal,
         },
@@ -801,6 +815,45 @@ export function CodaScopeAssistant() {
     setAtPickerOpen(false);
     setAtPickerPosition(null);
   }, []);
+
+  // ── Phase 3: Selection-to-chat listener ────────────────────────────
+
+  useEffect(() => {
+    if (!commandBus) return;
+    const unsub = commandBus.on("codascope:design-selection-to-chat", (payload: {
+      blockId: string;
+      text: string;
+      startLine: number;
+      endLine: number;
+      docId: string;
+      epicId: string;
+    }) => {
+      // Create a selection attachment chip
+      const chipId = `sel-${Date.now()}`;
+      const preview = payload.text.length > 100
+        ? payload.text.slice(0, 97) + "..."
+        : payload.text;
+
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: chipId,
+          type: "selection" as const,
+          label: `Lines ${payload.startLine}–${payload.endLine}`,
+          preview,
+          metadata: {
+            blockId: payload.blockId,
+            text: payload.text,
+            startLine: payload.startLine,
+            endLine: payload.endLine,
+            docId: payload.docId,
+            epicId: payload.epicId,
+          },
+        },
+      ]);
+    });
+    return unsub;
+  }, [commandBus]);
 
   // ── Design doc action tag handlers ────────────────────────────────
 

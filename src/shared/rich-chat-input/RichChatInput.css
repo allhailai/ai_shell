@@ -138,6 +138,19 @@
   max-width: 140px;
 }
 
+.shared-rich-input-chip-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  border-left: 1px solid var(--color-border-primary);
+  padding-left: var(--space-1);
+  margin-left: var(--space-1);
+}
+
 .shared-rich-input-chip-remove {
   flex-shrink: 0;
   display: flex;

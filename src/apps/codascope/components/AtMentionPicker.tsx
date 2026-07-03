@@ -17,7 +17,7 @@ import {
   IconFile,
   IconFolder,
   IconPaintbrush,
-  IconTarget,
+  IconEpic,
 } from "./CodaScopeIcons";
 
 /* ── Types ───────────────────────────────────────────────────────── */
@@ -60,7 +60,7 @@ const CATEGORIES: CategoryDef[] = [
   { id: "source", label: "Research Sources", icon: <IconSearch size={16} />, hasList: true },
   { id: "design", label: "Design Documents", icon: <IconPaintbrush size={16} />, hasList: true },
   { id: "code", label: "Code Files", icon: <IconFile size={16} />, hasList: true },
-  { id: "definition", label: "Epic Definition", icon: <IconTarget size={16} />, hasList: false },
+  { id: "definition", label: "Epic Definition", icon: <IconEpic size={16} />, hasList: false },
 ];
 
 const DEBOUNCE_MS = 300;

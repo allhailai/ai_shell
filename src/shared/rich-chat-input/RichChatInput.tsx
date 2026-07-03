@@ -236,6 +236,11 @@ export function RichChatInput({
               <span className="shared-rich-input-chip-label">
                 {attachment.label}
               </span>
+              {attachment.type === "selection" && attachment.preview && (
+                <span className="shared-rich-input-chip-preview" title={attachment.preview}>
+                  {attachment.preview}
+                </span>
+              )}
               {onRemoveAttachment && (
                 <button
                   className="shared-rich-input-chip-remove"

@@ -26,7 +26,7 @@ import { CodaScopeCurationService } from "../services/codaScopeCurationService.j
 import { CodaScopeImageService } from "../services/codaScopeImageService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
-import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, formatReferences, streamAssistantResponse, type ViewContext, type ReferenceItem } from "../services/codaScopeChatOrchestrator.js";
+import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, formatReferences, formatSelectionContext, streamAssistantResponse, type ViewContext, type ReferenceItem, type SelectionContext } from "../services/codaScopeChatOrchestrator.js";
 import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.js";
 import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
@@ -846,11 +846,12 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       const { agentSvc, chatSvc } = svcs;
       const id = param(req, "id");
       const convId = param(req, "convId");
-      const { message, modelId, context, references } = req.body as {
+      const { message, modelId, context, references, selectionContext } = req.body as {
         message?: string;
         modelId?: string;
         context?: Record<string, unknown>;
         references?: Array<{ category: string; id: string; label?: string }>;
+        selectionContext?: { blockId: string; text: string; startLine: number; endLine: number; docId: string; epicId?: string };
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -970,8 +971,13 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         ? "\n\n" + formatReferences(references as ReferenceItem[])
         : "";
 
+      // Format selection context into prompt context (Phase 3)
+      const selectionStr = selectionContext && selectionContext.text
+        ? "\n\n" + formatSelectionContext(selectionContext as SelectionContext)
+        : "";
+
       // Build the full system prompt with all context injected
-      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr + referencesStr, message.trim());
+      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr + referencesStr + selectionStr, message.trim());
 
       // Set up SSE headers
       res.writeHead(200, {

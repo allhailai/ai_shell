@@ -4483,6 +4483,29 @@
   white-space: nowrap;
 }
 
+.codascope-selection-toolbar-btn--primary {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-selection-toolbar-btn--primary:hover {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* ── Phase 3: Diff Highlighting for Agent Edits ─────────────────────── */
+
+.codascope-document-block--changed {
+  background-color: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border-left: 2px solid var(--color-success);
+  transition: background-color 1s ease-out, border-left-color 1s ease-out;
+}
+
+.codascope-document-block--changed.codascope-fade-out {
+  background-color: transparent;
+  border-left-color: transparent;
+}
+
 /* ── Document Editor P2b Additions ──────────────────────────────────── */
 
 .codascope-document-editor-annotation-count {

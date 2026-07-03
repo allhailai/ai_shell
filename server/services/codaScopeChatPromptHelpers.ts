@@ -488,3 +488,40 @@ export function formatReferences(references: ReferenceItem[]): string {
   return lines.join("\n");
 }
 
+/* ── Selection Context Formatter ─────────────────────────────────── */
+
+export interface SelectionContext {
+  blockId: string;
+  text: string;
+  startLine: number;
+  endLine: number;
+  docId: string;
+  epicId?: string;
+}
+
+/**
+ * Format selection context into a system prompt section.
+ * Tells the agent what text the user has selected in the document
+ * and instructs it to make targeted edits to that specific area.
+ */
+export function formatSelectionContext(selection: SelectionContext): string {
+  if (!selection || !selection.text) return "";
+
+  const lines: string[] = [
+    "## Selection Context",
+    "",
+    `The user has selected text in design document \`${selection.docId}\` ` +
+    `(lines ${selection.startLine}–${selection.endLine}):`,
+    "",
+    "```",
+    selection.text,
+    "```",
+    "",
+    "**Instructions**: When the user asks you to edit or modify something, " +
+    "focus your changes on this specific selected area. Use the `edit_design_doc_section` tool " +
+    `with startLine=${selection.startLine} and endLine=${selection.endLine} to make targeted edits. ` +
+    "Do NOT rewrite the entire document unless the user explicitly asks for a broad rewrite.",
+  ];
+
+  return lines.join("\n");
+}

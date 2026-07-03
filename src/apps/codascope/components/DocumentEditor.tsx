@@ -7,11 +7,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
-import { IconAnnotation, IconCheckmark, IconRewrite, IconExpand, IconBolt } from "./CodaScopeIcons";
-import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, DirectiveType } from "../codaScopeTypes";
+import { IconAnnotation, IconCheckmark, IconBolt, IconSparkle } from "./CodaScopeIcons";
+import { useCommandBus } from "../../../shell/hooks";
+import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -30,10 +32,22 @@ const LOCK_WARNING_MS = 4 * 60 * 1000;
 const LOCK_TTL_MS = 5 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 60_000;
 
+/* ── Helpers ─────────────────────────────────────────────────────────── */
+
+/** Simple string hash for diff comparison (djb2 algorithm) */
+function simpleHash(str: string): number {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 33) ^ str.charCodeAt(i);
+  }
+  return hash >>> 0;
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function DocumentEditor({ epicId, doc, content, onContentChange, onClose }: DocumentEditorProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const commandBus = useCommandBus();
 
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -59,6 +73,12 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const selectionToolbarRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
 
+  // Phase 3: Diff highlighting state
+  const [changedBlockIds, setChangedBlockIds] = useState<Set<string>>(new Set());
+  const [fadingBlockIds, setFadingBlockIds] = useState<Set<string>>(new Set());
+  const previousContentRef = useRef<string>("");
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Sync content when it changes externally
   useEffect(() => {
     if (!editing) setEditContent(content);
@@ -75,12 +95,78 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
         );
         if (res.ok) {
           const data = await res.json();
-          setBlocks(data.blocks ?? []);
+          const newBlocks = data.blocks ?? [];
+          setBlocks(newBlocks);
+
+          // Phase 3: Diff highlighting — compare with previous content
+          if (previousContentRef.current && previousContentRef.current !== content) {
+            const oldBlockHashes = new Map<string, number>();
+            // Simple hash per block from previous render's blocks
+            const oldLines = previousContentRef.current.split("\n");
+            for (const block of newBlocks) {
+              const blockContent = oldLines.slice(block.lineStart - 1, block.lineEnd).join("\n");
+              oldBlockHashes.set(block.blockId, simpleHash(blockContent));
+            }
+            const changed = new Set<string>();
+            for (const block of newBlocks) {
+              const newBlockContent = content.split("\n").slice(block.lineStart - 1, block.lineEnd).join("\n");
+              const newHash = simpleHash(newBlockContent);
+              const oldHash = oldBlockHashes.get(block.blockId);
+              if (oldHash !== undefined && oldHash !== newHash) {
+                changed.add(block.blockId);
+              }
+            }
+            // Also mark any blocks that exist in new but not old
+            if (changed.size > 0) {
+              setChangedBlockIds(changed);
+              setFadingBlockIds(new Set());
+              // Start fade-out timer
+              if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+              fadeTimerRef.current = setTimeout(() => {
+                setFadingBlockIds(changed);
+                // After transition completes, clear everything
+                setTimeout(() => {
+                  setChangedBlockIds(new Set());
+                  setFadingBlockIds(new Set());
+                }, 1000);
+              }, 5000);
+            }
+          }
+          previousContentRef.current = content;
         }
       } catch { /* ignore */ }
     };
     fetchBlocks();
   }, [activeProjectId, epicId, doc.id, content]);
+
+  // Cleanup fade timer on unmount
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
+
+  /* ── Phase 3: Agent edit refresh via command bus ──────────────────── */
+
+  useEffect(() => {
+    if (!commandBus || !activeProjectId) return;
+    const unsub = commandBus.on("codascope:design-doc-edited", async (payload: { epicId: string; docId: string; summary?: string }) => {
+      if (payload.docId !== doc.id) return;
+      // Re-fetch the content from the API
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.content !== undefined) {
+            onContentChange(data.content);
+          }
+        }
+      } catch { /* ignore */ }
+    });
+    return unsub;
+  }, [commandBus, activeProjectId, epicId, doc.id, onContentChange]);
 
   /* ── Annotation & directive loading ──────────────────────────────── */
 
@@ -401,11 +487,14 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
           const isHovered = hoveredBlockId === block.blockId;
           const isCommentOpen = commentBlockId === block.blockId;
 
+          const isChanged = changedBlockIds.has(block.blockId);
+          const isFading = fadingBlockIds.has(block.blockId);
+
           return (
             <div key={block.blockId}>
               {/* Block with gutter */}
               <div
-                className={`codascope-document-block${isHovered ? " codascope-document-block--hover" : ""}`}
+                className={`codascope-document-block${isHovered ? " codascope-document-block--hover" : ""}${isChanged ? " codascope-document-block--changed" : ""}${isFading ? " codascope-fade-out" : ""}`}
                 data-block-id={block.blockId}
                 onMouseEnter={() => setHoveredBlockId(block.blockId)}
                 onMouseLeave={() => setHoveredBlockId(null)}
@@ -551,13 +640,23 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
 
   /* ── Selection toolbar ───────────────────────────────────────────── */
 
-  const handleSelectionAction = useCallback((_action: DirectiveType) => {
+  const handleEditWithAgent = useCallback(() => {
     if (!selectionInfo) return;
-    // Open an insertion prompt for the selection
-    setInsertionBlockId(selectionInfo.blockId);
+    // Package selection context and emit to chat
+    commandBus?.emit("codascope:design-selection-to-chat", {
+      blockId: selectionInfo.blockId,
+      text: selectionInfo.text,
+      startLine: selectionInfo.startLine,
+      endLine: selectionInfo.endLine,
+      docId: doc.id,
+      epicId,
+    });
+    // Open the right panel to the assistant
+    useShellStore.getState().openRightPanel("assistant");
+    // Clear selection
     setSelectionInfo(null);
     window.getSelection()?.removeAllRanges();
-  }, [selectionInfo]);
+  }, [selectionInfo, commandBus, doc.id, epicId]);
 
   /* ── Render ──────────────────────────────────────────────────────── */
 
@@ -665,6 +764,13 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
       {selectionInfo && !editing && (
         <div className="codascope-selection-toolbar" ref={selectionToolbarRef}>
           <button
+            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn codascope-selection-toolbar-btn--primary"
+            onClick={handleEditWithAgent}
+            type="button"
+          >
+            <IconSparkle size={12} /> Edit with Agent
+          </button>
+          <button
             className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
             onClick={() => {
               setCommentBlockId(selectionInfo.blockId);
@@ -674,20 +780,6 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
             type="button"
           >
             <IconAnnotation size={12} /> Comment
-          </button>
-          <button
-            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
-            onClick={() => handleSelectionAction("replace")}
-            type="button"
-          >
-            <IconRewrite size={12} /> Rewrite
-          </button>
-          <button
-            className="codascope-btn codascope-btn-xs codascope-selection-toolbar-btn"
-            onClick={() => handleSelectionAction("expand")}
-            type="button"
-          >
-            <IconExpand size={12} /> Expand
           </button>
         </div>
       )}
