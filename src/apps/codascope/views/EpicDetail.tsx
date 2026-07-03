@@ -340,6 +340,22 @@ export function EpicDetail() {
     [fetchSources],
   );
 
+  // ── Error source callbacks ────────────────────────────────────────────
+  const handleErrorSourceResolved = useCallback(
+    (sourceId: string) => {
+      setSources((prev) => prev.filter((s) => s.id !== sourceId));
+      void fetchSources(); // Refetch — new replacement source will appear
+    },
+    [fetchSources],
+  );
+
+  const handleErrorSourceDeleted = useCallback(
+    (sourceId: string) => {
+      setSources((prev) => prev.filter((s) => s.id !== sourceId));
+    },
+    [],
+  );
+
   // ── Loading / Error ──────────────────────────────────────────────────
   if (loading) {
     return (
@@ -408,6 +424,8 @@ export function EpicDetail() {
               errorSources={errorSources}
               onBlockedDismissed={handleBlockedDismissed}
               onBlockedResolved={handleBlockedResolved}
+              onErrorSourceResolved={handleErrorSourceResolved}
+              onErrorSourceDeleted={handleErrorSourceDeleted}
             />
           );
           break;

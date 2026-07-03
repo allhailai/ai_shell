@@ -15,6 +15,7 @@ import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { SourceUpload } from "../components/SourceUpload";
 import { BlockedDownloadItem } from "../components/BlockedDownloadItem";
+import { ErrorSourceItem } from "../components/ErrorSourceItem";
 import {
   IconKnowledge,
   IconFile,
@@ -418,6 +419,8 @@ interface EpicKnowledgeBlockedViewProps {
   errorSources: EpicKnowledgeSource[];
   onBlockedDismissed: (blockId: string) => void;
   onBlockedResolved: (blockId: string) => void;
+  onErrorSourceResolved: (sourceId: string) => void;
+  onErrorSourceDeleted: (sourceId: string) => void;
 }
 
 export function EpicKnowledgeBlockedView({
@@ -426,6 +429,8 @@ export function EpicKnowledgeBlockedView({
   errorSources,
   onBlockedDismissed,
   onBlockedResolved,
+  onErrorSourceResolved,
+  onErrorSourceDeleted,
 }: EpicKnowledgeBlockedViewProps) {
   const { activeProjectId } = useCodaScopeStore();
   const totalFailed = errorSources.length + blockedItems.length;
@@ -439,6 +444,18 @@ export function EpicKnowledgeBlockedView({
         <h2 className="codascope-knowledge-section-title">Failed Sources</h2>
         <span className="codascope-knowledge-section-count">{totalFailed}</span>
       </div>
+
+      {/* Info callout — wiki rebuild guidance */}
+      {totalFailed > 0 && (
+        <div className="codascope-error-source-callout">
+          <IconHelp size={16} style={{ flexShrink: 0, marginTop: "2px" }} />
+          <span>
+            <strong>How to update the wiki:</strong> After uploading replacement content, click{" "}
+            <strong>Curate</strong> in the sidebar to re-run the agentic extraction pipeline.
+            The agent will incorporate your uploaded sources and update wiki pages accordingly.
+          </span>
+        </div>
+      )}
 
       {totalFailed === 0 && (
         <div className="codascope-knowledge-empty">
@@ -460,34 +477,14 @@ export function EpicKnowledgeBlockedView({
             Error Sources ({errorSources.length})
           </h3>
           {errorSources.map((source) => (
-            <div
+            <ErrorSourceItem
               key={source.id}
-              className="codascope-knowledge-source-card"
-              style={{ marginBottom: "var(--space-2)" }}
-            >
-              <div className="codascope-knowledge-source-card-header">
-                <span className="codascope-knowledge-source-card-title">{source.title}</span>
-                <div className="codascope-knowledge-source-card-meta">
-                  <span className={`codascope-knowledge-source-type codascope-knowledge-source-type-${source.type}`}>
-                    {source.type === "machine" ? "Machine" : "Human"}
-                  </span>
-                  <span className="codascope-knowledge-source-status codascope-knowledge-source-status-error">
-                    Error
-                  </span>
-                </div>
-              </div>
-              {source.url && (
-                <div style={{
-                  fontSize: "var(--text-xs)",
-                  color: "var(--color-text-tertiary)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap" as const,
-                }}>
-                  {source.url}
-                </div>
-              )}
-            </div>
+              projectId={activeProjectId!}
+              epicId={epic.id}
+              source={source}
+              onResolved={onErrorSourceResolved}
+              onDeleted={onErrorSourceDeleted}
+            />
           ))}
         </div>
       )}
