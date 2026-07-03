@@ -96,7 +96,6 @@ export function CodaScopeAssistant() {
 
   // @-mention picker state
   const [atPickerOpen, setAtPickerOpen] = useState(false);
-  const [atPickerPosition, setAtPickerPosition] = useState<{ top: number; left: number } | null>(null);
 
   // Command bus for cross-component communication
   const commandBus = useCommandBus();
@@ -809,8 +808,7 @@ export function CodaScopeAssistant() {
 
   // ── @-mention picker handlers ────────────────────────────────────
 
-  const handleAtTrigger = useCallback((position: { top: number; left: number }) => {
-    setAtPickerPosition(position);
+  const handleAtTrigger = useCallback((_position: { top: number; left: number }) => {
     setAtPickerOpen(true);
   }, []);
 
@@ -844,12 +842,10 @@ export function CodaScopeAssistant() {
     ]);
 
     setAtPickerOpen(false);
-    setAtPickerPosition(null);
   }, []);
 
   const handleAtPickerClose = useCallback(() => {
     setAtPickerOpen(false);
-    setAtPickerPosition(null);
   }, []);
 
   // ── Phase 3: Selection-to-chat listener ────────────────────────────
@@ -1129,6 +1125,14 @@ export function CodaScopeAssistant() {
           </div>
         </div>
         <div className="codascope-assistant-input-row">
+          {atPickerOpen && activeProjectId && (
+            <AtMentionPicker
+              projectId={activeProjectId}
+              epicId={currentEpicId}
+              onSelect={handleAtMentionSelect}
+              onClose={handleAtPickerClose}
+            />
+          )}
           <RichChatInput
             value={input}
             onChange={setInput}
@@ -1157,15 +1161,6 @@ export function CodaScopeAssistant() {
           </button>
         </div>
         <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
-        {atPickerOpen && atPickerPosition && activeProjectId && (
-          <AtMentionPicker
-            projectId={activeProjectId}
-            epicId={currentEpicId}
-            position={atPickerPosition}
-            onSelect={handleAtMentionSelect}
-            onClose={handleAtPickerClose}
-          />
-        )}
       </div>
     </div>
   );

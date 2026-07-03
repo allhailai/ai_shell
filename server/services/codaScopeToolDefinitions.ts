@@ -32,6 +32,22 @@ import type { TopicDepth, CurationReasonType } from "../../src/apps/codascope/co
 
 export type AgentPurpose = "chat" | "assistant" | "wiki-build" | "curation" | "research";
 
+// ── Tool Result Collector ───────────────────────────────────────────
+// Module-level collector for tool return values that contain action tags.
+// The agent service drains this after each run completes.
+
+const toolResultCollector: string[] = [];
+
+/** Push a tool result text for later action-tag extraction. */
+function collectToolResult(text: string): void {
+  toolResultCollector.push(text);
+}
+
+/** Drain all collected tool results (clears the collector). */
+export function drainToolResults(): string[] {
+  return toolResultCollector.splice(0);  // returns and clears
+}
+
 // ── Read-Only Tools ─────────────────────────────────────────────────
 
 /**
@@ -1371,10 +1387,12 @@ export function buildEpicTools(
             createdBy: "agent",
           });
           // Emit action tag for frontend auto-navigation
-          return `Created design document "${title}" (ID: ${doc.id}) with ${doc.wordCount} words.\n\n` +
+          const resultText = `Created design document "${title}" (ID: ${doc.id}) with ${doc.wordCount} words.\n\n` +
             `<codascope_action type="design_doc_created" epicId="${epicId}" docId="${doc.id}">\n` +
             `Created design document "${title}"\n` +
             `</codascope_action>`;
+          collectToolResult(resultText);
+          return resultText;
         } catch (err) {
           return `Failed to create design doc: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -1410,10 +1428,12 @@ export function buildEpicTools(
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
 
-          return `Updated design document "${updated.title}" — ${updated.wordCount} words. Summary: ${editSummary}\n\n` +
+          const resultText = `Updated design document "${updated.title}" — ${updated.wordCount} words. Summary: ${editSummary}\n\n` +
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;
+          collectToolResult(resultText);
+          return resultText;
         } catch (err) {
           return `Failed to edit design doc: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -1463,10 +1483,12 @@ export function buildEpicTools(
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, updatedContent);
           if (!updated) return `Failed to update design doc "${docId}".`;
 
-          return `Updated lines ${startLine}-${endLine} of "${updated.title}". Summary: ${editSummary}\n\n` +
+          const resultText = `Updated lines ${startLine}-${endLine} of "${updated.title}". Summary: ${editSummary}\n\n` +
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}" startLine="${startLine}" endLine="${endLine}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;
+          collectToolResult(resultText);
+          return resultText;
         } catch (err) {
           return `Failed to edit design doc section: ${err instanceof Error ? err.message : String(err)}`;
         }

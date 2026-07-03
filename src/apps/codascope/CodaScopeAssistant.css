@@ -559,6 +559,7 @@
 }
 
 .codascope-assistant-input-row {
+  position: relative;
   display: flex;
   gap: var(--space-2);
   align-items: flex-end;

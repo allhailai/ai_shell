@@ -21,7 +21,7 @@ import type {
 } from "@cursor/sdk";
 import type { SecretService } from "./secretService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
-import { getToolsForPurpose } from "./codaScopeToolDefinitions.js";
+import { getToolsForPurpose, drainToolResults } from "./codaScopeToolDefinitions.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -318,8 +318,17 @@ export class CodaScopeAgentService {
       this.activeChatControllers.delete(projectId);
 
       if (abortController.signal.aborted) {
+        drainToolResults(); // discard collected results on cancel
         onError(new Error("Agent cancelled by user."));
       } else {
+        // Forward any tool results collected during execution
+        // (e.g., design doc tools push action tags to the collector)
+        for (const text of drainToolResults()) {
+          onMessage({
+            type: "tool-result",
+            text,
+          } as unknown as SDKMessage);
+        }
         onDone(result);
       }
     } catch (err) {

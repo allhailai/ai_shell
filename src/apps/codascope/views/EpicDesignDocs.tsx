@@ -12,6 +12,7 @@ import { DocumentEditor } from "../components/DocumentEditor";
 import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import type { EpicDesignDetail, EpicDesignDoc } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -25,6 +26,7 @@ interface EpicDesignDocsProps {
 
 export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { getParam, setParam } = useAppSubRoute("codascope");
 
   const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string } | null>(null);
   const [archiving, setArchiving] = useState<string | null>(null);
@@ -41,7 +43,44 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     if (activeDocs.length === 0) {
       useShellStore.getState().openRightPanel("assistant");
     }
+    // Also refresh the doc list on mount to catch docs created while on other tabs
+    if (activeProjectId) {
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const freshDocs = data.docs ?? [];
+            // Only update if the count changed (avoid unnecessary re-renders)
+            if (freshDocs.length !== epic.designDocs.length) {
+              setEpic({ ...epic, designDocs: freshDocs });
+            }
+          }
+        } catch { /* best-effort */ }
+      })();
+    }
   }, []); // Only on mount
+
+  // Deep-link: auto-open doc from URL query param on mount
+  const docParam = getParam("doc");
+  useEffect(() => {
+    if (!docParam || !activeProjectId || activeDoc) return;
+    // Only auto-open if we don't already have a doc open
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docParam}`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setActiveDoc({ doc: data.doc, content: data.content });
+        }
+      } catch { /* ignore — doc may have been deleted */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docParam, activeProjectId, epic.id]); // Only re-run when the doc param changes
 
   // Listen for agent-created design docs — auto-open them
   const commandBus = useCommandBus();
@@ -57,6 +96,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         if (res.ok) {
           const result = await res.json();
           setActiveDoc({ doc: result.doc, content: result.content });
+          setParam("doc", data.docId);
           // Refresh the epic doc list
           const listRes = await fetch(
             `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
@@ -86,9 +126,10 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
       if (res.ok) {
         const data = await res.json();
         setActiveDoc({ doc: data.doc, content: data.content });
+        setParam("doc", doc.id);
       }
     } catch { /* ignore */ }
-  }, [activeProjectId, epic.id]);
+  }, [activeProjectId, epic.id, setParam]);
 
   const archiveDoc = useCallback(async (docId: string) => {
     if (!activeProjectId) return;
@@ -208,7 +249,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
         doc={activeDoc.doc}
         content={activeDoc.content}
         onContentChange={handleContentChange}
-        onClose={() => setActiveDoc(null)}
+        onClose={() => { setActiveDoc(null); setParam("doc", null); }}
       />
     );
   }

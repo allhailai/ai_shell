@@ -48,7 +48,6 @@ interface CategoryDef {
 interface AtMentionPickerProps {
   projectId: string;
   epicId: string | null;
-  position: { top: number; left: number };
   onSelect: (item: AtMentionItem) => void;
   onClose: () => void;
 }
@@ -70,7 +69,6 @@ const DEBOUNCE_MS = 300;
 export function AtMentionPicker({
   projectId,
   epicId,
-  position,
   onSelect,
   onClose,
 }: AtMentionPickerProps) {
@@ -174,7 +172,7 @@ export function AtMentionPicker({
 
       switch (category) {
         case "wiki": {
-          const res = await fetch(`/api/codascope/projects/${projectId}/wiki/topics`);
+          const res = await fetch(`/api/codascope/projects/${projectId}/wiki`);
           if (res.ok) {
             const data = await res.json();
             fetchedItems = (data.topics ?? []).map((t: { id: string; title: string }) => ({
@@ -292,16 +290,8 @@ export function AtMentionPicker({
 
   /* ── Render ────────────────────────────────────────────────────── */
 
-  // Compute position (above the input)
-  const style: React.CSSProperties = {
-    position: "fixed",
-    bottom: `calc(100vh - ${position.top}px)`,
-    left: Math.max(8, position.left),
-    zIndex: 9999,
-  };
-
   return (
-    <div ref={containerRef} className="codascope-at-mention-picker" style={style}>
+    <div ref={containerRef} className="codascope-at-mention-picker">
       {stage === "categories" ? (
         /* Stage 1: Category Picker */
         <div className="codascope-at-mention-categories">

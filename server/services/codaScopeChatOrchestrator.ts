@@ -148,6 +148,7 @@ export async function streamAssistantResponse(options: {
   const { projectId, message, modelId, systemPrompt, agentSvc, images, onMessage } = options;
 
   let fullResponse = "";
+  let toolResultText = "";
 
   return new Promise<StreamResult>((resolve, reject) => {
     agentSvc.send({
@@ -158,17 +159,34 @@ export async function streamAssistantResponse(options: {
       images,
       purpose: "assistant",
       onMessage: (msg) => {
-        // Accumulate text
+        // Accumulate text from model responses
         if (msg.type === "assistant" && msg.message?.content) {
           for (const block of msg.message.content) {
             if (block.type === "text") fullResponse += block.text;
           }
         }
+        // Accumulate text from tool results (custom tool return values)
+        const msgAny = msg as unknown as { type: string; text?: string };
+        if (msgAny.type === "tool-result" && typeof msgAny.text === "string") {
+          toolResultText += msgAny.text + "\n";
+        }
         onMessage(msg);
       },
       onDone: async (result) => {
-        const actions = extractActions(fullResponse);
-        resolve({ fullResponse, actions, agentResult: result });
+        // Extract actions from both model text and tool results
+        const textActions = extractActions(fullResponse);
+        const toolActions = extractActions(toolResultText);
+        // Merge, deduplicating by type+docId
+        const seen = new Set(textActions.map(a => `${a.type}:${a.attributes?.docId ?? ""}`));
+        const merged = [...textActions];
+        for (const ta of toolActions) {
+          const key = `${ta.type}:${ta.attributes?.docId ?? ""}`;
+          if (!seen.has(key)) {
+            merged.push(ta);
+            seen.add(key);
+          }
+        }
+        resolve({ fullResponse, actions: merged, agentResult: result });
       },
       onError: async (err) => {
         reject(Object.assign(err, { fullResponse }));

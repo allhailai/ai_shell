@@ -213,10 +213,6 @@
 /* Mermaid diagrams (viewer) */
 .shared-md-mermaid-diagram {
   margin: var(--space-4) 0;
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border-primary);
   text-align: center;
 }
 
@@ -228,4 +224,145 @@
   border: 1px solid var(--color-danger);
   color: var(--color-danger);
   font-size: var(--text-sm);
+}
+
+/* ── Resizable Mermaid Container (Viewer) ────────────────────────────── */
+
+.shared-md-mermaid-rendered-pre {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: none;
+  background: transparent;
+  overflow: visible;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  padding: var(--space-3);
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable .shared-md-mermaid-diagram {
+  margin: 0;
+  border: none;
+  background: transparent;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable.shared-md-mermaid-resizing {
+  transition: none;
+  user-select: none;
+}
+
+/* Resize handle for viewer mermaid */
+.shared-md-viewer .shared-md-mermaid-resize-handle {
+  position: sticky;
+  bottom: 0;
+  float: right;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    var(--color-text-tertiary) 40%,
+    var(--color-text-tertiary) 45%,
+    transparent 45%,
+    transparent 55%,
+    var(--color-text-tertiary) 55%,
+    var(--color-text-tertiary) 60%,
+    transparent 60%,
+    transparent 70%,
+    var(--color-text-tertiary) 70%,
+    var(--color-text-tertiary) 75%,
+    transparent 75%
+  );
+  border-radius: 0 0 var(--radius-md) 0;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable:hover .shared-md-mermaid-resize-handle {
+  opacity: 0.5;
+}
+
+.shared-md-viewer .shared-md-mermaid-resize-handle:hover {
+  opacity: 0.9 !important;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizing .shared-md-mermaid-resize-handle {
+  opacity: 1 !important;
+}
+
+/* Scrollbar for viewer mermaid containers */
+.shared-md-viewer .shared-md-mermaid-resizable::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable::-webkit-scrollbar-thumb {
+  background: var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.shared-md-viewer .shared-md-mermaid-resizable::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* ── Resizable Image Container (Viewer) ──────────────────────────────── */
+
+.shared-md-image-resizable {
+  display: inline-block;
+  position: relative;
+}
+
+.shared-md-image-resize-handle {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    var(--color-text-tertiary) 40%,
+    var(--color-text-tertiary) 45%,
+    transparent 45%,
+    transparent 55%,
+    var(--color-text-tertiary) 55%,
+    var(--color-text-tertiary) 60%,
+    transparent 60%,
+    transparent 70%,
+    var(--color-text-tertiary) 70%,
+    var(--color-text-tertiary) 75%,
+    transparent 75%
+  );
+  border-radius: 0 0 var(--radius-md) 0;
+}
+
+.shared-md-image-resizable:hover .shared-md-image-resize-handle {
+  opacity: 0.5;
+}
+
+.shared-md-image-resize-handle:hover {
+  opacity: 0.9 !important;
+}
+
+.shared-md-image-resizable.shared-md-image-resizing {
+  user-select: none;
+}
+
+.shared-md-image-resizing .shared-md-image-resize-handle {
+  opacity: 1 !important;
 }

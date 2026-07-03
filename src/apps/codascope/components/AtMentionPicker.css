@@ -1,18 +1,23 @@
 /* ── CodaScope: AtMentionPicker Styles ───────────────────────────────
    Dropdown styles for the @-mention two-stage picker.
    Prefixed with `codascope-at-mention-` per shell conventions.
+   Uses absolute positioning relative to the input row container.
    ──────────────────────────────────────────────────────────────────── */
 
 .codascope-at-mention-picker {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
   width: 280px;
   max-height: 340px;
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  z-index: 100;
   animation: codascope-at-mention-fadein 0.12s ease-out;
 }
 
@@ -34,7 +39,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-primary);
   min-height: 36px;
 }
 
@@ -64,7 +69,7 @@
 }
 
 .codascope-at-mention-back:hover {
-  background: var(--color-surface-hover);
+  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
@@ -72,15 +77,15 @@
 
 .codascope-at-mention-search {
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-primary);
 }
 
 .codascope-at-mention-search-input {
   width: 100%;
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-border-subtle);
+  border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: var(--text-sm);
   outline: none;
@@ -88,11 +93,11 @@
 }
 
 .codascope-at-mention-search-input:focus {
-  border-color: var(--color-primary);
+  border-color: var(--color-accent);
 }
 
 .codascope-at-mention-search-input::placeholder {
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
 }
 
 /* ── List ────────────────────────────────────────────────────────── */
@@ -121,7 +126,7 @@
 
 .codascope-at-mention-item:hover,
 .codascope-at-mention-item--focused {
-  background: var(--color-surface-hover);
+  background: var(--color-bg-hover);
 }
 
 .codascope-at-mention-item-icon {
@@ -142,7 +147,7 @@
 }
 
 .codascope-at-mention-item-arrow {
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
   font-size: 16px;
   flex-shrink: 0;
 }
@@ -153,6 +158,6 @@
 .codascope-at-mention-empty {
   padding: var(--space-4) var(--space-3);
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
   font-size: var(--text-sm);
 }
