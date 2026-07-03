@@ -118,7 +118,9 @@ export type CodaScopeActionType =
   // Epic Design actions (P2b)
   | "insert_content"
   | "replace_content"
-  | "expand_content";
+  | "expand_content"
+  // Knowledge & Research
+  | "trigger_research";
 
 // ── Build State ─────────────────────────────────────────────────────
 

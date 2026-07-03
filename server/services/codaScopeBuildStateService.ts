@@ -53,6 +53,7 @@ export interface BuildState {
   error: string | null;
   outputLength: number;  // bytes of output written so far
   pipelineSteps: PipelineStepRecord[];
+  scope?: string;  // Optional scope key (e.g. "epic-deepen::epicId", "research::epicId")
 }
 
 export interface BuildLogEntry {
@@ -81,17 +82,17 @@ export interface BuildLogEntry {
 export class CodaScopeBuildStateService {
   private root: string;
 
-  /** Active build state per project (in-memory) */
+  /** Active build state per key (in-memory). Key = projectId or projectId::scope */
   private activeBuilds = new Map<string, BuildState>();
 
-  /** Track which projects have been hydrated from disk */
-  private hydratedProjects = new Set<string>();
+  /** Track which keys have been hydrated from disk */
+  private hydratedKeys = new Set<string>();
 
   /** Map project IDs to their actual directory paths on disk */
   private projectDirs = new Map<string, string>();
 
-  /** Cancelled builds — projectId set, checked by running pipelines */
-  private cancelledProjects = new Set<string>();
+  /** Cancelled builds — build key set, checked by running pipelines */
+  private cancelledKeys = new Set<string>();
 
   constructor(root: string) {
     this.root = root;
@@ -101,19 +102,24 @@ export class CodaScopeBuildStateService {
     this.root = root;
   }
 
-  /** Request cancellation of the active build for a project. */
-  cancelBuild(projectId: string): void {
-    this.cancelledProjects.add(projectId);
+  /** Compute the internal map key for a projectId + optional scope. */
+  private buildKey(projectId: string, scope?: string): string {
+    return scope ? `${projectId}::${scope}` : projectId;
   }
 
-  /** Check if the build for a project has been cancelled. */
-  isCancelled(projectId: string): boolean {
-    return this.cancelledProjects.has(projectId);
+  /** Request cancellation of the active build for a project (optionally scoped). */
+  cancelBuild(projectId: string, scope?: string): void {
+    this.cancelledKeys.add(this.buildKey(projectId, scope));
+  }
+
+  /** Check if the build for a project has been cancelled (optionally scoped). */
+  isCancelled(projectId: string, scope?: string): boolean {
+    return this.cancelledKeys.has(this.buildKey(projectId, scope));
   }
 
   /** Clear the cancellation flag (call when a new build starts). */
-  clearCancellation(projectId: string): void {
-    this.cancelledProjects.delete(projectId);
+  clearCancellation(projectId: string, scope?: string): void {
+    this.cancelledKeys.delete(this.buildKey(projectId, scope));
   }
 
   /**
@@ -129,17 +135,25 @@ export class CodaScopeBuildStateService {
    * If a build was "building" when the server crashed, mark it as interrupted.
    * Only runs once per project per server lifetime.
    */
-  private hydrateProjectFromDisk(projectId: string): void {
-    if (this.hydratedProjects.has(projectId)) return;
-    this.hydratedProjects.add(projectId);
+  /**
+   * Hydrate build state from disk for a given key.
+   * If a build was "building" when the server crashed, mark it as interrupted.
+   * Only runs once per key per server lifetime.
+   *
+   * When scope is provided, only hydrates builds matching that scope.
+   */
+  private hydrateFromDisk(projectId: string, scope?: string): void {
+    const key = this.buildKey(projectId, scope);
+    if (this.hydratedKeys.has(key)) return;
+    this.hydratedKeys.add(key);
 
-    // If we already have in-memory state for this project, skip disk read
-    if (this.activeBuilds.has(projectId)) return;
+    // If we already have in-memory state for this key, skip disk read
+    if (this.activeBuilds.has(key)) return;
 
     const dir = this.buildLogsDir(projectId);
     if (!existsSync(dir)) return;
 
-    // Find the most recent .json build log
+    // Find all .json build logs, sorted most-recent first
     const jsonFiles = readdirSync(dir)
       .filter((f) => f.endsWith(".json"))
       .map((f) => {
@@ -156,50 +170,59 @@ export class CodaScopeBuildStateService {
     if (jsonFiles.length === 0) return;
 
     jsonFiles.sort((a, b) => b.mtime - a.mtime);
-    const latest = jsonFiles[0];
 
-    try {
-      const data = JSON.parse(readFileSync(latest.path, "utf-8")) as BuildLogEntry;
+    // Find the most recent log that matches the requested scope
+    for (const file of jsonFiles) {
+      try {
+        const data = JSON.parse(readFileSync(file.path, "utf-8")) as BuildLogEntry;
 
-      // Convert BuildLogEntry back into BuildState
-      const state: BuildState = {
-        runId: data.runId,
-        status: data.status,
-        command: data.command,
-        modelId: data.modelId,
-        startedAt: data.startedAt,
-        completedAt: data.completedAt,
-        summary: data.summary,
-        error: data.error,
-        outputLength: 0,
-        pipelineSteps: data.pipelineSteps ?? [],
-      };
+        // Scope matching: if scope is provided, only match builds with that scope
+        const logScope = (data as BuildLogEntry & { scope?: string }).scope;
+        if (scope && logScope !== scope) continue;
+        if (!scope && logScope) continue; // unscoped query should not match scoped builds
 
-      // If the build was interrupted (still "building" on disk), mark it as crashed
-      if (state.status === "building") {
-        const now = new Date();
-        state.status = "error";
-        state.completedAt = now.toISOString();
-        state.error = "Build was interrupted by server restart.";
-        const startTime = new Date(state.startedAt).getTime();
-        const durationMs = now.getTime() - startTime;
-        state.summary = `Interrupted after ${formatDuration(durationMs)}`;
-
-        // Update the on-disk metadata too
-        const entry: BuildLogEntry = {
-          ...data,
-          status: "error",
-          completedAt: state.completedAt,
-          summary: state.summary,
-          error: state.error,
-          durationMs,
+        // Convert BuildLogEntry back into BuildState
+        const state: BuildState = {
+          runId: data.runId,
+          status: data.status,
+          command: data.command,
+          modelId: data.modelId,
+          startedAt: data.startedAt,
+          completedAt: data.completedAt,
+          summary: data.summary,
+          error: data.error,
+          outputLength: 0,
+          pipelineSteps: data.pipelineSteps ?? [],
+          scope: logScope,
         };
-        writeFileSync(latest.path, JSON.stringify(entry, null, 2), "utf-8");
-      }
 
-      this.activeBuilds.set(projectId, state);
-    } catch {
-      // Skip corrupt files
+        // If the build was interrupted (still "building" on disk), mark it as crashed
+        if (state.status === "building") {
+          const now = new Date();
+          state.status = "error";
+          state.completedAt = now.toISOString();
+          state.error = "Build was interrupted by server restart.";
+          const startTime = new Date(state.startedAt).getTime();
+          const durationMs = now.getTime() - startTime;
+          state.summary = `Interrupted after ${formatDuration(durationMs)}`;
+
+          // Update the on-disk metadata too
+          const entry: BuildLogEntry = {
+            ...data,
+            status: "error",
+            completedAt: state.completedAt,
+            summary: state.summary,
+            error: state.error,
+            durationMs,
+          };
+          writeFileSync(file.path, JSON.stringify(entry, null, 2), "utf-8");
+        }
+
+        this.activeBuilds.set(key, state);
+        return; // found the matching log, stop searching
+      } catch {
+        // Skip corrupt files, try next
+      }
     }
   }
 
@@ -221,15 +244,25 @@ export class CodaScopeBuildStateService {
 
   /* ── Build lifecycle ───────────────────────────────────────────────── */
 
-  /** Start a new build. Returns the runId, or null if a build is already running. */
-  startBuild(projectId: string, command: string, modelId: string): string | null {
-    // Hydrate from disk first to detect stale builds
-    this.hydrateProjectFromDisk(projectId);
+  /**
+   * Start a new build. Returns the runId, or null if a build is already running.
+   *
+   * @param scope — Optional scope key for per-epic builds (e.g. "research::epicId").
+   *   Scoped builds are independent of each other and of unscoped project builds.
+   */
+  startBuild(projectId: string, command: string, modelId: string, scope?: string): string | null {
+    const key = this.buildKey(projectId, scope);
 
-    const existing = this.activeBuilds.get(projectId);
+    // Hydrate from disk first to detect stale builds
+    this.hydrateFromDisk(projectId, scope);
+
+    const existing = this.activeBuilds.get(key);
     if (existing && existing.status === "building") {
       return null; // Already building
     }
+
+    // Clear any previous cancellation
+    this.clearCancellation(projectId, scope);
 
     const runId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     const dir = this.ensureBuildLogsDir(projectId);
@@ -245,11 +278,12 @@ export class CodaScopeBuildStateService {
       error: null,
       outputLength: 0,
       pipelineSteps: [],
+      scope,
     };
 
-    this.activeBuilds.set(projectId, state);
+    this.activeBuilds.set(key, state);
 
-    // Write initial metadata
+    // Write initial metadata (include scope for disk hydration)
     const metaPath = path.join(dir, `${runId}.json`);
     writeFileSync(metaPath, JSON.stringify(state, null, 2), "utf-8");
 
@@ -261,12 +295,13 @@ export class CodaScopeBuildStateService {
   }
 
   /** Append output text to the build log file. */
-  appendOutput(projectId: string, runId: string, text: string): void {
+  appendOutput(projectId: string, runId: string, text: string, scope?: string): void {
     const dir = this.buildLogsDir(projectId);
     const logPath = path.join(dir, `${runId}.log`);
     appendFileSync(logPath, text, "utf-8");
 
-    const state = this.activeBuilds.get(projectId);
+    const key = this.buildKey(projectId, scope);
+    const state = this.activeBuilds.get(key);
     if (state && state.runId === runId) {
       state.outputLength += Buffer.byteLength(text, "utf-8");
     }
@@ -277,8 +312,10 @@ export class CodaScopeBuildStateService {
     projectId: string,
     runId: string,
     step: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord },
+    scope?: string,
   ): void {
-    const state = this.activeBuilds.get(projectId);
+    const key = this.buildKey(projectId, scope);
+    const state = this.activeBuilds.get(key);
     if (!state || state.runId !== runId) return;
 
     const labelMap: Record<string, string> = {
@@ -290,6 +327,9 @@ export class CodaScopeBuildStateService {
       "wiki-outline": "Wiki (Outline)",
       "wiki-state": "Wiki State",
       "quality": "Quality Scan",
+      "generate-plan": "Research Plan",
+      "execute-downloads": "Download Sources",
+      "process-sources": "Process Sources",
     };
 
     let detail = "";
@@ -363,8 +403,10 @@ export class CodaScopeBuildStateService {
       topicsRebuilt?: number;
       topicsSkipped?: number;
     },
+    scope?: string,
   ): void {
-    const state = this.activeBuilds.get(projectId);
+    const key = this.buildKey(projectId, scope);
+    const state = this.activeBuilds.get(key);
     if (!state || state.runId !== runId) return;
 
     const now = new Date();
@@ -394,8 +436,9 @@ export class CodaScopeBuildStateService {
   }
 
   /** Mark build as failed with error message. */
-  failBuild(projectId: string, runId: string, error: string): void {
-    const state = this.activeBuilds.get(projectId);
+  failBuild(projectId: string, runId: string, error: string, scope?: string): void {
+    const key = this.buildKey(projectId, scope);
+    const state = this.activeBuilds.get(key);
     if (!state || state.runId !== runId) return;
 
     const now = new Date();
@@ -471,11 +514,11 @@ export class CodaScopeBuildStateService {
 
   /* ── Queries ───────────────────────────────────────────────────────── */
 
-  /** Get current build state for a project. Returns null if no build tracked. */
-  getBuildState(projectId: string): BuildState | null {
-    // Hydrate from disk if we haven't seen this project yet
-    this.hydrateProjectFromDisk(projectId);
-    return this.activeBuilds.get(projectId) ?? null;
+  /** Get current build state for a project (optionally scoped). Returns null if no build tracked. */
+  getBuildState(projectId: string, scope?: string): BuildState | null {
+    // Hydrate from disk if we haven't seen this key yet
+    this.hydrateFromDisk(projectId, scope);
+    return this.activeBuilds.get(this.buildKey(projectId, scope)) ?? null;
   }
 
   /** Read the output log file for a given run. Returns the text content. */

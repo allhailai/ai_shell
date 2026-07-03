@@ -302,11 +302,12 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ saved: true });
   }));
 
-  // ── Research Pipeline (SSE streaming) ─────────────────────────────
+  // ── Research Pipeline (SSE streaming with BuildState tracking) ─────
 
   app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/research", async (req, res) => {
     try {
       const svcs = await ensureServices();
+      const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
       const epicId = param(req, "epicId");
       const { modelId, topics } = req.body as { modelId?: string; topics?: string[] };
@@ -317,6 +318,17 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       }
       if (!topics || topics.length === 0) {
         res.status(400).json({ error: "topics array is required." });
+        return;
+      }
+
+      // Register project dir and start a scoped build
+      const projectDir = projectSvc.getProjectDir(id);
+      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
+
+      const scope = `research::${epicId}`;
+      const runId = buildSvc.startBuild(id, "research", modelId, scope);
+      if (!runId) {
+        res.status(409).json({ error: "A research pipeline is already running for this epic.", code: "build_in_progress" });
         return;
       }
 
@@ -331,34 +343,59 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       let aborted = false;
       req.on("close", () => { aborted = true; });
 
+      const isAborted = () => aborted || buildSvc.isCancelled(id, scope);
+
       const sendEvent = (event: string, data: unknown) => {
-        if (aborted) return;
+        // Forward research events to build pipeline steps for state tracking
+        if (event === "research-step" || event === "research-plan-generated" || event === "research-download-complete") {
+          const stepData = data as Record<string, unknown>;
+          buildSvc.addPipelineStep(id, runId, {
+            step: (stepData.step as string) ?? event,
+            status: event === "research-step" ? "running" : "complete",
+            progress: (stepData.progress as string) ?? (stepData.queryCount ? `${stepData.queryCount} queries, ${stepData.urlCount} URLs` : undefined),
+          }, scope);
+        }
+        if (isAborted()) return;
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
       const sendMessage = (msg: unknown) => {
-        if (aborted) return;
-        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+        const msgJson = JSON.stringify(msg);
+        buildSvc.appendOutput(id, runId, msgJson + "\n", scope);
+        if (isAborted()) return;
+        res.write(`event: message\ndata: ${msgJson}\n\n`);
       };
 
-      sendEvent("research-started", { projectId: id, epicId, modelId, topics });
+      sendEvent("research-started", { projectId: id, epicId, modelId, topics, runId });
 
-      await runResearchPipeline(
-        { projectId: id, epicId, modelId, topics },
-        { sendEvent, sendMessage, isAborted: () => aborted },
-        {
-          agentSvc: svcs.agentSvc,
-          projectSvc: svcs.projectSvc,
-          epicSvc: svcs.epicSvc,
-          epicKnowledgeSvc: svcs.epicKnowledgeSvc,
-          curationSvc: svcs.curationSvc,
-          contentSvc: svcs.contentSvc,
-        },
-      );
+      try {
+        await runResearchPipeline(
+          { projectId: id, epicId, modelId, topics },
+          { sendEvent, sendMessage, isAborted },
+          {
+            agentSvc: svcs.agentSvc,
+            projectSvc: svcs.projectSvc,
+            epicSvc: svcs.epicSvc,
+            epicKnowledgeSvc: svcs.epicKnowledgeSvc,
+            curationSvc: svcs.curationSvc,
+            contentSvc: svcs.contentSvc,
+          },
+        );
 
-      if (!aborted) {
-        sendEvent("done", {});
-        res.end();
+        // Mark build complete
+        buildSvc.completeBuild(id, runId, undefined, undefined, scope);
+
+        if (!isAborted()) {
+          sendEvent("done", {});
+          res.end();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        buildSvc.failBuild(id, runId, message, scope);
+        if (!isAborted()) {
+          res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+          res.end();
+        }
       }
     } catch (err) {
       if (!res.headersSent) {
@@ -382,16 +419,28 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ reasons });
   }));
 
-  // Trigger curation run (SSE streaming pipeline)
+  // Trigger curation run (SSE streaming pipeline with BuildState tracking)
   app.post("/api/codascope/projects/:id/epics/:epicId/curation/run", async (req, res) => {
     try {
       const svcs = await ensureServices();
+      const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
       const epicId = param(req, "epicId");
       const { modelId } = req.body as { modelId?: string };
 
       if (!modelId) {
         res.status(400).json({ error: "modelId is required." });
+        return;
+      }
+
+      // Register project dir and start a scoped build
+      const projectDir = projectSvc.getProjectDir(id);
+      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
+
+      const scope = `curation::${epicId}`;
+      const runId = buildSvc.startBuild(id, "curation", modelId, scope);
+      if (!runId) {
+        res.status(409).json({ error: "A curation pipeline is already running for this epic.", code: "build_in_progress" });
         return;
       }
 
@@ -406,36 +455,52 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       let aborted = false;
       req.on("close", () => { aborted = true; });
 
+      const isAborted = () => aborted || buildSvc.isCancelled(id, scope);
+
       const sendEvent = (event: string, data: unknown) => {
-        if (aborted) return;
+        if (isAborted()) return;
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
       const sendMessage = (msg: unknown) => {
-        if (aborted) return;
-        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+        const msgJson = JSON.stringify(msg);
+        buildSvc.appendOutput(id, runId, msgJson + "\n", scope);
+        if (isAborted()) return;
+        res.write(`event: message\ndata: ${msgJson}\n\n`);
       };
 
-      sendEvent("run-started", { projectId: id, epicId, modelId });
+      sendEvent("run-started", { projectId: id, epicId, modelId, runId });
 
-      await runCurationPipeline(
-        { projectId: id, epicId, modelId },
-        { sendEvent, sendMessage, isAborted: () => aborted },
-        {
-          agentSvc: svcs.agentSvc,
-          projectSvc: svcs.projectSvc,
-          wikiSvc: svcs.wikiSvc,
-          epicSvc: svcs.epicSvc,
-          epicKnowledgeSvc: svcs.epicKnowledgeSvc,
-          curationSvc: svcs.curationSvc,
-          conceptSvc: svcs.conceptSvc,
-          codeMapSvc: svcs.codeMapSvc,
-        },
-      );
+      try {
+        await runCurationPipeline(
+          { projectId: id, epicId, modelId },
+          { sendEvent, sendMessage, isAborted },
+          {
+            agentSvc: svcs.agentSvc,
+            projectSvc: svcs.projectSvc,
+            wikiSvc: svcs.wikiSvc,
+            epicSvc: svcs.epicSvc,
+            epicKnowledgeSvc: svcs.epicKnowledgeSvc,
+            curationSvc: svcs.curationSvc,
+            conceptSvc: svcs.conceptSvc,
+            codeMapSvc: svcs.codeMapSvc,
+          },
+        );
 
-      if (!aborted) {
-        sendEvent("done", {});
-        res.end();
+        // Mark build complete
+        buildSvc.completeBuild(id, runId, undefined, undefined, scope);
+
+        if (!isAborted()) {
+          sendEvent("done", {});
+          res.end();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        buildSvc.failBuild(id, runId, message, scope);
+        if (!isAborted()) {
+          res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
+          res.end();
+        }
       }
     } catch (err) {
       if (!res.headersSent) {

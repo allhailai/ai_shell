@@ -41,6 +41,8 @@ export const VALID_ACTION_TYPES = new Set([
   // Epic Design Reimagined — agent write tools
   "design_doc_created",
   "design_doc_edited",
+  // Knowledge & Research
+  "trigger_research",
 ]);
 
 /* ── Parser ────────────────────────────────────────────────────────── */

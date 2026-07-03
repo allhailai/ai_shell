@@ -856,7 +856,9 @@ export function CodaScopeAssistant() {
 
         {messages.map((msg) => {
           const actions = (msg.metadata?.actions ?? []) as CodaScopeAction[];
-          const displayContent = msg.role === "assistant" && actions.length > 0
+          // Always strip action tags from assistant messages — even if metadata.actions
+          // is empty (e.g. older messages or unrecognized action types)
+          const displayContent = msg.role === "assistant"
             ? stripActionTagsClient(msg.content)
             : msg.content;
 

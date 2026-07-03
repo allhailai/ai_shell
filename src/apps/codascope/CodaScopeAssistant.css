@@ -799,10 +799,9 @@
 .codascope-action-card-error {
   font-size: var(--text-2xs);
   color: var(--color-error, #f87171);
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .codascope-action-card-spinner {
@@ -817,6 +816,57 @@
 
 @keyframes codascope-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ── Research Progress Indicator ─────────────────────────────────── */
+
+.codascope-action-card-progress {
+  margin: var(--space-1) 0 var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.codascope-action-card-progress-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  position: relative;
+}
+
+.codascope-action-card-progress-fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-accent, hsl(220 90% 56%)) 40%,
+    var(--color-accent, hsl(220 90% 56%)) 60%,
+    transparent 100%
+  );
+  animation: codascope-research-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes codascope-research-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.codascope-action-card-progress-text {
+  font-size: var(--text-2xs);
+  color: var(--color-accent-text, hsl(220 95% 72%));
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── Build Summary Text ──────────────────────────────────────────── */
+
+.codascope-action-card-summary {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
 }
 
 /* ── Phase 3: Epic Context Banner ─────────────────────────────────── */

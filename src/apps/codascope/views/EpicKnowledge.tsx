@@ -4,12 +4,16 @@
    2. Research Sources   — downloaded + uploaded content with upload
    3. Blocked Downloads  — failed downloads with resolution flow
 
+   Also includes a Knowledge Workflow Guide banner that explains
+   how to build knowledge (via chat-driven research → upload → curate).
+
    Depends on Phases 2 + 5 backend (knowledge service, content
    extraction, research pipeline).
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { SourceUpload } from "../components/SourceUpload";
 import { SourceViewer } from "../components/SourceViewer";
@@ -21,6 +25,10 @@ import {
   IconClock,
   IconBlocked,
   IconUpload,
+  IconHelp,
+  IconArrowRight,
+  IconCheck,
+  IconChat,
 } from "../components/CodaScopeIcons";
 import type {
   EpicDesignDetail,
@@ -73,6 +81,100 @@ function SourceTypeBadge({ type }: { type: EpicKnowledgeSource["type"] }) {
   );
 }
 
+/* ── Workflow Guide ──────────────────────────────────────────────────── */
+
+interface GuideStepData {
+  number: number;
+  title: string;
+  description: string;
+  complete: boolean;
+  hint: string;
+}
+
+function KnowledgeWorkflowGuide({
+  steps,
+  expanded,
+  onToggle,
+  onOpenChat,
+}: {
+  steps: GuideStepData[];
+  expanded: boolean;
+  onToggle: () => void;
+  onOpenChat: () => void;
+}) {
+  const completedCount = steps.filter((s) => s.complete).length;
+
+  return (
+    <div className={`codascope-knowledge-guide ${expanded ? "codascope-knowledge-guide-expanded" : ""}`}>
+      <button
+        className="codascope-knowledge-guide-header"
+        onClick={onToggle}
+        type="button"
+      >
+        <div className="codascope-knowledge-guide-header-left">
+          <IconHelp size={16} />
+          <span className="codascope-knowledge-guide-title">
+            How to Build Knowledge
+          </span>
+          <span className="codascope-knowledge-guide-progress">
+            {completedCount}/{steps.length} steps
+          </span>
+        </div>
+        <span className="codascope-knowledge-guide-chevron">
+          {expanded ? "▾" : "▸"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="codascope-knowledge-guide-body">
+          <p className="codascope-knowledge-guide-intro">
+            The <strong>chat assistant</strong> drives your research workflow.
+            Ask it to search the web, download content, and synthesize findings into wiki pages.
+          </p>
+
+          <div className="codascope-knowledge-guide-steps">
+            {steps.map((step) => (
+              <div
+                key={step.number}
+                className={`codascope-knowledge-guide-step ${step.complete ? "codascope-knowledge-guide-step-complete" : ""}`}
+              >
+                <div className="codascope-knowledge-guide-step-indicator">
+                  {step.complete ? (
+                    <span className="codascope-knowledge-guide-step-check">
+                      <IconCheck size={12} />
+                    </span>
+                  ) : (
+                    <span className="codascope-knowledge-guide-step-number">
+                      {step.number}
+                    </span>
+                  )}
+                </div>
+                <div className="codascope-knowledge-guide-step-content">
+                  <span className="codascope-knowledge-guide-step-title">{step.title}</span>
+                  <span className="codascope-knowledge-guide-step-desc">{step.description}</span>
+                  {!step.complete && (
+                    <span className="codascope-knowledge-guide-step-hint">{step.hint}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            className="codascope-knowledge-guide-cta"
+            onClick={onOpenChat}
+            type="button"
+          >
+            <IconChat size={14} />
+            <span>Use the chat assistant in the right panel to get started</span>
+            <IconArrowRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
@@ -96,6 +198,9 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
 
   // Source viewer modal
   const [viewingSource, setViewingSource] = useState<EpicKnowledgeSource | null>(null);
+
+  // Guide state — auto-expand when empty, user can toggle
+  const [guideExpanded, setGuideExpanded] = useState<boolean | null>(null); // null = not yet decided
 
   const pid = activeProjectId;
 
@@ -162,6 +267,53 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
     void fetchBlocked();
   }, [fetchWikiPages, fetchSources, fetchBlocked]);
 
+  // ── Auto-expand guide when there's no content ────────────────────────
+  useEffect(() => {
+    if (guideExpanded !== null) return; // user already toggled
+    if (loadingWiki || loadingSources) return; // still loading
+    // Auto-expand if there are no wiki pages and no sources
+    setGuideExpanded(wikiPages.length === 0 && sources.length === 0);
+  }, [guideExpanded, loadingWiki, loadingSources, wikiPages.length, sources.length]);
+
+  // ── Guide steps computation ──────────────────────────────────────────
+  const hasDefinition = epic.definition.trim().length > 0;
+  const hasScope = epic.scope !== null && epic.scope.entries.length > 0;
+  const hasSources = sources.length > 0;
+  const hasWikiPages = wikiPages.length > 0;
+
+  const guideSteps: GuideStepData[] = [
+    {
+      number: 1,
+      title: "Define & Scope",
+      description: "Set up the epic definition and scope topics as the foundation for research.",
+      complete: hasDefinition && hasScope,
+      hint: hasDefinition
+        ? "Go to the Scope tab to identify relevant topics."
+        : "Go to the Define tab to describe what this epic is about.",
+    },
+    {
+      number: 2,
+      title: "Research",
+      description: "Ask the chat assistant to research your topics. It searches the web and downloads sources.",
+      complete: hasSources && sources.some((s) => s.type === "machine"),
+      hint: "Try: \"Research best practices for [your topic]\"",
+    },
+    {
+      number: 3,
+      title: "Upload Sources",
+      description: "Manually upload PDFs, articles, or docs. Paste URLs into chat to download pages.",
+      complete: hasSources,
+      hint: "Use the drop zone below or drag files onto this page.",
+    },
+    {
+      number: 4,
+      title: "Curate & Synthesize",
+      description: "Run curation to synthesize all sources into organized wiki pages for this epic.",
+      complete: hasWikiPages,
+      hint: "Use the Curate button or ask: \"Process sources into wiki pages\"",
+    },
+  ];
+
   // ── Wiki page expand/collapse ────────────────────────────────────────
 
   const handleTogglePage = useCallback(async (pageId: string) => {
@@ -216,6 +368,14 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
   return (
     <div className="codascope-knowledge-container">
 
+      {/* ── Workflow Guide Banner ─────────────────────────────────────── */}
+      <KnowledgeWorkflowGuide
+        steps={guideSteps}
+        expanded={guideExpanded ?? false}
+        onToggle={() => setGuideExpanded((prev) => !(prev ?? false))}
+        onOpenChat={() => useShellStore.getState().openRightPanel("assistant")}
+      />
+
       {/* ── Section 1: Epic Wiki Pages ──────────────────────────────── */}
       <section className="codascope-knowledge-section">
         <div className="codascope-knowledge-section-header">
@@ -233,7 +393,7 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
             <IconKnowledge size={24} />
             <p>No research wiki pages yet.</p>
             <span className="codascope-knowledge-empty-hint">
-              Curate or process research to generate them.
+              Ask the chat assistant to research topics and curate findings into wiki pages.
             </span>
           </div>
         )}
@@ -315,7 +475,7 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
             <IconUpload size={24} />
             <p>No research sources yet.</p>
             <span className="codascope-knowledge-empty-hint">
-              Upload content above or use the chat to trigger research downloads.
+              Upload content above or ask the chat assistant to research and download sources.
             </span>
           </div>
         )}

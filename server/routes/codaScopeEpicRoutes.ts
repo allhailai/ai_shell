@@ -290,11 +290,12 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
         throw httpError("No included scope entries to deepen.", 400, "no_included_entries");
       }
 
-      // Register project dir and start build
+      // Register project dir and start a scoped build (per-epic)
       buildSvc.registerProjectDir(id, projectDir);
-      const runId = buildSvc.startBuild(id, "epic-deepen", modelId);
+      const buildScope = `epic-deepen::${epicId}`;
+      const runId = buildSvc.startBuild(id, "epic-deepen", modelId, buildScope);
       if (!runId) {
-        res.status(409).json({ error: "A build is already running for this project.", code: "build_in_progress" });
+        res.status(409).json({ error: "A deepen pipeline is already running for this epic.", code: "build_in_progress" });
         return;
       }
 
@@ -311,17 +312,17 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
       let sseAborted = false;
       req.on("close", () => { sseAborted = true; });
 
-      const isAborted = () => sseAborted || buildSvc.isCancelled(id);
+      const isAborted = () => sseAborted || buildSvc.isCancelled(id, buildScope);
       const sendEvent = (event: string, data: unknown) => {
         if (event === "pipeline-step") {
-          buildSvc.addPipelineStep(id, runId, data as any);
+          buildSvc.addPipelineStep(id, runId, data as any, buildScope);
         }
         if (isAborted()) return;
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
       const sendMessage = (msg: unknown) => {
         const msgJson = JSON.stringify(msg);
-        buildSvc.appendOutput(id, runId, msgJson + "\n");
+        buildSvc.appendOutput(id, runId, msgJson + "\n", buildScope);
         if (isAborted()) return;
         res.write(`data: ${msgJson}\n\n`);
       };
@@ -333,10 +334,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
           { sendEvent, sendMessage, isAborted },
           svcs as any,
           runId,
+          buildScope,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        buildSvc.failBuild(id, runId, message);
+        buildSvc.failBuild(id, runId, message, buildScope);
         sendEvent("error", { error: message });
       }
 

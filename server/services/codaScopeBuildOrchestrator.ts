@@ -444,6 +444,7 @@ export async function runEpicDeepenPipeline(
   callbacks: AnalyzeSseCallbacks,
   services: EpicDeepenServices,
   runId: string,
+  buildScope?: string,
 ): Promise<void> {
   const { projectId, epicId, modelId, entries } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
@@ -570,22 +571,22 @@ export async function runEpicDeepenPipeline(
   } catch { /* ignore */ }
 
   // Complete or fail based on results
-  if (buildSvc.isCancelled(projectId)) {
-    buildSvc.failBuild(projectId, runId, "Deepen cancelled by user");
-    buildSvc.clearCancellation(projectId);
+  if (buildSvc.isCancelled(projectId, buildScope)) {
+    buildSvc.failBuild(projectId, runId, "Deepen cancelled by user", buildScope);
+    buildSvc.clearCancellation(projectId, buildScope);
     sendEvent("cancelled", { runId });
   } else {
     buildSvc.completeBuild(projectId, runId, pageCount, {
       buildMode: "epic-deepen",
       topicsRebuilt: completed,
-    });
+    }, buildScope);
     sendEvent("done", {
       runId,
       epicId,
       completed,
       errored,
       total: entries.length,
-      buildSummary: buildSvc.getBuildState(projectId)?.summary,
+      buildSummary: buildSvc.getBuildState(projectId, buildScope)?.summary,
     });
   }
 }

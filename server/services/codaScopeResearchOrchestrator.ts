@@ -88,6 +88,15 @@ export async function runResearchPipeline(
   };
 
   try {
+    // Ensure knowledge directory structure exists for this epic
+    // (may not exist if epic pre-dates the knowledge feature)
+    const projDir = projectSvc.getProjectDir(projectId);
+    if (projDir) {
+      epicKnowledgeSvc.initializeKnowledgeDir(
+        epicKnowledgeSvc.getEpicDirForInit(projDir, epicId),
+      );
+    }
+
     // ── Phase 1: Generate Research Plan ──────────────────────────────
 
     sendEvent("research-step", { step: "generate-plan", status: "running", topics });
@@ -229,7 +238,7 @@ async function generateResearchPlan(
   const projectDir = projectSvc.getProjectDir(projectId);
   if (!projectDir) throw new Error("Project directory not found.");
 
-  const epicDetail = await epicSvc.getEpicDetail(projectId, epicId);
+  const epicDetail = await epicSvc.getEpic(projectId, epicId);
   if (!epicDetail) throw new Error(`Epic "${epicId}" not found.`);
 
   // Epic wiki pages
@@ -481,7 +490,7 @@ async function processSources(
   const projectDir = projectSvc.getProjectDir(projectId);
   if (!projectDir) throw new Error("Project directory not found.");
 
-  const epicDetail = await epicSvc.getEpicDetail(projectId, epicId);
+  const epicDetail = await epicSvc.getEpic(projectId, epicId);
   if (!epicDetail) throw new Error(`Epic "${epicId}" not found.`);
 
   // Scope

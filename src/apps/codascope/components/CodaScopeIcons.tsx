@@ -594,3 +594,24 @@ export function IconCopy({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Question mark in circle — Help / Info */
+export function IconHelp({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M6 6.5a2 2 0 0 1 3.9.5c0 1-1.4 1.5-1.9 2" />
+      <circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Right-pointing arrow — Navigation / CTA */
+export function IconArrowRight({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M3 8h10" />
+      <path d="M9 4l4 4-4 4" />
+    </svg>
+  );
+}

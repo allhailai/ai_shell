@@ -104,6 +104,7 @@ Available types:
 - **insert_content** (epicId="id"): Navigate to insert content via directive
 - **replace_content** (epicId="id"): Navigate to rewrite content via directive
 - **expand_content** (epicId="id"): Navigate to expand content via directive
+- **trigger_research** (epicId="id" topics="topic1,topic2,topic3"): Start the autonomous research pipeline for the specified topics
 
 Guidelines:
 - Only suggest actions when genuinely helpful — don't spam action cards

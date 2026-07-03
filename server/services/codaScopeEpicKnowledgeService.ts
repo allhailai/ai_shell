@@ -505,6 +505,10 @@ export class CodaScopeEpicKnowledgeService {
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
+    // Ensure knowledge directory exists (may not if epic pre-dates knowledge feature)
+    const kDir = this.knowledgeDir(epicDir);
+    mkdirSync(kDir, { recursive: true });
+
     plan.updatedAt = nowIso();
     await atomicWrite(this.researchPlanPath(epicDir), JSON.stringify(plan, null, 2));
   }

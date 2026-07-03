@@ -11,6 +11,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { connectToSseStream } from "../codaScopeSseClient";
+import { useBuildState } from "../hooks/useBuildState";
 import type {
   EpicDesignDetail,
   EpicScope as EpicScopeType,
@@ -80,8 +81,23 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
     epic.scope ?? { entries: [], lastScopedAt: null, lastScopedBy: null },
   );
   const [loading, _setLoading] = useState(false);
-  const [deepening, setDeepening] = useState(false);
-  const [deepenProgress, setDeepenProgress] = useState<string>("");
+
+  // Local deepen state for when the user actively triggers a deepen
+  const [localDeepening, setLocalDeepening] = useState(false);
+  const [localDeepenProgress, setLocalDeepenProgress] = useState<string>("");
+
+  // Hydrate deepen pipeline state from server (survives refresh)
+  const deepenBuild = useBuildState({
+    projectId: activeProjectId,
+    scope: `epic-deepen::${epic.id}`,
+    enabled: true,
+  });
+
+  // Effective deepen state: local dispatch takes priority while active
+  const deepening = localDeepening || deepenBuild.status === "running";
+  const deepenProgress = localDeepening ? localDeepenProgress : (deepenBuild.progressMsg ?? "");
+  const deepenDone = !localDeepening && deepenBuild.status === "success";
+  const deepenFailed = !localDeepening && deepenBuild.status === "error";
 
   // Topic picker modal
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -233,8 +249,10 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
   const handleDeepen = useCallback(async () => {
     if (!activeProjectId || !selectedModel) return;
 
-    setDeepening(true);
-    setDeepenProgress("Starting enrichment…");
+    // Reset hydrated state so local dispatch takes over
+    deepenBuild.rebuild();
+    setLocalDeepening(true);
+    setLocalDeepenProgress("Starting enrichment…");
 
     connectToSseStream(
       {
@@ -246,7 +264,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
         onText: () => { /* ignore streaming text for deepen */ },
         onPipelineStep: (step) => {
           if (step.topic) {
-            setDeepenProgress(
+            setLocalDeepenProgress(
               `${step.status === "running" ? "Enriching" : step.status}: ${step.topic}${step.progress ? ` (${step.progress})` : ""}`,
             );
           }
@@ -264,17 +282,17 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           }
         },
         onDone: () => {
-          setDeepenProgress("Enrichment complete!");
-          setDeepening(false);
+          setLocalDeepenProgress("Enrichment complete!");
+          setLocalDeepening(false);
           refreshScope();
         },
         onError: (err) => {
-          setDeepenProgress(`Error: ${err}`);
-          setDeepening(false);
+          setLocalDeepenProgress(`Error: ${err}`);
+          setLocalDeepening(false);
         },
       },
     );
-  }, [activeProjectId, epic.id, selectedModel, refreshScope]);
+  }, [activeProjectId, epic.id, selectedModel, refreshScope, deepenBuild.rebuild]);
 
   /* ── Apply scope diff ──────────────────────────────────────────────── */
 
@@ -417,15 +435,35 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           >
             + Concept
           </button>
-          <button
-            className="codascope-btn codascope-btn-primary"
-            onClick={handleDeepen}
-            disabled={deepening || includedCount === 0 || !selectedModel}
-            title={!selectedModel ? "Select a model first" : undefined}
-            type="button"
-          >
-            {deepening ? "Deepening…" : "Deepen All"}
-          </button>
+          {deepenDone ? (
+            <button
+              className="codascope-btn codascope-btn-secondary"
+              onClick={() => { deepenBuild.rebuild(); }}
+              type="button"
+              title={deepenBuild.summary ?? undefined}
+            >
+              ✓ Deepened · Rebuild
+            </button>
+          ) : deepenFailed ? (
+            <button
+              className="codascope-btn codascope-btn-secondary codascope-btn-error"
+              onClick={() => { deepenBuild.rebuild(); }}
+              type="button"
+              title={deepenBuild.error ?? undefined}
+            >
+              ✗ Failed · Retry
+            </button>
+          ) : (
+            <button
+              className="codascope-btn codascope-btn-primary"
+              onClick={handleDeepen}
+              disabled={deepening || includedCount === 0 || !selectedModel}
+              title={!selectedModel ? "Select a model first" : undefined}
+              type="button"
+            >
+              {deepening ? "Deepening…" : "Deepen All"}
+            </button>
+          )}
         </div>
       </div>
 

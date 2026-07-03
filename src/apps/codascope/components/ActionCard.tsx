@@ -10,7 +10,8 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { CodaScopeAction } from "../codaScopeTypes";
 import { IconInsertContent, IconRewrite, IconExpand } from "./CodaScopeIcons";
-import { connectToSseStream } from "../codaScopeSseClient";
+import { connectToSseStream, parseSseChunk } from "../codaScopeSseClient";
+import { useBuildState } from "../hooks/useBuildState";
 
 // Re-export for existing consumers
 export type { CodaScopeAction };
@@ -53,6 +54,8 @@ function ActionIcon({ type }: { type: string }) {
       return <span className="codascope-action-icon"><IconRewrite size={14} /></span>;
     case "expand_content":
       return <span className="codascope-action-icon"><IconExpand size={14} /></span>;
+    case "trigger_research":
+      return <span className="codascope-action-icon">🔬</span>;
     default:
       return <span className="codascope-action-icon">⚡</span>;
   }
@@ -76,6 +79,7 @@ function actionLabel(type: string): string {
     case "insert_content": return "Insert Content";
     case "replace_content": return "Rewrite Content";
     case "expand_content": return "Expand Content";
+    case "trigger_research": return "Research";
     default: return "Action";
   }
 }
@@ -97,18 +101,77 @@ function actionButtonLabel(type: string, status: ActionStatus): string {
     case "insert_content": return "Insert";
     case "replace_content": return "Rewrite";
     case "expand_content": return "Expand";
+    case "trigger_research": return "Start Research";
     default: return "Run";
   }
 }
 
 /* ── Action Card Component ───────────────────────────────────────────── */
 
+/**
+ * Map action types to their build scope key (for server-tracked builds).
+ * Returns null for actions that don't use BuildStateService.
+ */
+function getBuildScope(type: string, attributes: Record<string, string>): string | null {
+  const epicId = attributes.epicId;
+  switch (type) {
+    case "trigger_research":
+      return epicId ? `research::${epicId}` : null;
+    case "deepen_wiki":
+      return epicId ? `epic-deepen::${epicId}` : null;
+    // Project-level builds (wiki, explore) use unscoped project-level tracking
+    case "build_wiki_page":
+    case "build_full_wiki":
+    case "run_quality_scan":
+    case "explore_codebase":
+      return null; // These use the default project-level build key (no scope)
+    default:
+      return null;
+  }
+}
+
+/**
+ * Returns true for action types that run async pipelines (not instant navigation).
+ */
+function isAsyncAction(type: string): boolean {
+  return [
+    "build_wiki_page", "build_full_wiki", "run_quality_scan",
+    "explore_codebase", "deepen_wiki", "trigger_research",
+  ].includes(type);
+}
+
 export function ActionCard({ action }: { action: CodaScopeAction }) {
   const { type, attributes, description } = action;
-  const [status, setStatus] = useState<ActionStatus>("idle");
+  const [localStatus, setLocalStatus] = useState<ActionStatus>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const { navigate } = useAppSubRoute("codascope");
   const { activeProjectId, selectedModel } = useCodaScopeStore();
+
+  // Determine if this action has a server-tracked build scope
+  const buildScope = getBuildScope(type, attributes);
+  const tracked = buildScope !== null && isAsyncAction(type);
+
+  // Hydrate build state from server for tracked actions
+  const hydrated = useBuildState({
+    projectId: activeProjectId,
+    scope: buildScope ?? "",
+    enabled: tracked,
+  });
+
+  // Merge hydrated state with local state.
+  // Local state takes priority while the user is actively dispatching.
+  // Once idle, the hydrated state takes over.
+  const effectiveStatus: ActionStatus = localStatus !== "idle" ? localStatus : hydrated.status;
+  const effectiveProgress = localStatus === "running" ? progressMsg : hydrated.progressMsg;
+  const effectiveError = localStatus === "error" ? errorMsg : hydrated.error;
+
+  const handleRebuild = useCallback(() => {
+    hydrated.rebuild();
+    setLocalStatus("idle");
+    setErrorMsg(null);
+    setProgressMsg(null);
+  }, [hydrated.rebuild]);
 
   const dispatchAction = useCallback(async () => {
     if (!activeProjectId) return;
@@ -190,7 +253,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
     }
 
     // Async actions use loading state
-    setStatus("running");
+    setLocalStatus("running");
     setErrorMsg(null);
 
     try {
@@ -209,7 +272,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
             method: "POST",
             body: commandPayload,
           });
-          setStatus("success");
+          setLocalStatus("success");
           return;
         }
 
@@ -219,7 +282,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
             method: "POST",
             body: { command: "do_build_full_wiki", modelId: selectedModel ?? "" },
           });
-          setStatus("success");
+          setLocalStatus("success");
           return;
         }
 
@@ -229,7 +292,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
             method: "POST",
             body: { command: "do_quality_scan", modelId: selectedModel ?? "" },
           });
-          setStatus("success");
+          setLocalStatus("success");
           return;
         }
 
@@ -239,7 +302,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
             method: "POST",
             body: { command: "do_explore", modelId: selectedModel ?? "" },
           });
-          setStatus("success");
+          setLocalStatus("success");
           return;
         }
 
@@ -253,22 +316,48 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
             method: "POST",
             body: { modelId: selectedModel ?? "" },
           });
-          setStatus("success");
+          setLocalStatus("success");
+          return;
+        }
+
+        case "trigger_research": {
+          const epicId = attributes.epicId;
+          if (!epicId) {
+            throw new Error("Missing epicId for trigger_research");
+          }
+          // Parse topics — the agent may pass them as comma-separated in a single attr
+          const topicsRaw = attributes.topics ?? "";
+          const topics = topicsRaw
+            .split(",")
+            .map((t: string) => t.trim())
+            .filter(Boolean);
+          if (topics.length === 0) {
+            throw new Error("No research topics specified");
+          }
+          await runResearchStream(
+            `/api/codascope/projects/${activeProjectId}/epics/${epicId}/knowledge/research`,
+            { modelId: selectedModel ?? "", topics },
+            setProgressMsg,
+          );
+          setLocalStatus("success");
+          setProgressMsg(null);
           return;
         }
 
         default:
-          setStatus("error");
+          setLocalStatus("error");
           setErrorMsg(`Unknown action type: ${type}`);
       }
     } catch (err) {
-      setStatus("error");
+      setLocalStatus("error");
       setErrorMsg((err as Error).message);
     }
   }, [type, attributes, activeProjectId, selectedModel, navigate]);
 
+  const isTerminal = effectiveStatus === "success" || effectiveStatus === "error";
+
   return (
-    <div className={`codascope-action-card codascope-action-card-${status}`}>
+    <div className={`codascope-action-card codascope-action-card-${effectiveStatus}`}>
       <div className="codascope-action-card-header">
         <ActionIcon type={type} />
         <span className="codascope-action-card-label">{actionLabel(type)}</span>
@@ -277,18 +366,34 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
         )}
       </div>
       <p className="codascope-action-card-desc">{description}</p>
+      {/* Progress indicator for running pipelines */}
+      {effectiveStatus === "running" && effectiveProgress && (
+        <div className="codascope-action-card-progress">
+          <div className="codascope-action-card-progress-bar">
+            <div className="codascope-action-card-progress-fill" />
+          </div>
+          <span className="codascope-action-card-progress-text">{effectiveProgress}</span>
+        </div>
+      )}
+      {/* Summary line for completed/failed builds */}
+      {isTerminal && hydrated.summary && (
+        <p className="codascope-action-card-summary">{hydrated.summary}</p>
+      )}
       <div className="codascope-action-card-footer">
+        {/* Primary action button */}
         <button
-          className={`codascope-action-card-btn codascope-action-card-btn-${status}`}
-          onClick={dispatchAction}
-          disabled={status === "running"}
+          className={`codascope-action-card-btn codascope-action-card-btn-${effectiveStatus}`}
+          onClick={isTerminal && tracked ? handleRebuild : dispatchAction}
+          disabled={effectiveStatus === "running"}
           type="button"
         >
-          {status === "running" && <span className="codascope-action-card-spinner" />}
-          {actionButtonLabel(type, status)}
+          {effectiveStatus === "running" && <span className="codascope-action-card-spinner" />}
+          {isTerminal && tracked
+            ? (effectiveStatus === "success" ? "↻ Rebuild" : "↻ Retry")
+            : actionButtonLabel(type, effectiveStatus)}
         </button>
-        {errorMsg && (
-          <span className="codascope-action-card-error">{errorMsg}</span>
+        {effectiveError && (
+          <span className="codascope-action-card-error">{effectiveError}</span>
         )}
       </div>
     </div>
@@ -325,5 +430,119 @@ function awaitSseStream(target: SseStreamTarget): Promise<void> {
       onDone: () => resolve(),
       onError: (error) => reject(new Error(error)),
     });
+  });
+}
+
+/* ── Research SSE Consumer ───────────────────────────────────────────── */
+
+/**
+ * Run the research pipeline via SSE, reporting live progress.
+ *
+ * The research endpoint emits custom events that differ from the standard
+ * pipeline SSE events, so we consume the stream directly instead of using
+ * connectToSseStream (which only knows about `done`/`error`/`pipeline-step`).
+ */
+function runResearchStream(
+  url: string,
+  body: Record<string, unknown>,
+  onProgress: (msg: string | null) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    void (async () => {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok || !res.body) {
+          let errorText = "Failed to start research pipeline.";
+          try {
+            const data = await res.json();
+            errorText = data.error ?? data.message ?? errorText;
+          } catch {
+            errorText = await res.text();
+          }
+          reject(new Error(errorText));
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          buffer = parseSseChunk(buffer, (event, data) => {
+            try {
+              const parsed = JSON.parse(data);
+
+              switch (event) {
+                case "research-started":
+                  onProgress("Starting research pipeline…");
+                  break;
+                case "research-step": {
+                  const step = parsed.step as string;
+                  if (step === "generate-plan") {
+                    onProgress("Phase 1/3 — Generating research plan…");
+                  } else if (step === "execute-downloads") {
+                    onProgress("Phase 2/3 — Downloading sources…");
+                  } else if (step === "process-sources") {
+                    onProgress("Phase 3/3 — Processing into wiki pages…");
+                  } else {
+                    onProgress(`Running: ${step}`);
+                  }
+                  break;
+                }
+                case "research-plan-generated": {
+                  const qc = parsed.queryCount ?? 0;
+                  const uc = parsed.urlCount ?? 0;
+                  onProgress(`Plan ready — ${qc} queries, ${uc} URLs to fetch`);
+                  break;
+                }
+                case "research-download-complete": {
+                  const s = parsed.succeeded ?? 0;
+                  const b = parsed.blocked ?? 0;
+                  const f = parsed.failed ?? 0;
+                  onProgress(`Downloads done — ${s} fetched, ${b} blocked, ${f} failed`);
+                  break;
+                }
+                case "research-complete":
+                  onProgress(null);
+                  resolve();
+                  return;
+                case "research-error":
+                  reject(new Error(parsed.error ?? "Research pipeline failed."));
+                  return;
+                case "research-cancelled":
+                  reject(new Error("Research pipeline was cancelled."));
+                  return;
+                case "done":
+                  onProgress(null);
+                  resolve();
+                  return;
+                case "error":
+                  reject(new Error(parsed.error ?? "Unknown error"));
+                  return;
+                default:
+                  // Ignore other events (e.g. message)
+                  break;
+              }
+            } catch {
+              // Ignore malformed JSON
+            }
+          });
+        }
+
+        // Stream ended without explicit done/error event
+        resolve();
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    })();
   });
 }

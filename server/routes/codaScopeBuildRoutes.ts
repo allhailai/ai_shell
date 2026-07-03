@@ -236,9 +236,10 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
   app.get("/api/codascope/projects/:id/build-status", wrap(async (req, res) => {
     const { buildSvc, projectSvc } = await ensureServices();
     const id = param(req, "id");
+    const scope = req.query.scope as string | undefined;
     const projectDir = projectSvc.getProjectDir(id);
     if (projectDir) buildSvc.registerProjectDir(id, projectDir);
-    const state = buildSvc.getBuildState(id);
+    const state = buildSvc.getBuildState(id, scope || undefined);
     res.json({ build: state });
   }));
 
@@ -247,12 +248,13 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
   app.post("/api/codascope/projects/:id/build/cancel", wrap(async (req, res) => {
     const { buildSvc } = await ensureServices();
     const id = param(req, "id");
-    const state = buildSvc.getBuildState(id);
+    const { scope } = req.body as { scope?: string };
+    const state = buildSvc.getBuildState(id, scope);
     if (!state || state.status !== "building") {
       res.json({ cancelled: false, reason: "No active build" });
       return;
     }
-    buildSvc.cancelBuild(id);
+    buildSvc.cancelBuild(id, scope);
     res.json({ cancelled: true, runId: state.runId });
   }));
 

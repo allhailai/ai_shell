@@ -108,6 +108,40 @@ function resolveChips(context: PromptChipContext): PromptChip[] {
         }
         break;
 
+      case "knowledge":
+        if (!context.hasResearch) {
+          chips.push({
+            label: "Research Topics",
+            prompt: "Research the scoped topics for this epic — find authoritative sources, technical docs, and best practices. Search the web and build a research plan.",
+            primary: true,
+          });
+          chips.push({
+            label: "What Can You Help With?",
+            prompt: "I'm on the Knowledge tab — explain what you can help me do here. How do I research topics, download content, and build wiki pages for this epic?",
+          });
+        } else if (!context.hasCuratedKnowledge) {
+          chips.push({
+            label: "Process Sources",
+            prompt: "Process the uploaded research sources and synthesize them into organized epic wiki pages",
+            primary: true,
+          });
+          chips.push({
+            label: "Find More Sources",
+            prompt: "Search the web for additional research sources related to this epic's scope topics",
+          });
+        } else {
+          chips.push({
+            label: "Deepen Knowledge",
+            prompt: "Review the current wiki pages and identify gaps — suggest additional research or deeper analysis needed",
+            primary: true,
+          });
+          chips.push({
+            label: "Research New Topics",
+            prompt: "Search for additional sources on topics not yet well covered in the epic wiki",
+          });
+        }
+        break;
+
       case "history":
         chips.push({
           label: "Summarize Progress",
