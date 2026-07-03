@@ -1,0 +1,453 @@
+/* ── CodaScope: Knowledge Routes ─────────────────────────────────────
+   Knowledge sources, blocked downloads, epic wiki, research pipeline,
+   and curation pipeline.
+   ──────────────────────────────────────────────────────────────────── */
+
+import type { Request, Response } from "express";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.js";
+import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
+
+export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
+  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
+
+  // ── Knowledge Sources ─────────────────────────────────────────────
+
+  // List sources for an epic
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/sources", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sources = await epicKnowledgeSvc.listSources(id, epicId);
+    res.json({ sources });
+  }));
+
+  // Get a specific source (detail + content info)
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/sources/:sourceId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sourceId = param(req, "sourceId");
+    const source = await epicKnowledgeSvc.getSource(id, epicId, sourceId);
+    if (!source) throw httpError("Source not found.", 404, "not_found");
+    const content = await epicKnowledgeSvc.getSourceContent(id, epicId, sourceId);
+    res.json({ source, hasMarkdown: !!content.markdown, hasOriginal: !!content.original });
+  }));
+
+  // Get source extracted markdown content
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/sources/:sourceId/content", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sourceId = param(req, "sourceId");
+    const content = await epicKnowledgeSvc.getSourceContent(id, epicId, sourceId);
+    if (!content.markdown) throw httpError("No extracted content available.", 404, "not_found");
+    res.json({ markdown: content.markdown });
+  }));
+
+  // Add source via file upload (multipart/form-data)
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/sources", upload.single("file"), wrap(async (req, res) => {
+    const { epicKnowledgeSvc, curationSvc, contentSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+
+    // Support both multipart upload and JSON-only metadata
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    const title = (req.body.title as string) ?? file?.originalname ?? "Untitled";
+    const topicAssociations = req.body.topicAssociations
+      ? (typeof req.body.topicAssociations === "string"
+        ? JSON.parse(req.body.topicAssociations)
+        : req.body.topicAssociations) as string[]
+      : [];
+
+    // Create source entry
+    const source = await epicKnowledgeSvc.addSource(id, epicId, {
+      epicId,
+      type: "human",
+      origin: "upload",
+      url: (req.body.url as string) ?? undefined,
+      filename: file?.originalname ?? (req.body.filename as string) ?? "unknown",
+      contentType: file?.mimetype ?? (req.body.contentType as string) ?? "application/octet-stream",
+      title,
+      status: file ? "processing" : "pending",
+      addedAt: new Date().toISOString(),
+      sizeBytesOriginal: file?.size ?? 0,
+      topicAssociations,
+    });
+
+    // If a file was uploaded, store and extract
+    if (file) {
+      try {
+        const ext = path.extname(file.originalname).replace(/^\./, "") || "bin";
+        await epicKnowledgeSvc.storeOriginalFile(id, epicId, source.id, file.buffer, ext);
+
+        // Extract content to markdown — write to temp file first
+        const tmpPath = path.join(os.tmpdir(), `codascope-extract-${crypto.randomBytes(4).toString("hex")}.${ext}`);
+        const { writeFileSync: wfs } = await import("node:fs");
+        wfs(tmpPath, file.buffer);
+        const markdown = await contentSvc.extractToMarkdown(tmpPath, file.mimetype);
+
+        await epicKnowledgeSvc.storeExtractedMarkdown(id, epicId, source.id, markdown);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "ready");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Source extraction failed for ${source.id}: ${msg}`);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "error");
+      }
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "human_content_added",
+        at: new Date().toISOString(),
+        detail: `Human uploaded content: "${title}"`,
+      });
+    }
+
+    res.status(201).json({ source });
+  }));
+
+  // Delete source
+  app.delete("/api/codascope/projects/:id/epics/:epicId/knowledge/sources/:sourceId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sourceId = param(req, "sourceId");
+    const deleted = await epicKnowledgeSvc.deleteSource(id, epicId, sourceId);
+    if (!deleted) throw httpError("Source not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
+  // ── Blocked Downloads ─────────────────────────────────────────────
+
+  // List blocked downloads
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/blocked", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const includeDismissed = req.query.includeDismissed === "true";
+    const items = await epicKnowledgeSvc.listBlockedDownloads(id, epicId, includeDismissed);
+    res.json({ items });
+  }));
+
+  // Dismiss or update a blocked download
+  app.patch("/api/codascope/projects/:id/epics/:epicId/knowledge/blocked/:blockId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const blockId = param(req, "blockId");
+    const { action } = req.body as { action?: string };
+    if (action === "dismiss") {
+      await epicKnowledgeSvc.dismissBlockedDownload(id, epicId, blockId);
+      res.json({ dismissed: true });
+    } else {
+      throw httpError("Invalid action. Use 'dismiss'.", 400, "invalid_input");
+    }
+  }));
+
+  // Resolve a blocked download by uploading the content
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/blocked/:blockId/resolve", upload.single("file"), wrap(async (req, res) => {
+    const { epicKnowledgeSvc, curationSvc, contentSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const blockId = param(req, "blockId");
+
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+
+    // Support both file upload and sourceId reference
+    if (file) {
+      const title = (req.body.title as string) ?? file.originalname ?? "Resolved content";
+
+      // Create a new source from the uploaded file
+      const source = await epicKnowledgeSvc.addSource(id, epicId, {
+        epicId,
+        type: "human",
+        origin: "human-resolved",
+        filename: file.originalname,
+        contentType: file.mimetype,
+        title,
+        status: "processing",
+        addedAt: new Date().toISOString(),
+        sizeBytesOriginal: file.size,
+        topicAssociations: [],
+      });
+
+      // Store original file
+      const ext = path.extname(file.originalname).replace(/^\./, "") || "bin";
+      await epicKnowledgeSvc.storeOriginalFile(id, epicId, source.id, file.buffer, ext);
+
+      // Extract content
+      try {
+        const tmpPath = path.join(os.tmpdir(), `codascope-resolve-${crypto.randomBytes(4).toString("hex")}.${ext}`);
+        const { writeFileSync: wfs } = await import("node:fs");
+        wfs(tmpPath, file.buffer);
+        const markdown = await contentSvc.extractToMarkdown(tmpPath, file.mimetype);
+        await epicKnowledgeSvc.storeExtractedMarkdown(id, epicId, source.id, markdown);
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "ready");
+      } catch {
+        await epicKnowledgeSvc.updateSourceStatus(id, epicId, source.id, "error");
+      }
+
+      // Mark blocked download as resolved
+      await epicKnowledgeSvc.resolveBlockedDownload(id, epicId, blockId, source.id);
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "blocked_download_resolved",
+        at: new Date().toISOString(),
+        detail: `Blocked download resolved with uploaded content: "${title}"`,
+      });
+
+      res.json({ resolved: true, sourceId: source.id });
+    } else {
+      // Fallback: accept sourceId in body (for linking an existing source)
+      const { sourceId } = req.body as { sourceId?: string };
+      if (!sourceId) throw httpError("Either a file upload or sourceId is required.", 400, "invalid_input");
+      await epicKnowledgeSvc.resolveBlockedDownload(id, epicId, blockId, sourceId);
+
+      // Add curation reason
+      await curationSvc.addReason(id, epicId, {
+        type: "blocked_download_resolved",
+        at: new Date().toISOString(),
+        detail: `Blocked download resolved with existing source: ${sourceId}`,
+      });
+
+      res.json({ resolved: true });
+    }
+  }));
+
+  // ── Epic Wiki (Research Synthesis) ────────────────────────────────
+
+  // List epic wiki pages
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const pages = await epicKnowledgeSvc.listEpicWikiPages(id, epicId);
+    res.json({ pages });
+  }));
+
+  // Read an epic wiki page
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki/:pageId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const pageId = param(req, "pageId");
+    const content = await epicKnowledgeSvc.readEpicWikiPage(id, epicId, pageId);
+    if (content === null) throw httpError("Epic wiki page not found.", 404, "not_found");
+    res.json({ pageId, content });
+  }));
+
+  // Create or update an epic wiki page
+  app.put("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki/:pageId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const pageId = param(req, "pageId");
+    const { title, content, sourceRefs } = req.body as { title?: string; content?: string; sourceRefs?: string[] };
+    if (!title || content === undefined) throw httpError("title and content are required.", 400, "invalid_input");
+    const page = await epicKnowledgeSvc.writeEpicWikiPage(id, epicId, pageId, title, content, sourceRefs);
+    res.json({ page });
+  }));
+
+  // Delete an epic wiki page
+  app.delete("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki/:pageId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const pageId = param(req, "pageId");
+    const deleted = await epicKnowledgeSvc.deleteEpicWikiPage(id, epicId, pageId);
+    if (!deleted) throw httpError("Epic wiki page not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
+  // ── Research Plan ─────────────────────────────────────────────────
+
+  // Get research plan
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/research-plan", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const plan = await epicKnowledgeSvc.getResearchPlan(id, epicId);
+    res.json({ plan });
+  }));
+
+  // Update research plan
+  app.put("/api/codascope/projects/:id/epics/:epicId/knowledge/research-plan", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const { plan } = req.body as { plan?: any };
+    if (!plan) throw httpError("plan is required.", 400, "invalid_input");
+    await epicKnowledgeSvc.updateResearchPlan(id, epicId, plan);
+    res.json({ saved: true });
+  }));
+
+  // ── Research Pipeline (SSE streaming) ─────────────────────────────
+
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/research", async (req, res) => {
+    try {
+      const svcs = await ensureServices();
+      const id = param(req, "id");
+      const epicId = param(req, "epicId");
+      const { modelId, topics } = req.body as { modelId?: string; topics?: string[] };
+
+      if (!modelId) {
+        res.status(400).json({ error: "modelId is required." });
+        return;
+      }
+      if (!topics || topics.length === 0) {
+        res.status(400).json({ error: "topics array is required." });
+        return;
+      }
+
+      // Set up SSE
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let aborted = false;
+      req.on("close", () => { aborted = true; });
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (aborted) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const sendMessage = (msg: unknown) => {
+        if (aborted) return;
+        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+      };
+
+      sendEvent("research-started", { projectId: id, epicId, modelId, topics });
+
+      await runResearchPipeline(
+        { projectId: id, epicId, modelId, topics },
+        { sendEvent, sendMessage, isAborted: () => aborted },
+        {
+          agentSvc: svcs.agentSvc,
+          projectSvc: svcs.projectSvc,
+          epicSvc: svcs.epicSvc,
+          epicKnowledgeSvc: svcs.epicKnowledgeSvc,
+          curationSvc: svcs.curationSvc,
+          contentSvc: svcs.contentSvc,
+        },
+      );
+
+      if (!aborted) {
+        sendEvent("done", {});
+        res.end();
+      }
+    } catch (err) {
+      if (!res.headersSent) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: message });
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // ── Curation ──────────────────────────────────────────────────────
+
+  // Get curation reasons
+  app.get("/api/codascope/projects/:id/epics/:epicId/curation/reasons", wrap(async (req, res) => {
+    const { curationSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const reasons = await curationSvc.getReasons(id, epicId);
+    res.json({ reasons });
+  }));
+
+  // Trigger curation run (SSE streaming pipeline)
+  app.post("/api/codascope/projects/:id/epics/:epicId/curation/run", async (req, res) => {
+    try {
+      const svcs = await ensureServices();
+      const id = param(req, "id");
+      const epicId = param(req, "epicId");
+      const { modelId } = req.body as { modelId?: string };
+
+      if (!modelId) {
+        res.status(400).json({ error: "modelId is required." });
+        return;
+      }
+
+      // Set up SSE
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      let aborted = false;
+      req.on("close", () => { aborted = true; });
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (aborted) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const sendMessage = (msg: unknown) => {
+        if (aborted) return;
+        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+      };
+
+      sendEvent("run-started", { projectId: id, epicId, modelId });
+
+      await runCurationPipeline(
+        { projectId: id, epicId, modelId },
+        { sendEvent, sendMessage, isAborted: () => aborted },
+        {
+          agentSvc: svcs.agentSvc,
+          projectSvc: svcs.projectSvc,
+          wikiSvc: svcs.wikiSvc,
+          epicSvc: svcs.epicSvc,
+          epicKnowledgeSvc: svcs.epicKnowledgeSvc,
+          curationSvc: svcs.curationSvc,
+          conceptSvc: svcs.conceptSvc,
+          codeMapSvc: svcs.codeMapSvc,
+        },
+      );
+
+      if (!aborted) {
+        sendEvent("done", {});
+        res.end();
+      }
+    } catch (err) {
+      if (!res.headersSent) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(500).json({ error: message });
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // List curation logs
+  app.get("/api/codascope/projects/:id/epics/:epicId/curation/logs", wrap(async (req, res) => {
+    const { curationSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const logs = await curationSvc.listLogs(id, epicId);
+    res.json({ logs });
+  }));
+
+  // Get a specific curation log
+  app.get("/api/codascope/projects/:id/epics/:epicId/curation/logs/:logId", wrap(async (req, res) => {
+    const { curationSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const logId = param(req, "logId");
+    const log = await curationSvc.getLog(id, epicId, logId);
+    if (!log) throw httpError("Curation log not found.", 404, "not_found");
+    res.json({ log });
+  }));
+}
