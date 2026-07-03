@@ -437,3 +437,54 @@ function stripMarkdownForHistory(text: string): string {
     .replace(/\n/g, " ")                           // single line
     .trim();
 }
+
+/* ── Reference Formatter ─────────────────────────────────────────── */
+
+export interface ReferenceItem {
+  category: string;
+  id: string;
+  label?: string;
+}
+
+/**
+ * Format @-mention references into a system prompt section.
+ * Tells the agent what context the user has referenced so it can
+ * use its read tools to access the full content.
+ */
+export function formatReferences(references: ReferenceItem[]): string {
+  if (!references || references.length === 0) return "";
+
+  const lines: string[] = [
+    "## Referenced Context",
+    "",
+    "The user has referenced the following items using @-mentions. Use the appropriate " +
+    "read tools to access their full content when relevant to your response:",
+    "",
+  ];
+
+  for (const ref of references) {
+    const label = ref.label ? ` — "${ref.label}"` : "";
+    switch (ref.category) {
+      case "wiki":
+        lines.push(`- **Wiki page**: \`${ref.id}\`${label} — use \`read_wiki_topic("${ref.id}")\``);
+        break;
+      case "source":
+        lines.push(`- **Research source**: \`${ref.id}\`${label} — use \`read_research_source(epicId, "${ref.id}")\``);
+        break;
+      case "design":
+        lines.push(`- **Design document**: \`${ref.id}\`${label} — use \`read_design_doc(epicId, "${ref.id}")\``);
+        break;
+      case "code":
+        lines.push(`- **Code file/repo**: \`${ref.id}\`${label}`);
+        break;
+      case "definition":
+        lines.push(`- **Epic definition** — use \`read_epic_definition(epicId)\``);
+        break;
+      default:
+        lines.push(`- **${ref.category}**: \`${ref.id}\`${label}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+

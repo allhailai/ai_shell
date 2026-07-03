@@ -1,6 +1,7 @@
 /* ── CodaScope: ChatHelpModal ────────────────────────────────────────
    Small modal triggered by `?` icon next to chat input.
-   Shows keyboard shortcuts, attachment instructions, and context hints.
+   Shows @-mention categories, keyboard shortcuts, attachment instructions,
+   and design doc creation tips.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -49,6 +50,37 @@ export function ChatHelpModal({ isOpen, onClose }: ChatHelpModalProps) {
         </div>
 
         <div className="codascope-help-modal-body">
+          {/* @-Mentions */}
+          <section className="codascope-help-modal-section">
+            <h4>@ Mentions — Add Context</h4>
+            <p className="codascope-help-modal-desc">
+              Type <code>@</code> in the chat input to reference context from your project.
+              The agent will use these references when crafting its response.
+            </p>
+            <div className="codascope-help-modal-shortcuts">
+              <div className="codascope-help-modal-shortcut">
+                <kbd>@wiki/</kbd>
+                <span>Reference a wiki page</span>
+              </div>
+              <div className="codascope-help-modal-shortcut">
+                <kbd>@source/</kbd>
+                <span>Reference a research source</span>
+              </div>
+              <div className="codascope-help-modal-shortcut">
+                <kbd>@design/</kbd>
+                <span>Reference a design document</span>
+              </div>
+              <div className="codascope-help-modal-shortcut">
+                <kbd>@code/</kbd>
+                <span>Reference a code repository</span>
+              </div>
+              <div className="codascope-help-modal-shortcut">
+                <kbd>@def</kbd>
+                <span>Reference the epic definition</span>
+              </div>
+            </div>
+          </section>
+
           {/* Keyboard Shortcuts */}
           <section className="codascope-help-modal-section">
             <h4>Keyboard Shortcuts</h4>
@@ -63,7 +95,11 @@ export function ChatHelpModal({ isOpen, onClose }: ChatHelpModalProps) {
               </div>
               <div className="codascope-help-modal-shortcut">
                 <kbd>Escape</kbd>
-                <span>Clear attachments</span>
+                <span>Clear attachments / close picker</span>
+              </div>
+              <div className="codascope-help-modal-shortcut">
+                <kbd>↑ ↓</kbd>
+                <span>Navigate @ picker</span>
               </div>
             </div>
           </section>
@@ -84,29 +120,26 @@ export function ChatHelpModal({ isOpen, onClose }: ChatHelpModalProps) {
             </ul>
           </section>
 
-          {/* Context */}
-          <section className="codascope-help-modal-section">
-            <h4>Context</h4>
-            <ul className="codascope-help-modal-list">
-              <li>
-                <strong>@ mentions</strong> — Type <code>@</code> to reference wiki pages, sources, and more
-                <span className="codascope-help-modal-coming-soon">Coming soon</span>
-              </li>
-              <li>
-                The assistant automatically includes context from your current view
-              </li>
-            </ul>
-          </section>
-
           {/* Design Docs */}
           <section className="codascope-help-modal-section">
             <h4>Design Documents</h4>
             <ul className="codascope-help-modal-list">
               <li>
-                Ask the assistant to <strong>create design documents</strong> — just describe what you need
+                <strong>Create</strong> — Ask the agent to create a design document:
+                <br />
+                <em>"Create a design doc about event store architecture"</em>
               </li>
               <li>
-                Reference your epic's wiki and research for grounded content
+                <strong>Edit</strong> — Ask the agent to modify an existing document:
+                <br />
+                <em>"Expand the security section of this document"</em>
+              </li>
+              <li>
+                <strong>Reference context</strong> — Use <code>@wiki/</code> and <code>@source/</code> mentions
+                to ground design docs in existing knowledge
+              </li>
+              <li>
+                New documents auto-open in the editor when created
               </li>
             </ul>
           </section>

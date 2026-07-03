@@ -11,6 +11,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
 import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
+import { useCommandBus } from "../../../shell/hooks";
 import type { EpicDesignDetail, EpicDesignDoc } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -41,6 +42,34 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
       useShellStore.getState().openRightPanel("assistant");
     }
   }, []); // Only on mount
+
+  // Listen for agent-created design docs — auto-open them
+  const commandBus = useCommandBus();
+  useEffect(() => {
+    if (!commandBus || !activeProjectId) return;
+    const unsub = commandBus.on("codascope:design-doc-created", async (data: { epicId: string; docId: string }) => {
+      if (data.epicId !== epic.id) return;
+      try {
+        // Fetch the newly created doc and open it
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${data.docId}`,
+        );
+        if (res.ok) {
+          const result = await res.json();
+          setActiveDoc({ doc: result.doc, content: result.content });
+          // Refresh the epic doc list
+          const listRes = await fetch(
+            `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
+          );
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            setEpic({ ...epic, designDocs: listData.docs ?? [] });
+          }
+        }
+      } catch { /* best-effort */ }
+    });
+    return () => { unsub(); };
+  }, [commandBus, activeProjectId, epic, setEpic]);
 
   /* ── Handlers ──────────────────────────────────────────────────────── */
 

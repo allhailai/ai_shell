@@ -42,6 +42,10 @@ interface CodaScopeState {
   epics: EpicDesign[];
   activeEpicId: string | null;
 
+  // Design doc context for chat
+  activeDesignDocId: string | null;
+  activeDesignEpicId: string | null;
+
   // Actions
   setProjectsRoot: (root: string) => void;
   setConfigured: (configured: boolean) => void;
@@ -58,6 +62,7 @@ interface CodaScopeState {
   setBuildSummary: (summary: string | null) => void;
   setEpics: (epics: EpicDesign[]) => void;
   setActiveEpic: (id: string | null) => void;
+  setActiveDesignDoc: (epicId: string | null, docId: string | null) => void;
 }
 
 export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
@@ -80,6 +85,8 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   })(),
   epics: [],
   activeEpicId: null,
+  activeDesignDocId: null,
+  activeDesignEpicId: null,
 
   // Actions
   setProjectsRoot: (root) => set({ projectsRoot: root }),
@@ -100,4 +107,5 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   },
   setEpics: (epics) => set({ epics }),
   setActiveEpic: (id) => set({ activeEpicId: id }),
+  setActiveDesignDoc: (epicId, docId) => set({ activeDesignEpicId: epicId, activeDesignDocId: docId }),
 }));

@@ -26,7 +26,7 @@ import { CodaScopeCurationService } from "../services/codaScopeCurationService.j
 import { CodaScopeImageService } from "../services/codaScopeImageService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
-import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, streamAssistantResponse, type ViewContext } from "../services/codaScopeChatOrchestrator.js";
+import { buildManifestFromServices, buildAssistantPrompt, buildProjectManifest, formatConversationHistory, formatViewContext, formatReferences, streamAssistantResponse, type ViewContext, type ReferenceItem } from "../services/codaScopeChatOrchestrator.js";
 import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.js";
 import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
@@ -846,10 +846,11 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
       const { agentSvc, chatSvc } = svcs;
       const id = param(req, "id");
       const convId = param(req, "convId");
-      const { message, modelId, context } = req.body as {
+      const { message, modelId, context, references } = req.body as {
         message?: string;
         modelId?: string;
         context?: Record<string, unknown>;
+        references?: Array<{ category: string; id: string; label?: string }>;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -964,8 +965,13 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
         } catch { /* epic context is best-effort */ }
       }
 
+      // Format @-mention references into prompt context
+      const referencesStr = references && references.length > 0
+        ? "\n\n" + formatReferences(references as ReferenceItem[])
+        : "";
+
       // Build the full system prompt with all context injected
-      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr, message.trim());
+      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr + referencesStr, message.trim());
 
       // Set up SSE headers
       res.writeHead(200, {

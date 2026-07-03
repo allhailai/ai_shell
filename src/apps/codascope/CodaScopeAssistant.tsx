@@ -23,6 +23,8 @@ import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
 import { ChatHelpModal } from "./components/ChatHelpModal";
+import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
+import { useCommandBus } from "../../shell/hooks";
 import type { EpicStatus } from "./codaScopeTypes";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -89,6 +91,13 @@ export function CodaScopeAssistant() {
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [helpModalOpen, setHelpModalOpen] = useState(false);
+
+  // @-mention picker state
+  const [atPickerOpen, setAtPickerOpen] = useState(false);
+  const [atPickerPosition, setAtPickerPosition] = useState<{ top: number; left: number } | null>(null);
+
+  // Command bus for cross-component communication
+  const commandBus = useCommandBus();
 
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -412,6 +421,15 @@ export function CodaScopeAssistant() {
       .filter((a) => a.type === "image")
       .map((a) => ({ type: "image" as const, path: a.metadata?.path as string }));
 
+    // Build references payload from @-mention chips
+    const referenceAttachments = attachments
+      .filter((a) => a.type === "reference")
+      .map((a) => ({
+        category: a.metadata?.category as string,
+        id: a.metadata?.itemId as string,
+        label: a.label,
+      }));
+
     try {
       const response = await fetch(
         `/api/codascope/projects/${activeProjectId}/conversations/${convId}/messages`,
@@ -423,6 +441,7 @@ export function CodaScopeAssistant() {
             modelId: selectedModelId,
             context: getContext(),
             ...(imageAttachments.length > 0 ? { attachments: imageAttachments } : {}),
+            ...(referenceAttachments.length > 0 ? { references: referenceAttachments } : {}),
           }),
           signal: controller.signal,
         },
@@ -738,6 +757,78 @@ export function CodaScopeAssistant() {
     setAttachments([]);
   }, []);
 
+  // ── @-mention picker handlers ────────────────────────────────────
+
+  const handleAtTrigger = useCallback((position: { top: number; left: number }) => {
+    setAtPickerPosition(position);
+    setAtPickerOpen(true);
+  }, []);
+
+  const handleAtMentionSelect = useCallback((item: AtMentionItem) => {
+    // Insert @category/id text into the input
+    const mentionText = item.category === "definition"
+      ? "@def"
+      : `@${item.category}/${item.id}`;
+
+    setInput((prev) => {
+      // Replace the trailing @ that triggered the picker
+      if (prev.endsWith("@")) {
+        return prev.slice(0, -1) + mentionText + " ";
+      }
+      return prev + mentionText + " ";
+    });
+
+    // Add a reference chip
+    setAttachments((prev) => [
+      ...prev,
+      {
+        id: `ref-${item.category}-${item.id}-${Date.now()}`,
+        type: "reference",
+        label: item.category === "definition" ? "Epic Definition" : `${item.category}/${item.label}`,
+        metadata: {
+          category: item.category,
+          itemId: item.id,
+          itemLabel: item.label,
+        },
+      },
+    ]);
+
+    setAtPickerOpen(false);
+    setAtPickerPosition(null);
+  }, []);
+
+  const handleAtPickerClose = useCallback(() => {
+    setAtPickerOpen(false);
+    setAtPickerPosition(null);
+  }, []);
+
+  // ── Design doc action tag handlers ────────────────────────────────
+
+  // After SSE completes, check for design doc actions in the final message
+  useEffect(() => {
+    if (streaming || messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role !== "assistant" || !lastMsg.metadata?.actions) return;
+
+    const actions = lastMsg.metadata.actions as Array<{ type: string; attributes: Record<string, string> }>;
+    for (const action of actions) {
+      if (action.type === "design_doc_created" && action.attributes?.epicId && action.attributes?.docId) {
+        commandBus?.emit("codascope:design-doc-created", {
+          epicId: action.attributes.epicId,
+          docId: action.attributes.docId,
+        });
+      } else if (action.type === "design_doc_edited" && action.attributes?.epicId && action.attributes?.docId) {
+        commandBus?.emit("codascope:design-doc-edited", {
+          epicId: action.attributes.epicId,
+          docId: action.attributes.docId,
+          summary: action.attributes.summary ?? "",
+          startLine: action.attributes.startLine ? Number(action.attributes.startLine) : undefined,
+          endLine: action.attributes.endLine ? Number(action.attributes.endLine) : undefined,
+        });
+      }
+    }
+  }, [messages, streaming, commandBus]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -930,6 +1021,7 @@ export function CodaScopeAssistant() {
             value={input}
             onChange={setInput}
             onSend={sendMessage}
+            onAtTrigger={handleAtTrigger}
             onImagePaste={handleImageFile}
             onImageDrop={handleImageFile}
             attachments={attachments}
@@ -964,6 +1056,15 @@ export function CodaScopeAssistant() {
           </div>
         </div>
         <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
+        {atPickerOpen && atPickerPosition && activeProjectId && (
+          <AtMentionPicker
+            projectId={activeProjectId}
+            epicId={currentEpicId}
+            position={atPickerPosition}
+            onSelect={handleAtMentionSelect}
+            onClose={handleAtPickerClose}
+          />
+        )}
       </div>
     </div>
   );

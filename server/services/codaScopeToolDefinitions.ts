@@ -1341,6 +1341,132 @@ export function buildEpicTools(
         }
       },
     },
+
+    // ── Design Doc Write Tools (Reimagined) ─────────────────────────
+
+    create_design_doc: {
+      description:
+        "Create a new design document within the current epic. The document will appear " +
+        "in the Design tab and the user will be notified via an action tag. Always provide " +
+        "substantial initial content — never create empty documents.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: { type: "string", description: "The epic ID to create the doc in" },
+          title: { type: "string", description: "Document title" },
+          content: { type: "string", description: "Full markdown content for the document" },
+        },
+        required: ["epicId", "title", "content"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const title = args.title as string;
+        const content = args.content as string;
+        if (!epicId || !title || !content) return "epicId, title, and content are required.";
+        try {
+          const designDocService = new CodaScopeDesignDocService(projectsRoot);
+          const doc = await designDocService.createDesignDoc(projectId, epicId, {
+            title,
+            content,
+            createdBy: "agent",
+          });
+          // Emit action tag for frontend auto-navigation
+          return `Created design document "${title}" (ID: ${doc.id}) with ${doc.wordCount} words.\n\n` +
+            `<codascope_action type="design_doc_created" epicId="${epicId}" docId="${doc.id}">\n` +
+            `Created design document "${title}"\n` +
+            `</codascope_action>`;
+        } catch (err) {
+          return `Failed to create design doc: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+
+    edit_design_doc: {
+      description:
+        "Replace the entire content of a design document. Use edit_design_doc_section " +
+        "for targeted edits. Always read the document first before editing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: { type: "string", description: "The epic ID" },
+          docId: { type: "string", description: "The design document ID" },
+          content: { type: "string", description: "Full replacement markdown content" },
+          editSummary: { type: "string", description: "Brief description of what changed (for version history)" },
+        },
+        required: ["epicId", "docId", "content", "editSummary"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const docId = args.docId as string;
+        const content = args.content as string;
+        const editSummary = args.editSummary as string;
+        if (!epicId || !docId || !content || !editSummary) {
+          return "epicId, docId, content, and editSummary are required.";
+        }
+        try {
+          const designDocService = new CodaScopeDesignDocService(projectsRoot);
+          const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
+          if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
+
+          return `Updated design document "${updated.title}" — ${updated.wordCount} words. Summary: ${editSummary}\n\n` +
+            `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}">\n` +
+            `${editSummary}\n` +
+            `</codascope_action>`;
+        } catch (err) {
+          return `Failed to edit design doc: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+
+    edit_design_doc_section: {
+      description:
+        "Edit a specific section of a design document by replacing a range of lines. " +
+        "Preferred over edit_design_doc for targeted changes. Read the document first " +
+        "to determine the correct line range.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          epicId: { type: "string", description: "The epic ID" },
+          docId: { type: "string", description: "The design document ID" },
+          startLine: { type: "number", description: "Start line number (1-indexed)" },
+          endLine: { type: "number", description: "End line number (1-indexed, inclusive)" },
+          newContent: { type: "string", description: "Replacement content for the specified line range" },
+          editSummary: { type: "string", description: "Brief description of what changed" },
+        },
+        required: ["epicId", "docId", "startLine", "endLine", "newContent", "editSummary"],
+      },
+      execute: async (args) => {
+        const epicId = args.epicId as string;
+        const docId = args.docId as string;
+        const startLine = args.startLine as number;
+        const endLine = args.endLine as number;
+        const newContent = args.newContent as string;
+        const editSummary = args.editSummary as string;
+        if (!epicId || !docId || !startLine || !endLine || newContent === undefined || !editSummary) {
+          return "epicId, docId, startLine, endLine, newContent, and editSummary are required.";
+        }
+        try {
+          const designDocService = new CodaScopeDesignDocService(projectsRoot);
+          const result = await designDocService.getDesignDoc(projectId, epicId, docId);
+          if (!result) return `Design doc "${docId}" not found in epic "${epicId}".`;
+
+          const lines = result.content.split("\n");
+          const before = lines.slice(0, startLine - 1);
+          const after = lines.slice(endLine);
+          const updatedContent = [...before, newContent, ...after].join("\n");
+
+          const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, updatedContent);
+          if (!updated) return `Failed to update design doc "${docId}".`;
+
+          return `Updated lines ${startLine}-${endLine} of "${updated.title}". Summary: ${editSummary}\n\n` +
+            `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}" startLine="${startLine}" endLine="${endLine}">\n` +
+            `${editSummary}\n` +
+            `</codascope_action>`;
+        } catch (err) {
+          return `Failed to edit design doc section: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
   };
 }
 

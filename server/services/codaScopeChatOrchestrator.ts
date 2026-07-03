@@ -22,7 +22,7 @@ import type { CodaScopeQualityService } from "./codaScopeQualityService.js";
 import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, type ManifestInput, type ViewContext, type EpicContextInput } from "./codaScopeChatPromptHelpers.js";
+import { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences, type ManifestInput, type ViewContext, type EpicContextInput, type ReferenceItem } from "./codaScopeChatPromptHelpers.js";
 import { loadCommandTemplate, substituteVars } from "./codaScopeCommandLoader.js";
 import { extractActions, type CodaScopeAction } from "./codaScopeActionParser.js";
 
@@ -177,5 +177,5 @@ export async function streamAssistantResponse(options: {
 
 // ── Re-exports for Route Convenience ────────────────────────────────
 
-export { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext };
-export type { ViewContext, EpicContextInput };
+export { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences };
+export type { ViewContext, EpicContextInput, ReferenceItem };

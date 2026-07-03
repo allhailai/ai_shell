@@ -47,6 +47,9 @@ You have access to the project's CodaScope data through these tools:
 - **trigger_research(epicId, topics)** — start research for specific topics
 - **search_web(query)** — search the web for research content
 - **create_annotation(epicId, documentId, blockId, body, category?)** — create an annotation on a design document block
+- **create_design_doc(epicId, title, content)** — create a new design document with content
+- **edit_design_doc(epicId, docId, content, editSummary)** — replace entire design document content
+- **edit_design_doc_section(epicId, docId, startLine, endLine, newContent, editSummary)** — edit specific lines of a design document
 
 You also have filesystem access to read source code files from the
 configured repositories.
