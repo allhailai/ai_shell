@@ -5400,10 +5400,29 @@
 }
 
 .codascope-knowledge-wiki-entry {
+  display: flex;
+  flex-wrap: wrap;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);
   overflow: hidden;
   transition: border-color var(--transition-fast);
+}
+
+.codascope-knowledge-wiki-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border-primary);
+  transition: color var(--transition-fast), background var(--transition-fast);
+  text-decoration: none;
+}
+
+.codascope-knowledge-wiki-download:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
 }
 
 .codascope-knowledge-wiki-entry:hover {
@@ -5414,7 +5433,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: var(--space-3) var(--space-4);
   background: var(--color-bg-secondary);
   border: none;
@@ -5466,6 +5486,7 @@
 }
 
 .codascope-knowledge-wiki-content {
+  width: 100%;
   padding: var(--space-4);
   background: var(--color-bg-primary);
   max-height: 400px;

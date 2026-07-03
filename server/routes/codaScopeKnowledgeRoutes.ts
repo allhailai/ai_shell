@@ -257,6 +257,20 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ pageId, content });
   }));
 
+  // Download an epic wiki page as markdown file
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki/:pageId/download", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const pageId = param(req, "pageId");
+    const content = await epicKnowledgeSvc.readEpicWikiPage(id, epicId, pageId);
+    if (content === null) throw httpError("Epic wiki page not found.", 404, "not_found");
+    const filename = `${pageId}.md`;
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(content);
+  }));
+
   // Create or update an epic wiki page
   app.put("/api/codascope/projects/:id/epics/:epicId/knowledge/wiki/:pageId", wrap(async (req, res) => {
     const { epicKnowledgeSvc } = await ensureServices();

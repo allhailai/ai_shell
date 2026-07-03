@@ -86,6 +86,21 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ saved: true });
   }));
 
+  // Download definition as markdown file
+  app.get("/api/codascope/projects/:id/epics/:epicId/definition/download", wrap(async (req, res) => {
+    const { epicSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const definition = await epicSvc.getDefinition(id, epicId);
+    if (definition === null) throw httpError("Epic not found.", 404, "not_found");
+    const epic = await epicSvc.getEpic(id, epicId);
+    const slug = (epic?.title ?? epicId).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const filename = `${slug}-definition.md`;
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(definition);
+  }));
+
   // Acquire edit lock
   app.post("/api/codascope/projects/:id/epics/:epicId/lock", wrap(async (req, res) => {
     const { epicSvc } = await ensureServices();
@@ -387,6 +402,21 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const result = await designDocSvc.getDesignDoc(id, epicId, docId);
     if (!result) throw httpError("Design doc not found.", 404, "not_found");
     res.json(result); // includes { doc, content, contentHash }
+  }));
+
+  // Download design doc as markdown file
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId/download", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const result = await designDocSvc.getDesignDoc(id, epicId, docId);
+    if (!result) throw httpError("Design doc not found.", 404, "not_found");
+    const slug = result.doc.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const filename = `${slug}.md`;
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(result.content);
   }));
 
   // Update design doc content (manual save — creates a version snapshot)

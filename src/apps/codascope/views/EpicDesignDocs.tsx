@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
-import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo } from "../components/CodaScopeIcons";
+import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo, IconDownload } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
@@ -319,6 +319,15 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
                 </span>
               </div>
               <div className="codascope-design-doc-card-actions">
+                <a
+                  className="codascope-epic-card-action"
+                  href={`/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${doc.id}/download`}
+                  download
+                  title="Download as Markdown"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <IconDownload size={14} />
+                </a>
                 <button
                   className="codascope-epic-card-action codascope-render-btn"
                   onClick={(e) => renderAsHtml(doc.id, e)}

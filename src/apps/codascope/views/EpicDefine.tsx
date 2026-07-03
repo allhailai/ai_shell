@@ -12,7 +12,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useShellStore } from "../../../shell/store";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { MarkdownViewer } from "../../../shared/markdown";
-import { IconChat, IconSparkle } from "../components/CodaScopeIcons";
+import { IconChat, IconSparkle, IconDownload } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EditLock } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -356,6 +356,15 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
           >
             ↻ Refresh
           </button>
+          <a
+            className="codascope-btn codascope-btn-ghost"
+            href={`/api/codascope/projects/${activeProjectId}/epics/${epic.id}/definition/download`}
+            download
+            title="Download definition as Markdown"
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
+          >
+            <IconDownload size={13} /> Download
+          </a>
         </div>
         <div className="codascope-epic-define-toolbar-right">
           <div className="codascope-epic-define-agent-hint">

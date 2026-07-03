@@ -8,7 +8,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
-import { IconWiki, IconRefresh, IconFile, IconHome } from "../components/CodaScopeIcons";
+import { IconWiki, IconRefresh, IconFile, IconHome, IconDownload } from "../components/CodaScopeIcons";
 import { connectToSseStream } from "../codaScopeSseClient";
 
 export function WikiBrowser() {
@@ -394,10 +394,20 @@ export function WikiBrowser() {
               display: "flex",
               alignItems: "center",
               justifyContent: "flex-end",
+              gap: "var(--space-2)",
               padding: "var(--space-2) var(--space-4)",
               borderBottom: "1px solid var(--color-border-primary)",
               flexShrink: 0,
             }}>
+              <a
+                className="codascope-btn codascope-btn-ghost"
+                style={{ fontSize: "var(--text-xs)", display: "inline-flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
+                href={`/api/codascope/projects/${activeProjectId}/wiki/${activeTopicId}/download`}
+                download
+                title="Download as Markdown"
+              >
+                <IconDownload size={13} /> Download
+              </a>
               <button
                 className="codascope-btn codascope-btn-secondary"
                 style={{ fontSize: "var(--text-xs)" }}

@@ -11,7 +11,7 @@ import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh, IconWarning } from "./CodaScopeIcons";
+import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh, IconWarning, IconDownload } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useEditorDiff } from "../hooks/useEditorDiff";
 import { useEditorResize } from "../hooks/useEditorResize";
@@ -713,6 +713,15 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
               </span>
             )}
           </span>
+          <a
+            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+            href={`/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}/download`}
+            download
+            title="Download as Markdown"
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
+          >
+            <IconDownload size={12} />
+          </a>
           {lastAgentEditVersion && !editing && (
             <button
               className="codascope-btn codascope-btn-ghost codascope-btn-undo"

@@ -29,6 +29,7 @@ import {
   IconArrowRight,
   IconCheck,
   IconChat,
+  IconDownload,
 } from "../components/CodaScopeIcons";
 import type {
   EpicDesignDetail,
@@ -420,6 +421,15 @@ export function EpicKnowledge({ epic }: EpicKnowledgeProps) {
                     {expandedPageId === page.id ? "▾" : "▸"}
                   </span>
                 </button>
+                <a
+                  className="codascope-knowledge-wiki-download"
+                  href={`/api/codascope/projects/${activeProjectId}/epics/${epic.id}/knowledge/wiki/${page.id}/download`}
+                  download
+                  title="Download as Markdown"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <IconDownload size={13} />
+                </a>
 
                 {expandedPageId === page.id && (
                   <div className="codascope-knowledge-wiki-content">

@@ -26,6 +26,19 @@ export function registerWikiRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ content });
   }));
 
+  // Download wiki topic as markdown file
+  app.get("/api/codascope/projects/:id/wiki/:topicId/download", wrap(async (req, res) => {
+    const { wikiSvc } = await ensureServices();
+    const id = param(req, "id");
+    const topicId = param(req, "topicId");
+    const content = await wikiSvc.getTopicContent(id, topicId);
+    if (content === null) throw httpError("Topic not found.", 404, "not_found");
+    const filename = `${topicId}.md`;
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(content);
+  }));
+
   app.put("/api/codascope/projects/:id/wiki/:topicId", wrap(async (req, res) => {
     const { wikiSvc } = await ensureServices();
     const id = param(req, "id");
