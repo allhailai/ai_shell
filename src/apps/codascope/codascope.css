@@ -6185,6 +6185,32 @@
   color: var(--color-danger);
 }
 
+/* ── Error source: uploaded file indicator ────────────────────────── */
+
+.codascope-error-source-file-info {
+  padding: var(--space-1) 0;
+}
+
+.codascope-error-source-file-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  background: hsl(220 30% 18% / 0.5);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-error-source-file-size {
+  color: var(--color-text-tertiary);
+}
+
 .codascope-blocked-item-drop-overlay {
   position: absolute;
   inset: 0;

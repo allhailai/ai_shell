@@ -1,14 +1,21 @@
 /* ── CodaScope: ErrorSourceItem Component ────────────────────────────
    Renders a single error source entry with:
    - Source title, type badge, error status, original URL
-   - Upload button for resolution (replaces the error source)
-   - Delete button to remove the source entirely
+   - If file uploaded: file indicator, download, clear, retry extraction
+   - If no file: upload button, delete button
    - Drop zone for drag-and-drop upload
-   Modeled after BlockedDownloadItem.tsx.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useRef } from "react";
-import { IconWarning, IconUpload, IconDelete, IconExternalLink } from "./CodaScopeIcons";
+import {
+  IconWarning,
+  IconUpload,
+  IconDelete,
+  IconExternalLink,
+  IconDownload,
+  IconClose,
+  IconRefresh,
+} from "./CodaScopeIcons";
 import type { EpicKnowledgeSource } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -37,6 +44,12 @@ function truncateUrl(url: string, maxLen = 60): string {
   }
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function ErrorSourceItem({
@@ -49,8 +62,12 @@ export function ErrorSourceItem({
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Determine if this source has an uploaded file
+  const hasUploadedFile = source.origin === "human-resolved" && (source.sizeBytesOriginal ?? 0) > 0;
 
   const handleDelete = useCallback(async () => {
     setDeleting(true);
@@ -70,6 +87,36 @@ export function ErrorSourceItem({
     }
     setDeleting(false);
   }, [projectId, epicId, source.id, onDeleted]);
+
+  const handleRetryExtraction = useCallback(async () => {
+    setRetrying(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${projectId}/epics/${epicId}/knowledge/sources/${source.id}/retry-extract`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        onResolved(source.id);
+      } else {
+        const data = await res.json().catch(() => ({ error: "Extraction failed" }));
+        setError(data.error ?? "Extraction failed.");
+      }
+    } catch {
+      setError("Network error.");
+    }
+    setRetrying(false);
+  }, [projectId, epicId, source.id, onResolved]);
+
+  const handleDownload = useCallback(() => {
+    const url = `/api/codascope/projects/${projectId}/epics/${epicId}/knowledge/sources/${source.id}/download`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = source.filename ?? `source-${source.id}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, [projectId, epicId, source.id, source.filename]);
 
   const resolveWithFile = useCallback(async (file: File) => {
     setUploading(true);
@@ -183,26 +230,81 @@ export function ErrorSourceItem({
         )}
       </div>
 
+      {/* Uploaded file indicator */}
+      {hasUploadedFile && (
+        <div className="codascope-error-source-file-info">
+          <span className="codascope-error-source-file-badge">
+            📎 {source.filename ?? "uploaded file"}
+            {source.sizeBytesOriginal != null && (
+              <span className="codascope-error-source-file-size">
+                · {formatBytes(source.sizeBytesOriginal)}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="codascope-blocked-item-actions">
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          type="button"
-        >
-          <IconUpload size={14} />
-          {uploading ? "Uploading…" : "Upload Replacement"}
-        </button>
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-          onClick={handleDelete}
-          disabled={deleting}
-          type="button"
-        >
-          <IconDelete size={14} />
-          {deleting ? "Deleting…" : "Delete"}
-        </button>
+        {hasUploadedFile ? (
+          <>
+            {/* Retry extraction */}
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={handleRetryExtraction}
+              disabled={retrying}
+              type="button"
+              title="Re-extract text content from the uploaded file"
+            >
+              <IconRefresh size={14} />
+              {retrying ? "Extracting…" : "Retry Extract"}
+            </button>
+            {/* Download */}
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={handleDownload}
+              type="button"
+              title="Download the uploaded original file"
+            >
+              <IconDownload size={14} />
+              Download
+            </button>
+            {/* Clear (delete) */}
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm codascope-btn-danger"
+              onClick={handleDelete}
+              disabled={deleting}
+              type="button"
+              title="Delete this source entirely"
+            >
+              <IconClose size={14} />
+              {deleting ? "Deleting…" : "Clear"}
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Upload replacement */}
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              type="button"
+            >
+              <IconUpload size={14} />
+              {uploading ? "Uploading…" : "Upload Replacement"}
+            </button>
+            {/* Delete */}
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={handleDelete}
+              disabled={deleting}
+              type="button"
+            >
+              <IconDelete size={14} />
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </>
+        )}
         <input
           ref={fileInputRef}
           type="file"

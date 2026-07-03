@@ -48,6 +48,53 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ markdown: content.markdown });
   }));
 
+  // Download original source file
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/sources/:sourceId/download", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sourceId = param(req, "sourceId");
+    const source = await epicKnowledgeSvc.getSource(id, epicId, sourceId);
+    if (!source) throw httpError("Source not found.", 404, "not_found");
+    const content = await epicKnowledgeSvc.getSourceContent(id, epicId, sourceId);
+    if (!content.original) throw httpError("No original file available.", 404, "not_found");
+
+    const filename = source.filename ?? `source-${sourceId}`;
+    const contentType = source.contentType ?? "application/octet-stream";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.send(content.original);
+  }));
+
+  // Retry content extraction for a source that has an original file
+  app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/sources/:sourceId/retry-extract", wrap(async (req, res) => {
+    const { epicKnowledgeSvc, contentSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const sourceId = param(req, "sourceId");
+    const source = await epicKnowledgeSvc.getSource(id, epicId, sourceId);
+    if (!source) throw httpError("Source not found.", 404, "not_found");
+    const content = await epicKnowledgeSvc.getSourceContent(id, epicId, sourceId);
+    if (!content.original) throw httpError("No original file to extract from.", 400, "no_original");
+
+    // Write original to temp file for extraction
+    const ext = path.extname(source.filename ?? "").replace(/^\./, "") || "bin";
+    const tmpPath = path.join(os.tmpdir(), `codascope-retry-${crypto.randomBytes(4).toString("hex")}.${ext}`);
+    const { writeFileSync: wfs, unlinkSync } = await import("node:fs");
+    wfs(tmpPath, content.original);
+
+    try {
+      const markdown = await contentSvc.extractToMarkdown(tmpPath, source.contentType ?? "application/octet-stream");
+      await epicKnowledgeSvc.storeExtractedMarkdown(id, epicId, sourceId, markdown);
+      await epicKnowledgeSvc.updateSourceStatus(id, epicId, sourceId, "ready");
+      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      res.json({ success: true, sizeBytesMarkdown: Buffer.byteLength(markdown, "utf-8") });
+    } catch (err) {
+      try { unlinkSync(tmpPath); } catch { /* ignore */ }
+      throw httpError(`Extraction failed: ${err instanceof Error ? err.message : String(err)}`, 500, "extraction_failed");
+    }
+  }));
+
   // Add source via file upload (multipart/form-data)
   app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/sources", upload.single("file"), wrap(async (req, res) => {
     const { epicKnowledgeSvc, curationSvc, contentSvc } = await ensureServices();

@@ -276,16 +276,20 @@ export class CodaScopeContentService {
    */
   async extractPdf(filePath: string): Promise<string> {
     const buffer = readFileSync(filePath);
+    // pdf-parse v2 requires Uint8Array, not Buffer
+    const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
-    // Dynamically import pdf-parse
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(buffer);
+    // Dynamically import pdf-parse v2 (named export: PDFParse class)
+    const { PDFParse } = await import("pdf-parse");
+    const parser = new PDFParse(uint8);
+    await parser.load();
+    const result = await parser.getText();
 
-    const pageCount = result.numpages;
+    const pageCount = result.totalPages ?? "unknown";
     let text = result.text;
 
     // Clean up common PDF noise
-    text = this.cleanupPdfText(text, pageCount);
+    text = this.cleanupPdfText(text, typeof pageCount === "number" ? pageCount : 1);
 
     // Add metadata header
     const header = `> _Extracted from PDF: ${path.basename(filePath)} (${pageCount} pages)_\n\n`;
