@@ -137,6 +137,44 @@ When extending agent capabilities:
 
 ---
 
+## Design Doc Development Rules
+
+### Chat-Driven Creation (No Templates)
+
+Design documents are created and edited via the chat assistant, not through templates. The flow is:
+
+1. Agent uses `create_design_doc` / `edit_design_doc` / `edit_design_doc_section` tools
+2. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger frontend auto-navigation and diff highlighting
+3. Users can select text → "Edit with Agent" for targeted edits
+
+### Version History
+
+Every design doc edit (agent or manual) creates a version snapshot:
+
+- Versions are stored per-doc in `<docId>/versions/v001.md`, `v002.md`, etc.
+- Max 10 versions per doc — oldest are pruned automatically
+- Reverting creates a NEW version (so reverts themselves are undoable)
+- The "Undo" button in DocumentEditor toolbar appears after agent edits
+
+When modifying the design doc service:
+- Always use `docPath()` which handles storage migration transparently
+- Never read/write to `<docId>.md` directly — use the service methods
+- Version creation is best-effort (wrapped in try/catch in tools and routes)
+
+### Storage Layout
+
+```
+<docId>/
+  content.md        (current content)
+  versions/
+    v001.md         (snapshot before each write)
+    versions.json   (metadata: number, author, summary, wordCount)
+```
+
+Legacy flat-file docs (`<docId>.md`) are migrated to `<docId>/content.md` on first access.
+
+---
+
 ## Patterns to Follow
 
 ### Empty States

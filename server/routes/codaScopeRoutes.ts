@@ -1759,7 +1759,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     res.json(result);
   }));
 
-  // Update design doc content
+  // Update design doc content (manual save — creates a version snapshot)
   app.put("/api/codascope/projects/:id/epics/:epicId/designs/:docId", wrap(async (req, res) => {
     const { designDocSvc } = await ensureServices(secretService, httpError);
     const id = param(req, "id");
@@ -1769,6 +1769,8 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     if (content === undefined || typeof content !== "string") {
       throw httpError("content is required.", 400, "invalid_input");
     }
+    // Create a version snapshot before saving (best effort — don't fail the save)
+    try { await designDocSvc.createVersion(id, epicId, docId, "user", "Manual save"); } catch { /* ignore */ }
     const doc = await designDocSvc.updateDesignDoc(id, epicId, docId, content);
     if (!doc) throw httpError("Design doc not found.", 404, "not_found");
     res.json({ doc });
@@ -1794,6 +1796,44 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
     const restored = await designDocSvc.unarchiveDesignDoc(id, epicId, docId);
     if (!restored) throw httpError("Design doc not found or not archived.", 404, "not_found");
     res.json({ success: true });
+  }));
+
+  // ── Design Doc Versions (Phase 4) ──────────────────────────────────
+
+  // List versions for a design doc
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId/versions", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const versions = await designDocSvc.listDocVersions(id, epicId, docId);
+    res.json({ versions });
+  }));
+
+  // Get a specific version's content
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId/versions/:num", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const num = parseInt(req.params.num, 10);
+    if (isNaN(num)) throw httpError("Invalid version number.", 400, "invalid_input");
+    const result = await designDocSvc.getDocVersion(id, epicId, docId, num);
+    if (!result) throw httpError("Version not found.", 404, "not_found");
+    res.json(result);
+  }));
+
+  // Revert design doc to a specific version
+  app.post("/api/codascope/projects/:id/epics/:epicId/designs/:docId/revert/:num", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices(secretService, httpError);
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const num = parseInt(req.params.num, 10);
+    if (isNaN(num)) throw httpError("Invalid version number.", 400, "invalid_input");
+    const result = await designDocSvc.revertToVersion(id, epicId, docId, num);
+    if (!result) throw httpError("Version not found or revert failed.", 404, "not_found");
+    res.json({ content: result.content, revertVersion: result.revertVersion });
   }));
 
   // ── Versions (P2a) ────────────────────────────────────────────────

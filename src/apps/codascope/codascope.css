@@ -4506,6 +4506,26 @@
   border-left-color: transparent;
 }
 
+/* Phase 4: Undo button in DocumentEditor toolbar */
+.codascope-btn-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.codascope-btn-undo:hover:not(:disabled) {
+  color: var(--color-accent-hover, var(--color-accent));
+  background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.codascope-btn-undo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Document Editor P2b Additions ──────────────────────────────────── */
 
 .codascope-document-editor-annotation-count {

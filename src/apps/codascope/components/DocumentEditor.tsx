@@ -11,7 +11,7 @@ import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { AnnotationThread } from "./AnnotationThread";
 import { InsertionPrompt } from "./InsertionPrompt";
-import { IconAnnotation, IconCheckmark, IconBolt, IconSparkle } from "./CodaScopeIcons";
+import { IconAnnotation, IconCheckmark, IconBolt, IconSparkle, IconRefresh } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo } from "../codaScopeTypes";
 
@@ -78,6 +78,10 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
   const [fadingBlockIds, setFadingBlockIds] = useState<Set<string>>(new Set());
   const previousContentRef = useRef<string>("");
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Phase 4: Undo state
+  const [lastAgentEditVersion, setLastAgentEditVersion] = useState<number | null>(null);
+  const [undoing, setUndoing] = useState(false);
 
   // Sync content when it changes externally
   useEffect(() => {
@@ -161,6 +165,18 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
           const data = await res.json();
           if (data.content !== undefined) {
             onContentChange(data.content);
+          }
+        }
+        // Fetch the latest version list to get the pre-edit version number for undo
+        const versionsRes = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}/versions`,
+        );
+        if (versionsRes.ok) {
+          const versionsData = await versionsRes.json();
+          const versions = versionsData.versions ?? [];
+          if (versions.length > 0) {
+            // The most recent version is the snapshot taken before the agent edit
+            setLastAgentEditVersion(versions[versions.length - 1].number);
           }
         }
       } catch { /* ignore */ }
@@ -375,6 +391,27 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
     } catch { /* ignore */ }
     setBatchExecuting(false);
   }, [activeProjectId, epicId, doc.id, batchExecuting, onContentChange, loadDirectives]);
+
+  /* ── Phase 4: Undo last agent change ─────────────────────────────── */
+
+  const handleUndo = useCallback(async () => {
+    if (!activeProjectId || !lastAgentEditVersion || undoing) return;
+    setUndoing(true);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}/revert/${lastAgentEditVersion}`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.content !== undefined) {
+          onContentChange(data.content);
+        }
+        setLastAgentEditVersion(null);
+      }
+    } catch { /* ignore */ }
+    setUndoing(false);
+  }, [activeProjectId, epicId, doc.id, lastAgentEditVersion, undoing, onContentChange]);
 
   /* ── Create annotation on block ──────────────────────────────────── */
 
@@ -687,6 +724,17 @@ export function DocumentEditor({ epicId, doc, content, onContentChange, onClose 
               </span>
             )}
           </span>
+          {lastAgentEditVersion && !editing && (
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-undo"
+              onClick={handleUndo}
+              disabled={undoing}
+              type="button"
+              title="Revert to the version before the last agent edit"
+            >
+              <IconRefresh size={12} /> {undoing ? "Undoing…" : "Undo"}
+            </button>
+          )}
           {!editing && (
             <button className="codascope-btn codascope-btn-secondary" onClick={startEditing} type="button">
               ✏️ Edit

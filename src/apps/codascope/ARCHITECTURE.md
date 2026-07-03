@@ -477,7 +477,7 @@ The Epic Design subsystem provides collaborative document authoring for software
 | Service | Responsibility |
 |---------|---------------|
 | `codaScopeEpicService.ts` | Epic CRUD, lifecycle, scope management, edit locks, health computation |
-| `codaScopeDesignDocService.ts` | Design document CRUD with markdown templates |
+| `codaScopeDesignDocService.ts` | Design document CRUD, per-doc version history, storage migration |
 | `codaScopeVersionService.ts` | Snapshot-based version history for epics |
 | `codaScopeAnnotationService.ts` | Inline annotations (comments), insertion directives, block tracking |
 | `codaScopeEpicRenderService.ts` | HTML rendering of design documents (basic + agent-generated) |
@@ -493,14 +493,20 @@ The Epic Design subsystem provides collaborative document authoring for software
     ├── locks.json                          # Active edit locks
     ├── scope.json                          # Topic scope with enrichment data
     ├── designs/
-    │   ├── <docId>.md                      # Design document content (markdown)
-    │   └── <docId>-rendered/index.html     # Rendered HTML output (P3)
+    │   ├── designs.json                  # Design doc index
+    │   └── <docId>/
+    │       ├── content.md                # Current document content (markdown)
+    │       ├── <docId>-rendered/index.html  # Rendered HTML output
+    │       └── versions/
+    │           ├── v001.md               # Version snapshot
+    │           ├── v002.md
+    │           └── versions.json         # Version metadata index
     ├── annotations/
     │   └── <docId>-annotations.json        # Inline annotations per document
     ├── directives/
     │   └── <docId>-directives.json         # Insertion directives per document
     └── versions/
-        └── <version>-<timestamp>.json      # Versioned snapshots
+        └── <version>-<timestamp>.json      # Epic-level versioned snapshots
 ```
 
 ### Epic Lifecycle
@@ -521,13 +527,33 @@ Locks prevent concurrent edits to the same document:
 - **Startup cleanup**: `cleanupAllExpiredLocks()` runs on server start to clear stale locks from crashes
 - **Agent safety**: `isDocumentLockedByHuman()` lets the agent check before writing (agent locks prefixed with `agent_` don't block)
 
-### Design Doc Templates
+### Chat-Driven Design Doc Creation
 
-Templates are markdown files with predefined structure. Available templates:
-- `api-spec` — API specification
-- `data-model` — Data model design
-- `system-design` — System architecture
-- `user-flow` — User experience flow
+Design documents are created via the chat assistant, not templates. The flow:
+
+1. User navigates to the Design tab or opens chat in an epic context
+2. The chat assistant uses `create_design_doc` / `edit_design_doc` / `edit_design_doc_section` tools
+3. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
+4. Every edit (agent or manual) creates a version snapshot before writing
+5. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
+
+### Per-Document Version History
+
+Each design doc maintains its own version history within `<docId>/versions/`:
+
+- **Snapshots**: `v001.md`, `v002.md`, etc. — copies of `content.md` before each write
+- **Metadata**: `versions.json` tracks author, timestamp, summary, and word count per version
+- **Max versions**: 10 per document. Oldest are pruned automatically.
+- **Revert**: copies target version content back to `content.md` and creates a NEW version documenting the revert (so reverts are undoable)
+- **Storage migration**: legacy flat-file docs (`<docId>.md`) are migrated to `<docId>/content.md` on first access
+
+#### Version API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/designs/:docId/versions` | List version history |
+| `GET` | `/designs/:docId/versions/:num` | Get version content |
+| `POST` | `/designs/:docId/revert/:num` | Revert to a version |
 
 ---
 

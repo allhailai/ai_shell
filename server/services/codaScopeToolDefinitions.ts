@@ -1405,6 +1405,8 @@ export function buildEpicTools(
         }
         try {
           const designDocService = new CodaScopeDesignDocService(projectsRoot);
+          // Create a version snapshot before editing (Phase 4: version history)
+          try { await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary); } catch { /* best effort */ }
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
 
@@ -1449,6 +1451,9 @@ export function buildEpicTools(
           const designDocService = new CodaScopeDesignDocService(projectsRoot);
           const result = await designDocService.getDesignDoc(projectId, epicId, docId);
           if (!result) return `Design doc "${docId}" not found in epic "${epicId}".`;
+
+          // Create a version snapshot before editing (Phase 4: version history)
+          try { await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary); } catch { /* best effort */ }
 
           const lines = result.content.split("\n");
           const before = lines.slice(0, startLine - 1);
