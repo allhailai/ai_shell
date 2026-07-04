@@ -43,6 +43,8 @@ export const VALID_ACTION_TYPES = new Set([
   "design_doc_edited",
   // Knowledge & Research
   "trigger_research",
+  // Visual Artifacts
+  "artifact_built",
 ]);
 
 /* ── Parser ────────────────────────────────────────────────────────── */

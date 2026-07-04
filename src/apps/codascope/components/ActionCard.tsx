@@ -56,6 +56,8 @@ function ActionIcon({ type }: { type: string }) {
       return <span className="codascope-action-icon"><IconExpand size={14} /></span>;
     case "trigger_research":
       return <span className="codascope-action-icon">🔬</span>;
+    case "artifact_built":
+      return <span className="codascope-action-icon">📊</span>;
     default:
       return <span className="codascope-action-icon">⚡</span>;
   }
@@ -80,6 +82,7 @@ function actionLabel(type: string): string {
     case "replace_content": return "Rewrite Content";
     case "expand_content": return "Expand Content";
     case "trigger_research": return "Research";
+    case "artifact_built": return "Artifact Built";
     default: return "Action";
   }
 }
@@ -102,6 +105,7 @@ function actionButtonLabel(type: string, status: ActionStatus): string {
     case "replace_content": return "Rewrite";
     case "expand_content": return "Expand";
     case "trigger_research": return "Start Research";
+    case "artifact_built": return "View";
     default: return "Run";
   }
 }
@@ -248,6 +252,16 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
       const epicId = attributes.epicId;
       if (epicId) {
         navigate(`project/${activeProjectId}/epic/${epicId}/design`);
+      }
+      return;
+    }
+
+    // Artifact notification — navigate to the artifact preview
+    if (type === "artifact_built") {
+      const epicId = attributes.epicId;
+      const artifactId = attributes.artifactId;
+      if (epicId && artifactId) {
+        navigate(`project/${activeProjectId}/epic/${epicId}/design/artifact:${artifactId}`);
       }
       return;
     }

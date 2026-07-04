@@ -57,14 +57,24 @@ src/apps/codascope/
 │   ├── DocumentEditor.tsx      # Rich markdown editor for design docs
 │   ├── EditorSelectionToolbar.tsx # Floating toolbar on text selection
 │   ├── EpicBriefExport.tsx     # Epic brief export modal + clipboard
+│   ├── EpicSidebar.tsx         # Collapsible left panel for epic detail
+│   ├── ErrorSourceItem.tsx     # Failed knowledge source resolution UI
 │   ├── InsertionPrompt.tsx     # Inline directive prompt UI
 │   ├── ModelPicker.tsx         # AI model selection dropdown
 │   ├── PromptChips.tsx         # Quick-action prompt chip suggestions
 │   ├── SetupBanners.tsx        # Inline banners for missing config
 │   ├── SourceUpload.tsx        # File upload for knowledge sources
-│   └── SourceViewer.tsx        # Research source content viewer
+│   ├── SourceViewer.tsx        # Research source content viewer
+│   └── artifact-viewer/        # Visual HTML artifact subsystem
+│       ├── ArtifactViewer.tsx   # Main orchestrator (spec/preview tabs)
+│       ├── ArtifactSpecEditor.tsx # Spec editing with model picker
+│       ├── ArtifactPreview.tsx  # Sandboxed iframe preview
+│       ├── ArtifactSectionPanel.tsx # Section/annotation/version panel
+│       ├── ArtifactAnnotationCard.tsx # Individual annotation card
+│       └── artifactApi.ts      # Typed API wrappers
 ├── hooks/
 │   ├── useAssistantStream.ts   # Chat SSE streaming, action parsing, auto-title
+│   ├── useBuildState.ts        # Build lifecycle SSE hook
 │   ├── useEditorDiff.ts        # Diff highlighting with fade-out timer
 │   └── useEditorResize.ts      # Mermaid/image resize handlers + API persistence
 ├── views/
@@ -93,7 +103,9 @@ src/apps/codascope/
     ├── do_chat.md              # Codebase Q&A system prompt
     ├── do_curate_epic.md       # Curation pipeline prompt
     ├── do_process_source.md    # Research source processing prompt
-    └── do_research_epic.md     # Web research pipeline prompt
+    ├── do_research_epic.md     # Web research pipeline prompt
+    ├── do_build_artifact.md    # Artifact HTML generation prompt
+    └── do_regen_sections.md    # Section regeneration prompt
 ```
 
 **Backend** (under `server/`):
@@ -137,7 +149,11 @@ server/
     ├── codaScopeContentService.ts      # Content extraction & processing
     ├── codaScopeCurationService.ts     # Curation trigger tracking & log persistence
     ├── codaScopeCurationOrchestrator.ts # Curation pipeline orchestration
-    └── codaScopeResearchOrchestrator.ts # Web research pipeline orchestration
+    ├── codaScopeResearchOrchestrator.ts # Web research pipeline orchestration
+    ├── codaScopeArtifactService.ts     # Artifact spec CRUD + build orchestration
+    ├── codaScopeArtifactAnnotationService.ts # Artifact annotation lifecycle
+    ├── codaScopeArtifactVersionService.ts   # Artifact build version snapshots
+    └── codaScopeArtifactAnnotationScript.ts # DOM inspection overlay script
 ```
 
 ---
@@ -179,6 +195,7 @@ Backend API routes are split into domain-specific sub-modules under `server/rout
 - `codaScopeEpicRoutes.ts` — epic CRUD, scope, designs, versions, rendering
 - `codaScopeAnnotationRoutes.ts` — annotations, directives, blocks, batch
 - `codaScopeKnowledgeRoutes.ts` — knowledge sources, research, curation
+- `codaScopeArtifactRoutes.ts` — artifact CRUD, build, preview, sections, annotations, versions
 
 New endpoints should be added to the appropriate domain route file, not to the hub.
 
@@ -285,15 +302,17 @@ This hybrid approach avoids token waste (no guessing at relevance) and gives the
 
 ### Tool Set
 
-Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool definitions are organized into three builder functions:
+Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool definitions are organized into four builder functions:
 - `buildReadOnlyTools()` — wiki, quality, code map, concepts, golden rules, build status
 - `buildEpicTools()` — epic CRUD, scope management, design doc operations
 - `buildWriteTools()` — wiki write, code map write, quality write
+- `buildArtifactTools()` — artifact HTML read/write, epic context assembly
 
 Purpose-based filtering:
-- **Assistant/chat** → ALL tools (read + write + epic) — full agent autonomy
+- **Assistant/chat** → ALL tools (read + write + epic + artifact) — full agent autonomy
 - **Wiki-build** → read-only + write tools
 - **Curation/research** → read-only + epic tools
+- **Artifact-build/regen** → read-only + artifact tools
 
 The table below is a representative subset of read-only tools:
 
@@ -324,7 +343,7 @@ The agent can propose structured actions via XML tags embedded in responses:
 
 **Server-side** (`codaScopeActionParser.ts`):
 - Extracts all `<codascope_action>` tags from agent text
-- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `run_quality_scan`, `navigate`, `create_golden_rule`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`
+- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `run_quality_scan`, `navigate`, `create_golden_rule`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`
 - Parsed actions are stored in `message.metadata.actions`
 
 **Client-side** (`ActionCard.tsx`):
@@ -522,6 +541,9 @@ The Epic Design subsystem provides collaborative document authoring for software
 | `codaScopeVersionService.ts` | Snapshot-based version history for epics |
 | `codaScopeAnnotationService.ts` | Inline annotations (comments), insertion directives, block tracking |
 | `codaScopeEpicRenderService.ts` | HTML rendering of design documents (basic + agent-generated) |
+| `codaScopeArtifactService.ts` | Visual artifact spec CRUD, build orchestration, section extraction |
+| `codaScopeArtifactAnnotationService.ts` | Artifact annotation lifecycle (pending → applied/failed/inactive) |
+| `codaScopeArtifactVersionService.ts` | Artifact build version snapshots and revert |
 
 ### Storage Layout
 
@@ -546,6 +568,12 @@ The Epic Design subsystem provides collaborative document authoring for software
     │   └── <docId>-annotations.json        # Inline annotations per document
     ├── directives/
     │   └── <docId>-directives.json         # Insertion directives per document
+    ├── artifacts/
+    │   └── <artifactId>/
+    │       ├── spec.json                   # Artifact specification
+    │       └── builds/
+    │           └── <version>/
+    │               └── index.html          # Built HTML output
     └── versions/
         └── <version>-<timestamp>.json      # Epic-level versioned snapshots
 ```
@@ -674,3 +702,112 @@ Insertion directives can be executed in batch, applying all pending directives w
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/epics/:epicId/docs/:docId/directives/batch` | Execute all ready directives atomically |
+
+---
+
+## Level 16 — Visual Artifacts
+
+### Overview
+
+Visual artifacts are agent-generated HTML dashboards and visualizations that present complex project data in a rich, interactive format. Unlike design documents (which are markdown), artifacts are full HTML documents with inline styles and scripts, rendered in sandboxed iframes.
+
+### Service Architecture
+
+| Service | Responsibility |
+|---------|---------------|
+| `codaScopeArtifactService.ts` | Artifact spec CRUD, build orchestration with agent callback, section extraction from built HTML, preview path resolution |
+| `codaScopeArtifactAnnotationService.ts` | Annotation lifecycle management: create, toggle (pending → inactive), batch apply, soft cap enforcement (max 20 pending per artifact) |
+| `codaScopeArtifactVersionService.ts` | Build version snapshots (auto-created before each rebuild), version listing, revert to previous build |
+
+### Storage Layout
+
+```
+<epicDir>/artifacts/
+├── artifacts.json                          # Artifact spec index (id, title, status, modelId)
+└── <artifactId>/
+    ├── spec.json                           # Full artifact specification
+    ├── annotations.json                    # Annotations on the built HTML sections
+    └── builds/
+        ├── current/
+        │   └── index.html                  # Latest built HTML
+        └── v<N>/
+            └── index.html                  # Version snapshot
+```
+
+### Build Pipeline
+
+```
+Artifact Spec → Agent (purpose: artifact-build) → write_artifact_html tool → index.html → section extraction
+```
+
+1. **Spec creation**: User defines an artifact spec (title, description, section outlines, model preference)
+2. **Build trigger**: Frontend calls `POST /build` → route handler assembles epic context + prompt template (`do_build_artifact.md`)
+3. **Agent generation**: Agent receives assembled prompt, uses `read_epic_context` for grounding, generates HTML, writes via `write_artifact_html`
+4. **Section extraction**: After HTML is written, sections are extracted from `<section id="...">` elements for annotation targeting
+5. **Preview**: Built HTML is served via sandboxed iframe in `ArtifactPreview.tsx`
+
+### Annotation Lifecycle
+
+```
+pending → applied (agent regenerated the section)
+        → failed (regeneration failed)
+        → inactive (user toggled off)
+```
+
+- Annotations target specific `<section>` elements in the built HTML
+- Batch apply groups annotations by section, then triggers section regeneration via `do_regen_sections.md`
+- The agent uses `write_artifact_html(mode="section")` to replace individual section inner HTML
+- Soft cap: max 20 pending annotations per artifact (configurable)
+
+### Agent Tools
+
+| Tool | Purpose |
+|------|---------|
+| `write_artifact_html` | Write complete HTML (`mode="full"`) or replace a single section (`mode="section"`) |
+| `read_artifact_html` | Read current built HTML for structure understanding before section edits |
+| `read_epic_context` | Assemble epic definition, scope, wiki summaries, design doc summaries for grounding |
+
+These tools are available to:
+- **artifact-build / artifact-section-regen** purposes (with read-only project tools)
+- **assistant / chat** purpose (with all other tools)
+
+### Frontend Architecture
+
+The artifact viewer is a component tree rooted in `ArtifactViewer.tsx`:
+
+| Component | Responsibility |
+|-----------|---------------|
+| `ArtifactViewer.tsx` | Orchestrator — tab switching (spec/preview), build trigger, state management |
+| `ArtifactSpecEditor.tsx` | Spec editing form with model picker |
+| `ArtifactPreview.tsx` | Sandboxed iframe preview of built HTML |
+| `ArtifactSectionPanel.tsx` | Section list, annotation management, version history panel |
+| `ArtifactAnnotationCard.tsx` | Individual annotation card with status badge and toggle |
+| `artifactApi.ts` | Typed fetch wrappers for all artifact API endpoints |
+
+### URL Scheme
+
+```
+/codascope/project/:projectId/epic/:epicId/design/artifact::artifactId
+```
+
+The `artifact:` prefix distinguishes artifact routes from design doc routes within the design tab.
+
+### API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/epics/:epicId/artifacts` | List artifact specs |
+| `POST` | `/epics/:epicId/artifacts` | Create new artifact spec |
+| `GET` | `/epics/:epicId/artifacts/:artId` | Get artifact spec |
+| `PUT` | `/epics/:epicId/artifacts/:artId` | Update artifact spec |
+| `DELETE` | `/epics/:epicId/artifacts/:artId` | Delete artifact |
+| `POST` | `/epics/:epicId/artifacts/:artId/build` | Trigger artifact build |
+| `GET` | `/epics/:epicId/artifacts/:artId/build/status` | SSE build progress |
+| `GET` | `/epics/:epicId/artifacts/:artId/preview` | Serve built HTML |
+| `GET` | `/epics/:epicId/artifacts/:artId/sections` | List extracted sections |
+| `GET` | `/epics/:epicId/artifacts/:artId/annotations` | List annotations |
+| `POST` | `/epics/:epicId/artifacts/:artId/annotations` | Create annotation |
+| `PATCH` | `/epics/:epicId/artifacts/:artId/annotations/:annId` | Toggle annotation status |
+| `POST` | `/epics/:epicId/artifacts/:artId/annotations/apply` | Batch apply pending annotations |
+| `GET` | `/epics/:epicId/artifacts/:artId/versions` | List build versions |
+| `POST` | `/epics/:epicId/artifacts/:artId/versions/:ver/revert` | Revert to version |

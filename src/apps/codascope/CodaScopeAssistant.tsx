@@ -790,9 +790,14 @@ export function CodaScopeAssistant() {
           startLine: action.attributes.startLine ? Number(action.attributes.startLine) : undefined,
           endLine: action.attributes.endLine ? Number(action.attributes.endLine) : undefined,
         });
+      } else if (action.type === "artifact_built" && action.attributes?.epicId && action.attributes?.artifactId) {
+        // Auto-navigate to the artifact preview view
+        if (activeProjectId) {
+          navigate(`project/${activeProjectId}/epic/${action.attributes.epicId}/design/artifact:${action.attributes.artifactId}`);
+        }
       }
     }
-  }, [messages, streaming, commandBus]);
+  }, [messages, streaming, commandBus, navigate, activeProjectId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

@@ -118,7 +118,9 @@ When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
 - Add corresponding card rendering in `ActionCard.tsx`
 - Actions must dispatch through existing CodaScope APIs — never bypass the API layer
-- New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, or `buildWriteTools()` in `codaScopeToolDefinitions.ts`
+- New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, `buildWriteTools()`, or `buildArtifactTools()` in `codaScopeToolDefinitions.ts`
+- Artifact tools (`write_artifact_html`, `read_artifact_html`, `read_epic_context`) are in `buildArtifactTools()`
+- Tool safety: assistant/chat = ALL tools (read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic. Artifact-build/regen = read + artifact.
 - Update `do_chat.md` system prompt with new tool descriptions and behavioral guidance
 
 ---
@@ -132,6 +134,9 @@ When extending agent capabilities:
 | New agent command | `commands/do_<action>.md` |
 | New backend service | `server/services/codaScope<Domain>Service.ts` |
 | New API endpoints | Add to the appropriate domain route file in `server/routes/codaScope*Routes.ts` |
+| New artifact component | `components/artifact-viewer/<ComponentName>.tsx` |
+| New artifact service | `server/services/codaScopeArtifact*Service.ts` |
+| Artifact API endpoints | `server/routes/codaScopeArtifactRoutes.ts` |
 | New styles | Add to `codascope.css` (or `CodaScopeAssistant.css` for assistant) |
 | New icons | Add to `components/CodaScopeIcons.tsx` |
 
@@ -240,3 +245,4 @@ Before marking work as complete:
 8. **Using `codascope-btn--primary` (BEM double-dash)** — Use flat single-dash convention: `codascope-btn-primary`, `codascope-btn-danger`, `codascope-btn-sm`
 9. **Duplicating SSE parsing logic** — Always import from `codaScopeSseClient.ts`, never inline
 10. **Not updating `do_chat.md` Available Actions** — When adding new action types to the parser and ActionCard, also update the Available Actions section in `do_chat.md` so the agent knows about them
+11. **Not wiring agent prompts for new purposes** — Adding a purpose to `AgentPurpose` is not enough; the command loader must also load the corresponding `do_*.md` prompt file and the route handler must assemble the prompt and create the `agentCallback`

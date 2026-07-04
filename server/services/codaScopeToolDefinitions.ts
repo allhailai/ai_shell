@@ -1693,7 +1693,13 @@ export function buildArtifactTools(
             const { writeFileSync } = await import("node:fs");
             writeFileSync(previewPath, newHtml, "utf-8");
 
-            return `Section "${sectionId}" updated successfully.`;
+            // Emit action tag for frontend auto-navigation
+            const sectionResultText = `Section "${sectionId}" updated successfully.\n\n` +
+              `<codascope_action type="artifact_built" epicId="${epicId}" artifactId="${artifactId}">` +
+              `Visual artifact section "${sectionId}" updated` +
+              `</codascope_action>`;
+            collectToolResult(sectionResultText);
+            return sectionResultText;
           }
 
           // mode === "full"
@@ -1712,7 +1718,13 @@ export function buildArtifactTools(
           if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
           writeFileSync(previewPath, html, "utf-8");
 
-          return `Artifact HTML written successfully (${html.length} bytes). Sections will be extracted automatically.`;
+          // Emit action tag for frontend auto-navigation
+          const resultText = `Artifact HTML written successfully (${html.length} bytes). Sections will be extracted automatically.\n\n` +
+            `<codascope_action type="artifact_built" epicId="${epicId}" artifactId="${artifactId}">` +
+            `Visual artifact updated successfully` +
+            `</codascope_action>`;
+          collectToolResult(resultText);
+          return resultText;
         } catch (err) {
           return `Failed to write artifact HTML: ${err instanceof Error ? err.message : String(err)}`;
         }
