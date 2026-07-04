@@ -476,7 +476,7 @@ export function EpicDetail() {
       }
       break;
     case "design":
-      content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} />;
+      content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} wikiPages={wikiPages} />;
       break;
     case "history":
       content = <EpicHistory epic={epic} setEpic={setEpic} />;

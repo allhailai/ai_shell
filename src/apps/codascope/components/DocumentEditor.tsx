@@ -13,9 +13,10 @@ import { InsertionPrompt } from "./InsertionPrompt";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
 import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh, IconWarning, IconDownload } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
 import { useEditorResize } from "../hooks/useEditorResize";
-import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo } from "../codaScopeTypes";
+import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, EpicWikiPage } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -26,6 +27,7 @@ interface DocumentEditorProps {
   contentHash?: string;
   onContentChange: (content: string, contentHash?: string) => void;
   onClose: () => void;
+  wikiPages?: EpicWikiPage[];
 }
 
 /* ── Constants ───────────────────────────────────────────────────────── */
@@ -39,9 +41,10 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose }: DocumentEditorProps) {
+export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose, wikiPages }: DocumentEditorProps) {
   const { activeProjectId } = useCodaScopeStore();
   const commandBus = useCommandBus();
+  const { navigate } = useAppSubRoute("codascope");
 
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(content);
@@ -59,7 +62,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [directives, setDirectives] = useState<InsertionDirective[]>([]);
   const [blocks, setBlocks] = useState<BlockInfo[]>([]);
-  const [activeThreadBlockId, setActiveThreadBlockId] = useState<string | null>(null);
+  const [openThreadBlockIds, setOpenThreadBlockIds] = useState<Set<string>>(new Set());
   const [insertionBlockId, setInsertionBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
@@ -468,8 +471,47 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
     month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
 
-  const openAnnotationCount = annotations.filter((a) => a.status === "open" && !a.parentId).length;
+  // ── Wiki link navigation ──────────────────────────────────────────
+  const handleWikiLink = useCallback((topic: string) => {
+    if (!activeProjectId) return;
+    const normalizedTopic = topic.toLowerCase().trim();
+    const match = (wikiPages ?? []).find(
+      (p) =>
+        p.id.toLowerCase() === normalizedTopic ||
+        p.title.toLowerCase() === normalizedTopic,
+    );
+    const targetId = match?.id ?? topic;
+    navigate(`project/${activeProjectId}/epic/${epicId}/knowledge/wiki/${targetId}`);
+  }, [activeProjectId, epicId, wikiPages, navigate]);
+
+  const totalAnnotationCount = annotations.length;
+  const allRootAnnotations = useMemo(() => annotations.filter((a) => !a.parentId), [annotations]);
+  const openRootCount = allRootAnnotations.filter((a) => a.status === "open").length;
+  const resolvedRootCount = allRootAnnotations.length - openRootCount;
+  const annotatedBlockIdsOrdered = useMemo(() =>
+    blocks.filter((b) => annotationsByBlock.has(b.blockId)).map((b) => b.blockId),
+    [blocks, annotationsByBlock],
+  );
+  const allAnnotatedBlockIds = useMemo(() => new Set(annotatedBlockIdsOrdered), [annotatedBlockIdsOrdered]);
+  const allExpanded = allAnnotatedBlockIds.size > 0 && [...allAnnotatedBlockIds].every((id) => openThreadBlockIds.has(id));
+  const [commentNavIndex, setCommentNavIndex] = useState(-1);
   const pendingDirectiveCount = directives.filter((d) => d.status === "pending").length;
+
+  const navigateToComment = useCallback((index: number) => {
+    if (annotatedBlockIdsOrdered.length === 0) return;
+    const clamped = Math.max(0, Math.min(index, annotatedBlockIdsOrdered.length - 1));
+    const blockId = annotatedBlockIdsOrdered[clamped];
+    setCommentNavIndex(clamped);
+    // Open the thread
+    setOpenThreadBlockIds((prev) => {
+      const next = new Set(prev);
+      next.add(blockId);
+      return next;
+    });
+    // Scroll to the block
+    const el = document.querySelector(`[data-block-id="${blockId}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [annotatedBlockIdsOrdered]);
 
   /* ── Render blocks with annotation gutter ────────────────────────── */
 
@@ -507,9 +549,9 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         {blocks.map((block, idx) => {
           const blockAnns = annotationsByBlock.get(block.blockId);
           const rootAnnotations = blockAnns?.roots ?? [];
-          const openCount = rootAnnotations.filter((a) => a.status === "open").length;
+          const totalCount = rootAnnotations.length + rootAnnotations.reduce((sum, r) => sum + (blockAnns?.replies.get(r.id)?.length ?? 0), 0);
           const blockDirs = directivesByBlock.get(block.blockId) ?? [];
-          const isThreadOpen = activeThreadBlockId === block.blockId;
+          const isThreadOpen = openThreadBlockIds.has(block.blockId);
           const isInsertionOpen = insertionBlockId === block.blockId;
           const isHovered = hoveredBlockId === block.blockId;
           const isCommentOpen = commentBlockId === block.blockId;
@@ -537,6 +579,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                 <div className="codascope-document-block-content">
                   <MarkdownViewer
                     content={block.content}
+                    onWikiLink={handleWikiLink}
                     onMermaidResize={blockMermaidResize}
                     onImageResize={blockImageResize}
                   />
@@ -544,20 +587,28 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
 
                 {/* Annotation gutter */}
                 <div className="codascope-annotation-gutter">
-                  {openCount > 0 && (
+                  {rootAnnotations.length > 0 && rootAnnotations.some((a) => a.status === "open") && (
                     <button
                       className="codascope-annotation-gutter-icon"
-                      onClick={() => setActiveThreadBlockId(isThreadOpen ? null : block.blockId)}
-                      title={`${openCount} open comment${openCount > 1 ? "s" : ""}`}
+                      onClick={() => setOpenThreadBlockIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(block.blockId)) next.delete(block.blockId); else next.add(block.blockId);
+                        return next;
+                      })}
+                      title={`${totalCount} comment${totalCount > 1 ? "s" : ""}`}
                       type="button"
                     >
-                      <IconAnnotation size={12} /> {openCount}
+                      <IconAnnotation size={12} /> {totalCount}
                     </button>
                   )}
-                  {rootAnnotations.length > 0 && openCount === 0 && (
+                  {rootAnnotations.length > 0 && !rootAnnotations.some((a) => a.status === "open") && (
                     <button
                       className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--resolved"
-                      onClick={() => setActiveThreadBlockId(isThreadOpen ? null : block.blockId)}
+                      onClick={() => setOpenThreadBlockIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(block.blockId)) next.delete(block.blockId); else next.add(block.blockId);
+                        return next;
+                      })}
                       title={`${rootAnnotations.length} resolved`}
                       type="button"
                     >
@@ -568,7 +619,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                     <button
                       className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--add"
                       onClick={() => setCommentBlockId(isCommentOpen ? null : block.blockId)}
-                      title="Add comment"
+                      data-tooltip="Add comment"
                       type="button"
                     >
                       +
@@ -617,7 +668,11 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                   projectId={activeProjectId!}
                   epicId={epicId}
                   onUpdate={loadAnnotations}
-                  onClose={() => setActiveThreadBlockId(null)}
+                  onClose={() => setOpenThreadBlockIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(block.blockId);
+                    return next;
+                  })}
                 />
               ))}
 
@@ -674,6 +729,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         {blocks.length === 0 && (
           <MarkdownViewer
             content={displayContent}
+            onWikiLink={handleWikiLink}
             onMermaidResize={handleMermaidResize}
             onImageResize={handleImageResize}
           />
@@ -691,9 +747,6 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
       {/* Header toolbar */}
       <div className="codascope-document-editor-toolbar">
         <div className="codascope-document-editor-toolbar-left">
-          <button className="codascope-btn codascope-btn-ghost" onClick={onClose} type="button">
-            ← Back
-          </button>
           <h2 className="codascope-document-editor-title">{doc.title}</h2>
           {doc.template && (
             <span className="codascope-document-editor-template-badge">{doc.template}</span>
@@ -702,10 +755,50 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         <div className="codascope-document-editor-toolbar-right">
           <span className="codascope-document-editor-meta">
             {wordCount.toLocaleString()} words · Updated {lastUpdated}
-            {openAnnotationCount > 0 && (
-              <span className="codascope-document-editor-annotation-count">
-                · <IconAnnotation size={12} /> {openAnnotationCount}
-              </span>
+            {totalAnnotationCount > 0 && (
+              <>
+                <button
+                  className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-document-editor-annotation-count"
+                  onClick={() => {
+                    if (allExpanded) {
+                      setOpenThreadBlockIds(new Set());
+                    } else {
+                      setOpenThreadBlockIds(new Set(allAnnotatedBlockIds));
+                    }
+                  }}
+                  type="button"
+                  title={allExpanded ? "Collapse all annotations" : "Expand all annotations"}
+                >
+                  · <IconAnnotation size={12} />{" "}
+                  {openRootCount > 0 && <span className="codascope-annotation-count-open">{openRootCount} open</span>}
+                  {openRootCount > 0 && resolvedRootCount > 0 && <span style={{ opacity: 0.4 }}> · </span>}
+                  {resolvedRootCount > 0 && <span className="codascope-annotation-count-resolved">{resolvedRootCount} ✓</span>}
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2, transition: "transform 0.15s ease", transform: allExpanded ? "rotate(90deg)" : "rotate(0deg)" }}><polyline points="3,1.5 7,5 3,8.5" /></svg>
+                </button>
+                <span className="codascope-annotation-nav">
+                  <button
+                    className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-annotation-nav-btn"
+                    onClick={() => navigateToComment(commentNavIndex >= annotatedBlockIdsOrdered.length - 1 ? 0 : commentNavIndex + 1)}
+                    type="button"
+                    title="Next comment"
+                    disabled={annotatedBlockIdsOrdered.length === 0}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5,3 5,7 8.5,3" /></svg>
+                  </button>
+                  <span className="codascope-annotation-nav-pos">
+                    {commentNavIndex >= 0 ? commentNavIndex + 1 : "–"}/{annotatedBlockIdsOrdered.length}
+                  </span>
+                  <button
+                    className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-annotation-nav-btn"
+                    onClick={() => navigateToComment(commentNavIndex <= 0 ? annotatedBlockIdsOrdered.length - 1 : commentNavIndex - 1)}
+                    type="button"
+                    title="Previous comment"
+                    disabled={annotatedBlockIdsOrdered.length === 0}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5,7 5,3 8.5,7" /></svg>
+                  </button>
+                </span>
+              </>
             )}
             {pendingDirectiveCount > 0 && (
               <span className="codascope-document-editor-directive-count">

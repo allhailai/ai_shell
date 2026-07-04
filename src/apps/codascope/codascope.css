@@ -3766,6 +3766,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   flex-shrink: 0;
+  padding: var(--space-2) var(--space-3) 0;
 }
 
 .codascope-document-editor-toolbar-left {
@@ -4264,27 +4265,27 @@
   font-size: var(--text-xs);
   padding: var(--space-1);
   border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
+  color: hsl(38 95% 60%);
   transition: background var(--transition-fast), color var(--transition-fast);
   line-height: 1;
 }
 
 .codascope-annotation-gutter-icon:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
+  background: hsl(38 90% 55% / 0.12);
+  color: hsl(38 95% 68%);
 }
 
 .codascope-annotation-gutter-icon--resolved {
-  color: var(--color-text-tertiary);
+  color: hsl(38 40% 50%);
   opacity: 0.6;
 }
 
 .codascope-annotation-gutter-icon--add {
   opacity: 0;
   transition: opacity var(--transition-fast);
-  font-size: var(--text-sm);
+  font-size: 24px;
   font-weight: var(--weight-bold);
-  color: var(--color-accent-primary);
+  color: hsl(38 95% 60%);
 }
 
 .codascope-document-block--hover .codascope-annotation-gutter-icon--add {
@@ -4295,36 +4296,62 @@
   opacity: 1;
 }
 
+.codascope-annotation-gutter-icon--add {
+  position: relative;
+}
+
+.codascope-annotation-gutter-icon--add::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: hsl(0 0% 15%);
+  color: hsl(38 90% 65%);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.codascope-document-block--hover .codascope-annotation-gutter-icon--add:hover::after {
+  opacity: 1;
+}
+
 /* ── Annotation Thread (P2b) ────────────────────────────────────────── */
 
 .codascope-annotation-thread {
-  margin: var(--space-2) 0 var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  margin: var(--space-1) 0 var(--space-2) 0;
+  border: 1px solid hsl(38 50% 40% / 0.25);
+  border-radius: var(--radius-sm);
+  background: hsl(38 30% 12% / 0.5);
   overflow: hidden;
 }
 
 .codascope-annotation-thread--new {
-  padding: var(--space-3);
+  padding: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .codascope-annotation-thread-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-tertiary);
-  border-bottom: 1px solid var(--color-border-primary);
+  padding: var(--space-1) var(--space-2);
+  background: hsl(38 30% 14% / 0.6);
+  border-bottom: 1px solid hsl(38 50% 40% / 0.2);
 }
 
 .codascope-annotation-thread-count {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
-  color: var(--color-text-secondary);
+  color: hsl(38 80% 65%);
 }
 
 .codascope-annotation-thread-toolbar-actions {
@@ -4338,7 +4365,7 @@
 }
 
 .codascope-annotation-thread-entry {
-  padding: var(--space-3);
+  padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid var(--color-border-primary);
 }
 
@@ -4347,7 +4374,7 @@
 }
 
 .codascope-annotation-thread-entry--reply {
-  padding-left: var(--space-6);
+  padding-left: var(--space-4);
   background: var(--color-bg-primary);
 }
 
@@ -4355,7 +4382,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-1);
+  margin-bottom: 0;
 }
 
 .codascope-annotation-thread-author {
@@ -4366,7 +4393,7 @@
 
 .codascope-annotation-thread-time {
   font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .codascope-annotation-thread-status {
@@ -4379,8 +4406,8 @@
 }
 
 .codascope-annotation-thread-status--open {
-  background: hsl(220 60% 50% / 0.15);
-  color: hsl(220 70% 65%);
+  background: hsl(38 80% 50% / 0.15);
+  color: hsl(38 90% 65%);
 }
 
 .codascope-annotation-thread-status--resolved {
@@ -4394,19 +4421,28 @@
 }
 
 .codascope-annotation-thread-body {
-  font-size: var(--text-sm);
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: 1.4;
   color: var(--color-text-primary);
 }
 
 .codascope-annotation-thread-body p {
-  margin: 0 0 var(--space-1) 0;
+  margin: 0;
+}
+
+.codascope-annotation-thread-body p:last-child {
+  margin-bottom: 0;
+}
+
+.codascope-annotation-thread-entry .shared-markdown-viewer {
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 .codascope-annotation-thread-entry-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: var(--space-1);
+  margin-top: 0;
   opacity: 0;
   transition: opacity var(--transition-fast);
 }
@@ -4418,22 +4454,22 @@
 /* ── Annotation Reply Composer ──────────────────────────────────────── */
 
 .codascope-annotation-thread-reply {
-  padding: var(--space-3);
+  padding: var(--space-1) var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  border-top: 1px solid var(--color-border-primary);
+  gap: var(--space-1);
+  border-top: 1px solid hsl(38 50% 40% / 0.2);
 }
 
 .codascope-annotation-thread-reply-input {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-primary);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: 1.4;
   resize: vertical;
   outline: none;
   font-family: inherit;
@@ -4441,7 +4477,7 @@
 }
 
 .codascope-annotation-thread-reply-input:focus {
-  border-color: var(--color-accent-primary);
+  border-color: hsl(38 80% 55%);
 }
 
 .codascope-annotation-thread-reply-actions {
@@ -4453,15 +4489,15 @@
 .codascope-annotation-thread-reply-trigger {
   width: 100%;
   text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--color-border-primary);
-  color: var(--color-text-tertiary);
+  padding: var(--space-1) var(--space-2);
+  border-top: 1px solid hsl(38 50% 40% / 0.2);
+  color: hsl(38 50% 55%);
   font-size: var(--text-xs);
 }
 
 .codascope-annotation-thread-reply-trigger:hover {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
+  color: hsl(38 80% 65%);
+  background: hsl(38 30% 14% / 0.4);
 }
 
 /* ── Insertion Prompt (P2b) ─────────────────────────────────────────── */
@@ -4717,11 +4753,59 @@
 /* ── Document Editor P2b Additions ──────────────────────────────────── */
 
 .codascope-document-editor-annotation-count {
-  color: hsl(220 70% 65%);
+  color: hsl(38 90% 65%);
+  margin-left: var(--space-2);
 }
 
 .codascope-document-editor-directive-count {
   color: hsl(35 80% 65%);
+}
+
+.codascope-annotation-count-open {
+  color: hsl(38 90% 65%);
+}
+
+.codascope-annotation-count-resolved {
+  color: hsl(140 50% 60%);
+}
+
+/* ── Annotation Navigation ─────────────────────────────────────────── */
+
+.codascope-annotation-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: var(--space-1);
+  color: hsl(38 90% 65%);
+}
+
+.codascope-annotation-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px !important;
+  min-width: 18px;
+  min-height: 18px;
+  color: hsl(38 80% 60%);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-annotation-nav-btn:hover:not(:disabled) {
+  color: hsl(38 95% 72%);
+  background: hsl(38 90% 55% / 0.12);
+}
+
+.codascope-annotation-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.codascope-annotation-nav-pos {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(38 60% 55%);
+  min-width: 24px;
+  text-align: center;
 }
 
 /* ── Phase 3: Rendered HTML Preview ────────────────────────────────── */

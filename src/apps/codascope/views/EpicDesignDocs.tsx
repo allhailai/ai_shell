@@ -15,7 +15,7 @@ import { IconPaintbrush, IconChat } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
-import type { EpicDesignDetail, EpicDesignDoc } from "../codaScopeTypes";
+import type { EpicDesignDetail, EpicDesignDoc, EpicWikiPage } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -23,11 +23,12 @@ interface EpicDesignDocsProps {
   epic: EpicDesignDetail;
   setEpic: (e: EpicDesignDetail) => void;
   docId: string | null;
+  wikiPages?: EpicWikiPage[];
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function EpicDesignDocs({ epic, setEpic, docId }: EpicDesignDocsProps) {
+export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
   const { navigate } = useAppSubRoute("codascope");
 
@@ -252,6 +253,7 @@ export function EpicDesignDocs({ epic, setEpic, docId }: EpicDesignDocsProps) {
       contentHash={docData.contentHash}
       onContentChange={handleContentChange}
       onClose={handleClose}
+      wikiPages={wikiPages}
     />
   );
 }
