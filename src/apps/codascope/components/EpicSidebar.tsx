@@ -15,6 +15,7 @@ import {
   IconWarning,
   IconPaintbrush,
   IconClock,
+  IconArtifact,
 } from "./CodaScopeIcons";
 import { CurateButton } from "./CurateButton";
 import type {
@@ -25,6 +26,7 @@ import type {
   BlockedDownload,
   EpicStatus,
   CurationReason,
+  ArtifactSpec,
 } from "../codaScopeTypes";
 
 /* ── Constants ───────────────────────────────────────────────────────── */
@@ -60,6 +62,7 @@ interface EpicSidebarProps {
   // Sub-item data
   wikiPages: EpicWikiPage[];
   designDocs: EpicDesignDoc[];          // non-archived design docs
+  artifacts: ArtifactSpec[];             // visual HTML artifacts
   sources: EpicKnowledgeSource[];        // non-error sources only
   errorSources: EpicKnowledgeSource[];   // error-status sources
   blockedItems: BlockedDownload[];
@@ -118,6 +121,7 @@ export function EpicSidebar({
   onToggleCollapse,
   wikiPages,
   designDocs,
+  artifacts,
   sources,
   errorSources,
   blockedItems,
@@ -572,6 +576,58 @@ export function EpicSidebar({
                     </span>
                   </button>
                 ))}
+              </div>
+            </>
+          )}
+
+          {/* Visual Artifacts */}
+          {showDesignSubItems && artifacts.length > 0 && (
+            <>
+              <div className="codascope-epic-sidebar-subitems-header">
+                <span>Visual Artifacts</span>
+                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                  {artifacts.length}
+                </span>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {artifacts.map((art) => {
+                  const statusColor =
+                    art.status === "built" ? "var(--color-success, #22c55e)"
+                    : art.status === "building" ? "var(--color-warning, #f59e0b)"
+                    : "var(--color-text-tertiary)";
+
+                  return (
+                    <button
+                      key={art.id}
+                      className={`codascope-epic-sidebar-wiki-item ${
+                        activeSubItemId === `artifact:${art.id}`
+                          ? "codascope-epic-sidebar-wiki-item--active"
+                          : ""
+                      }`}
+                      onClick={() => onNavigate("design", `artifact:${art.id}`)}
+                      type="button"
+                    >
+                      <span className="codascope-epic-sidebar-wiki-item-icon">
+                        <IconArtifact size={12} />
+                      </span>
+                      <span className="codascope-epic-sidebar-wiki-item-title">
+                        {art.title}
+                      </span>
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: statusColor,
+                          flexShrink: 0,
+                          marginLeft: "auto",
+                          animation: art.status === "building" ? "codascope-pulse 1.5s ease-in-out infinite" : undefined,
+                        }}
+                        title={art.status}
+                      />
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}

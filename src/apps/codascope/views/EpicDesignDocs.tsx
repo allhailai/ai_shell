@@ -11,11 +11,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
-import { IconPaintbrush, IconChat } from "../components/CodaScopeIcons";
+import { ArtifactViewer } from "../components/artifact-viewer/ArtifactViewer";
+import { IconPaintbrush, IconChat, IconArtifact, IconInsert } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
-import type { EpicDesignDetail, EpicDesignDoc, EpicWikiPage } from "../codaScopeTypes";
+import type { EpicDesignDetail, EpicDesignDoc, EpicWikiPage, ArtifactSpec } from "../codaScopeTypes";
+import * as artifactApi from "../components/artifact-viewer/artifactApi";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -24,13 +26,19 @@ interface EpicDesignDocsProps {
   setEpic: (e: EpicDesignDetail) => void;
   docId: string | null;
   wikiPages?: EpicWikiPage[];
+  artifacts?: ArtifactSpec[];
+  onArtifactsChange?: (artifacts: ArtifactSpec[]) => void;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDocsProps) {
+export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onArtifactsChange }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
   const { navigate } = useAppSubRoute("codascope");
+
+  // Detect if this is an artifact URL (docId starts with "artifact:")
+  const isArtifactView = docId?.startsWith("artifact:") ?? false;
+  const artifactId = isArtifactView ? docId!.slice("artifact:".length) : null;
 
   const [docData, setDocData] = useState<{ doc: EpicDesignDoc; content: string; contentHash?: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,10 +47,13 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDo
   const [rendering, setRendering] = useState(false);
   const [renderedHtmlUrl, setRenderedHtmlUrl] = useState<string | null>(null);
 
+  // Create dropdown state
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+
   // ── Fetch doc content when docId changes ─────────────────────────────
 
   useEffect(() => {
-    if (!activeProjectId || !docId) {
+    if (!activeProjectId || !docId || isArtifactView) {
       setDocData(null);
       setRenderedHtmlUrl(null);
       return;
@@ -153,6 +164,30 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDo
     setRendering(false);
   }, [activeProjectId, epic.id, docId, rendering]);
 
+  // ── Create artifact handler ───────────────────────────────────────────
+
+  const handleCreateArtifact = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      const art = await artifactApi.createArtifact(activeProjectId, epic.id, {
+        title: "New Visual Artifact",
+        body: "",
+        createdBy: "user",
+      });
+      onArtifactsChange?.([...(artifacts ?? []), art]);
+      navigate(`project/${activeProjectId}/epic/${epic.id}/design/artifact:${art.id}`);
+    } catch {
+      /* silent */
+    }
+    setShowCreateMenu(false);
+  }, [activeProjectId, epic.id, artifacts, onArtifactsChange, navigate]);
+
+  const handleCreateDoc = useCallback(() => {
+    // Open chat to create doc via agent
+    useShellStore.getState().openRightPanel("assistant");
+    setShowCreateMenu(false);
+  }, []);
+
   /* ── Rendered HTML preview ─────────────────────────────────────────── */
 
   if (renderedHtmlUrl && docData) {
@@ -187,6 +222,18 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDo
     );
   }
 
+  /* ── Artifact view (when docId starts with "artifact:") ────────────── */
+
+  if (isArtifactView && artifactId && activeProjectId) {
+    return (
+      <ArtifactViewer
+        projectId={activeProjectId}
+        epicId={epic.id}
+        artifactId={artifactId}
+      />
+    );
+  }
+
   /* ── No doc selected — empty state ─────────────────────────────────── */
 
   if (!docId) {
@@ -194,24 +241,71 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages }: EpicDesignDo
       <div className="codascope-empty-state">
         <span className="codascope-empty-state-icon"><IconPaintbrush size={32} /></span>
         <div className="codascope-empty-state-title">
-          {epic.designDocs.filter((d) => !d.archivedAt).length === 0
+          {epic.designDocs.filter((d) => !d.archivedAt).length === 0 && !(artifacts?.length)
             ? "No design documents yet"
             : "Select a design document"}
         </div>
         <div className="codascope-empty-state-text">
-          {epic.designDocs.filter((d) => !d.archivedAt).length === 0
-            ? "Use the chat assistant to create your first design document."
-            : "Choose a document from the sidebar, or create a new one using the chat assistant."}
+          Create a markdown document or a rich visual artifact.
         </div>
-        <button
-          className="codascope-btn codascope-btn-primary"
-          onClick={openChatPanel}
-          type="button"
-          style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
-        >
-          <IconChat size={14} />
-          Open Chat Assistant
-        </button>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", position: "relative" }}>
+          <div style={{ position: "relative" }}>
+            <button
+              className="codascope-btn codascope-btn-primary"
+              onClick={() => setShowCreateMenu((p) => !p)}
+              type="button"
+              style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
+            >
+              <IconInsert size={14} />
+              Create
+            </button>
+            {showCreateMenu && (
+              <div
+                className="codascope-artifact-create-menu"
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  background: "var(--color-bg-elevated, var(--color-bg-secondary))",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "var(--radius-md)",
+                  boxShadow: "var(--shadow-lg, 0 4px 12px rgba(0,0,0,0.15))",
+                  zIndex: 100,
+                  minWidth: 200,
+                  overflow: "hidden",
+                }}
+              >
+                <button
+                  className="codascope-btn codascope-btn-ghost"
+                  onClick={handleCreateDoc}
+                  type="button"
+                  style={{ width: "100%", textAlign: "left", borderRadius: 0, display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2) var(--space-3)" }}
+                >
+                  <IconPaintbrush size={14} />
+                  Markdown Document
+                </button>
+                <button
+                  className="codascope-btn codascope-btn-ghost"
+                  onClick={() => void handleCreateArtifact()}
+                  type="button"
+                  style={{ width: "100%", textAlign: "left", borderRadius: 0, display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2) var(--space-3)" }}
+                >
+                  <IconArtifact size={14} />
+                  Visual Artifact
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            className="codascope-btn codascope-btn-ghost"
+            onClick={openChatPanel}
+            type="button"
+            style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
+          >
+            <IconChat size={14} />
+            Open Chat
+          </button>
+        </div>
       </div>
     );
   }

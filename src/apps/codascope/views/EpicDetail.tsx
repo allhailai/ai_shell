@@ -37,7 +37,9 @@ import type {
   EpicWikiPage,
   EpicKnowledgeSource,
   BlockedDownload,
+  ArtifactSpec,
 } from "../codaScopeTypes";
+import { listArtifacts } from "../components/artifact-viewer/artifactApi";
 
 /* ── Sidebar collapse persistence ────────────────────────────────────── */
 
@@ -114,6 +116,7 @@ export function EpicDetail() {
   const [wikiPages, setWikiPages] = useState<EpicWikiPage[]>([]);
   const [sources, setSources] = useState<EpicKnowledgeSource[]>([]);
   const [blockedItems, setBlockedItems] = useState<BlockedDownload[]>([]);
+  const [artifacts, setArtifacts] = useState<ArtifactSpec[]>([]);
 
   // Split sources into good (non-error) and error
   const goodSources = useMemo(() => sources.filter((s) => s.status !== "error"), [sources]);
@@ -247,11 +250,23 @@ export function EpicDetail() {
     }
   }, [activeProjectId, epicId]);
 
+  // ── Fetch artifacts ─────────────────────────────────────────────────
+  const fetchArtifacts = useCallback(async () => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const list = await listArtifacts(activeProjectId, epicId);
+      setArtifacts(list);
+    } catch {
+      /* silent */
+    }
+  }, [activeProjectId, epicId]);
+
   useEffect(() => {
     void fetchWikiPages();
     void fetchSources();
     void fetchBlocked();
-  }, [fetchWikiPages, fetchSources, fetchBlocked]);
+    void fetchArtifacts();
+  }, [fetchWikiPages, fetchSources, fetchBlocked, fetchArtifacts]);
 
   // ── Navigation handlers ──────────────────────────────────────────────
   const handleBack = useCallback(() => {
@@ -476,7 +491,7 @@ export function EpicDetail() {
       }
       break;
     case "design":
-      content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} wikiPages={wikiPages} />;
+      content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} wikiPages={wikiPages} artifacts={artifacts} onArtifactsChange={setArtifacts} />;
       break;
     case "history":
       content = <EpicHistory epic={epic} setEpic={setEpic} />;
@@ -495,6 +510,7 @@ export function EpicDetail() {
         onToggleCollapse={handleToggleCollapse}
         wikiPages={wikiPages}
         designDocs={epic.designDocs.filter((d) => !d.archivedAt)}
+        artifacts={artifacts}
         sources={goodSources}
         errorSources={errorSources}
         blockedItems={blockedItems}

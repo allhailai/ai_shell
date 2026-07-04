@@ -615,3 +615,20 @@ export function IconArrowRight({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Browser viewport with code brackets — Visual Artifact */
+export function IconArtifact({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
+      <line x1="1.5" y1="5" x2="14.5" y2="5" />
+      <circle cx="3.5" cy="3.5" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="5.5" cy="3.5" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="7.5" cy="3.5" r="0.5" fill="currentColor" stroke="none" />
+      <polyline points="5.5,8 4,10 5.5,12" />
+      <polyline points="10.5,8 12,10 10.5,12" />
+      <line x1="7" y1="12" x2="9" y2="8" />
+    </svg>
+  );
+}
+

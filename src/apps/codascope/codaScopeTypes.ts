@@ -245,6 +245,7 @@ export interface EpicDesignDetail extends EpicDesign {
   definition: string;              // markdown content
   scope: EpicScope | null;         // null until scoped
   designDocs: EpicDesignDoc[];
+  artifacts?: ArtifactSpec[];      // visual HTML artifacts
   versions: EpicVersion[];
   conversationId: string | null;   // dedicated epic conversation
 }
