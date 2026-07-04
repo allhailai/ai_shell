@@ -126,6 +126,20 @@ describe("CodaScopeArtifactVersionService", () => {
       const versions = await svc.listVersions(projectId, epicId, artifactId);
       expect(versions).toEqual([]);
     });
+
+    it("marks the latest version as current by default", async () => {
+      const projDir = scaffoldProject(root, projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V1</h1>");
+      await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V2</h1>");
+      await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      const versions = await svc.listVersions(projectId, epicId, artifactId);
+      expect(versions[0].isCurrent).toBe(false);
+      expect(versions[1].isCurrent).toBe(true);
+    });
   });
 
   // ── revertToVersion ──────────────────────────────────────────
@@ -151,18 +165,60 @@ describe("CodaScopeArtifactVersionService", () => {
       expect(content).toBe("<h1>Original</h1>");
     });
 
-    it("creates a snapshot before reverting (revert is revertible)", async () => {
+    it("does NOT create a new version when reverting", async () => {
       const projDir = scaffoldProject(root, projectId, epicId, artifactId);
 
       writeHtml(projDir, epicId, artifactId, "<h1>V1</h1>");
       const v1 = await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
 
       writeHtml(projDir, epicId, artifactId, "<h1>V2</h1>");
+      await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      // Revert to v1 — should NOT create v3
       await svc.revertToVersion(projectId, epicId, artifactId, v1!.dirName);
 
-      // Should now have 2 versions: the original v1 and the snapshot of V2 content
       const versions = await svc.listVersions(projectId, epicId, artifactId);
-      expect(versions.length).toBeGreaterThanOrEqual(2);
+      expect(versions).toHaveLength(2);
+      expect(versions[0].version).toBe(1);
+      expect(versions[1].version).toBe(2);
+    });
+
+    it("marks the reverted version as current", async () => {
+      const projDir = scaffoldProject(root, projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V1</h1>");
+      const v1 = await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V2</h1>");
+      await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      // Revert to v1
+      await svc.revertToVersion(projectId, epicId, artifactId, v1!.dirName);
+
+      const versions = await svc.listVersions(projectId, epicId, artifactId);
+      const currentVersion = versions.find((v) => v.isCurrent);
+      expect(currentVersion).toBeDefined();
+      expect(currentVersion!.version).toBe(1);
+    });
+
+    it("switching between versions does not grow version list", async () => {
+      const projDir = scaffoldProject(root, projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V1</h1>");
+      const v1 = await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      writeHtml(projDir, epicId, artifactId, "<h1>V2</h1>");
+      const v2 = await svc.snapshotCurrentBuild(projectId, epicId, artifactId);
+
+      // Switch back and forth several times
+      await svc.revertToVersion(projectId, epicId, artifactId, v1!.dirName);
+      await svc.revertToVersion(projectId, epicId, artifactId, v2!.dirName);
+      await svc.revertToVersion(projectId, epicId, artifactId, v1!.dirName);
+      await svc.revertToVersion(projectId, epicId, artifactId, v2!.dirName);
+
+      // Should still only have 2 versions
+      const versions = await svc.listVersions(projectId, epicId, artifactId);
+      expect(versions).toHaveLength(2);
     });
 
     it("returns false for nonexistent version directory", async () => {

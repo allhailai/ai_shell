@@ -4,11 +4,13 @@
    Responsibilities:
    - Snapshot current build before overwriting (copy index.html to .versions/)
    - List versions with metadata (version number, timestamp, size)
-   - Revert to any previous version (copy snapshot back)
+   - Revert to any previous version (switch current pointer, no new snapshot)
    - Revert to latest
+   - Track which version is currently active via current.json
 
    Storage layout:
    <artifactId>/builds/.versions/
+   ├── current.json           ← { "currentDirName": "v001_..." }
    ├── v001_<timestamp>/
    │   └── index.html
    └── v002_<timestamp>/
@@ -62,11 +64,39 @@ export class CodaScopeArtifactVersionService {
     return path.join(this.buildsDir(projectDir, epicId, artifactId), "index.html");
   }
 
+  private currentJsonPath(vDir: string): string {
+    return path.join(vDir, "current.json");
+  }
+
+  /* ── Current version pointer ─────────────────────────────────────── */
+
+  /** Read which dirName is currently active. Returns null if not set. */
+  private readCurrentPointer(vDir: string): string | null {
+    const jsonPath = this.currentJsonPath(vDir);
+    if (!existsSync(jsonPath)) return null;
+    try {
+      const data = JSON.parse(readFileSync(jsonPath, "utf-8"));
+      return data.currentDirName ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Write the current version pointer. */
+  private writeCurrentPointer(vDir: string, dirName: string): void {
+    writeFileSync(
+      this.currentJsonPath(vDir),
+      JSON.stringify({ currentDirName: dirName }),
+      "utf-8",
+    );
+  }
+
   /* ── Snapshot ─────────────────────────────────────────────────────── */
 
   /**
    * Create a snapshot of the current build.
    * Returns the version metadata, or null if no index.html exists.
+   * After snapshotting, the new version becomes current.
    */
   async snapshotCurrentBuild(projectId: string, epicId: string, artifactId: string): Promise<ArtifactBuildVersion | null> {
     const projectDir = this.projectDir(projectId);
@@ -95,6 +125,9 @@ export class CodaScopeArtifactVersionService {
 
     const sizeBytes = statSync(htmlPath).size;
 
+    // Mark the new version as current
+    this.writeCurrentPointer(vDir, dirName);
+
     return {
       version: nextVersion,
       timestamp: new Date().toISOString(),
@@ -105,13 +138,24 @@ export class CodaScopeArtifactVersionService {
 
   /* ── List ─────────────────────────────────────────────────────────── */
 
-  /** List all version snapshots for an artifact. */
+  /** List all version snapshots for an artifact, with isCurrent annotated. */
   async listVersions(projectId: string, epicId: string, artifactId: string): Promise<ArtifactBuildVersion[]> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
 
     const vDir = this.versionsDir(projectDir, epicId, artifactId);
-    return this.listVersionsFromDisk(vDir);
+    const versions = this.listVersionsFromDisk(vDir);
+
+    // Annotate current version
+    const currentDirName = this.readCurrentPointer(vDir);
+    // If no pointer set, the latest version is current
+    const effectiveCurrent = currentDirName ?? (versions.length > 0 ? versions[versions.length - 1].dirName : null);
+
+    for (const v of versions) {
+      v.isCurrent = v.dirName === effectiveCurrent;
+    }
+
+    return versions;
   }
 
   /** Read version entries from disk. */
@@ -154,7 +198,8 @@ export class CodaScopeArtifactVersionService {
 
   /**
    * Revert to a specific version by its directory name.
-   * Copies the snapshot's index.html back to the builds directory.
+   * Copies the snapshot's index.html back to the builds directory
+   * and updates the current pointer. Does NOT create a new version.
    */
   async revertToVersion(projectId: string, epicId: string, artifactId: string, dirName: string): Promise<boolean> {
     const projectDir = this.projectDir(projectId);
@@ -164,13 +209,13 @@ export class CodaScopeArtifactVersionService {
     const snapshotHtml = path.join(vDir, dirName, "index.html");
     if (!existsSync(snapshotHtml)) return false;
 
-    // Snapshot current state before reverting (so revert is itself revertible)
-    await this.snapshotCurrentBuild(projectId, epicId, artifactId);
-
-    // Copy snapshot to current
+    // Copy snapshot to current build — no new snapshot created
     const targetPath = this.indexHtmlPath(projectDir, epicId, artifactId);
     const content = readFileSync(snapshotHtml, "utf-8");
     writeFileSync(targetPath, content, "utf-8");
+
+    // Update current pointer
+    this.writeCurrentPointer(vDir, dirName);
 
     return true;
   }
@@ -187,6 +232,18 @@ export class CodaScopeArtifactVersionService {
     if (versions.length === 0) return false;
 
     const latest = versions[versions.length - 1];
-    return this.revertToVersion(projectId, epicId, artifactId, latest.dirName);
+
+    // Copy latest snapshot to current build
+    const snapshotHtml = path.join(vDir, latest.dirName, "index.html");
+    if (!existsSync(snapshotHtml)) return false;
+
+    const targetPath = this.indexHtmlPath(projectDir, epicId, artifactId);
+    const content = readFileSync(snapshotHtml, "utf-8");
+    writeFileSync(targetPath, content, "utf-8");
+
+    // Update current pointer to latest
+    this.writeCurrentPointer(vDir, latest.dirName);
+
+    return true;
   }
 }

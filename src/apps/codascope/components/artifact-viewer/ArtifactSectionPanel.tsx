@@ -587,11 +587,19 @@ export function ArtifactSectionPanel({
             ) : (
               <>
                 {versions.map((v) => (
-                  <div key={v.dirName} className="codascope-artifact-version-item">
+                  <div
+                    key={v.dirName}
+                    className={`codascope-artifact-version-item${v.isCurrent ? " codascope-artifact-version-item-current" : ""}`}
+                  >
                     <div className="codascope-artifact-version-info">
                       <span className="codascope-artifact-version-number">
                         v{v.version}
                       </span>
+                      {v.isCurrent && (
+                        <span className="codascope-artifact-version-current-badge">
+                          current
+                        </span>
+                      )}
                       <span className="codascope-artifact-version-date">
                         {new Date(v.timestamp).toLocaleString()}
                       </span>
@@ -599,23 +607,28 @@ export function ArtifactSectionPanel({
                         {(v.sizeBytes / 1024).toFixed(1)} KB
                       </span>
                     </div>
-                    <button
-                      className="codascope-artifact-version-revert-btn"
-                      onClick={() => onRevertVersion(v.dirName)}
-                      title="Revert to this version"
-                      type="button"
-                    >
-                      Revert
-                    </button>
+                    {!v.isCurrent && (
+                      <button
+                        className="codascope-artifact-version-revert-btn"
+                        onClick={() => onRevertVersion(v.dirName)}
+                        title="Revert to this version"
+                        type="button"
+                      >
+                        Revert
+                      </button>
+                    )}
                   </div>
                 ))}
-                <button
-                  className="codascope-artifact-version-revert-latest"
-                  onClick={onRevertToLatest}
-                  type="button"
-                >
-                  Revert to Latest
-                </button>
+                {/* Only show "Revert to Latest" if the latest version is NOT current */}
+                {!versions[versions.length - 1]?.isCurrent && (
+                  <button
+                    className="codascope-artifact-version-revert-latest"
+                    onClick={onRevertToLatest}
+                    type="button"
+                  >
+                    Revert to Latest
+                  </button>
+                )}
               </>
             )}
           </div>

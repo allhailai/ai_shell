@@ -7663,6 +7663,26 @@
   border-bottom: none;
 }
 
+.codascope-artifact-version-item-current {
+  background: var(--color-accent-muted);
+  border-radius: var(--radius-sm);
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  margin-right: calc(-1 * var(--space-2));
+}
+
+.codascope-artifact-version-current-badge {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent-text);
+  background: var(--color-accent-subtle);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .codascope-artifact-version-info {
   display: flex;
   align-items: center;

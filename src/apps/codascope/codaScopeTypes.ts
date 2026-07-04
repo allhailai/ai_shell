@@ -608,6 +608,7 @@ export interface ArtifactBuildVersion {
   timestamp: string;
   dirName: string;
   sizeBytes: number;
+  isCurrent?: boolean;
 }
 
 export interface ArtifactBuildProgress {
