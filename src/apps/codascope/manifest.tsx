@@ -40,7 +40,7 @@ export const codaScopeApp: AppManifest = {
     component: CodaScopeAssistant,
     defaultSize: 420,
     minSize: 320,
-    maxSize: 700,
+    maxSize: 1000,
   },
 
   secrets: [
