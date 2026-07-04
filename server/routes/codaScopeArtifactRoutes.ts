@@ -389,7 +389,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
 
   // Batch apply pending annotations (triggers section regeneration)
   app.post("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/annotations/apply", wrap(async (req, res) => {
-    const { artifactAnnotationSvc, artifactSvc, agentSvc, epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc } = await ensureServices();
+    const { artifactAnnotationSvc, artifactSvc, artifactVersionSvc, agentSvc, epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const artId = param(req, "artId");
@@ -399,6 +399,9 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
       res.json({ applied: 0, sections: [] });
       return;
     }
+
+    // Snapshot current build before regenerating (so user can revert)
+    await artifactVersionSvc.snapshotCurrentBuild(id, epicId, artId);
 
     // Mark all pending as applied
     const allIds = pendingBySection.flatMap((g) => g.annotations.map((a) => a.id));
