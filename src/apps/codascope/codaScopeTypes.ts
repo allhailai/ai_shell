@@ -546,3 +546,73 @@ export interface PendingWikiDeletion {
   curationId?: string;
   status: "pending" | "approved" | "rejected";
 }
+
+// ── Visual Artifacts ────────────────────────────────────────────────
+
+export interface ArtifactSpec {
+  id: string;
+  epicId?: string;           // null for project-level artifacts
+  title: string;
+  body: string;              // free-form markdown spec (goals, content guidance)
+  modelId: string | null;
+  sources: string[];          // manual source hints (wiki topic IDs, file paths)
+  autoDiscoverContext: boolean; // true = auto-include epic knowledge
+  lastBuilt: string | null;
+  status: "draft" | "building" | "built" | "stale";
+  buildSpecHash: string | null;
+  currentSpecHash: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
+
+export interface ArtifactSection {
+  id: string;
+  title: string;
+  hidden?: boolean;
+}
+
+export interface ArtifactSectionsResponse {
+  sections: ArtifactSection[];
+  regeneratedSections: string[];
+  regenerationCount: number;
+  contractVersion: number | null;
+  hiddenSectionIds: string[];
+}
+
+export interface ArtifactElementContext {
+  elementTag: string;
+  elementId?: string;
+  cssPath?: string;
+  elementText?: string;
+  elementHTML?: string;
+}
+
+export interface ArtifactAnnotation {
+  id: string;
+  sectionId: string;
+  sectionTitle: string;
+  instruction: string;
+  elementContext?: ArtifactElementContext | null;
+  status: "pending" | "applied" | "failed" | "inactive";
+  previouslyApplied?: boolean;
+  type?: "modify" | "add_section";
+  afterSectionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ArtifactBuildVersion {
+  version: number;
+  timestamp: string;
+  dirName: string;
+  sizeBytes: number;
+}
+
+export interface ArtifactBuildProgress {
+  artifactId: string;
+  status: "idle" | "building" | "regenerating" | "complete" | "error";
+  progress?: string;
+  startedAt?: string;
+  error?: string;
+}
