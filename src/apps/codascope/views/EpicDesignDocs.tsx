@@ -248,47 +248,30 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
         <div className="codascope-empty-state-text">
           Create a markdown document or a rich visual artifact.
         </div>
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", position: "relative" }}>
-          <div style={{ position: "relative" }}>
+        <div className="codascope-artifact-create-actions">
+          <div className="codascope-artifact-create-trigger">
             <button
-              className="codascope-btn codascope-btn-primary"
+              className="codascope-btn codascope-btn-primary codascope-artifact-create-btn"
               onClick={() => setShowCreateMenu((p) => !p)}
               type="button"
-              style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
             >
               <IconInsert size={14} />
               Create
             </button>
             {showCreateMenu && (
-              <div
-                className="codascope-artifact-create-menu"
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  left: 0,
-                  background: "var(--color-bg-elevated, var(--color-bg-secondary))",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "var(--radius-md)",
-                  boxShadow: "var(--shadow-lg, 0 4px 12px rgba(0,0,0,0.15))",
-                  zIndex: 100,
-                  minWidth: 200,
-                  overflow: "hidden",
-                }}
-              >
+              <div className="codascope-artifact-create-menu">
                 <button
-                  className="codascope-btn codascope-btn-ghost"
+                  className="codascope-btn codascope-btn-ghost codascope-artifact-create-menu-item"
                   onClick={handleCreateDoc}
                   type="button"
-                  style={{ width: "100%", textAlign: "left", borderRadius: 0, display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2) var(--space-3)" }}
                 >
                   <IconPaintbrush size={14} />
                   Markdown Document
                 </button>
                 <button
-                  className="codascope-btn codascope-btn-ghost"
+                  className="codascope-btn codascope-btn-ghost codascope-artifact-create-menu-item"
                   onClick={() => void handleCreateArtifact()}
                   type="button"
-                  style={{ width: "100%", textAlign: "left", borderRadius: 0, display: "flex", alignItems: "center", gap: "var(--space-2)", padding: "var(--space-2) var(--space-3)" }}
                 >
                   <IconArtifact size={14} />
                   Visual Artifact
@@ -297,10 +280,9 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
             )}
           </div>
           <button
-            className="codascope-btn codascope-btn-ghost"
+            className="codascope-btn codascope-btn-ghost codascope-artifact-create-btn"
             onClick={openChatPanel}
             type="button"
-            style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
           >
             <IconChat size={14} />
             Open Chat

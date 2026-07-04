@@ -24,6 +24,7 @@ import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
+import { CodaScopeArtifactService } from "./codaScopeArtifactService.js";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { TopicDepth, CurationReasonType } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -1623,15 +1624,7 @@ export function buildArtifactTools(
   const epicKnowledgeService = new CodaScopeEpicKnowledgeService(projectsRoot);
   const designDocService = new CodaScopeDesignDocService(projectsRoot);
 
-  // Lazy import to avoid circular dependency
-  let _artifactService: import("./codaScopeArtifactService.js").CodaScopeArtifactService | null = null;
-  const getArtifactService = async () => {
-    if (!_artifactService) {
-      const { CodaScopeArtifactService } = await import("./codaScopeArtifactService.js");
-      _artifactService = new CodaScopeArtifactService(projectsRoot);
-    }
-    return _artifactService;
-  };
+  const artifactService = new CodaScopeArtifactService(projectsRoot);
 
   return {
     write_artifact_html: {
@@ -1669,7 +1662,7 @@ export function buildArtifactTools(
         }
 
         try {
-          const svc = await getArtifactService();
+          const svc = artifactService;
 
           if (mode === "section") {
             if (!sectionId) return "sectionId is required when mode='section'.";
@@ -1749,7 +1742,7 @@ export function buildArtifactTools(
         if (!epicId || !artifactId) return "epicId and artifactId are required.";
 
         try {
-          const svc = await getArtifactService();
+          const svc = artifactService;
           const html = await svc.getPreviewHtml(projectId, epicId, artifactId);
           if (!html) return "No built HTML found for this artifact. Build the artifact first.";
           return html;

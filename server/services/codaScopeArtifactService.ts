@@ -48,9 +48,7 @@ interface SectionsManifest {
   hiddenSectionIds: string[];
 }
 
-/* ── Build progress tracking (in-memory, per-artifact) ───────────── */
-
-const buildProgress = new Map<string, ArtifactBuildProgress>();
+/* ── Build progress tracking — see CodaScopeArtifactService.buildProgress */
 
 /* ── HTML entity decoder for section title extraction ─────────────── */
 
@@ -70,6 +68,7 @@ function decodeHtmlEntities(str: string): string {
 
 export class CodaScopeArtifactService {
   private root: string;
+  private buildProgress = new Map<string, ArtifactBuildProgress>();
 
   constructor(root: string) {
     this.root = root;
@@ -350,7 +349,7 @@ export class CodaScopeArtifactService {
     }
 
     const key = this.buildKey(projectId, epicId, artifactId);
-    buildProgress.set(key, {
+    this.buildProgress.set(key, {
       artifactId,
       status: "building",
       startedAt: new Date().toISOString(),
@@ -378,17 +377,17 @@ export class CodaScopeArtifactService {
       spec.updatedAt = spec.lastBuilt;
       this.writeIndex(projectDir, epicId, index);
 
-      buildProgress.set(key, {
+      this.buildProgress.set(key, {
         artifactId,
         status: "complete",
-        startedAt: buildProgress.get(key)?.startedAt,
+        startedAt: this.buildProgress.get(key)?.startedAt,
       });
     } catch (err) {
-      buildProgress.set(key, {
+      this.buildProgress.set(key, {
         artifactId,
         status: "error",
         error: err instanceof Error ? err.message : String(err),
-        startedAt: buildProgress.get(key)?.startedAt,
+        startedAt: this.buildProgress.get(key)?.startedAt,
       });
       throw err;
     }
@@ -397,13 +396,13 @@ export class CodaScopeArtifactService {
   /** Get the current build status for an artifact. */
   getBuildStatus(projectId: string, epicId: string, artifactId: string): ArtifactBuildProgress {
     const key = this.buildKey(projectId, epicId, artifactId);
-    return buildProgress.get(key) ?? { artifactId, status: "idle" };
+    return this.buildProgress.get(key) ?? { artifactId, status: "idle" };
   }
 
   /** Update build progress externally (used by route handler during agent execution). */
   setBuildProgress(projectId: string, epicId: string, artifactId: string, progress: ArtifactBuildProgress): void {
     const key = this.buildKey(projectId, epicId, artifactId);
-    buildProgress.set(key, progress);
+    this.buildProgress.set(key, progress);
   }
 
   /** Read the raw built HTML (without annotation script injection). */
