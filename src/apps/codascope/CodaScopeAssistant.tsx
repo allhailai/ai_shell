@@ -84,7 +84,7 @@ interface Conversation {
 // ── Component ───────────────────────────────────────────────────────
 
 export function CodaScopeAssistant() {
-  const { segments, getParam, setParam } = useAppSubRoute("codascope");
+  const { segments, getParam, setParam, navigate } = useAppSubRoute("codascope");
   const { activeProjectId, projects, wikiTopics, epics } = useCodaScopeStore();
 
   // Conversation state

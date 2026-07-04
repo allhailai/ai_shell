@@ -59,6 +59,7 @@ interface ArtifactSectionPanelProps {
   onRevertToLatest: () => void;
   onPauseHover: () => void;
   onResumeHover: () => void;
+  onCollapse: () => void;
   building: boolean;
 }
 
@@ -88,6 +89,7 @@ export function ArtifactSectionPanel({
   onRevertToLatest,
   onPauseHover,
   onResumeHover,
+  onCollapse,
   building,
 }: ArtifactSectionPanelProps) {
   const [quickAddText, setQuickAddText] = useState("");
@@ -210,6 +212,14 @@ export function ArtifactSectionPanel({
     <div className="codascope-artifact-section-panel">
       {/* Header */}
       <div className="codascope-artifact-section-panel-header">
+        <button
+          className="codascope-artifact-panel-collapse-btn"
+          onClick={onCollapse}
+          title="Collapse panel"
+          type="button"
+        >
+          ▶
+        </button>
         <h3 className="codascope-artifact-section-panel-title">
           Sections & Annotations
         </h3>

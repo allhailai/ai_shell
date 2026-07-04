@@ -62,6 +62,9 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
   // Rebuild warning modal
   const [showRebuildWarning, setShowRebuildWarning] = useState(false);
 
+  // Section panel collapse
+  const [sectionPanelCollapsed, setSectionPanelCollapsed] = useState(false);
+
   const previewRef = useRef<ArtifactPreviewHandle>(null);
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
@@ -668,10 +671,22 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
                   <p>No preview available. Build the artifact from the Spec tab.</p>
                 </div>
               )}
+
+              {/* Expand button shown when panel is collapsed */}
+              {isBuilt && sectionPanelCollapsed && (
+                <button
+                  className="codascope-artifact-panel-expand-btn"
+                  onClick={() => setSectionPanelCollapsed(false)}
+                  title="Expand Sections & Annotations"
+                  type="button"
+                >
+                  ◀
+                </button>
+              )}
             </div>
 
             {/* Section panel (right side) */}
-            {isBuilt && (
+            {isBuilt && !sectionPanelCollapsed && (
               <ArtifactSectionPanel
                 sections={sections}
                 annotations={annotations}
@@ -696,6 +711,7 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
                 onRevertToLatest={handleRevertToLatest}
                 onPauseHover={() => previewRef.current?.pauseHover()}
                 onResumeHover={() => previewRef.current?.resumeHover()}
+                onCollapse={() => setSectionPanelCollapsed(true)}
                 building={building}
               />
             )}
