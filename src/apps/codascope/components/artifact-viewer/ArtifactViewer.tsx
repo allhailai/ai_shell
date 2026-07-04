@@ -443,11 +443,12 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
   );
 
   const handleAddSection = useCallback(
-    async (title: string, afterSectionId: string | null) => {
+    async (title: string, afterSectionId: string | null, instruction?: string) => {
       try {
         await api.addSection(projectId, epicId, artifactId, {
           title,
           afterSectionId,
+          instruction,
         });
         await loadAnnotations();
         flash("New section added as draft annotation");
@@ -599,9 +600,9 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
         {notice && (
           <span className="codascope-artifact-notice">{notice}</span>
         )}
-        {building && buildProgress && (
+        {building && (
           <span className="codascope-artifact-build-status">
-            {buildProgress.progress ?? "Building…"}
+            {buildProgress?.progress ?? "Agent generating sections…"}
           </span>
         )}
       </div>

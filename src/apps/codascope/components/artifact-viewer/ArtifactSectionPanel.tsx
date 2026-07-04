@@ -54,7 +54,7 @@ interface ArtifactSectionPanelProps {
   onToggleAnnotation: (annotationId: string) => void;
   onBatchApply: () => void;
   onRetryFailed: () => void;
-  onAddSection: (title: string, afterSectionId: string | null) => void;
+  onAddSection: (title: string, afterSectionId: string | null, instruction?: string) => void;
   onRevertVersion: (dirName: string) => void;
   onRevertToLatest: () => void;
   onPauseHover: () => void;
@@ -94,6 +94,7 @@ export function ArtifactSectionPanel({
 }: ArtifactSectionPanelProps) {
   const [quickAddText, setQuickAddText] = useState("");
   const [addSectionTitle, setAddSectionTitle] = useState("");
+  const [addSectionInstruction, setAddSectionInstruction] = useState("");
   const [addSectionAfter, setAddSectionAfter] = useState<string | null>(null);
   const [showAddSection, setShowAddSection] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
@@ -157,11 +158,16 @@ export function ArtifactSectionPanel({
   // Add section handler
   const handleAddSection = useCallback(() => {
     if (!addSectionTitle.trim()) return;
-    onAddSection(addSectionTitle.trim(), addSectionAfter);
+    onAddSection(
+      addSectionTitle.trim(),
+      addSectionAfter,
+      addSectionInstruction.trim() || undefined,
+    );
     setAddSectionTitle("");
+    setAddSectionInstruction("");
     setAddSectionAfter(null);
     setShowAddSection(false);
-  }, [addSectionTitle, addSectionAfter, onAddSection]);
+  }, [addSectionTitle, addSectionInstruction, addSectionAfter, onAddSection]);
 
   // Drag-and-drop reorder
   const handleDragStart = useCallback(
@@ -236,77 +242,6 @@ export function ArtifactSectionPanel({
         </div>
       </div>
 
-      {/* Quick-add annotation input */}
-      <div className={`codascope-artifact-quick-add ${pendingElementContext ? "codascope-artifact-quick-add-active" : ""}`}>
-        {pendingElementContext && (
-          <div className="codascope-artifact-quick-add-context">
-            <span className="codascope-artifact-element-context-tag">
-              &lt;{pendingElementContext.elementContext.elementTag}&gt;
-            </span>
-            <span className="codascope-artifact-quick-add-section">
-              in {pendingElementContext.sectionTitle}
-            </span>
-          </div>
-        )}
-        <div className="codascope-artifact-quick-add-row">
-          <textarea
-            ref={quickAddRef}
-            className="codascope-artifact-quick-add-input"
-            value={quickAddText}
-            onChange={(e) => {
-              // Pause iframe hover on first keystroke while element is picked
-              if (pendingElementContext && !quickAddText) {
-                onPauseHover();
-              }
-              setQuickAddText(e.target.value);
-            }}
-            onKeyDown={handleQuickAddKeyDown}
-            placeholder={
-              pendingElementContext
-                ? "Describe change for this element…"
-                : "Add annotation…"
-            }
-            rows={2}
-          />
-          <button
-            className="codascope-artifact-quick-add-btn"
-            onClick={handleQuickAdd}
-            disabled={!quickAddText.trim()}
-            title="Add annotation"
-            type="button"
-          >
-            <IconInsert size={14} />
-          </button>
-        </div>
-      </div>
-
-      {/* Batch action bar */}
-      {(pendingCount > 0 || failedCount > 0) && (
-        <div className="codascope-artifact-batch-bar">
-          {pendingCount > 0 && (
-            <button
-              className="codascope-artifact-batch-regen-btn"
-              onClick={onBatchApply}
-              disabled={building}
-              type="button"
-            >
-              <IconRefresh size={14} />
-              Regenerate w/ {pendingCount} change{pendingCount !== 1 ? "s" : ""}
-            </button>
-          )}
-          {failedCount > 0 && (
-            <button
-              className="codascope-artifact-batch-retry-btn"
-              onClick={onRetryFailed}
-              disabled={building}
-              type="button"
-            >
-              <IconWarning size={14} /> Retry {failedCount} failed
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Section list */}
       <div className="codascope-artifact-section-list">
         <div className="codascope-artifact-section-list-header">
@@ -324,13 +259,27 @@ export function ArtifactSectionPanel({
         {/* Add section form */}
         {showAddSection && (
           <div className="codascope-artifact-add-section-form">
+            <label className="codascope-artifact-add-section-label">
+              Section title <span className="codascope-artifact-add-section-required">*</span>
+            </label>
             <input
-              className="codascope-artifact-add-section-input"
+              className={`codascope-artifact-add-section-input${!addSectionTitle.trim() ? " codascope-artifact-add-section-input-empty" : ""}`}
               type="text"
               value={addSectionTitle}
               onChange={(e) => setAddSectionTitle(e.target.value)}
               placeholder="New section title"
-              onKeyDown={(e) => e.key === "Enter" && handleAddSection()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleAddSection()}
+              autoFocus
+            />
+            <label className="codascope-artifact-add-section-label">
+              Directive <span className="codascope-artifact-add-section-optional">(optional)</span>
+            </label>
+            <textarea
+              className="codascope-artifact-add-section-input codascope-artifact-add-section-instruction"
+              value={addSectionInstruction}
+              onChange={(e) => setAddSectionInstruction(e.target.value)}
+              placeholder="Describe what to build in this section…"
+              rows={3}
             />
             <select
               className="codascope-artifact-add-section-select"
@@ -342,6 +291,7 @@ export function ArtifactSectionPanel({
               }
             >
               <option value="__end__">At the end</option>
+              <option value="__start__">At the start</option>
               {sections.map((s) => (
                 <option key={s.id} value={s.id}>
                   After: {s.title}
@@ -350,15 +300,16 @@ export function ArtifactSectionPanel({
             </select>
             <div className="codascope-artifact-add-section-actions">
               <button
-                className="codascope-artifact-section-action-btn"
+                className="codascope-artifact-add-section-submit"
                 onClick={handleAddSection}
                 disabled={!addSectionTitle.trim()}
+                title={!addSectionTitle.trim() ? "Section title is required" : "Add section"}
                 type="button"
               >
-                <IconCheckmark size={12} /> Add
+                <IconCheckmark size={12} /> Add Section
               </button>
               <button
-                className="codascope-artifact-section-action-btn"
+                className="codascope-artifact-add-section-cancel"
                 onClick={() => setShowAddSection(false)}
                 type="button"
               >
@@ -439,6 +390,84 @@ export function ArtifactSectionPanel({
           );
         })}
       </div>
+
+      {/* Quick-add annotation input */}
+      <div className={`codascope-artifact-quick-add ${pendingElementContext ? "codascope-artifact-quick-add-active" : ""}`}>
+        {pendingElementContext && (
+          <div className="codascope-artifact-quick-add-context">
+            <span className="codascope-artifact-element-context-tag">
+              &lt;{pendingElementContext.elementContext.elementTag}&gt;
+            </span>
+            <span className="codascope-artifact-quick-add-section">
+              in {pendingElementContext.sectionTitle}
+            </span>
+          </div>
+        )}
+        <div className="codascope-artifact-quick-add-row">
+          <textarea
+            ref={quickAddRef}
+            className="codascope-artifact-quick-add-input"
+            value={quickAddText}
+            onChange={(e) => {
+              // Pause iframe hover on first keystroke while element is picked
+              if (pendingElementContext && !quickAddText) {
+                onPauseHover();
+              }
+              setQuickAddText(e.target.value);
+            }}
+            onKeyDown={handleQuickAddKeyDown}
+            placeholder={
+              pendingElementContext
+                ? "Describe change for this element…"
+                : "Add annotation…"
+            }
+            rows={2}
+          />
+          <button
+            className="codascope-artifact-quick-add-btn"
+            onClick={handleQuickAdd}
+            disabled={!quickAddText.trim()}
+            title="Add annotation"
+            type="button"
+          >
+            <IconInsert size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Batch action bar */}
+      {(pendingCount > 0 || failedCount > 0 || building) && (
+        <div className="codascope-artifact-batch-bar">
+          {building ? (
+            <span className="codascope-artifact-batch-generating">
+              <IconRefresh size={14} />
+              Agent generating sections…
+            </span>
+          ) : (
+            <>
+              {pendingCount > 0 && (
+                <button
+                  className="codascope-artifact-batch-regen-btn"
+                  onClick={onBatchApply}
+                  type="button"
+                >
+                  <IconRefresh size={14} />
+                  Regenerate w/ {pendingCount} change{pendingCount !== 1 ? "s" : ""}
+                </button>
+              )}
+              {failedCount > 0 && (
+                <button
+                  className="codascope-artifact-batch-retry-btn"
+                  onClick={onRetryFailed}
+                  type="button"
+                >
+                  <IconWarning size={14} /> Retry {failedCount} failed
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Annotation queue */}
       <div className="codascope-artifact-annotation-queue">
