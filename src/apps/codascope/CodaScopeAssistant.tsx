@@ -45,14 +45,19 @@ function stripActionTagsClient(text: string): string {
 /**
  * Convert Obsidian-style [[topic-id]] wikilinks into markdown links
  * that navigate to the wiki topic page within CodaScope.
+ * When epicId is provided, links target the epic-scoped wiki.
  */
-function convertWikiLinks(text: string, projectId: string | null): string {
+function convertWikiLinks(text: string, projectId: string | null, epicId?: string | null): string {
   if (!text || !projectId) return text;
   return text.replace(
     /\[\[([^\]]+)\]\]/g,
     (_match, topicId: string) => {
       const slug = topicId.trim();
-      return `[${slug}](/codascope/project/${projectId}/wiki/${encodeURIComponent(slug)})`;
+      const encodedSlug = encodeURIComponent(slug);
+      const url = epicId
+        ? `/codascope/project/${projectId}/epic/${epicId}/knowledge/wiki/${encodedSlug}`
+        : `/codascope/project/${projectId}/wiki/${encodedSlug}`;
+      return `[${slug}](${url})`;
     },
   );
 }
@@ -912,7 +917,7 @@ export function CodaScopeAssistant() {
                 </div>
                 <div className="codascope-assistant-msg-content">
                   {msg.role === "assistant" ? (
-                    <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId)} />
+                    <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId, currentEpicId)} />
                   ) : (
                     <>
                       {msg.images && msg.images.length > 0 && (
@@ -955,7 +960,7 @@ export function CodaScopeAssistant() {
             <div className="codascope-assistant-msg-avatar">🤖</div>
             <div className="codascope-assistant-msg-content">
               {streamingContent ? (
-                <MarkdownViewer content={convertWikiLinks(stripActionTagsClient(streamingContent), activeProjectId)} />
+                <MarkdownViewer content={convertWikiLinks(stripActionTagsClient(streamingContent), activeProjectId, currentEpicId)} />
               ) : (
                 <div className="codascope-assistant-thinking">
                   <span />

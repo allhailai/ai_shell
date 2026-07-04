@@ -10,6 +10,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback } from "react";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
@@ -82,6 +83,7 @@ export function EpicKnowledgeWikiView({
   sources,
 }: EpicKnowledgeWikiViewProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { navigate } = useAppSubRoute("codascope");
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -111,6 +113,20 @@ export function EpicKnowledgeWikiView({
       cancelled = true;
     };
   }, [activeProjectId, epic.id, pageId]);
+
+  // ── Wiki link navigation ──────────────────────────────────────────
+  const handleWikiLink = useCallback((topic: string) => {
+    if (!activeProjectId) return;
+    // Resolve the topic slug against known wiki pages (by id or title)
+    const normalizedTopic = topic.toLowerCase().trim();
+    const match = wikiPages.find(
+      (p) =>
+        p.id.toLowerCase() === normalizedTopic ||
+        p.title.toLowerCase() === normalizedTopic,
+    );
+    const targetId = match?.id ?? topic;
+    navigate(`project/${activeProjectId}/epic/${epic.id}/knowledge/wiki/${targetId}`);
+  }, [activeProjectId, epic.id, wikiPages, navigate]);
 
   // No page selected → show overview
   if (!pageId) {
@@ -183,7 +199,9 @@ export function EpicKnowledgeWikiView({
         {loading && (
           <div className="codascope-knowledge-loading">Loading…</div>
         )}
-        {!loading && content !== null && <MarkdownViewer content={content} />}
+        {!loading && content !== null && (
+          <MarkdownViewer content={content} onWikiLink={handleWikiLink} />
+        )}
         {!loading && content === null && (
           <div className="codascope-knowledge-empty">
             <p>Page content not found.</p>
