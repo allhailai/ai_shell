@@ -4,7 +4,7 @@
    and batch regeneration controls.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type {
   ArtifactSection,
   ArtifactAnnotation,
@@ -57,6 +57,8 @@ interface ArtifactSectionPanelProps {
   onAddSection: (title: string, afterSectionId: string | null) => void;
   onRevertVersion: (dirName: string) => void;
   onRevertToLatest: () => void;
+  onPauseHover: () => void;
+  onResumeHover: () => void;
   building: boolean;
 }
 
@@ -84,6 +86,8 @@ export function ArtifactSectionPanel({
   onAddSection,
   onRevertVersion,
   onRevertToLatest,
+  onPauseHover,
+  onResumeHover,
   building,
 }: ArtifactSectionPanelProps) {
   const [quickAddText, setQuickAddText] = useState("");
@@ -93,6 +97,14 @@ export function ArtifactSectionPanel({
   const [showVersions, setShowVersions] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const quickAddRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-focus the quick-add textarea when an element is picked
+  useEffect(() => {
+    if (pendingElementContext && quickAddRef.current) {
+      quickAddRef.current.focus();
+      quickAddRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [pendingElementContext]);
 
   // Group annotations by status
   const pendingAnnotations = useMemo(
@@ -127,7 +139,8 @@ export function ArtifactSectionPanel({
       elementContext: ctx?.elementContext ?? null,
     });
     setQuickAddText("");
-  }, [quickAddText, pendingElementContext, sections, onAddAnnotation]);
+    onResumeHover();
+  }, [quickAddText, pendingElementContext, sections, onAddAnnotation, onResumeHover]);
 
   const handleQuickAddKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -214,7 +227,7 @@ export function ArtifactSectionPanel({
       </div>
 
       {/* Quick-add annotation input */}
-      <div className="codascope-artifact-quick-add">
+      <div className={`codascope-artifact-quick-add ${pendingElementContext ? "codascope-artifact-quick-add-active" : ""}`}>
         {pendingElementContext && (
           <div className="codascope-artifact-quick-add-context">
             <span className="codascope-artifact-element-context-tag">
@@ -230,7 +243,13 @@ export function ArtifactSectionPanel({
             ref={quickAddRef}
             className="codascope-artifact-quick-add-input"
             value={quickAddText}
-            onChange={(e) => setQuickAddText(e.target.value)}
+            onChange={(e) => {
+              // Pause iframe hover on first keystroke while element is picked
+              if (pendingElementContext && !quickAddText) {
+                onPauseHover();
+              }
+              setQuickAddText(e.target.value);
+            }}
             onKeyDown={handleQuickAddKeyDown}
             placeholder={
               pendingElementContext

@@ -143,9 +143,12 @@ export function subscribeBuildStatus(
     try {
       const data = JSON.parse(event.data) as ArtifactBuildProgress;
       onProgress(data);
-      if (data.status === "complete" || data.status === "error" || data.status === "idle") {
+      if (data.status === "complete" || data.status === "idle") {
         es.close();
         onDone();
+      } else if (data.status === "error") {
+        es.close();
+        onError(new Error(data.error ?? "Build failed"));
       }
     } catch {
       // ignore parse errors

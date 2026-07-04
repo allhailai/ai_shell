@@ -310,13 +310,43 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
         epicId,
         artifactId,
       );
-      flash(`Applied ${result.applied} annotation(s)`);
-      await loadAnnotations();
-      setPreviewKey((k) => k + 1);
+      if (result.applied === 0) {
+        flash("No pending annotations to apply");
+        return;
+      }
+
+      // Enter building state and subscribe to SSE for real-time progress
+      setBuilding(true);
+      setBuildProgress(null);
+      flash(`Regenerating ${result.applied} annotation(s)…`);
+
+      // Subscribe to SSE build status — same pattern as handleBuild
+      sseCleanupRef.current?.();
+      sseCleanupRef.current = api.subscribeBuildStatus(
+        projectId,
+        epicId,
+        artifactId,
+        (progress) => setBuildProgress(progress),
+        () => {
+          // Regeneration done
+          setBuilding(false);
+          setBuildProgress(null);
+          void loadAnnotations();
+          void loadSections();
+          setPreviewKey((k) => k + 1);
+          flash("Sections regenerated ✓");
+        },
+        (err) => {
+          setBuilding(false);
+          setBuildProgress(null);
+          void loadAnnotations();
+          flash(err.message || "Regeneration failed");
+        },
+      );
     } catch (err) {
       flash(err instanceof Error ? err.message : "Batch apply failed");
     }
-  }, [projectId, epicId, artifactId, loadAnnotations, flash]);
+  }, [projectId, epicId, artifactId, loadAnnotations, loadSections, flash]);
 
   const handleRetryFailed = useCallback(async () => {
     try {
@@ -664,6 +694,8 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
                 onAddSection={handleAddSection}
                 onRevertVersion={handleRevertVersion}
                 onRevertToLatest={handleRevertToLatest}
+                onPauseHover={() => previewRef.current?.pauseHover()}
+                onResumeHover={() => previewRef.current?.resumeHover()}
                 building={building}
               />
             )}

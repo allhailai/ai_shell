@@ -37,8 +37,10 @@ export function getAnnotationScript(): string {
   });
 
   var active = false;
+  var hoverPaused = false;
   var overlay = null;
   var label = null;
+  var annotatedEls = []; // Elements with persistent annotation outlines
 
   var SEMANTIC_TAGS = [
     'SECTION','ARTICLE','NAV','HEADER','FOOTER','MAIN','ASIDE',
@@ -53,7 +55,19 @@ export function getAnnotationScript(): string {
     if (e.data.type === 'exit-annotation-mode') deactivate();
     if (e.data.type === 'highlight-element') highlightElement(e.data.cssPath, e.data.sectionId);
     if (e.data.type === 'scroll-to-section') scrollToSection(e.data.sectionId);
+    if (e.data.type === 'pause-hover') pauseHover();
+    if (e.data.type === 'resume-hover') resumeHover();
   });
+
+  function pauseHover() {
+    hoverPaused = true;
+    if (overlay) overlay.style.display = 'none';
+    if (label) label.style.display = 'none';
+  }
+
+  function resumeHover() {
+    hoverPaused = false;
+  }
 
   function highlightElement(cssPath, sectionId) {
     var el = cssPath ? document.querySelector(cssPath) : null;
@@ -108,6 +122,27 @@ export function getAnnotationScript(): string {
     document.body.style.cursor = '';
     if (overlay) { overlay.remove(); overlay = null; }
     if (label) { label.remove(); label = null; }
+    clearAnnotatedOutlines();
+  }
+
+  /** Remove persistent outlines from all previously-annotated elements */
+  function clearAnnotatedOutlines() {
+    for (var i = 0; i < annotatedEls.length; i++) {
+      var el = annotatedEls[i];
+      el.style.outline = '';
+      el.style.outlineOffset = '';
+      el.style.transition = '';
+    }
+    annotatedEls = [];
+  }
+
+  /** Apply a persistent dimmer outline to mark an element as annotated */
+  function markAnnotated(el) {
+    // Avoid duplicates
+    if (annotatedEls.indexOf(el) !== -1) return;
+    annotatedEls.push(el);
+    el.style.outline = '2px solid rgba(200,112,64,0.45)';
+    el.style.outlineOffset = '2px';
   }
 
   function findSemanticParent(el) {
@@ -148,7 +183,7 @@ export function getAnnotationScript(): string {
   }
 
   function handleHover(e) {
-    if (!active || !overlay || !label) return;
+    if (!active || !overlay || !label || hoverPaused) return;
     var target = findSemanticParent(e.target);
     var rect = target.getBoundingClientRect();
     overlay.style.display = 'block';
@@ -173,6 +208,9 @@ export function getAnnotationScript(): string {
     var sectionId = getSectionId(target);
     var text = (target.textContent || '').replace(/\\s+/g, ' ').trim();
 
+    // Leave a persistent dimmer outline on the annotated element
+    markAnnotated(target);
+
     window.parent.postMessage({
       type: 'annotation-selected',
       sectionId: sectionId,
@@ -187,3 +225,4 @@ export function getAnnotationScript(): string {
 })();
 </script>`;
 }
+

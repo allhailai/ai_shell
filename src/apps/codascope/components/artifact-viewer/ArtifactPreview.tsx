@@ -24,6 +24,8 @@ export interface ArtifactPreviewHandle {
   exitAnnotationMode: () => void;
   scrollToSection: (sectionId: string) => void;
   highlightElement: (cssPath: string, sectionId?: string) => void;
+  pauseHover: () => void;
+  resumeHover: () => void;
 }
 
 export const ArtifactPreview = forwardRef<ArtifactPreviewHandle, ArtifactPreviewProps>(
@@ -51,6 +53,10 @@ export const ArtifactPreview = forwardRef<ArtifactPreviewHandle, ArtifactPreview
           postToIframe({ type: "scroll-to-section", sectionId }),
         highlightElement: (cssPath: string, sectionId?: string) =>
           postToIframe({ type: "highlight-element", cssPath, sectionId }),
+        pauseHover: () =>
+          postToIframe({ type: "pause-hover" }),
+        resumeHover: () =>
+          postToIframe({ type: "resume-hover" }),
       }),
       [postToIframe],
     );
