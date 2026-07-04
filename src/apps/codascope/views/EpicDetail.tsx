@@ -83,9 +83,14 @@ export function EpicDetail() {
   const subSection = segments[5] ?? "";
   const itemId = segments[6] ?? "";
 
-  // Build the active section key
-  const activeSection = subSection ? `${section}/${subSection}` : section;
-  const activeSubItemId = itemId || null;
+  // Build the active section key.
+  // For 'design', subSection is the docId (not a sub-section like knowledge/wiki).
+  const activeSection = (section === "design" || !subSection)
+    ? section
+    : `${section}/${subSection}`;
+  const activeSubItemId = section === "design"
+    ? (subSection || null)
+    : (itemId || null);
 
   // ── Epic data ────────────────────────────────────────────────────────
   const [epic, setEpic] = useState<EpicDesignDetail | null>(null);
@@ -471,7 +476,7 @@ export function EpicDetail() {
       }
       break;
     case "design":
-      content = <EpicDesignDocs epic={epic} setEpic={setEpic} />;
+      content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} />;
       break;
     case "history":
       content = <EpicHistory epic={epic} setEpic={setEpic} />;
@@ -489,6 +494,7 @@ export function EpicDetail() {
         collapsed={collapsed}
         onToggleCollapse={handleToggleCollapse}
         wikiPages={wikiPages}
+        designDocs={epic.designDocs.filter((d) => !d.archivedAt)}
         sources={goodSources}
         errorSources={errorSources}
         blockedItems={blockedItems}

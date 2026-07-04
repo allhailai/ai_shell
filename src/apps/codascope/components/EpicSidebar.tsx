@@ -19,6 +19,7 @@ import {
 import { CurateButton } from "./CurateButton";
 import type {
   EpicDesignDetail,
+  EpicDesignDoc,
   EpicKnowledgeSource,
   EpicWikiPage,
   BlockedDownload,
@@ -58,6 +59,7 @@ interface EpicSidebarProps {
   onToggleCollapse: () => void;
   // Sub-item data
   wikiPages: EpicWikiPage[];
+  designDocs: EpicDesignDoc[];          // non-archived design docs
   sources: EpicKnowledgeSource[];        // non-error sources only
   errorSources: EpicKnowledgeSource[];   // error-status sources
   blockedItems: BlockedDownload[];
@@ -115,6 +117,7 @@ export function EpicSidebar({
   collapsed,
   onToggleCollapse,
   wikiPages,
+  designDocs,
   sources,
   errorSources,
   blockedItems,
@@ -197,7 +200,8 @@ export function EpicSidebar({
   const showWikiSubItems = activeSection === "knowledge/wiki";
   const showSourceSubItems = activeSection === "knowledge/sources";
   const showFailedSubItems = activeSection === "knowledge/failed";
-  const showSubItems = showWikiSubItems || showSourceSubItems || showFailedSubItems;
+  const showDesignSubItems = activeSection === "design";
+  const showSubItems = showWikiSubItems || showSourceSubItems || showFailedSubItems || showDesignSubItems;
 
   const failedCount = errorSources.length + blockedItems.length;
 
@@ -522,6 +526,51 @@ export function EpicSidebar({
                       {item.reason}
                     </span>
                   </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Design docs */}
+          {showDesignSubItems && (
+            <>
+              <div className="codascope-epic-sidebar-subitems-header">
+                <span>Design Docs</span>
+                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                  {designDocs.length}
+                </span>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {designDocs.length === 0 && (
+                  <div
+                    style={{
+                      padding: "var(--space-3)",
+                      textAlign: "center",
+                      color: "var(--color-text-tertiary)",
+                      fontSize: "var(--text-xs)",
+                    }}
+                  >
+                    No design docs yet
+                  </div>
+                )}
+                {designDocs.map((doc) => (
+                  <button
+                    key={doc.id}
+                    className={`codascope-epic-sidebar-wiki-item ${
+                      activeSubItemId === doc.id
+                        ? "codascope-epic-sidebar-wiki-item--active"
+                        : ""
+                    }`}
+                    onClick={() => onNavigate("design", doc.id)}
+                    type="button"
+                  >
+                    <span className="codascope-epic-sidebar-wiki-item-icon">
+                      <IconPaintbrush size={12} />
+                    </span>
+                    <span className="codascope-epic-sidebar-wiki-item-title">
+                      {doc.title}
+                    </span>
+                  </button>
                 ))}
               </div>
             </>

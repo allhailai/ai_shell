@@ -1,15 +1,17 @@
 /* ── CodaScope: EpicDesignDocs View ──────────────────────────────────
-   The Design tab content. Shows:
-   - List of design documents with title, creator metadata, word count
-   - "New Design" button → opens chat panel
-   - Empty state points to chat for design doc creation
-   - Click doc → opens DocumentEditor in-page
+   The Design tab content. Renders:
+   - Empty state when no doc selected (with chat CTA)
+   - DocumentEditor when a doc is selected via URL
+   - HTML rendered preview when triggered
+
+   Design docs are listed in the EpicSidebar, not in this component.
+   URL scheme: /epic/:epicId/design/:docId
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
-import { IconFile, IconDelete, IconLaunch, IconPaintbrush, IconUndo, IconDownload } from "../components/CodaScopeIcons";
+import { IconPaintbrush, IconChat } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
@@ -20,96 +22,95 @@ import type { EpicDesignDetail, EpicDesignDoc } from "../codaScopeTypes";
 interface EpicDesignDocsProps {
   epic: EpicDesignDetail;
   setEpic: (e: EpicDesignDetail) => void;
+  docId: string | null;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
+export function EpicDesignDocs({ epic, setEpic, docId }: EpicDesignDocsProps) {
   const { activeProjectId } = useCodaScopeStore();
-  const { getParam, setParam } = useAppSubRoute("codascope");
+  const { navigate } = useAppSubRoute("codascope");
 
-  const [activeDoc, setActiveDoc] = useState<{ doc: EpicDesignDoc; content: string; contentHash?: string } | null>(null);
-  const [archiving, setArchiving] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
+  const [docData, setDocData] = useState<{ doc: EpicDesignDoc; content: string; contentHash?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
 
   // Phase 3: Rendering state
-  const [rendering, setRendering] = useState<string | null>(null);
-  const [renderedDocId, setRenderedDocId] = useState<string | null>(null);
+  const [rendering, setRendering] = useState(false);
   const [renderedHtmlUrl, setRenderedHtmlUrl] = useState<string | null>(null);
 
-  // Auto-open chat panel when Design tab mounts with zero docs
-  const activeDocs = epic.designDocs.filter((d) => !d.archivedAt);
-  useEffect(() => {
-    if (activeDocs.length === 0) {
-      useShellStore.getState().openRightPanel("assistant");
-    }
-    // Also refresh the doc list on mount to catch docs created while on other tabs
-    if (activeProjectId) {
-      void (async () => {
-        try {
-          const res = await fetch(
-            `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const freshDocs = data.docs ?? [];
-            // Only update if the count changed (avoid unnecessary re-renders)
-            if (freshDocs.length !== epic.designDocs.length) {
-              setEpic({ ...epic, designDocs: freshDocs });
-            }
-          }
-        } catch { /* best-effort */ }
-      })();
-    }
-  }, []); // Only on mount
+  // ── Fetch doc content when docId changes ─────────────────────────────
 
-  // Deep-link: auto-open doc from URL query param on mount
-  const docParam = getParam("doc");
   useEffect(() => {
-    if (!docParam || !activeProjectId || activeDoc) return;
-    // Only auto-open if we don't already have a doc open
+    if (!activeProjectId || !docId) {
+      setDocData(null);
+      setRenderedHtmlUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setRenderedHtmlUrl(null);
     void (async () => {
       try {
         const res = await fetch(
-          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docParam}`,
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}`,
+        );
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          setDocData({ doc: data.doc, content: data.content, contentHash: data.contentHash });
+        } else {
+          setDocData(null);
+        }
+      } catch {
+        /* silent */
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, epic.id, docId]);
+
+  // ── Refresh design docs list on mount ────────────────────────────────
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
         );
         if (res.ok) {
           const data = await res.json();
-          setActiveDoc({ doc: data.doc, content: data.content, contentHash: data.contentHash });
+          const freshDocs = data.docs ?? [];
+          if (freshDocs.length !== epic.designDocs.length) {
+            setEpic({ ...epic, designDocs: freshDocs });
+          }
         }
-      } catch { /* ignore — doc may have been deleted */ }
+      } catch { /* best-effort */ }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docParam, activeProjectId, epic.id]); // Only re-run when the doc param changes
+  }, []); // Only on mount
 
-  // Listen for agent-created design docs — auto-open them
+  // ── Listen for agent-created design docs ─────────────────────────────
+
   const commandBus = useCommandBus();
   useEffect(() => {
     if (!commandBus || !activeProjectId) return;
     const unsub = commandBus.on("codascope:design-doc-created", async (data: { epicId: string; docId: string }) => {
       if (data.epicId !== epic.id) return;
       try {
-        // Fetch the newly created doc and open it
-        const res = await fetch(
-          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${data.docId}`,
+        // Refresh the doc list
+        const listRes = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
         );
-        if (res.ok) {
-          const result = await res.json();
-          setActiveDoc({ doc: result.doc, content: result.content, contentHash: result.contentHash });
-          setParam("doc", data.docId);
-          // Refresh the epic doc list
-          const listRes = await fetch(
-            `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs`,
-          );
-          if (listRes.ok) {
-            const listData = await listRes.json();
-            setEpic({ ...epic, designDocs: listData.docs ?? [] });
-          }
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          setEpic({ ...epic, designDocs: listData.docs ?? [] });
         }
+        // Navigate to the new doc
+        navigate(`project/${activeProjectId}/epic/${epic.id}/design/${data.docId}`);
       } catch { /* best-effort */ }
     });
     return () => { unsub(); };
-  }, [commandBus, activeProjectId, epic, setEpic]);
+  }, [commandBus, activeProjectId, epic, setEpic, navigate]);
 
   /* ── Handlers ──────────────────────────────────────────────────────── */
 
@@ -117,102 +118,47 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     useShellStore.getState().openRightPanel("assistant");
   }, []);
 
-  const openDoc = useCallback(async (doc: EpicDesignDoc) => {
-    if (!activeProjectId) return;
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${doc.id}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setActiveDoc({ doc: data.doc, content: data.content, contentHash: data.contentHash });
-        setParam("doc", doc.id);
-      }
-    } catch { /* ignore */ }
-  }, [activeProjectId, epic.id, setParam]);
-
-  const archiveDoc = useCallback(async (docId: string) => {
-    if (!activeProjectId) return;
-    setArchiving(docId);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/archive`,
-        { method: "PATCH" },
-      );
-      if (res.ok) {
-        setEpic({
-          ...epic,
-          designDocs: epic.designDocs.map((d) =>
-            d.id === docId ? { ...d, archivedAt: new Date().toISOString() } : d,
-          ),
-        });
-      }
-    } catch { /* ignore */ }
-    setArchiving(null);
-  }, [activeProjectId, epic, setEpic]);
-
-  const unarchiveDoc = useCallback(async (docId: string) => {
-    if (!activeProjectId) return;
-    setArchiving(docId);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/unarchive`,
-        { method: "PATCH" },
-      );
-      if (res.ok) {
-        setEpic({
-          ...epic,
-          designDocs: epic.designDocs.map((d) => {
-            if (d.id !== docId) return d;
-            const { archivedAt: _, ...rest } = d;
-            return rest;
-          }),
-        });
-      }
-    } catch { /* ignore */ }
-    setArchiving(null);
-  }, [activeProjectId, epic, setEpic]);
-
   const handleContentChange = useCallback((newContent: string, newContentHash?: string) => {
-    if (!activeDoc) return;
+    if (!docData) return;
     const wordCount = newContent.trim() ? newContent.trim().split(/\s+/).length : 0;
-    const updatedDoc = { ...activeDoc.doc, wordCount, updatedAt: new Date().toISOString() };
-    setActiveDoc({ doc: updatedDoc, content: newContent, contentHash: newContentHash ?? activeDoc.contentHash });
+    const updatedDoc = { ...docData.doc, wordCount, updatedAt: new Date().toISOString() };
+    setDocData({ doc: updatedDoc, content: newContent, contentHash: newContentHash ?? docData.contentHash });
     setEpic({
       ...epic,
       designDocs: epic.designDocs.map((d) => d.id === updatedDoc.id ? updatedDoc : d),
     });
-  }, [activeDoc, epic, setEpic]);
+  }, [docData, epic, setEpic]);
+
+  const handleClose = useCallback(() => {
+    if (!activeProjectId) return;
+    navigate(`project/${activeProjectId}/epic/${epic.id}/design`);
+  }, [activeProjectId, epic.id, navigate]);
 
   // Phase 3: Render as HTML
-  const renderAsHtml = useCallback(async (docId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!activeProjectId || rendering) return;
-    setRendering(docId);
+  const renderAsHtml = useCallback(async () => {
+    if (!activeProjectId || !docId || rendering) return;
+    setRendering(true);
     try {
       const res = await fetch(
         `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/render`,
         { method: "POST" },
       );
       if (res.ok) {
-        // Set the URL for the rendered preview
-        setRenderedDocId(docId);
         setRenderedHtmlUrl(
           `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/rendered`,
         );
       }
     } catch { /* ignore */ }
-    setRendering(null);
-  }, [activeProjectId, epic.id, rendering]);
+    setRendering(false);
+  }, [activeProjectId, epic.id, docId, rendering]);
 
   /* ── Rendered HTML preview ─────────────────────────────────────────── */
 
-  if (renderedDocId && renderedHtmlUrl) {
-    const renderedDoc = epic.designDocs.find((d) => d.id === renderedDocId);
+  if (renderedHtmlUrl && docData) {
     return (
       <div className="codascope-rendered-preview">
         <div className="codascope-rendered-preview-header">
-          <h3>{renderedDoc?.title ?? "Rendered Document"}</h3>
+          <h3>{docData.doc.title ?? "Rendered Document"}</h3>
           <div className="codascope-rendered-preview-actions">
             <button
               className="codascope-btn codascope-btn-ghost codascope-btn-sm"
@@ -223,7 +169,7 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
             </button>
             <button
               className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-              onClick={() => { setRenderedDocId(null); setRenderedHtmlUrl(null); }}
+              onClick={() => setRenderedHtmlUrl(null)}
               type="button"
             >
               ✕ Close Preview
@@ -240,153 +186,72 @@ export function EpicDesignDocs({ epic, setEpic }: EpicDesignDocsProps) {
     );
   }
 
-  /* ── Active document editor view ───────────────────────────────────── */
+  /* ── No doc selected — empty state ─────────────────────────────────── */
 
-  if (activeDoc) {
+  if (!docId) {
     return (
-      <DocumentEditor
-        epicId={epic.id}
-        doc={activeDoc.doc}
-        content={activeDoc.content}
-        contentHash={activeDoc.contentHash}
-        onContentChange={handleContentChange}
-        onClose={() => { setActiveDoc(null); setParam("doc", null); }}
-      />
-    );
-  }
-
-  /* ── Design doc list ───────────────────────────────────────────────── */
-
-  const archivedDocs = epic.designDocs.filter((d) => !!d.archivedAt);
-
-  /** Render creator metadata line */
-  const renderCreatedBy = (doc: EpicDesignDoc) => {
-    const creator = doc.createdBy;
-    if (creator === "agent") {
-      return <span className="codascope-design-doc-card-creator">Created by agent</span>;
-    }
-    if (creator) {
-      return <span className="codascope-design-doc-card-creator">Created by {creator}</span>;
-    }
-    return null;
-  };
-
-  return (
-    <div className="codascope-design-doc-list">
-      <div className="codascope-design-doc-list-header">
-        <span className="codascope-design-doc-list-count">
-          {activeDocs.length} document{activeDocs.length !== 1 ? "s" : ""}
-        </span>
+      <div className="codascope-empty-state">
+        <span className="codascope-empty-state-icon"><IconPaintbrush size={32} /></span>
+        <div className="codascope-empty-state-title">
+          {epic.designDocs.filter((d) => !d.archivedAt).length === 0
+            ? "No design documents yet"
+            : "Select a design document"}
+        </div>
+        <div className="codascope-empty-state-text">
+          {epic.designDocs.filter((d) => !d.archivedAt).length === 0
+            ? "Use the chat assistant to create your first design document."
+            : "Choose a document from the sidebar, or create a new one using the chat assistant."}
+        </div>
         <button
           className="codascope-btn codascope-btn-primary"
           onClick={openChatPanel}
           type="button"
+          style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}
         >
-          + New Design
+          <IconChat size={14} />
+          Open Chat Assistant
         </button>
       </div>
+    );
+  }
 
-      {activeDocs.length === 0 ? (
-        <div className="codascope-empty-state">
-          <span className="codascope-empty-state-icon"><IconPaintbrush size={32} /></span>
-          <h3>No design documents yet</h3>
-          <p>Use the chat assistant to create your first design document. Describe what you need and the agent will draft it for you.</p>
-          <button
-            className="codascope-btn codascope-btn-primary"
-            onClick={openChatPanel}
-            type="button"
-          >
-            Open Chat to Start Designing
-          </button>
-        </div>
-      ) : (
-        <div className="codascope-design-doc-grid">
-          {activeDocs.map((doc) => (
-            <div key={doc.id} className="codascope-design-doc-card" onClick={() => openDoc(doc)}>
-              <div className="codascope-design-doc-card-header">
-                <span className="codascope-design-doc-card-icon">
-                  <IconFile size={24} />
-                </span>
-                <h4 className="codascope-design-doc-card-title">{doc.title}</h4>
-              </div>
-              <div className="codascope-design-doc-card-meta">
-                {renderCreatedBy(doc)}
-                <span>{doc.wordCount.toLocaleString()} words</span>
-                <span>
-                  {new Date(doc.updatedAt).toLocaleDateString("en-US", {
-                    month: "short", day: "numeric",
-                  })}
-                </span>
-              </div>
-              <div className="codascope-design-doc-card-actions">
-                <a
-                  className="codascope-epic-card-action"
-                  href={`/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${doc.id}/download`}
-                  download
-                  title="Download as Markdown"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <IconDownload size={14} />
-                </a>
-                <button
-                  className="codascope-epic-card-action codascope-render-btn"
-                  onClick={(e) => renderAsHtml(doc.id, e)}
-                  disabled={rendering === doc.id}
-                  title="Render as HTML"
-                  type="button"
-                >
-                  {rendering === doc.id ? "…" : <IconLaunch size={14} />}
-                </button>
-                <button
-                  className="codascope-epic-card-action"
-                  onClick={(e) => { e.stopPropagation(); archiveDoc(doc.id); }}
-                  disabled={archiving === doc.id}
-                  title="Archive document"
-                  type="button"
-                >
-                  {archiving === doc.id ? "…" : <IconDelete size={14} />}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+  /* ── Loading state ─────────────────────────────────────────────────── */
 
-      {archivedDocs.length > 0 && (
-        <div className="codascope-design-doc-archived">
-          <button
-            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-            onClick={() => setShowArchived(!showArchived)}
-            type="button"
-          >
-            {showArchived ? "▾" : "▸"} {archivedDocs.length} archived
-          </button>
-          {showArchived && (
-            <div className="codascope-design-doc-archived-list">
-              {archivedDocs.map((doc) => (
-                <div key={doc.id} className="codascope-design-doc-archived-item">
-                  <span className="codascope-design-doc-archived-icon">
-                    <IconFile size={18} />
-                  </span>
-                  <span className="codascope-design-doc-archived-title">{doc.title}</span>
-                  <span className="codascope-design-doc-archived-meta">
-                    {doc.wordCount.toLocaleString()} words
-                  </span>
-                  <button
-                    className="codascope-epic-card-action codascope-epic-card-action--restore"
-                    onClick={() => unarchiveDoc(doc.id)}
-                    disabled={archiving === doc.id}
-                    title="Restore document"
-                    type="button"
-                  >
-                    {archiving === doc.id ? "…" : <IconUndo size={14} />}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+  if (loading) {
+    return (
+      <div className="codascope-empty-state">
+        <p>Loading document…</p>
+      </div>
+    );
+  }
+
+  /* ── Doc not found ─────────────────────────────────────────────────── */
+
+  if (!docData) {
+    return (
+      <div className="codascope-empty-state">
+        <p>Document not found.</p>
+        <button
+          className="codascope-btn codascope-btn-ghost"
+          onClick={handleClose}
+          type="button"
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  /* ── Active document editor view ───────────────────────────────────── */
+
+  return (
+    <DocumentEditor
+      epicId={epic.id}
+      doc={docData.doc}
+      content={docData.content}
+      contentHash={docData.contentHash}
+      onContentChange={handleContentChange}
+      onClose={handleClose}
+    />
   );
 }
