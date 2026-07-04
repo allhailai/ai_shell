@@ -32,7 +32,7 @@ export interface AgentSendOptions {
   systemPrompt?: string;
   context?: string;
   images?: Array<{ data: string; mimeType: string }>;
-  purpose: "chat" | "assistant" | "wiki-build" | "curation" | "research";
+  purpose: "chat" | "assistant" | "wiki-build" | "curation" | "research" | "artifact-build" | "artifact-section-regen";
   onMessage: (msg: SDKMessage) => void;
   onDone: (result: RunResult) => void;
   onError: (err: Error) => void;

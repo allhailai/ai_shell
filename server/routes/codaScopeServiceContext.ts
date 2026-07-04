@@ -25,6 +25,9 @@ import { CodaScopeEpicKnowledgeService } from "../services/codaScopeEpicKnowledg
 import { CodaScopeCurationService } from "../services/codaScopeCurationService.js";
 import { CodaScopeContentService } from "../services/codaScopeContentService.js";
 import { CodaScopeImageService } from "../services/codaScopeImageService.js";
+import { CodaScopeArtifactService } from "../services/codaScopeArtifactService.js";
+import { CodaScopeArtifactAnnotationService } from "../services/codaScopeArtifactAnnotationService.js";
+import { CodaScopeArtifactVersionService } from "../services/codaScopeArtifactVersionService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -58,6 +61,9 @@ export interface CodaScopeServices {
   curationSvc: CodaScopeCurationService;
   contentSvc: CodaScopeContentService;
   imageSvc: CodaScopeImageService;
+  artifactSvc: CodaScopeArtifactService;
+  artifactAnnotationSvc: CodaScopeArtifactAnnotationService;
+  artifactVersionSvc: CodaScopeArtifactVersionService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -98,6 +104,9 @@ let epicKnowledgeService: CodaScopeEpicKnowledgeService | null = null;
 let curationService: CodaScopeCurationService | null = null;
 let contentService: CodaScopeContentService | null = null;
 let imageService: CodaScopeImageService | null = null;
+let artifactService: CodaScopeArtifactService | null = null;
+let artifactAnnotationService: CodaScopeArtifactAnnotationService | null = null;
+let artifactVersionService: CodaScopeArtifactVersionService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -190,6 +199,15 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!imageService) imageService = new CodaScopeImageService(root);
   else imageService.setRoot(root);
 
+  if (!artifactService) artifactService = new CodaScopeArtifactService(root);
+  else artifactService.setRoot(root);
+
+  if (!artifactAnnotationService) artifactAnnotationService = new CodaScopeArtifactAnnotationService(root);
+  else artifactAnnotationService.setRoot(root);
+
+  if (!artifactVersionService) artifactVersionService = new CodaScopeArtifactVersionService(root);
+  else artifactVersionService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -211,6 +229,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     curationSvc: curationService,
     contentSvc: contentService,
     imageSvc: imageService,
+    artifactSvc: artifactService,
+    artifactAnnotationSvc: artifactAnnotationService,
+    artifactVersionSvc: artifactVersionService,
   };
 }
 

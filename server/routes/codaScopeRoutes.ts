@@ -17,6 +17,7 @@ import { registerChatRoutes } from "./codaScopeChatRoutes.js";
 import { registerEpicRoutes } from "./codaScopeEpicRoutes.js";
 import { registerAnnotationRoutes } from "./codaScopeAnnotationRoutes.js";
 import { registerKnowledgeRoutes } from "./codaScopeKnowledgeRoutes.js";
+import { registerArtifactRoutes } from "./codaScopeArtifactRoutes.js";
 
 export { type CodaScopeRoutesDeps } from "./codaScopeServiceContext.js";
 
@@ -30,4 +31,5 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   registerEpicRoutes(ctx);
   registerAnnotationRoutes(ctx);
   registerKnowledgeRoutes(ctx);
+  registerArtifactRoutes(ctx);
 }
