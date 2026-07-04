@@ -6455,3 +6455,1093 @@
   border-top: 1px solid var(--color-border-primary);
   flex-shrink: 0;
 }
+
+/* ── Visual Artifact System ──────────────────────────────────────────── */
+
+/* ── Viewer Layout ───────────────────────────────────────────────────── */
+
+.codascope-artifact-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.codascope-artifact-viewer-loading,
+.codascope-artifact-viewer-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.codascope-artifact-viewer-error {
+  color: var(--color-danger);
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+.codascope-artifact-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.codascope-artifact-tab {
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-artifact-tab:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-artifact-tab-active {
+  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+}
+
+.codascope-artifact-tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.codascope-artifact-notice {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-success);
+  animation: codascope-artifact-fade-in var(--duration-normal) var(--ease-out);
+}
+
+.codascope-artifact-build-status {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  animation: codascope-artifact-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes codascope-artifact-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes codascope-artifact-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Content Area ────────────────────────────────────────────────────── */
+
+.codascope-artifact-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Preview Layout (iframe + section panel side-by-side) ────────────── */
+
+.codascope-artifact-preview-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.codascope-artifact-preview-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Preview Container ───────────────────────────────────────────────── */
+
+.codascope-artifact-preview-container {
+  flex: 1;
+  display: flex;
+  background: var(--color-bg-primary);
+}
+
+.codascope-artifact-preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+  border-radius: var(--radius-md);
+  margin: var(--space-2);
+}
+
+.codascope-artifact-preview-building {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.codascope-artifact-preview-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border-secondary);
+  border-top-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  animation: codascope-artifact-spin 0.8s linear infinite;
+}
+
+@keyframes codascope-artifact-spin {
+  to { transform: rotate(360deg); }
+}
+
+.codascope-artifact-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* ── Section Panel ───────────────────────────────────────────────────── */
+
+.codascope-artifact-section-panel {
+  width: 320px;
+  min-width: 280px;
+  max-width: 400px;
+  border-left: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.codascope-artifact-section-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.codascope-artifact-section-panel-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.codascope-artifact-section-panel-controls {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* ── Inspection Mode Toggle ──────────────────────────────────────────── */
+
+.codascope-artifact-inspect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-artifact-inspect-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.codascope-artifact-inspect-btn-active {
+  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent);
+}
+
+/* ── Quick-Add Annotation ────────────────────────────────────────────── */
+
+.codascope-artifact-quick-add {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-artifact-quick-add-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.codascope-artifact-element-context-tag {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-quick-add-section {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.codascope-artifact-quick-add-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.codascope-artifact-quick-add-input {
+  flex: 1;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  font-family: var(--font-sans);
+  line-height: var(--leading-normal);
+}
+
+.codascope-artifact-quick-add-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.codascope-artifact-quick-add-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-artifact-quick-add-btn {
+  padding: var(--space-2);
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.codascope-artifact-quick-add-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.codascope-artifact-quick-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Batch Action Bar ────────────────────────────────────────────────── */
+
+.codascope-artifact-batch-bar {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-artifact-batch-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.codascope-artifact-batch-regen-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.codascope-artifact-batch-regen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codascope-artifact-batch-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-warning);
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-artifact-batch-retry-btn:hover:not(:disabled) {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+
+/* ── Section List ────────────────────────────────────────────────────── */
+
+.codascope-artifact-section-list {
+  padding: var(--space-2) 0;
+}
+
+.codascope-artifact-section-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.codascope-artifact-section-add-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-section-add-toggle:hover {
+  background: var(--color-accent-muted);
+}
+
+/* ── Add Section Form ────────────────────────────────────────────────── */
+
+.codascope-artifact-add-section-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  margin-left: var(--space-4);
+  margin-right: var(--space-4);
+}
+
+.codascope-artifact-add-section-input,
+.codascope-artifact-add-section-select {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+
+.codascope-artifact-add-section-input:focus,
+.codascope-artifact-add-section-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.codascope-artifact-add-section-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ── Section Item ────────────────────────────────────────────────────── */
+
+.codascope-artifact-section-item {
+  padding: var(--space-1) var(--space-4);
+  transition: background var(--transition-fast);
+}
+
+.codascope-artifact-section-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-artifact-section-hidden {
+  opacity: 0.5;
+}
+
+.codascope-artifact-section-dragging {
+  opacity: 0.3;
+  background: var(--color-accent-muted);
+}
+
+.codascope-artifact-section-item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+}
+
+.codascope-artifact-section-drag-handle {
+  color: var(--color-text-tertiary);
+  cursor: grab;
+  font-size: var(--text-sm);
+  user-select: none;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.codascope-artifact-section-title-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: var(--space-1) 0;
+}
+
+.codascope-artifact-section-title-btn:hover {
+  color: var(--color-accent-text);
+}
+
+.codascope-artifact-section-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  flex-shrink: 0;
+}
+
+.codascope-artifact-section-item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.codascope-artifact-section-item:hover .codascope-artifact-section-item-actions {
+  opacity: 1;
+}
+
+.codascope-artifact-section-action-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-section-action-btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-active);
+}
+
+.codascope-artifact-section-action-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ── Annotation Queue ────────────────────────────────────────────────── */
+
+.codascope-artifact-annotation-queue {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-artifact-annotation-queue-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.codascope-artifact-annotation-group {
+  margin-bottom: var(--space-3);
+}
+
+.codascope-artifact-annotation-group-label {
+  display: block;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-1);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.codascope-artifact-annotation-group-failed {
+  color: var(--color-danger);
+}
+
+.codascope-artifact-annotation-group-applied {
+  color: var(--color-success);
+}
+
+.codascope-artifact-annotation-group-inactive {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-artifact-annotation-empty {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+  line-height: var(--leading-relaxed);
+}
+
+/* ── Annotation Card ─────────────────────────────────────────────────── */
+
+.codascope-artifact-annotation-card {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-artifact-annotation-card:hover {
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-artifact-annotation-inactive {
+  opacity: 0.5;
+}
+
+.codascope-artifact-annotation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.codascope-artifact-annotation-section-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  padding: 0;
+}
+
+.codascope-artifact-annotation-section-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Element Context ─────────────────────────────────────────────────── */
+
+.codascope-artifact-element-context {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  margin-bottom: var(--space-1);
+}
+
+.codascope-artifact-element-context:hover {
+  color: var(--color-accent-text);
+}
+
+.codascope-artifact-element-context code {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-element-path {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-text-tertiary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Annotation Type Badge ───────────────────────────────────────────── */
+
+.codascope-artifact-annotation-type-badge {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-info);
+  background: var(--color-info-muted);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  margin-bottom: var(--space-1);
+}
+
+.codascope-artifact-annotation-instruction {
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-2);
+  line-height: var(--leading-normal);
+  word-break: break-word;
+}
+
+/* ── Annotation Edit Mode ────────────────────────────────────────────── */
+
+.codascope-artifact-annotation-edit {
+  margin-bottom: var(--space-2);
+}
+
+.codascope-artifact-annotation-edit-input {
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-accent);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.codascope-artifact-annotation-edit-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.codascope-artifact-annotation-edit-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+/* ── Annotation Action Buttons ───────────────────────────────────────── */
+
+.codascope-artifact-annotation-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+
+.codascope-artifact-annotation-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.codascope-artifact-annotation-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-active);
+}
+
+.codascope-artifact-annotation-btn-warning:hover {
+  color: var(--color-warning);
+}
+
+.codascope-artifact-annotation-btn-danger:hover {
+  color: var(--color-danger);
+}
+
+/* ── Status Badge ────────────────────────────────────────────────────── */
+
+.codascope-artifact-status-badge {
+  display: inline-block;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.codascope-artifact-status-pending {
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
+}
+
+.codascope-artifact-status-applied {
+  color: var(--color-success);
+  background: var(--color-success-muted);
+}
+
+.codascope-artifact-status-failed {
+  color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+
+.codascope-artifact-status-inactive {
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Spec Editor ─────────────────────────────────────────────────────── */
+
+.codascope-artifact-spec-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  overflow-y: auto;
+  height: 100%;
+}
+
+.codascope-artifact-spec-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-artifact-spec-field-grow {
+  flex: 1;
+  min-height: 0;
+}
+
+.codascope-artifact-spec-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.codascope-artifact-spec-hint {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-artifact-spec-input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+}
+
+.codascope-artifact-spec-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.codascope-artifact-spec-textarea {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  line-height: var(--leading-relaxed);
+  min-height: 120px;
+}
+
+.codascope-artifact-spec-field-grow .codascope-artifact-spec-textarea {
+  flex: 1;
+  min-height: 0;
+}
+
+.codascope-artifact-spec-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.codascope-artifact-spec-textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-artifact-spec-sources {
+  min-height: 60px;
+  font-size: var(--text-xs);
+}
+
+.codascope-artifact-spec-toggle-row {
+  margin-bottom: var(--space-1);
+}
+
+.codascope-artifact-spec-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.codascope-artifact-spec-toggle input[type="checkbox"] {
+  accent-color: var(--color-accent);
+}
+
+/* ── Spec Actions Bar ────────────────────────────────────────────────── */
+
+.codascope-artifact-spec-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.codascope-artifact-spec-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  margin-right: auto;
+}
+
+.codascope-artifact-spec-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-artifact-spec-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codascope-artifact-spec-btn-primary {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.codascope-artifact-spec-btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.codascope-artifact-spec-btn-secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-secondary);
+}
+
+.codascope-artifact-spec-btn-secondary:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+/* ── Version History ─────────────────────────────────────────────────── */
+
+.codascope-artifact-version-history {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-artifact-version-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  padding: var(--space-1) 0;
+}
+
+.codascope-artifact-version-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.codascope-artifact-version-chevron {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+}
+
+.codascope-artifact-version-list {
+  margin-top: var(--space-2);
+}
+
+.codascope-artifact-version-empty {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.codascope-artifact-version-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-artifact-version-item:last-child {
+  border-bottom: none;
+}
+
+.codascope-artifact-version-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-artifact-version-number {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-artifact-version-date {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-artifact-version-size {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.codascope-artifact-version-revert-btn {
+  border: none;
+  background: transparent;
+  color: var(--color-accent-text);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-version-revert-btn:hover {
+  background: var(--color-accent-muted);
+}
+
+.codascope-artifact-version-revert-latest {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.codascope-artifact-version-revert-latest:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+/* ── Rebuild Warning Modal ───────────────────────────────────────────── */
+
+.codascope-artifact-modal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsla(228, 16%, 7%, 0.7);
+  z-index: var(--z-modal);
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.codascope-artifact-modal {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
+  max-width: 440px;
+  width: 90%;
+  box-shadow: var(--shadow-xl);
+}
+
+.codascope-artifact-modal-title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-3);
+}
+
+.codascope-artifact-modal-body {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  margin: 0 0 var(--space-5);
+}
+
+.codascope-artifact-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
