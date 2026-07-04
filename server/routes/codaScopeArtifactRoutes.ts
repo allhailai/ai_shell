@@ -12,6 +12,8 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import { loadArtifactBuildPrompt, loadSectionRegenPrompt } from "../services/codaScopeCommandLoader.js";
+import type { ArtifactSpec } from "../../src/apps/codascope/codaScopeTypes.js";
 
 export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param } = ctx;
@@ -116,9 +118,9 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
 
   // ── Build ────────────────────────────────────────────────────────
 
-  // Trigger artifact build (async — returns immediately, client polls status)
+  // Trigger artifact build (async — returns immediately, client polls SSE status)
   app.post("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/build", wrap(async (req, res) => {
-    const { artifactSvc, artifactVersionSvc } = await ensureServices();
+    const { artifactSvc, artifactVersionSvc, agentSvc, epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const artId = param(req, "artId");
@@ -127,25 +129,48 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     const artifact = await artifactSvc.getArtifact(id, epicId, artId);
     if (!artifact) throw httpError("Artifact not found.", 404, "not_found");
 
+    // Load the assembled prompt with epic context
+    const assembledPrompt = await loadArtifactBuildPrompt(id, epicId, artId, {
+      epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc, artifactSvc,
+    });
+    if (!assembledPrompt) throw httpError("Failed to load artifact build prompt.", 500, "prompt_load_failed");
+
     // Snapshot current build before overwriting (if exists)
     await artifactVersionSvc.snapshotCurrentBuild(id, epicId, artId);
 
-    // Trigger build asynchronously — the actual agent wiring will be provided
-    // by the calling context. For now, return a build-started response so the
-    // frontend can poll status via the SSE endpoint.
-    // NOTE: The actual build invocation happens when the agent service
-    // integration is fully wired. This route sets the build in-progress state.
-    try {
-      await artifactSvc.buildArtifact(id, epicId, artId, modelId);
-      res.json({ status: "complete", artifactId: artId });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg === "Agent service not configured") {
-        res.status(503).json({ error: "Agent service not yet configured for artifact builds.", code: "agent_not_configured" });
-        return;
-      }
-      throw err;
-    }
+    // Create agent callback that invokes the Cursor SDK agent
+    const agentCallback = async (spec: ArtifactSpec): Promise<string> => {
+      return new Promise<string>((resolve, reject) => {
+        agentSvc.send({
+          projectId: id,
+          message: assembledPrompt,
+          modelId: modelId ?? spec.modelId ?? "default",
+          purpose: "artifact-build",
+          onMessage: () => {
+            // Update build progress for SSE polling
+            artifactSvc.setBuildProgress(id, epicId, artId, {
+              artifactId: artId,
+              status: "building",
+              progress: "Agent generating HTML...",
+            });
+          },
+          onDone: () => {
+            // The HTML was written to disk by the write_artifact_html tool.
+            // Read it back to return to buildArtifact() for section extraction.
+            const html = artifactSvc.getBuiltHtml(id, epicId, artId);
+            resolve(html ?? "");
+          },
+          onError: (err) => reject(err),
+        }).catch(reject);
+      });
+    };
+
+    // Fire build asynchronously — respond immediately so the client can poll status
+    artifactSvc.buildArtifact(id, epicId, artId, modelId, agentCallback).catch((err) => {
+      console.error(`[artifact-build] Build failed for ${artId}:`, err);
+    });
+
+    res.json({ status: "building", artifactId: artId });
   }));
 
   // SSE build status
@@ -364,7 +389,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
 
   // Batch apply pending annotations (triggers section regeneration)
   app.post("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/annotations/apply", wrap(async (req, res) => {
-    const { artifactAnnotationSvc } = await ensureServices();
+    const { artifactAnnotationSvc, artifactSvc, agentSvc, epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const artId = param(req, "artId");
@@ -375,13 +400,65 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
       return;
     }
 
-    // For now, return the grouped annotations — the actual regeneration
-    // will be invoked when the agent service is fully wired in Phase 2/3.
-    // Mark all pending as applied (the frontend will trigger the regen via
-    // the agent service).
+    // Mark all pending as applied
     const allIds = pendingBySection.flatMap((g) => g.annotations.map((a) => a.id));
     await artifactAnnotationSvc.markApplied(id, epicId, artId, allIds);
 
+    // Load the regen prompt with the affected sections + their annotations
+    const regenPrompt = await loadSectionRegenPrompt(
+      id, epicId, artId, pendingBySection,
+      { epicSvc, epicKnowledgeSvc, designDocSvc, projectSvc, artifactSvc },
+    );
+
+    if (regenPrompt) {
+      // Get artifact for model preference
+      const artifact = await artifactSvc.getArtifact(id, epicId, artId);
+
+      // Set build progress to "regenerating"
+      artifactSvc.setBuildProgress(id, epicId, artId, {
+        artifactId: artId,
+        status: "regenerating",
+        progress: `Regenerating ${pendingBySection.length} section(s)...`,
+      });
+
+      // Fire and forget — the SSE status endpoint will track progress
+      agentSvc.send({
+        projectId: id,
+        message: regenPrompt,
+        modelId: artifact?.modelId ?? "default",
+        purpose: "artifact-section-regen",
+        onMessage: () => {
+          artifactSvc.setBuildProgress(id, epicId, artId, {
+            artifactId: artId,
+            status: "regenerating",
+            progress: "Agent regenerating sections...",
+          });
+        },
+        onDone: () => {
+          // Re-extract sections from the updated HTML
+          const html = artifactSvc.getBuiltHtml(id, epicId, artId);
+          if (html) {
+            artifactSvc.reExtractSections(id, epicId, artId, html);
+          }
+          artifactSvc.setBuildProgress(id, epicId, artId, {
+            artifactId: artId,
+            status: "complete",
+          });
+        },
+        onError: (err) => {
+          console.error(`[artifact-regen] Section regeneration failed for ${artId}:`, err);
+          artifactSvc.setBuildProgress(id, epicId, artId, {
+            artifactId: artId,
+            status: "error",
+            error: err.message,
+          });
+        },
+      }).catch((err) => {
+        console.error(`[artifact-regen] Agent send failed for ${artId}:`, err);
+      });
+    }
+
+    // Return immediately to client (async regeneration)
     res.json({
       applied: allIds.length,
       sections: pendingBySection.map((g) => ({

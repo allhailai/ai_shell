@@ -210,3 +210,174 @@ export function loadCommandOrSkill(
   // Fall back to framework command
   return loadCommand(commandId, vars);
 }
+
+/* ── Artifact Prompt Assembly ────────────────────────────────────── */
+
+/**
+ * Services needed for epic context assembly. Passed in by the route handler
+ * so the command loader doesn't need to import them directly.
+ */
+export interface ArtifactPromptServices {
+  epicSvc: {
+    getEpic(projectId: string, epicId: string): Promise<{ title: string } | null>;
+    getDefinition(projectId: string, epicId: string): Promise<string | null>;
+    getScope(projectId: string, epicId: string): Promise<{ entries: Array<{ topicTitle: string; topicId: string; currentDepth?: string; included: boolean }> } | null>;
+  };
+  epicKnowledgeSvc: {
+    listEpicWikiPages(projectId: string, epicId: string): Promise<Array<{ id: string; title: string }>>;
+    readEpicWikiPage(projectId: string, epicId: string, pageId: string): Promise<string | null>;
+  };
+  designDocSvc: {
+    listDesignDocs(projectId: string, epicId: string): Promise<Array<{ title: string; id: string; wordCount?: number }>>;
+  };
+  projectSvc: {
+    getProject(projectId: string): Promise<{ name: string } | null>;
+  };
+  artifactSvc: {
+    getArtifact(projectId: string, epicId: string, artifactId: string): Promise<{ title: string; body: string; modelId?: string | null; sources?: string[] } | null>;
+  };
+}
+
+/**
+ * Assemble epic context from services for artifact prompts.
+ * Returns a markdown string with definition, scope, wiki, and design doc summaries.
+ */
+async function assembleEpicContext(
+  projectId: string,
+  epicId: string,
+  svcs: ArtifactPromptServices,
+): Promise<string> {
+  const parts: string[] = [];
+
+  // 1. Epic definition
+  const definition = await svcs.epicSvc.getDefinition(projectId, epicId);
+  if (definition) {
+    parts.push("### Epic Definition\n\n" + definition);
+  }
+
+  // 2. Epic scope
+  const scope = await svcs.epicSvc.getScope(projectId, epicId);
+  if (scope?.entries?.length) {
+    const scopeList = scope.entries
+      .filter((e) => e.included)
+      .map((e) => `- **${e.topicTitle}** (${e.topicId}) — depth: ${e.currentDepth ?? "none"}`)
+      .join("\n");
+    parts.push("### Scope Topics\n\n" + scopeList);
+  }
+
+  // 3. Wiki page summaries (up to 10)
+  const pages = await svcs.epicKnowledgeSvc.listEpicWikiPages(projectId, epicId);
+  if (pages.length > 0) {
+    const summaries: string[] = [];
+    for (const page of pages.slice(0, 10)) {
+      const content = await svcs.epicKnowledgeSvc.readEpicWikiPage(projectId, epicId, page.id);
+      if (content) {
+        const preview = content.length > 500 ? content.slice(0, 500) + "..." : content;
+        summaries.push(`#### ${page.title}\n\n${preview}`);
+      }
+    }
+    if (summaries.length > 0) {
+      parts.push("### Research Wiki\n\n" + summaries.join("\n\n"));
+    }
+  }
+
+  // 4. Design doc summaries
+  const docs = await svcs.designDocSvc.listDesignDocs(projectId, epicId);
+  if (docs.length > 0) {
+    const docSummaries = docs
+      .map((d) => `- **${d.title}** (${d.id}) — ${d.wordCount ?? 0} words`)
+      .join("\n");
+    parts.push("### Design Documents\n\n" + docSummaries);
+  }
+
+  return parts.length > 0 ? parts.join("\n\n---\n\n") : "(No epic context available)";
+}
+
+/**
+ * Load and assemble the artifact build prompt with full epic context.
+ * Returns the substituted prompt string ready for the agent.
+ */
+export async function loadArtifactBuildPrompt(
+  projectId: string,
+  epicId: string,
+  artifactId: string,
+  svcs: ArtifactPromptServices,
+): Promise<string | null> {
+  const template = loadCommandTemplate("do_build_artifact");
+  if (!template) return null;
+
+  // Gather context
+  const [project, epic, artifact, epicContext] = await Promise.all([
+    svcs.projectSvc.getProject(projectId),
+    svcs.epicSvc.getEpic(projectId, epicId),
+    svcs.artifactSvc.getArtifact(projectId, epicId, artifactId),
+    assembleEpicContext(projectId, epicId, svcs),
+  ]);
+
+  if (!artifact) return null;
+
+  // Assemble manual sources if the spec has attached source hints
+  let manualSources = "(No additional sources specified)";
+  if (artifact.sources && artifact.sources.length > 0) {
+    manualSources = artifact.sources
+      .map((s) => `- ${s}`)
+      .join("\n");
+  }
+
+  const vars: Record<string, string> = {
+    PROJECT_NAME: project?.name ?? projectId,
+    EPIC_TITLE: epic?.title ?? epicId,
+    ARTIFACT_TITLE: artifact.title,
+    ARTIFACT_SPEC_BODY: artifact.body,
+    EPIC_CONTEXT: epicContext,
+    MANUAL_SOURCES: manualSources,
+  };
+
+  return substituteVars(template, vars);
+}
+
+/**
+ * Load and assemble the section regeneration prompt with pending annotations.
+ * Returns the substituted prompt string ready for the agent.
+ */
+export async function loadSectionRegenPrompt(
+  projectId: string,
+  epicId: string,
+  artifactId: string,
+  pendingBySection: Array<{ sectionId: string; annotations: Array<{ id: string; instruction: string; elementContext?: unknown }> }>,
+  svcs: ArtifactPromptServices,
+): Promise<string | null> {
+  const template = loadCommandTemplate("do_regen_sections");
+  if (!template) return null;
+
+  const [project, epic, artifact] = await Promise.all([
+    svcs.projectSvc.getProject(projectId),
+    svcs.epicSvc.getEpic(projectId, epicId),
+    svcs.artifactSvc.getArtifact(projectId, epicId, artifactId),
+  ]);
+
+  // Format pending annotations as structured markdown
+  const annotationsText = pendingBySection.map((group) => {
+    const annotationList = group.annotations.map((a) => {
+      const parts = [`- **Instruction:** ${a.instruction}`];
+      if (a.elementContext) {
+        const ctx = a.elementContext as Record<string, unknown>;
+        if (ctx.elementTag) parts.push(`  - Element: \`<${ctx.elementTag}>\``);
+        if (ctx.cssPath) parts.push(`  - CSS Path: \`${ctx.cssPath}\``);
+        if (ctx.elementText) parts.push(`  - Text: "${String(ctx.elementText).slice(0, 100)}"`);
+        if (ctx.elementHTML) parts.push(`  - HTML: \`${String(ctx.elementHTML).slice(0, 200)}\``);
+      }
+      return parts.join("\n");
+    }).join("\n\n");
+    return `#### Section: \`${group.sectionId}\`\n\n${annotationList}`;
+  }).join("\n\n---\n\n");
+
+  const vars: Record<string, string> = {
+    PROJECT_NAME: project?.name ?? projectId,
+    EPIC_TITLE: epic?.title ?? epicId,
+    ARTIFACT_TITLE: artifact?.title ?? artifactId,
+    PENDING_ANNOTATIONS: annotationsText,
+  };
+
+  return substituteVars(template, vars);
+}

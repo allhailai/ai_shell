@@ -400,6 +400,31 @@ export class CodaScopeArtifactService {
     return buildProgress.get(key) ?? { artifactId, status: "idle" };
   }
 
+  /** Update build progress externally (used by route handler during agent execution). */
+  setBuildProgress(projectId: string, epicId: string, artifactId: string, progress: ArtifactBuildProgress): void {
+    const key = this.buildKey(projectId, epicId, artifactId);
+    buildProgress.set(key, progress);
+  }
+
+  /** Read the raw built HTML (without annotation script injection). */
+  getBuiltHtml(projectId: string, epicId: string, artifactId: string): string | null {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+    const htmlPath = this.indexHtmlPath(projectDir, epicId, artifactId);
+    if (!existsSync(htmlPath)) return null;
+    return readFileSync(htmlPath, "utf-8");
+  }
+
+  /**
+   * Re-extract sections from updated HTML (public API for route handlers).
+   * Accepts projectId and resolves the project directory internally.
+   */
+  reExtractSections(projectId: string, epicId: string, artifactId: string, html: string): void {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return;
+    this.extractAndPersistSections(projectDir, epicId, artifactId, html);
+  }
+
   /* ── Section extraction ────────────────────────────────────────── */
 
   /**
