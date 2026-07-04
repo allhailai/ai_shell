@@ -157,25 +157,41 @@
   display: none;
 }
 
-/* ── Nav Collapse Toggle ── */
+/* ── Panel Collapse/Expand Toggle (shared) ── */
+/* Consistent ◀/▶ button style used by both left nav and right panel,
+   matching CodaScope's nested panel collapse pattern. */
 
-.nav-collapse-toggle {
+.shell-panel-collapse-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2);
+  flex-shrink: 0;
+}
+
+.shell[data-nav="collapsed"] .shell-panel-collapse-row {
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin: var(--space-2) auto 0;
+  padding: var(--space-1);
+}
+
+.shell-panel-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
-  background: var(--color-bg-tertiary);
+  background: none;
   color: var(--color-text-tertiary);
   cursor: pointer;
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  font-size: var(--text-xs);
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
-.nav-collapse-toggle:hover {
+.shell-panel-collapse-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
@@ -201,8 +217,7 @@
 .right-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-primary);
   flex-shrink: 0;
@@ -211,22 +226,6 @@
 .right-panel-title {
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.right-panel-close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-tertiary);
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.right-panel-close:hover {
-  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 

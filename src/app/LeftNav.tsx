@@ -1,6 +1,6 @@
 import type { AppManifest } from "../types/app";
 import { useShellStore } from "../shell/store";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 
 /**
  * Left navigation panel.
@@ -38,7 +38,7 @@ export function LeftNav({
   if (!activeApp) {
     // Mode 1: Launcher nav — show app list
     return (
-      <nav className="left-nav" aria-label="Application navigation">
+      <LeftNavShell collapsed={collapsed} onToggle={toggleLeftNav}>
         <div className="left-nav-content scrollable-y">
           <div className="left-nav-top">
             {regularApps.map((app) => (
@@ -54,10 +54,9 @@ export function LeftNav({
                 ))}
               </>
             )}
-            <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
           </div>
         </div>
-      </nav>
+      </LeftNavShell>
     );
   }
 
@@ -65,7 +64,7 @@ export function LeftNav({
     // Mode 2: App-provided left nav
     const AppNav = activeApp.leftNav;
     return (
-      <nav className="left-nav" aria-label={`${activeApp.name} navigation`}>
+      <LeftNavShell collapsed={collapsed} onToggle={toggleLeftNav} label={`${activeApp.name} navigation`}>
         <div className="left-nav-content scrollable-y">
           <div className="left-nav-top">
             {/* Home button at the top */}
@@ -82,16 +81,15 @@ export function LeftNav({
                 ))}
               </>
             )}
-            <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
           </div>
         </div>
-      </nav>
+      </LeftNavShell>
     );
   }
 
   // Mode 3: No app nav — just a home button
   return (
-    <nav className="left-nav" aria-label="Navigation">
+    <LeftNavShell collapsed={collapsed} onToggle={toggleLeftNav}>
       <div className="left-nav-content scrollable-y">
         <div className="left-nav-top">
           <HomeNavItem collapsed={collapsed} />
@@ -105,10 +103,9 @@ export function LeftNav({
               ))}
             </>
           )}
-          <NavCollapseToggle collapsed={collapsed} onToggle={toggleLeftNav} />
         </div>
       </div>
-    </nav>
+    </LeftNavShell>
   );
 }
 
@@ -186,39 +183,35 @@ function BackArrowIcon() {
 }
 
 /**
- * Small collapse/expand toggle button at the bottom of the left nav.
+ * Wrapper for left nav that adds the collapse/expand toggle button,
+ * matching CodaScope's panel collapse pattern.
  */
-function NavCollapseToggle({
+function LeftNavShell({
   collapsed,
   onToggle,
+  label,
+  children,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  label?: string;
+  children: ReactNode;
 }) {
   return (
-    <button
-      className="nav-collapse-toggle"
-      onClick={onToggle}
-      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      type="button"
-      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-    >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {collapsed ? (
-          <polyline points="9 18 15 12 9 6" />
-        ) : (
-          <polyline points="15 18 9 12 15 6" />
-        )}
-      </svg>
-    </button>
+    <nav className="left-nav" aria-label={label ?? "Application navigation"}>
+      {/* Collapse/expand toggle — pinned to the top-right of the nav */}
+      <div className="shell-panel-collapse-row">
+        <button
+          className="shell-panel-collapse-btn"
+          onClick={onToggle}
+          type="button"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? "▶" : "◀"}
+        </button>
+      </div>
+      {children}
+    </nav>
   );
 }

@@ -112,14 +112,14 @@ export function ArtifactAnnotationCard({
           />
           <div className="codascope-artifact-annotation-edit-actions">
             <button
-              className="codascope-artifact-annotation-btn"
+              className="codascope-artifact-annotation-btn codascope-artifact-annotation-btn-save"
               onClick={handleSave}
               type="button"
             >
               <IconCheckmark size={12} /> Save
             </button>
             <button
-              className="codascope-artifact-annotation-btn"
+              className="codascope-artifact-annotation-btn codascope-artifact-annotation-btn-cancel"
               onClick={() => {
                 setEditing(false);
                 setEditText(annotation.instruction);

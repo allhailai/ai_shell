@@ -6779,30 +6779,30 @@
 }
 
 .codascope-artifact-quick-add-active {
-  background: var(--color-accent-muted);
-  border-left-color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
+  background: var(--color-warning-muted);
+  border-left-color: var(--color-warning);
+  border-bottom-color: var(--color-warning);
   box-shadow:
-    inset 0 0 0 1px hsl(220 50% 24% / 0.5),
-    0 0 12px hsl(220 90% 56% / 0.15);
+    inset 0 0 0 1px hsl(38 50% 24% / 0.5),
+    0 0 12px hsl(38 90% 55% / 0.15);
   animation: codascope-annotation-pulse 1.5s ease-in-out 1;
 }
 
 .codascope-artifact-quick-add-active .codascope-artifact-quick-add-input {
-  border-color: var(--color-accent);
+  border-color: var(--color-warning);
   background: var(--color-bg-secondary);
-  box-shadow: 0 0 0 2px hsl(220 90% 56% / 0.2);
+  box-shadow: 0 0 0 2px hsl(38 90% 55% / 0.2);
 }
 
 .codascope-artifact-quick-add-active .codascope-artifact-quick-add-context {
-  color: var(--color-accent-text);
+  color: var(--color-warning);
   font-weight: var(--weight-medium);
 }
 
 @keyframes codascope-annotation-pulse {
-  0% { box-shadow: inset 0 0 0 1px hsl(220 50% 24% / 0.5), 0 0 12px hsl(220 90% 56% / 0.15); }
-  40% { box-shadow: inset 0 0 0 1px hsl(220 50% 24% / 0.7), 0 0 20px hsl(220 90% 56% / 0.3); }
-  100% { box-shadow: inset 0 0 0 1px hsl(220 50% 24% / 0.5), 0 0 12px hsl(220 90% 56% / 0.15); }
+  0% { box-shadow: inset 0 0 0 1px hsl(38 50% 24% / 0.5), 0 0 12px hsl(38 90% 55% / 0.15); }
+  40% { box-shadow: inset 0 0 0 1px hsl(38 50% 24% / 0.7), 0 0 20px hsl(38 90% 55% / 0.3); }
+  100% { box-shadow: inset 0 0 0 1px hsl(38 50% 24% / 0.5), 0 0 12px hsl(38 90% 55% / 0.15); }
 }
 
 .codascope-artifact-quick-add-context {
@@ -6817,8 +6817,8 @@
 .codascope-artifact-element-context-tag {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  color: var(--color-accent-text);
-  background: var(--color-accent-muted);
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
   padding: 1px var(--space-1);
   border-radius: var(--radius-sm);
 }
@@ -6849,8 +6849,8 @@
 
 .codascope-artifact-quick-add-input:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-muted);
+  border-color: var(--color-warning);
+  box-shadow: 0 0 0 2px hsl(38 90% 55% / 0.2);
 }
 
 .codascope-artifact-quick-add-input::placeholder {
@@ -6859,17 +6859,19 @@
 
 .codascope-artifact-quick-add-btn {
   padding: var(--space-2);
-  border: none;
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
+  border: 1px solid var(--color-warning);
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
   flex-shrink: 0;
 }
 
 .codascope-artifact-quick-add-btn:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  background: var(--color-warning);
+  color: var(--color-bg-primary);
 }
 
 .codascope-artifact-quick-add-btn:disabled {
@@ -7307,14 +7309,14 @@
 }
 
 .codascope-artifact-element-context:hover {
-  color: var(--color-accent-text);
+  color: var(--color-warning);
 }
 
 .codascope-artifact-element-context code {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  color: var(--color-accent-text);
-  background: var(--color-accent-muted);
+  color: var(--color-warning);
+  background: var(--color-warning-muted);
   padding: 1px var(--space-1);
   border-radius: var(--radius-sm);
 }
@@ -7359,7 +7361,7 @@
 .codascope-artifact-annotation-edit-input {
   width: 100%;
   padding: var(--space-2);
-  border: 1px solid var(--color-accent);
+  border: 1px solid var(--color-warning);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: var(--text-xs);
@@ -7371,7 +7373,7 @@
 
 .codascope-artifact-annotation-edit-input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-accent-muted);
+  box-shadow: 0 0 0 2px hsl(38 90% 55% / 0.2);
 }
 
 .codascope-artifact-annotation-edit-actions {
@@ -7413,6 +7415,25 @@
 
 .codascope-artifact-annotation-btn-danger:hover {
   color: var(--color-danger);
+}
+
+.codascope-artifact-annotation-btn-save {
+  color: var(--color-warning);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-artifact-annotation-btn-save:hover {
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+}
+
+.codascope-artifact-annotation-btn-cancel {
+  color: var(--color-text-secondary);
+}
+
+.codascope-artifact-annotation-btn-cancel:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-active);
 }
 
 /* ── Status Badge ────────────────────────────────────────────────────── */
