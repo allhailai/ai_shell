@@ -6724,7 +6724,7 @@
 .codascope-artifact-section-panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-primary);
   flex-shrink: 0;
@@ -6969,6 +6969,43 @@
   letter-spacing: 0.05em;
 }
 
+.codascope-artifact-section-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+}
+
+.codascope-artifact-section-collapse-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.codascope-artifact-section-collapse-chevron {
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
+}
+
+/* ── Annotation Action Bar ──────────────────────────────────────────── */
+
+.codascope-artifact-annotation-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  flex-wrap: wrap;
+}
+
 .codascope-artifact-section-add-toggle {
   display: inline-flex;
   align-items: center;
@@ -7206,16 +7243,11 @@
   border-top: 1px solid var(--color-border-primary);
 }
 
-.codascope-artifact-annotation-queue-title {
+.codascope-artifact-annotation-queue-header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--space-2);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  justify-content: space-between;
+  padding-bottom: var(--space-1);
 }
 
 .codascope-artifact-annotation-group {

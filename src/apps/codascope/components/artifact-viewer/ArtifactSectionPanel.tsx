@@ -98,6 +98,8 @@ export function ArtifactSectionPanel({
   const [addSectionAfter, setAddSectionAfter] = useState<string | null>(null);
   const [showAddSection, setShowAddSection] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
+  const [sectionsCollapsed, setSectionsCollapsed] = useState(false);
+  const [annotationsCollapsed, setAnnotationsCollapsed] = useState(false);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const quickAddRef = useRef<HTMLTextAreaElement>(null);
 
@@ -229,338 +231,364 @@ export function ArtifactSectionPanel({
         <h3 className="codascope-artifact-section-panel-title">
           Sections & Annotations
         </h3>
-        <div className="codascope-artifact-section-panel-controls">
-          <button
-            className={`codascope-artifact-inspect-btn ${inspectionMode ? "codascope-artifact-inspect-btn-active" : ""}`}
-            onClick={onToggleInspectionMode}
-            title={inspectionMode ? "Exit inspection mode" : "Pick UI to annotate"}
-            type="button"
-          >
-            <IconEye size={14} />
-            {inspectionMode ? "Exit Inspect" : "Pick UI"}
-          </button>
-        </div>
       </div>
 
-      {/* Section list */}
+      {/* Section list — collapsible */}
       <div className="codascope-artifact-section-list">
         <div className="codascope-artifact-section-list-header">
-          <span>Sections ({sections.length})</span>
           <button
-            className="codascope-artifact-section-add-toggle"
-            onClick={() => setShowAddSection(!showAddSection)}
-            title="Add new section"
+            className="codascope-artifact-section-collapse-toggle"
+            onClick={() => setSectionsCollapsed(!sectionsCollapsed)}
+            title={sectionsCollapsed ? "Expand sections" : "Collapse sections"}
             type="button"
           >
-            <IconInsert size={14} /> Add
+            <span className="codascope-artifact-section-collapse-chevron">
+              {sectionsCollapsed ? "▸" : "▾"}
+            </span>
+            Sections ({sections.length})
           </button>
+          {!sectionsCollapsed && (
+            <button
+              className="codascope-artifact-section-add-toggle"
+              onClick={() => setShowAddSection(!showAddSection)}
+              title="Add new section"
+              type="button"
+            >
+              <IconInsert size={14} /> Add
+            </button>
+          )}
         </div>
 
-        {/* Add section form */}
-        {showAddSection && (
-          <div className="codascope-artifact-add-section-form">
-            <label className="codascope-artifact-add-section-label">
-              Section title <span className="codascope-artifact-add-section-required">*</span>
-            </label>
-            <input
-              className={`codascope-artifact-add-section-input${!addSectionTitle.trim() ? " codascope-artifact-add-section-input-empty" : ""}`}
-              type="text"
-              value={addSectionTitle}
-              onChange={(e) => setAddSectionTitle(e.target.value)}
-              placeholder="New section title"
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleAddSection()}
-              autoFocus
-            />
-            <label className="codascope-artifact-add-section-label">
-              Directive <span className="codascope-artifact-add-section-optional">(optional)</span>
-            </label>
-            <textarea
-              className="codascope-artifact-add-section-input codascope-artifact-add-section-instruction"
-              value={addSectionInstruction}
-              onChange={(e) => setAddSectionInstruction(e.target.value)}
-              placeholder="Describe what to build in this section…"
-              rows={3}
-            />
-            <select
-              className="codascope-artifact-add-section-select"
-              value={addSectionAfter ?? "__end__"}
-              onChange={(e) =>
-                setAddSectionAfter(
-                  e.target.value === "__end__" ? null : e.target.value,
-                )
-              }
-            >
-              <option value="__end__">At the end</option>
-              <option value="__start__">At the start</option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>
-                  After: {s.title}
-                </option>
-              ))}
-            </select>
-            <div className="codascope-artifact-add-section-actions">
-              <button
-                className="codascope-artifact-add-section-submit"
-                onClick={handleAddSection}
-                disabled={!addSectionTitle.trim()}
-                title={!addSectionTitle.trim() ? "Section title is required" : "Add section"}
-                type="button"
-              >
-                <IconCheckmark size={12} /> Add Section
-              </button>
-              <button
-                className="codascope-artifact-add-section-cancel"
-                onClick={() => setShowAddSection(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Section items */}
-        {sections.map((section, idx) => {
-          const isHidden = hiddenSectionIds.includes(section.id);
-          const sectionAnnotations = annotations.filter(
-            (a) => a.sectionId === section.id,
-          );
-          const sectionPending = sectionAnnotations.filter(
-            (a) => a.status === "pending",
-          ).length;
-
-          return (
-            <div
-              key={section.id}
-              className={`codascope-artifact-section-item ${isHidden ? "codascope-artifact-section-hidden" : ""} ${dragIdx === idx ? "codascope-artifact-section-dragging" : ""}`}
-              draggable
-              onDragStart={handleDragStart(idx)}
-              onDragOver={handleDragOver(idx)}
-              onDrop={handleDrop(idx)}
-            >
-              <div className="codascope-artifact-section-item-header">
-                <span className="codascope-artifact-section-drag-handle" title="Drag to reorder">⠿</span>
-                <button
-                  className="codascope-artifact-section-title-btn"
-                  onClick={() => onScrollToSection(section.id)}
-                  title={`Scroll to "${section.title}"`}
-                  type="button"
+        {!sectionsCollapsed && (
+          <>
+            {/* Add section form */}
+            {showAddSection && (
+              <div className="codascope-artifact-add-section-form">
+                <label className="codascope-artifact-add-section-label">
+                  Section title <span className="codascope-artifact-add-section-required">*</span>
+                </label>
+                <input
+                  className={`codascope-artifact-add-section-input${!addSectionTitle.trim() ? " codascope-artifact-add-section-input-empty" : ""}`}
+                  type="text"
+                  value={addSectionTitle}
+                  onChange={(e) => setAddSectionTitle(e.target.value)}
+                  placeholder="New section title"
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleAddSection()}
+                  autoFocus
+                />
+                <label className="codascope-artifact-add-section-label">
+                  Directive <span className="codascope-artifact-add-section-optional">(optional)</span>
+                </label>
+                <textarea
+                  className="codascope-artifact-add-section-input codascope-artifact-add-section-instruction"
+                  value={addSectionInstruction}
+                  onChange={(e) => setAddSectionInstruction(e.target.value)}
+                  placeholder="Describe what to build in this section…"
+                  rows={3}
+                />
+                <select
+                  className="codascope-artifact-add-section-select"
+                  value={addSectionAfter ?? "__end__"}
+                  onChange={(e) =>
+                    setAddSectionAfter(
+                      e.target.value === "__end__" ? null : e.target.value,
+                    )
+                  }
                 >
-                  {section.title}
-                </button>
-                {sectionPending > 0 && (
-                  <span className="codascope-artifact-section-badge">
-                    {sectionPending}
-                  </span>
-                )}
-                <div className="codascope-artifact-section-item-actions">
+                  <option value="__end__">At the end</option>
+                  <option value="__start__">At the start</option>
+                  {sections.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      After: {s.title}
+                    </option>
+                  ))}
+                </select>
+                <div className="codascope-artifact-add-section-actions">
                   <button
-                    className="codascope-artifact-section-action-btn"
-                    onClick={() => handleMoveSection(idx, "up")}
-                    disabled={idx === 0}
-                    title="Move up"
+                    className="codascope-artifact-add-section-submit"
+                    onClick={handleAddSection}
+                    disabled={!addSectionTitle.trim()}
+                    title={!addSectionTitle.trim() ? "Section title is required" : "Add section"}
                     type="button"
                   >
-                    ↑
+                    <IconCheckmark size={12} /> Add Section
                   </button>
                   <button
-                    className="codascope-artifact-section-action-btn"
-                    onClick={() => handleMoveSection(idx, "down")}
-                    disabled={idx === sections.length - 1}
-                    title="Move down"
+                    className="codascope-artifact-add-section-cancel"
+                    onClick={() => setShowAddSection(false)}
                     type="button"
                   >
-                    ↓
-                  </button>
-                  <button
-                    className="codascope-artifact-section-action-btn"
-                    onClick={() =>
-                      isHidden
-                        ? onUnhideSection(section.id)
-                        : onHideSection(section.id)
-                    }
-                    title={isHidden ? "Show section" : "Hide section"}
-                    type="button"
-                  >
-                    {isHidden ? "Show" : "Hide"}
+                    Cancel
                   </button>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            )}
+
+            {/* Section items */}
+            {sections.map((section, idx) => {
+              const isHidden = hiddenSectionIds.includes(section.id);
+              const sectionAnnotations = annotations.filter(
+                (a) => a.sectionId === section.id,
+              );
+              const sectionPending = sectionAnnotations.filter(
+                (a) => a.status === "pending",
+              ).length;
+
+              return (
+                <div
+                  key={section.id}
+                  className={`codascope-artifact-section-item ${isHidden ? "codascope-artifact-section-hidden" : ""} ${dragIdx === idx ? "codascope-artifact-section-dragging" : ""}`}
+                  draggable
+                  onDragStart={handleDragStart(idx)}
+                  onDragOver={handleDragOver(idx)}
+                  onDrop={handleDrop(idx)}
+                >
+                  <div className="codascope-artifact-section-item-header">
+                    <span className="codascope-artifact-section-drag-handle" title="Drag to reorder">⠿</span>
+                    <button
+                      className="codascope-artifact-section-title-btn"
+                      onClick={() => onScrollToSection(section.id)}
+                      title={`Scroll to "${section.title}"`}
+                      type="button"
+                    >
+                      {section.title}
+                    </button>
+                    {sectionPending > 0 && (
+                      <span className="codascope-artifact-section-badge">
+                        {sectionPending}
+                      </span>
+                    )}
+                    <div className="codascope-artifact-section-item-actions">
+                      <button
+                        className="codascope-artifact-section-action-btn"
+                        onClick={() => handleMoveSection(idx, "up")}
+                        disabled={idx === 0}
+                        title="Move up"
+                        type="button"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className="codascope-artifact-section-action-btn"
+                        onClick={() => handleMoveSection(idx, "down")}
+                        disabled={idx === sections.length - 1}
+                        title="Move down"
+                        type="button"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        className="codascope-artifact-section-action-btn"
+                        onClick={() =>
+                          isHidden
+                            ? onUnhideSection(section.id)
+                            : onHideSection(section.id)
+                        }
+                        title={isHidden ? "Show section" : "Hide section"}
+                        type="button"
+                      >
+                        {isHidden ? "Show" : "Hide"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
 
-      {/* Quick-add annotation input */}
-      <div className={`codascope-artifact-quick-add ${pendingElementContext ? "codascope-artifact-quick-add-active" : ""}`}>
-        {pendingElementContext && (
-          <div className="codascope-artifact-quick-add-context">
-            <span className="codascope-artifact-element-context-tag">
-              &lt;{pendingElementContext.elementContext.elementTag}&gt;
-            </span>
-            <span className="codascope-artifact-quick-add-section">
-              in {pendingElementContext.sectionTitle}
-            </span>
-          </div>
-        )}
-        <div className="codascope-artifact-quick-add-row">
-          <textarea
-            ref={quickAddRef}
-            className="codascope-artifact-quick-add-input"
-            value={quickAddText}
-            onChange={(e) => {
-              // Pause iframe hover on first keystroke while element is picked
-              if (pendingElementContext && !quickAddText) {
-                onPauseHover();
-              }
-              setQuickAddText(e.target.value);
-            }}
-            onKeyDown={handleQuickAddKeyDown}
-            placeholder={
-              pendingElementContext
-                ? "Describe change for this element…"
-                : "Add annotation…"
-            }
-            rows={2}
-          />
+      {/* Annotation queue — contains all annotation-related UI */}
+      <div className="codascope-artifact-annotation-queue">
+        <div className="codascope-artifact-annotation-queue-header">
           <button
-            className="codascope-artifact-quick-add-btn"
-            onClick={handleQuickAdd}
-            disabled={!quickAddText.trim()}
-            title="Add annotation"
+            className="codascope-artifact-section-collapse-toggle"
+            onClick={() => setAnnotationsCollapsed(!annotationsCollapsed)}
+            title={annotationsCollapsed ? "Expand annotations" : "Collapse annotations"}
             type="button"
           >
-            <IconInsert size={14} />
+            <span className="codascope-artifact-section-collapse-chevron">
+              {annotationsCollapsed ? "▸" : "▾"}
+            </span>
+            <IconAnnotation size={14} />
+            Annotations ({annotations.length})
           </button>
         </div>
-      </div>
 
-      {/* Batch action bar */}
-      {(pendingCount > 0 || failedCount > 0 || building) && (
-        <div className="codascope-artifact-batch-bar">
-          {building ? (
-            <span className="codascope-artifact-batch-generating">
-              <IconRefresh size={14} />
-              Agent generating sections…
-            </span>
-          ) : (
-            <>
-              {pendingCount > 0 && (
-                <button
-                  className="codascope-artifact-batch-regen-btn"
-                  onClick={onBatchApply}
-                  type="button"
-                >
+        {!annotationsCollapsed && (
+          <>
+            {/* Action bar: Pick UI + Regenerate */}
+            <div className="codascope-artifact-annotation-action-bar">
+              <button
+                className={`codascope-artifact-inspect-btn ${inspectionMode ? "codascope-artifact-inspect-btn-active" : ""}`}
+                onClick={onToggleInspectionMode}
+                title={inspectionMode ? "Exit inspection mode" : "Pick UI to annotate"}
+                type="button"
+              >
+                <IconEye size={14} />
+                {inspectionMode ? "Exit Inspect" : "Pick UI"}
+              </button>
+              {building ? (
+                <span className="codascope-artifact-batch-generating">
                   <IconRefresh size={14} />
-                  Regenerate w/ {pendingCount} change{pendingCount !== 1 ? "s" : ""}
-                </button>
+                  Generating…
+                </span>
+              ) : (
+                <>
+                  {pendingCount > 0 && (
+                    <button
+                      className="codascope-artifact-batch-regen-btn"
+                      onClick={onBatchApply}
+                      type="button"
+                    >
+                      <IconRefresh size={14} />
+                      Regenerate w/ {pendingCount}
+                    </button>
+                  )}
+                  {failedCount > 0 && (
+                    <button
+                      className="codascope-artifact-batch-retry-btn"
+                      onClick={onRetryFailed}
+                      type="button"
+                    >
+                      <IconWarning size={14} /> Retry {failedCount}
+                    </button>
+                  )}
+                </>
               )}
-              {failedCount > 0 && (
+            </div>
+
+            {/* Quick-add annotation input */}
+            <div className={`codascope-artifact-quick-add ${pendingElementContext ? "codascope-artifact-quick-add-active" : ""}`}>
+              {pendingElementContext && (
+                <div className="codascope-artifact-quick-add-context">
+                  <span className="codascope-artifact-element-context-tag">
+                    &lt;{pendingElementContext.elementContext.elementTag}&gt;
+                  </span>
+                  <span className="codascope-artifact-quick-add-section">
+                    in {pendingElementContext.sectionTitle}
+                  </span>
+                </div>
+              )}
+              <div className="codascope-artifact-quick-add-row">
+                <textarea
+                  ref={quickAddRef}
+                  className="codascope-artifact-quick-add-input"
+                  value={quickAddText}
+                  onChange={(e) => {
+                    // Pause iframe hover on first keystroke while element is picked
+                    if (pendingElementContext && !quickAddText) {
+                      onPauseHover();
+                    }
+                    setQuickAddText(e.target.value);
+                  }}
+                  onKeyDown={handleQuickAddKeyDown}
+                  placeholder={
+                    pendingElementContext
+                      ? "Describe change for this element…"
+                      : "Add annotation…"
+                  }
+                  rows={2}
+                />
                 <button
-                  className="codascope-artifact-batch-retry-btn"
-                  onClick={onRetryFailed}
+                  className="codascope-artifact-quick-add-btn"
+                  onClick={handleQuickAdd}
+                  disabled={!quickAddText.trim()}
+                  title="Add annotation"
                   type="button"
                 >
-                  <IconWarning size={14} /> Retry {failedCount} failed
+                  <IconInsert size={14} />
                 </button>
-              )}
-            </>
-          )}
-        </div>
-      )}
+              </div>
+            </div>
 
-      {/* Annotation queue */}
-      <div className="codascope-artifact-annotation-queue">
-        <h4 className="codascope-artifact-annotation-queue-title">
-          <IconAnnotation size={14} />
-          Annotations ({annotations.length})
-        </h4>
+            {/* Pending */}
+            {pendingAnnotations.length > 0 && (
+              <div className="codascope-artifact-annotation-group">
+                <span className="codascope-artifact-annotation-group-label">
+                  Pending ({pendingAnnotations.length})
+                </span>
+                {pendingAnnotations.map((a) => (
+                  <ArtifactAnnotationCard
+                    key={a.id}
+                    annotation={a}
+                    onScrollToSection={onScrollToSection}
+                    onHighlight={onHighlightAnnotation}
+                    onUpdate={onUpdateAnnotation}
+                    onDelete={onDeleteAnnotation}
+                    onToggle={onToggleAnnotation}
+                  />
+                ))}
+              </div>
+            )}
 
-        {/* Pending */}
-        {pendingAnnotations.length > 0 && (
-          <div className="codascope-artifact-annotation-group">
-            <span className="codascope-artifact-annotation-group-label">
-              Pending ({pendingAnnotations.length})
-            </span>
-            {pendingAnnotations.map((a) => (
-              <ArtifactAnnotationCard
-                key={a.id}
-                annotation={a}
-                onScrollToSection={onScrollToSection}
-                onHighlight={onHighlightAnnotation}
-                onUpdate={onUpdateAnnotation}
-                onDelete={onDeleteAnnotation}
-                onToggle={onToggleAnnotation}
-              />
-            ))}
-          </div>
-        )}
+            {/* Failed */}
+            {failedAnnotations.length > 0 && (
+              <div className="codascope-artifact-annotation-group">
+                <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-failed">
+                  Failed ({failedAnnotations.length})
+                </span>
+                {failedAnnotations.map((a) => (
+                  <ArtifactAnnotationCard
+                    key={a.id}
+                    annotation={a}
+                    onScrollToSection={onScrollToSection}
+                    onHighlight={onHighlightAnnotation}
+                    onUpdate={onUpdateAnnotation}
+                    onDelete={onDeleteAnnotation}
+                    onToggle={onToggleAnnotation}
+                  />
+                ))}
+              </div>
+            )}
 
-        {/* Failed */}
-        {failedAnnotations.length > 0 && (
-          <div className="codascope-artifact-annotation-group">
-            <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-failed">
-              Failed ({failedAnnotations.length})
-            </span>
-            {failedAnnotations.map((a) => (
-              <ArtifactAnnotationCard
-                key={a.id}
-                annotation={a}
-                onScrollToSection={onScrollToSection}
-                onHighlight={onHighlightAnnotation}
-                onUpdate={onUpdateAnnotation}
-                onDelete={onDeleteAnnotation}
-                onToggle={onToggleAnnotation}
-              />
-            ))}
-          </div>
-        )}
+            {/* Applied */}
+            {appliedAnnotations.length > 0 && (
+              <div className="codascope-artifact-annotation-group">
+                <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-applied">
+                  Applied ({appliedAnnotations.length})
+                </span>
+                {appliedAnnotations.map((a) => (
+                  <ArtifactAnnotationCard
+                    key={a.id}
+                    annotation={a}
+                    onScrollToSection={onScrollToSection}
+                    onHighlight={onHighlightAnnotation}
+                    onUpdate={onUpdateAnnotation}
+                    onDelete={onDeleteAnnotation}
+                    onToggle={onToggleAnnotation}
+                  />
+                ))}
+              </div>
+            )}
 
-        {/* Applied */}
-        {appliedAnnotations.length > 0 && (
-          <div className="codascope-artifact-annotation-group">
-            <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-applied">
-              Applied ({appliedAnnotations.length})
-            </span>
-            {appliedAnnotations.map((a) => (
-              <ArtifactAnnotationCard
-                key={a.id}
-                annotation={a}
-                onScrollToSection={onScrollToSection}
-                onHighlight={onHighlightAnnotation}
-                onUpdate={onUpdateAnnotation}
-                onDelete={onDeleteAnnotation}
-                onToggle={onToggleAnnotation}
-              />
-            ))}
-          </div>
-        )}
+            {/* Inactive */}
+            {inactiveAnnotations.length > 0 && (
+              <div className="codascope-artifact-annotation-group">
+                <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-inactive">
+                  Inactive ({inactiveAnnotations.length})
+                </span>
+                {inactiveAnnotations.map((a) => (
+                  <ArtifactAnnotationCard
+                    key={a.id}
+                    annotation={a}
+                    onScrollToSection={onScrollToSection}
+                    onHighlight={onHighlightAnnotation}
+                    onUpdate={onUpdateAnnotation}
+                    onDelete={onDeleteAnnotation}
+                    onToggle={onToggleAnnotation}
+                  />
+                ))}
+              </div>
+            )}
 
-        {/* Inactive */}
-        {inactiveAnnotations.length > 0 && (
-          <div className="codascope-artifact-annotation-group">
-            <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-inactive">
-              Inactive ({inactiveAnnotations.length})
-            </span>
-            {inactiveAnnotations.map((a) => (
-              <ArtifactAnnotationCard
-                key={a.id}
-                annotation={a}
-                onScrollToSection={onScrollToSection}
-                onHighlight={onHighlightAnnotation}
-                onUpdate={onUpdateAnnotation}
-                onDelete={onDeleteAnnotation}
-                onToggle={onToggleAnnotation}
-              />
-            ))}
-          </div>
-        )}
-
-        {annotations.length === 0 && (
-          <p className="codascope-artifact-annotation-empty">
-            No annotations yet. Use "Pick UI" to select elements, then add
-            instructions.
-          </p>
+            {annotations.length === 0 && (
+              <p className="codascope-artifact-annotation-empty">
+                No annotations yet. Use "Pick UI" to select elements, then add
+                instructions.
+              </p>
+            )}
+          </>
         )}
       </div>
 
