@@ -25,7 +25,6 @@ export interface SseStreamCallbacks {
   onError: (error: string) => void;
   onWikiRefresh?: (topics: unknown[]) => void;
   onPipelineStep?: (step: PipelineStep) => void;
-  onCancelled?: (runId: string) => void;
 }
 
 export type SseStreamTarget =
@@ -69,7 +68,6 @@ export function parseSseChunk(
  * - `pipeline-step` — progress updates for individual pipeline steps
  * - `done` — run completed successfully
  * - `error` — run failed
- * - `cancelled` — run was cancelled by the user
  * - `wiki-refresh` — wiki topics were updated
  * - `message` (default) — streaming agent text output
  */
@@ -142,13 +140,6 @@ export function connectToSseStream(
               callbacks.onError(parsed.error ?? "Unknown error");
             } catch {
               callbacks.onError("Unknown error");
-            }
-          } else if (event === "cancelled") {
-            try {
-              const parsed = JSON.parse(data);
-              callbacks.onCancelled?.(parsed.runId ?? "");
-            } catch {
-              callbacks.onCancelled?.("");
             }
           } else if (event === "wiki-refresh") {
             try {

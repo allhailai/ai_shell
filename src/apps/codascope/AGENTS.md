@@ -76,7 +76,6 @@ const controller = connectToSseStream(url, {
   onDone: (summary) => { /* handle completion */ },
   onError: (error) => { /* handle error */ },
   onPipelineStep: (step) => { /* handle pipeline progress */ },
-  onCancelled: (runId) => { /* handle cancellation */ },
 });
 ```
 

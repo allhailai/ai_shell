@@ -36,7 +36,6 @@ interface CodaScopeState {
   agentRunning: boolean;
   agentStatus: string;
   selectedModel: string;
-  buildSummary: string | null;
 
   // Epics
   epics: EpicDesign[];
@@ -54,7 +53,6 @@ interface CodaScopeState {
   setAgentRunning: (running: boolean) => void;
   setAgentStatus: (status: string) => void;
   setSelectedModel: (model: string) => void;
-  setBuildSummary: (summary: string | null) => void;
   setEpics: (epics: EpicDesign[]) => void;
 }
 
@@ -71,7 +69,6 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   skills: [],
   agentRunning: false,
   agentStatus: "",
-  buildSummary: null,
   selectedModel: (() => {
     try { return localStorage.getItem("codascope:lastModel") ?? ""; }
     catch { return ""; }
@@ -90,7 +87,6 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
   setSkills: (skills) => set({ skills }),
   setAgentRunning: (running) => set({ agentRunning: running }),
   setAgentStatus: (status) => set({ agentStatus: status }),
-  setBuildSummary: (summary: string | null) => set({ buildSummary: summary }),
   setSelectedModel: (model) => {
     try { localStorage.setItem("codascope:lastModel", model); } catch { /* ignore */ }
     set({ selectedModel: model });

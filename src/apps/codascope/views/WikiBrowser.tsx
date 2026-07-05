@@ -87,7 +87,7 @@ export function WikiBrowser() {
     }
   }, [activeProjectId, urlTopicId, wikiTopics, navigate]);
 
-  // ── Load topic content when URL topic changes ─────────────────────
+  // ── Load topic content when URL topic changes or topics refresh ────
 
   useEffect(() => {
     if (!activeProjectId || !urlTopicId) return;
@@ -102,7 +102,7 @@ export function WikiBrowser() {
         // Silently fail
       }
     })();
-  }, [activeProjectId, urlTopicId, setActiveTopic]);
+  }, [activeProjectId, urlTopicId, wikiTopics, setActiveTopic]);
 
   /** Navigate to a topic via URL */
   const handleSelectTopic = useCallback((topicId: string) => {
