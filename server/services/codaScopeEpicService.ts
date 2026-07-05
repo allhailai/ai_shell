@@ -6,7 +6,7 @@
    Responsibilities:
    - Epic CRUD (create, read, update, delete, list)
    - Definition document read/write (markdown file I/O)
-   - Edit lock management (acquire, release, check, auto-expire after 5 min)
+   - Edit lock management (via CodaScopeLockService)
    - Storage layout management (creates epics/ directory structure)
    - Epic health computation (derived from timestamps and annotation counts)
    - Integration: initializes knowledge/ and curation/ dirs on creation,
@@ -31,6 +31,7 @@ import type {
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
+import { CodaScopeLockService } from "./codaScopeLockService.js";
 
 /* ── Storage Schema ────────────────────────────────────────────────── */
 
@@ -42,29 +43,26 @@ interface EpicMetadata extends EpicDesign {
   conversationId: string | null;
 }
 
-interface LockFile {
-  locks: EditLock[];
-}
-
 /* ── Service ────────────────────────────────────────────────────────── */
 
 export class CodaScopeEpicService {
   private root: string;
   private knowledgeService: CodaScopeEpicKnowledgeService;
   private curationService: CodaScopeCurationService;
-  /** Lock expiry in milliseconds — 5 minutes */
-  private static readonly LOCK_TTL_MS = 5 * 60 * 1000;
+  private lockService: CodaScopeLockService;
 
   constructor(root: string) {
     this.root = root;
     this.knowledgeService = new CodaScopeEpicKnowledgeService(root);
     this.curationService = new CodaScopeCurationService(root);
+    this.lockService = new CodaScopeLockService(root);
   }
 
   setRoot(root: string): void {
     this.root = root;
     this.knowledgeService.setRoot(root);
     this.curationService.setRoot(root);
+    this.lockService.setRoot(root);
   }
 
   /* ── Path helpers ──────────────────────────────────────────────────── */
@@ -106,9 +104,6 @@ export class CodaScopeEpicService {
     return path.join(this.epicDir(projectDir, epicId), "definition.md");
   }
 
-  private lockFilePath(projectDir: string, epicId: string): string {
-    return path.join(this.epicDir(projectDir, epicId), "locks.json");
-  }
 
   private scopePath(projectDir: string, epicId: string): string {
     return path.join(this.epicDir(projectDir, epicId), "scope.json");
@@ -468,158 +463,39 @@ export class CodaScopeEpicService {
     return true;
   }
 
-  /* ── Edit Lock Management ──────────────────────────────────────────── */
-
-  private readLocks(projectDir: string, epicId: string): LockFile {
-    const p = this.lockFilePath(projectDir, epicId);
-    if (!existsSync(p)) return { locks: [] };
-    try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { locks: [] };
-    }
-  }
-
-  private writeLocks(projectDir: string, epicId: string, lockFile: LockFile): void {
-    writeFileSync(this.lockFilePath(projectDir, epicId), JSON.stringify(lockFile, null, 2), "utf-8");
-  }
-
-  /** Auto-expire stale locks (5 min idle). Returns cleaned lock list. */
-  private cleanExpiredLocks(lockFile: LockFile): LockFile {
-    const now = Date.now();
-    lockFile.locks = lockFile.locks.filter((lock) => {
-      const lastActivity = new Date(lock.lastActivityAt).getTime();
-      return (now - lastActivity) < CodaScopeEpicService.LOCK_TTL_MS;
-    });
-    return lockFile;
-  }
+  /* ── Edit Lock Management (delegated to CodaScopeLockService) ────── */
 
   /** Acquire an edit lock on a document within an epic. */
   async acquireLock(projectId: string, epicId: string, opts: {
     documentId: string;
     lockedBy: string;
   }): Promise<EditLock | { error: string; holder: EditLock }> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) throw new Error("Project not found");
-
-    let lockFile = this.readLocks(projectDir, epicId);
-    lockFile = this.cleanExpiredLocks(lockFile);
-
-    // Check if already locked by someone else
-    const existing = lockFile.locks.find((l) => l.documentId === opts.documentId);
-    if (existing && existing.lockedBy !== opts.lockedBy) {
-      return { error: "Document is locked", holder: existing };
-    }
-
-    // Refresh existing lock or create new
-    const now = new Date().toISOString();
-    if (existing) {
-      existing.lastActivityAt = now;
-      this.writeLocks(projectDir, epicId, lockFile);
-      return existing;
-    }
-
-    const lock: EditLock = {
-      lockedBy: opts.lockedBy,
-      lockedAt: now,
-      lastActivityAt: now,
-      documentId: opts.documentId,
-    };
-    lockFile.locks.push(lock);
-    this.writeLocks(projectDir, epicId, lockFile);
-    return lock;
+    return this.lockService.acquireLock(projectId, epicId, opts);
   }
 
   /** Release an edit lock. */
   async releaseLock(projectId: string, epicId: string, documentId: string): Promise<boolean> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) return false;
-
-    const lockFile = this.readLocks(projectDir, epicId);
-    const before = lockFile.locks.length;
-    lockFile.locks = lockFile.locks.filter((l) => l.documentId !== documentId);
-    this.writeLocks(projectDir, epicId, lockFile);
-    return lockFile.locks.length < before;
+    return this.lockService.releaseLock(projectId, epicId, documentId);
   }
 
   /** Check current lock status for a document. */
   async getLockStatus(projectId: string, epicId: string): Promise<EditLock[]> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) return [];
-
-    let lockFile = this.readLocks(projectDir, epicId);
-    lockFile = this.cleanExpiredLocks(lockFile);
-    this.writeLocks(projectDir, epicId, lockFile);
-    return lockFile.locks;
+    return this.lockService.getLockStatus(projectId, epicId);
   }
 
-  /**
-   * Heartbeat — refresh lock TTL for active editing (P4).
-   * Called periodically (every 60s) by the client to keep the lock alive.
-   */
+  /** Heartbeat — refresh lock TTL for active editing. */
   async heartbeatLock(projectId: string, epicId: string, documentId: string, lockedBy: string): Promise<EditLock | null> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) return null;
-
-    let lockFile = this.readLocks(projectDir, epicId);
-    lockFile = this.cleanExpiredLocks(lockFile);
-
-    const lock = lockFile.locks.find((l) => l.documentId === documentId && l.lockedBy === lockedBy);
-    if (!lock) return null;
-
-    lock.lastActivityAt = new Date().toISOString();
-    this.writeLocks(projectDir, epicId, lockFile);
-    return lock;
+    return this.lockService.heartbeatLock(projectId, epicId, documentId, lockedBy);
   }
 
-  /**
-   * Check if a document is currently locked by a human (P4).
-   * Used by the agent to verify before writing — returns the lock holder
-   * or null if unlocked / only locked by agent.
-   */
+  /** Check if a document is currently locked by a human. */
   async isDocumentLockedByHuman(projectId: string, epicId: string, documentId: string): Promise<EditLock | null> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) return null;
-
-    let lockFile = this.readLocks(projectDir, epicId);
-    lockFile = this.cleanExpiredLocks(lockFile);
-    this.writeLocks(projectDir, epicId, lockFile);
-
-    const lock = lockFile.locks.find((l) => l.documentId === documentId);
-    if (!lock) return null;
-
-    // Agent locks (lockedBy starts with "agent_") don't block
-    if (lock.lockedBy.startsWith("agent_")) return null;
-    return lock;
+    return this.lockService.isDocumentLockedByHuman(projectId, epicId, documentId);
   }
 
-  /**
-   * Cleanup all expired locks across all epics (P4).
-   * Called on server startup to clear stale locks from crashes.
-   */
+  /** Cleanup all expired locks across all epics. */
   async cleanupAllExpiredLocks(projectId: string): Promise<number> {
-    const projectDir = this.projectDir(projectId);
-    if (!projectDir) return 0;
-
-    const epicsDirectory = this.epicsDir(projectDir);
-    if (!existsSync(epicsDirectory)) return 0;
-
-    let cleaned = 0;
-    const entries = readdirSync(epicsDirectory, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith("_") || entry.name.startsWith(".")) continue;
-      const lockPath = this.lockFilePath(projectDir, entry.name);
-      if (!existsSync(lockPath)) continue;
-
-      let lockFile = this.readLocks(projectDir, entry.name);
-      const before = lockFile.locks.length;
-      lockFile = this.cleanExpiredLocks(lockFile);
-      if (lockFile.locks.length < before) {
-        cleaned += before - lockFile.locks.length;
-        this.writeLocks(projectDir, entry.name, lockFile);
-      }
-    }
-    return cleaned;
+    return this.lockService.cleanupAllExpiredLocks(projectId);
   }
 
   /* ── Health Computation ────────────────────────────────────────────── */

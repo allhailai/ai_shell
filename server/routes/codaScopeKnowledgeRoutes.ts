@@ -3,6 +3,13 @@
    and curation pipeline.
    ──────────────────────────────────────────────────────────────────── */
 
+import {
+  initSsePipeline,
+  completeSsePipeline,
+  failSsePipeline,
+  handlePreStreamError,
+} from "./utils/ssePipelineHelper.js";
+
 import type { Request, Response } from "express";
 import path from "node:path";
 import os from "node:os";
@@ -376,32 +383,22 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
       if (!topics || topics.length === 0) throw httpError("topics array is required.", 400, "invalid_input");
 
-      // Register project dir and start a scoped build
-      const projectDir = projectSvc.getProjectDir(id);
-      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
-
       const scope = `research::${epicId}`;
-      const runId = buildSvc.startBuild(id, "research", modelId, scope);
-      if (!runId) {
-        res.status(409).json({ error: "A research pipeline is already running for this epic.", code: "build_in_progress" });
-        return;
-      }
-
-      // Set up SSE
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
+      const pipeline = initSsePipeline(req, res, {
+        projectId: id,
+        scope,
+        buildType: "research",
+        modelId,
+        buildSvc,
+        projectDir: projectSvc.getProjectDir(id) ?? undefined,
       });
+      if (!pipeline) return; // 409 already sent
 
-      let aborted = false;
-      req.on("close", () => { aborted = true; });
+      const { runId, callbacks } = pipeline;
+      const { isAborted } = callbacks;
 
-      const isAborted = () => aborted || buildSvc.isCancelled(id, scope);
-
+      // Wrap sendEvent to forward research events to build pipeline steps
       const sendEvent = (event: string, data: unknown) => {
-        // Forward research events to build pipeline steps for state tracking
         if (event === "research-step" || event === "research-plan-generated" || event === "research-download-complete") {
           const stepData = data as Record<string, unknown>;
           buildSvc.addPipelineStep(id, runId, {
@@ -410,15 +407,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
             progress: (stepData.progress as string) ?? (stepData.queryCount ? `${stepData.queryCount} queries, ${stepData.urlCount} URLs` : undefined),
           }, scope);
         }
-        if (isAborted()) return;
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      };
-
-      const sendMessage = (msg: unknown) => {
-        const msgJson = JSON.stringify(msg);
-        buildSvc.appendOutput(id, runId, msgJson + "\n", scope);
-        if (isAborted()) return;
-        res.write(`event: message\ndata: ${msgJson}\n\n`);
+        callbacks.sendEvent(event, data);
       };
 
       sendEvent("research-started", { projectId: id, epicId, modelId, topics, runId });
@@ -426,7 +415,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       try {
         await runResearchPipeline(
           { projectId: id, epicId, modelId, topics },
-          { sendEvent, sendMessage, isAborted },
+          { sendEvent, sendMessage: callbacks.sendMessage, isAborted },
           {
             agentSvc: svcs.agentSvc,
             projectSvc: svcs.projectSvc,
@@ -437,30 +426,12 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
           },
         );
 
-        // Mark build complete
-        buildSvc.completeBuild(id, runId, undefined, undefined, scope);
-
-        if (!isAborted()) {
-          sendEvent("done", {});
-          res.end();
-        }
+        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, isAborted);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        buildSvc.failBuild(id, runId, message, scope);
-        if (!isAborted()) {
-          res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
-          res.end();
-        }
+        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, isAborted);
       }
     } catch (err) {
-      if (!res.headersSent) {
-        const message = err instanceof Error ? err.message : String(err);
-        const status = (err as any)?.status ?? 500;
-        res.status(status).json({ error: message });
-      } else {
-        res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
-        res.end();
-      }
+      handlePreStreamError(res, err);
     }
   });
 
@@ -486,41 +457,19 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
 
       if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
 
-      // Register project dir and start a scoped build
-      const projectDir = projectSvc.getProjectDir(id);
-      if (projectDir) buildSvc.registerProjectDir(id, projectDir);
-
       const scope = `curation::${epicId}`;
-      const runId = buildSvc.startBuild(id, "curation", modelId, scope);
-      if (!runId) {
-        res.status(409).json({ error: "A curation pipeline is already running for this epic.", code: "build_in_progress" });
-        return;
-      }
-
-      // Set up SSE
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
+      const pipeline = initSsePipeline(req, res, {
+        projectId: id,
+        scope,
+        buildType: "curation",
+        modelId,
+        buildSvc,
+        projectDir: projectSvc.getProjectDir(id) ?? undefined,
       });
+      if (!pipeline) return; // 409 already sent
 
-      let aborted = false;
-      req.on("close", () => { aborted = true; });
-
-      const isAborted = () => aborted || buildSvc.isCancelled(id, scope);
-
-      const sendEvent = (event: string, data: unknown) => {
-        if (isAborted()) return;
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-      };
-
-      const sendMessage = (msg: unknown) => {
-        const msgJson = JSON.stringify(msg);
-        buildSvc.appendOutput(id, runId, msgJson + "\n", scope);
-        if (isAborted()) return;
-        res.write(`event: message\ndata: ${msgJson}\n\n`);
-      };
+      const { runId, callbacks } = pipeline;
+      const { sendEvent, sendMessage, isAborted } = callbacks;
 
       sendEvent("run-started", { projectId: id, epicId, modelId, runId });
 
@@ -540,30 +489,12 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
           },
         );
 
-        // Mark build complete
-        buildSvc.completeBuild(id, runId, undefined, undefined, scope);
-
-        if (!isAborted()) {
-          sendEvent("done", {});
-          res.end();
-        }
+        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, isAborted);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        buildSvc.failBuild(id, runId, message, scope);
-        if (!isAborted()) {
-          res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
-          res.end();
-        }
+        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, isAborted);
       }
     } catch (err) {
-      if (!res.headersSent) {
-        const message = err instanceof Error ? err.message : String(err);
-        const status = (err as any)?.status ?? 500;
-        res.status(status).json({ error: message });
-      } else {
-        res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
-        res.end();
-      }
+      handlePreStreamError(res, err);
     }
   });
 

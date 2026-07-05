@@ -5,6 +5,12 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import {
+  initSsePipeline,
+  completeSsePipeline,
+  failSsePipeline,
+  handlePreStreamError,
+} from "./utils/ssePipelineHelper.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param } = ctx;
@@ -322,59 +328,44 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
         throw httpError("No included scope entries to deepen.", 400, "no_included_entries");
       }
 
-      // Register project dir and start a scoped build (per-epic)
-      buildSvc.registerProjectDir(id, projectDir);
       const buildScope = `epic-deepen::${epicId}`;
-      const runId = buildSvc.startBuild(id, "epic-deepen", modelId, buildScope);
-      if (!runId) {
-        res.status(409).json({ error: "A deepen pipeline is already running for this epic.", code: "build_in_progress" });
-        return;
-      }
-
-      // SSE headers
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
+      const pipeline = initSsePipeline(req, res, {
+        projectId: id,
+        scope: buildScope,
+        buildType: "epic-deepen",
+        modelId,
+        buildSvc,
+        projectDir,
       });
+      if (!pipeline) return; // 409 already sent
 
-      res.write(`event: run-started\ndata: ${JSON.stringify({ runId, epicId, entryCount: includedEntries.length })}\n\n`);
+      const { runId, callbacks } = pipeline;
+      const { isAborted } = callbacks;
 
-      let sseAborted = false;
-      req.on("close", () => { sseAborted = true; });
-
-      const isAborted = () => sseAborted || buildSvc.isCancelled(id, buildScope);
+      // Wrap sendEvent to forward pipeline-step events to build state
       const sendEvent = (event: string, data: unknown) => {
         if (event === "pipeline-step") {
           buildSvc.addPipelineStep(id, runId, data as any, buildScope);
         }
-        if (isAborted()) return;
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        callbacks.sendEvent(event, data);
       };
-      const sendMessage = (msg: unknown) => {
-        const msgJson = JSON.stringify(msg);
-        buildSvc.appendOutput(id, runId, msgJson + "\n", buildScope);
-        if (isAborted()) return;
-        res.write(`data: ${msgJson}\n\n`);
-      };
+
+      sendEvent("run-started", { runId, epicId, entryCount: includedEntries.length });
 
       try {
         const { runEpicDeepenPipeline } = await import("../services/codaScopeBuildOrchestrator.js");
         await runEpicDeepenPipeline(
           { projectId: id, epicId, modelId, entries: includedEntries },
-          { sendEvent, sendMessage, isAborted },
+          { sendEvent, sendMessage: callbacks.sendMessage, isAborted },
           svcs as any,
           runId,
           buildScope,
         );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        buildSvc.failBuild(id, runId, message, buildScope);
-        sendEvent("error", { error: message });
-      }
 
-      if (!isAborted()) res.end();
+        completeSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, isAborted);
+      } catch (err) {
+        failSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, err, isAborted);
+      }
     })().catch(next);
   });
 

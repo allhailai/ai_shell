@@ -28,6 +28,7 @@ import { CodaScopeImageService } from "../services/codaScopeImageService.js";
 import { CodaScopeArtifactService } from "../services/codaScopeArtifactService.js";
 import { CodaScopeArtifactAnnotationService } from "../services/codaScopeArtifactAnnotationService.js";
 import { CodaScopeArtifactVersionService } from "../services/codaScopeArtifactVersionService.js";
+import { CodaScopeLockService } from "../services/codaScopeLockService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ export interface CodaScopeServices {
   artifactSvc: CodaScopeArtifactService;
   artifactAnnotationSvc: CodaScopeArtifactAnnotationService;
   artifactVersionSvc: CodaScopeArtifactVersionService;
+  lockSvc: CodaScopeLockService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -107,6 +109,7 @@ let imageService: CodaScopeImageService | null = null;
 let artifactService: CodaScopeArtifactService | null = null;
 let artifactAnnotationService: CodaScopeArtifactAnnotationService | null = null;
 let artifactVersionService: CodaScopeArtifactVersionService | null = null;
+let lockService: CodaScopeLockService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -208,6 +211,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!artifactVersionService) artifactVersionService = new CodaScopeArtifactVersionService(root);
   else artifactVersionService.setRoot(root);
 
+  if (!lockService) lockService = new CodaScopeLockService(root);
+  else lockService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -232,6 +238,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     artifactSvc: artifactService,
     artifactAnnotationSvc: artifactAnnotationService,
     artifactVersionSvc: artifactVersionService,
+    lockSvc: lockService,
   };
 }
 
