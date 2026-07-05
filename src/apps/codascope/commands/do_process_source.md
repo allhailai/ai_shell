@@ -62,5 +62,3 @@ For each relevant topic area, create or update an epic wiki page:
 - **Main wiki = code knowledge ONLY.** Never put research findings in the main wiki.
 - **Enrich, don't replace.** When updating an existing page, add new content alongside existing.
 
-## Available Tools
-{{TOOL_DESCRIPTIONS}}

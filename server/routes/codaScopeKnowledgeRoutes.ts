@@ -373,14 +373,8 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       const epicId = param(req, "epicId");
       const { modelId, topics } = req.body as { modelId?: string; topics?: string[] };
 
-      if (!modelId) {
-        res.status(400).json({ error: "modelId is required." });
-        return;
-      }
-      if (!topics || topics.length === 0) {
-        res.status(400).json({ error: "topics array is required." });
-        return;
-      }
+      if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
+      if (!topics || topics.length === 0) throw httpError("topics array is required.", 400, "invalid_input");
 
       // Register project dir and start a scoped build
       const projectDir = projectSvc.getProjectDir(id);
@@ -461,7 +455,8 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     } catch (err) {
       if (!res.headersSent) {
         const message = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ error: message });
+        const status = (err as any)?.status ?? 500;
+        res.status(status).json({ error: message });
       } else {
         res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
         res.end();
@@ -489,10 +484,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       const epicId = param(req, "epicId");
       const { modelId } = req.body as { modelId?: string };
 
-      if (!modelId) {
-        res.status(400).json({ error: "modelId is required." });
-        return;
-      }
+      if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
 
       // Register project dir and start a scoped build
       const projectDir = projectSvc.getProjectDir(id);
@@ -566,7 +558,8 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     } catch (err) {
       if (!res.headersSent) {
         const message = err instanceof Error ? err.message : String(err);
-        res.status(500).json({ error: message });
+        const status = (err as any)?.status ?? 500;
+        res.status(status).json({ error: message });
       } else {
         res.write(`event: error\ndata: ${JSON.stringify({ error: err instanceof Error ? err.message : String(err) })}\n\n`);
         res.end();

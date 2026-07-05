@@ -193,7 +193,24 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const { scope } = req.body as { scope?: unknown };
-    if (!scope) throw httpError("scope is required.", 400, "invalid_input");
+    if (!scope || typeof scope !== "object") throw httpError("scope is required and must be an object.", 400, "invalid_input");
+
+    // Validate scope structure matches EpicScope shape
+    const s = scope as Record<string, unknown>;
+    if (!Array.isArray(s.entries)) throw httpError("scope.entries must be an array.", 400, "invalid_input");
+    for (let i = 0; i < s.entries.length; i++) {
+      const entry = s.entries[i] as Record<string, unknown> | undefined;
+      if (!entry || typeof entry !== "object") {
+        throw httpError(`scope.entries[${i}] must be an object.`, 400, "invalid_input");
+      }
+      if (typeof entry.topicId !== "string" || !entry.topicId) {
+        throw httpError(`scope.entries[${i}].topicId must be a non-empty string.`, 400, "invalid_input");
+      }
+      if (typeof entry.included !== "boolean") {
+        throw httpError(`scope.entries[${i}].included must be a boolean.`, 400, "invalid_input");
+      }
+    }
+
     const saved = await epicSvc.setScope(id, epicId, scope as any);
     if (!saved) throw httpError("Epic not found.", 404, "not_found");
     res.json({ saved: true });

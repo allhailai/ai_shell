@@ -83,5 +83,3 @@ Call the `update_research_plan` tool (or write to the research plan file) with t
 - **Deduplicate**: Don't include multiple URLs from the same domain covering the same topic.
 - **Be specific**: The relevance description should explain exactly what this source contributes.
 
-## Available Tools
-{{TOOL_DESCRIPTIONS}}
