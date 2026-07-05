@@ -1320,3 +1320,248 @@
   color: var(--color-text-tertiary);
   font-size: var(--text-sm);
 }
+
+/* ── Slash Command Palette ───────────────────────────────────────────
+   Floating palette anchored above the chat input.
+   Positioned like AtMentionPicker (absolute within .codascope-assistant-input-row).
+   ──────────────────────────────────────────────────────────────────── */
+
+.codascope-slash-palette {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  right: 0;
+  max-height: 360px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  animation: codascope-slash-palette-fadein 0.12s ease-out;
+}
+
+@keyframes codascope-slash-palette-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Header / Filter row ──────────────────────────────────────────── */
+
+.codascope-slash-palette-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  min-height: 36px;
+}
+
+.codascope-slash-palette-filter-icon {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-accent-text);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.codascope-slash-palette-filter-text {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Command List ─────────────────────────────────────────────────── */
+
+.codascope-slash-palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+  max-height: 280px;
+}
+
+.codascope-slash-palette-list::-webkit-scrollbar {
+  width: 4px;
+}
+.codascope-slash-palette-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.codascope-slash-palette-list::-webkit-scrollbar-thumb {
+  background: var(--color-border-primary);
+  border-radius: var(--radius-full);
+}
+
+/* ── Individual command row ───────────────────────────────────────── */
+
+.codascope-slash-palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  transition: background var(--transition-fast);
+  font-family: inherit;
+}
+
+.codascope-slash-palette-item:hover,
+.codascope-slash-palette-item--active {
+  background: var(--color-bg-hover);
+}
+
+.codascope-slash-palette-item--dimmed {
+  opacity: 0.5;
+}
+
+.codascope-slash-palette-item--dimmed.codascope-slash-palette-item--active,
+.codascope-slash-palette-item--dimmed:hover {
+  opacity: 0.8;
+}
+
+.codascope-slash-palette-category-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.codascope-slash-palette-item--active .codascope-slash-palette-category-icon {
+  color: var(--color-accent-text);
+}
+
+.codascope-slash-palette-slash {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono, monospace);
+  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.codascope-slash-palette-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* ── Divider ──────────────────────────────────────────────────────── */
+
+.codascope-slash-palette-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  margin: var(--space-1) 0;
+}
+
+.codascope-slash-palette-divider span {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.codascope-slash-palette-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-primary);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────── */
+
+.codascope-slash-palette-empty {
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* ── Footer hint ──────────────────────────────────────────────────── */
+
+.codascope-slash-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-slash-palette-footer kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-1);
+  font-size: var(--text-2xs);
+  font-family: inherit;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  margin-right: var(--space-1);
+}
+
+/* ── Slash Command Toast ──────────────────────────────────────────── */
+
+.codascope-slash-toast {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  right: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  z-index: 50;
+  animation: codascope-slash-toast-in 0.2s ease-out;
+  pointer-events: none;
+}
+
+@keyframes codascope-slash-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.codascope-slash-toast-icon {
+  color: var(--color-success, #4ade80);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+}

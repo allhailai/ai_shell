@@ -24,6 +24,11 @@ export interface RichChatInputProps {
   onChange: (value: string) => void;
   onSend: () => void;
   onAtTrigger?: (position: { top: number; left: number }) => void;
+  /** Fires when `/` is typed as the first character (empty input → `/`). */
+  onSlashTrigger?: (position: { top: number; left: number }) => void;
+  /** Allows the parent to intercept keydown events before normal handling.
+   *  Return `true` from the handler to prevent default behavior. */
+  onKeyDownCapture?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   onImagePaste?: (file: File) => void;
   onImageDrop?: (file: File) => void;
   attachments?: ChatAttachment[];
@@ -58,6 +63,8 @@ export function RichChatInput({
   onChange,
   onSend,
   onAtTrigger,
+  onSlashTrigger,
+  onKeyDownCapture,
   onImagePaste,
   onImageDrop,
   attachments = [],
@@ -100,6 +107,10 @@ export function RichChatInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Let parent intercept first (e.g. slash palette navigation)
+      if (onKeyDownCapture?.(e)) {
+        return;
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (!sendDisabled && !disabled) {
@@ -110,7 +121,7 @@ export function RichChatInput({
         onClearAttachments?.();
       }
     },
-    [onSend, onClearAttachments, sendDisabled, disabled],
+    [onSend, onClearAttachments, sendDisabled, disabled, onKeyDownCapture],
   );
 
   /* ── Input change with @ detection ────────────────────────────── */
@@ -122,6 +133,18 @@ export function RichChatInput({
 
       // Immediately adjust height for responsive feel
       requestAnimationFrame(adjustHeight);
+
+      // Detect / trigger (first char on empty input)
+      if (onSlashTrigger && textareaRef.current) {
+        if (newValue === "/") {
+          const textarea = textareaRef.current;
+          const rect = textarea.getBoundingClientRect();
+          onSlashTrigger({
+            top: rect.top - 8,
+            left: rect.left + 12,
+          });
+        }
+      }
 
       // Detect @ trigger
       if (onAtTrigger && textareaRef.current) {
@@ -140,7 +163,7 @@ export function RichChatInput({
         }
       }
     },
-    [onChange, onAtTrigger, adjustHeight],
+    [onChange, onAtTrigger, onSlashTrigger, adjustHeight],
   );
 
   /* ── Paste handler (images) ───────────────────────────────────── */

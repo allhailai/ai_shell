@@ -24,6 +24,9 @@ import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
 import { ChatHelpModal } from "./components/ChatHelpModal";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
+import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
+import type { SlashCommand, CommandContext } from "./commandRegistry";
+import { getFilteredCommands } from "./commandRegistry";
 import { useCommandBus } from "../../shell/hooks";
 import { useAssistantStream } from "./hooks/useAssistantStream";
 import { useConversationManager } from "./hooks/useConversationManager";
@@ -120,6 +123,12 @@ export function CodaScopeAssistant() {
 
   // @-mention picker state
   const [atPickerOpen, setAtPickerOpen] = useState(false);
+
+  // Slash command palette state
+  const [slashPaletteOpen, setSlashPaletteOpen] = useState(false);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashToast, setSlashToast] = useState<string | null>(null);
+  const slashToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Command bus for cross-component communication
   const commandBus = useCommandBus();
@@ -424,6 +433,249 @@ export function CodaScopeAssistant() {
   const handleAtPickerClose = useCallback(() => {
     setAtPickerOpen(false);
   }, []);
+
+  // ── Slash command palette handlers ─────────────────────────────────
+
+  const showSlashToast = useCallback((msg: string) => {
+    if (slashToastTimer.current) clearTimeout(slashToastTimer.current);
+    setSlashToast(msg);
+    slashToastTimer.current = setTimeout(() => setSlashToast(null), 2500);
+  }, []);
+
+  const slashCommandContext: CommandContext = useMemo(() => {
+    const currentView = segments[2] ?? "dashboard";
+    return {
+      currentView,
+      hasProject: !!activeProjectId,
+      isEpicView: currentView === "epic" || segments[2] === "epic",
+      epicId: segments[2] === "epic" ? (segments[3] ?? null) : null,
+      hasWiki: wikiTopics.length > 0,
+      hasCodeMap: true, // TODO: track from store if needed
+    };
+  }, [segments, activeProjectId, wikiTopics]);
+
+  const handleSlashTrigger = useCallback((_position: { top: number; left: number }) => {
+    setSlashPaletteOpen(true);
+    setSlashActiveIndex(0);
+  }, []);
+
+  const handleSlashSelect = useCallback(async (cmd: SlashCommand) => {
+    setSlashPaletteOpen(false);
+    setInput("");
+
+    if (cmd.behavior === "chat" && cmd.prompt) {
+      // Inject prompt into input — user reviews and sends
+      setInput(cmd.prompt);
+      return;
+    }
+
+    // Dispatch behavior
+    switch (cmd.id) {
+      // ── Navigation commands ──
+      case "goto-dashboard":
+        navigate(`project/${activeProjectId}/dashboard`);
+        showSlashToast("Navigating to Dashboard…");
+        break;
+      case "goto-wiki":
+        navigate(`project/${activeProjectId}/wiki`);
+        showSlashToast("Navigating to Wiki…");
+        break;
+      case "goto-quality":
+        navigate(`project/${activeProjectId}/quality`);
+        showSlashToast("Navigating to Quality…");
+        break;
+      case "goto-rules":
+        navigate(`project/${activeProjectId}/rules`);
+        showSlashToast("Navigating to Golden Rules…");
+        break;
+      case "goto-concepts":
+        navigate(`project/${activeProjectId}/concepts`);
+        showSlashToast("Navigating to Concepts…");
+        break;
+      case "goto-skills":
+        navigate(`project/${activeProjectId}/skills`);
+        showSlashToast("Navigating to Skills…");
+        break;
+      case "goto-epics":
+        navigate(`project/${activeProjectId}/epics`);
+        showSlashToast("Navigating to Epics…");
+        break;
+      case "goto-settings":
+        navigate(`project/${activeProjectId}/settings`);
+        showSlashToast("Navigating to Settings…");
+        break;
+
+      // ── Build commands ──
+      case "build-wiki":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Building wiki…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_build_full_wiki", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+      case "build-wiki-page":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Building wiki page…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_build_wiki_page", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+      case "build-code-map":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Exploring codebase…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_explore", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+
+      // ── Analyze commands ──
+      case "scan-quality":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Running quality scan…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_quality_scan", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+      case "explore":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Exploring codebase…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_explore", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+      case "scan-delta":
+        if (activeProjectId && selectedModelId) {
+          showSlashToast("Scanning for changes…");
+          try {
+            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ command: "do_delta_scan", modelId: selectedModelId }),
+            });
+          } catch { /* error handled by server */ }
+        }
+        break;
+
+      // ── Epic commands ──
+      case "epic-create":
+        if (activeProjectId) {
+          showSlashToast("Creating new epic…");
+          try {
+            const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: "New Epic" }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              navigate(`project/${activeProjectId}/epic/${data.epic.id}/define?new=1`);
+            }
+          } catch { /* error handled by server */ }
+        }
+        break;
+
+      // ── Help commands ──
+      case "help":
+        setHelpModalOpen(true);
+        break;
+      case "commands":
+        setHelpModalOpen(true);
+        break;
+      case "shortcuts":
+        setHelpModalOpen(true);
+        break;
+
+      default:
+        break;
+    }
+  }, [activeProjectId, selectedModelId, navigate, showSlashToast]);
+
+  const handleSlashClose = useCallback(() => {
+    setSlashPaletteOpen(false);
+    // Clear the `/` from input if it's just a bare `/`
+    setInput((prev) => (prev === "/" ? "" : prev));
+  }, []);
+
+  // Keyboard capture for slash palette navigation
+  const handleSlashKeyCapture = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+      if (!slashPaletteOpen) return false;
+
+      const totalItems = getVisibleCommandCount(
+        input.startsWith("/") ? input.slice(1) : "",
+        slashCommandContext,
+      );
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashActiveIndex((prev) => Math.min(prev + 1, totalItems - 1));
+        return true;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashActiveIndex((prev) => Math.max(prev - 1, 0));
+        return true;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        // Find the selected item from the filtered list at the active index
+        const q = input.startsWith("/") ? input.slice(1) : "";
+        const { relevant, other } = getFilteredCommands(q, slashCommandContext);
+        const allItems = [...relevant, ...other];
+        const selected = allItems[slashActiveIndex];
+        if (selected) {
+          void handleSlashSelect(selected);
+        }
+        return true;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleSlashClose();
+        return true;
+      }
+      return false;
+    },
+    [slashPaletteOpen, input, slashCommandContext, slashActiveIndex, handleSlashSelect, handleSlashClose],
+  );
+
+  // Close palette if input becomes empty (user deleted `/`)
+  useEffect(() => {
+    if (slashPaletteOpen && !input.startsWith("/")) {
+      setSlashPaletteOpen(false);
+    }
+  }, [input, slashPaletteOpen]);
+
+  // Reset active index when query changes
+  useEffect(() => {
+    if (slashPaletteOpen) {
+      setSlashActiveIndex(0);
+    }
+  }, [input, slashPaletteOpen]);
 
   // ── Phase 3: Selection-to-chat listener ────────────────────────────
 
@@ -744,17 +996,30 @@ export function CodaScopeAssistant() {
               onClose={handleAtPickerClose}
             />
           )}
+          {slashPaletteOpen && (
+            <SlashCommandPalette
+              isOpen={slashPaletteOpen}
+              query={input.startsWith("/") ? input.slice(1) : ""}
+              context={slashCommandContext}
+              onSelect={handleSlashSelect}
+              onClose={handleSlashClose}
+              activeIndex={slashActiveIndex}
+              onActiveIndexChange={setSlashActiveIndex}
+            />
+          )}
           <RichChatInput
             value={input}
             onChange={setInput}
             onSend={sendMessage}
             onAtTrigger={handleAtTrigger}
+            onSlashTrigger={handleSlashTrigger}
+            onKeyDownCapture={handleSlashKeyCapture}
             onImagePaste={handleImageFile}
             onImageDrop={handleImageFile}
             attachments={attachments}
             onRemoveAttachment={handleRemoveAttachment}
             onClearAttachments={handleClearAttachments}
-            placeholder="Message the agent... (@ to add context)"
+            placeholder="Message the agent... (@ to add context, / for commands)"
             disabled={streaming || !selectedModelId}
             sendDisabled={!input.trim() || streaming || !selectedModelId}
           />
@@ -772,6 +1037,14 @@ export function CodaScopeAssistant() {
           </button>
         </div>
         <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
+
+        {/* Slash command toast */}
+        {slashToast && (
+          <div className="codascope-slash-toast" key={slashToast}>
+            <span className="codascope-slash-toast-icon">✓</span>
+            {slashToast}
+          </div>
+        )}
       </div>
     </div>
   );
