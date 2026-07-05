@@ -82,6 +82,8 @@ const controller = connectToSseStream(url, {
 
 Do not duplicate the SSE parsing logic — always import from `codaScopeSseClient.ts`.
 
+> **Exception**: `artifactApi.ts` uses the browser-native `EventSource` API for GET-based SSE polling of artifact build status. This is an acceptable deviation because `connectToSseStream` is designed for POST-based SSE streams, while the artifact status endpoint is a GET-only polling endpoint.
+
 ### 5. Backend Services — Single Responsibility
 
 Each service file has one clear domain:
@@ -112,7 +114,7 @@ The chat agent is built on a **manifest + tool use** architecture:
 - The agent receives a **lightweight manifest** (~500 tokens) — project name, repo list, wiki topic titles, golden rule names, concept names, quality score, build status, and freshness timestamps
 - The agent has **read-only tools** to fetch full content on demand (wiki pages, quality reports, code maps, etc.)
 - The agent **decides what to read** based on the user's question — it is not force-fed content
-- **Tool safety**: assistant/chat = ALL tools (full autonomy — read + write + epic). Wiki-build = read + write. Curation/research = read + epic tools.
+- **Tool safety**: assistant/chat = ALL tools (full autonomy — read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic tools. Artifact-build/regen = read + artifact tools.
 
 When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
@@ -206,7 +208,7 @@ Wiki content uses Obsidian-style `[[topic-id]]` wikilinks. The client converts t
 
 When adding new pipeline steps:
 1. Add SSE event types to the frontend pipeline visualization in `ProjectDashboard.tsx`
-2. Add the step to the route handler's `analyze` flow in `codaScopeRoutes.ts`
+2. Add the step to the route handler's `analyze` flow in `codaScopeBuildRoutes.ts`
 3. Create a command template in `commands/`
 
 ### Agent Context Awareness

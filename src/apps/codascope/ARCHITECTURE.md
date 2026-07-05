@@ -179,6 +179,8 @@ server/
 /codascope/project/:id/concepts  → ConceptExplorer
 /codascope/project/:id/skills    → SkillsManager
 /codascope/project/:id/settings  → Settings
+/codascope/project/:id/epics     → EpicList
+/codascope/project/:id/epic/:eid → EpicDetail (with tab sub-routing)
 ```
 
 Chat is **not** a routed view — it lives in `CodaScopeAssistant.tsx` as a persistent right panel visible across all project views.
@@ -344,6 +346,7 @@ The agent can propose structured actions via XML tags embedded in responses:
 **Server-side** (`codaScopeActionParser.ts`):
 - Extracts all `<codascope_action>` tags from agent text
 - Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `run_quality_scan`, `navigate`, `create_golden_rule`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`
+- **Notification-only tags**: `design_doc_created`, `design_doc_edited`, and `artifact_built` are emitted automatically by agent write tools — they are not user-actionable cards in the ActionCard UI. They trigger side effects (auto-navigation, diff highlighting, build status updates) via the command bus.
 - Parsed actions are stored in `message.metadata.actions`
 
 **Client-side** (`ActionCard.tsx`):
@@ -454,13 +457,21 @@ Prepared for Phase 2 guided-learning features.
 
 Commands are markdown prompt templates in `commands/`. They use `{{VARIABLE}}` placeholders resolved at runtime:
 
-| Variable | Source |
-|----------|--------|
-| `{{PROJECT_NAME}}` | `project.name` |
-| `{{PROJECT_DIR}}` | Filesystem path |
-| `{{REPO_PATHS}}` | Formatted repository list |
-| `{{TOPIC_NAME}}` | Per-run parameter |
-| `{{TOPIC_SLUG}}` | Derived from topic name |
+| Variable | Source | Used By |
+|----------|--------|--------|
+| `{{PROJECT_NAME}}` | `project.name` | All commands |
+| `{{PROJECT_DIR}}` | Filesystem path | All commands |
+| `{{REPOSITORIES}}` | Formatted repository list | All commands |
+| `{{TOPIC_NAME}}` | Per-run parameter | Wiki commands |
+| `{{TOPIC_SLUG}}` | Derived from topic name | Wiki commands |
+| `{{CODE_MAP}}` | Code map content | `buildBaseVars()` |
+| `{{GOLDEN_RULES}}` | Active coding standards | `buildBaseVars()` |
+| `{{CONCEPTS_JSON}}` | Domain concepts | `buildBaseVars()` |
+| `{{WIKI_INDEX}}` | Wiki topic listing | `buildBaseVars()` |
+| `{{EPIC_TITLE}}`, `{{EPIC_DEFINITION}}`, `{{EPIC_SCOPE}}` | Epic context | Research/curation |
+| `{{ARTIFACT_TITLE}}`, `{{ARTIFACT_SPEC_BODY}}`, `{{EPIC_CONTEXT}}` | Artifact context | Artifact build/regen |
+
+There are 47 unique template variables across all commands. The table above is a representative subset; see `codaScopeCommandLoader.ts` and each orchestrator for the full variable set.
 
 ### Command Loader
 
@@ -632,9 +643,8 @@ Each design doc maintains its own version history within `<docId>/versions/`:
 
 Design documents can be rendered as static HTML for presentation/sharing:
 
-1. **Basic fallback**: `CodaScopeEpicRenderService.generateBasicHtml()` converts markdown → HTML with dark-themed styling
-2. **Agent-generated**: The `do_render_design.md` command template prompts the agent to produce polished HTML
-3. **Storage**: Rendered HTML saved to `<epicDir>/designs/<docId>-rendered/index.html`
+1. **Programmatic rendering**: `CodaScopeEpicRenderService.generateBasicHtml()` converts markdown → HTML with dark-themed styling, section anchors, and responsive layout
+2. **Storage**: Rendered HTML saved to `<epicDir>/designs/<docId>-rendered/index.html`
 
 ### API Endpoints
 
