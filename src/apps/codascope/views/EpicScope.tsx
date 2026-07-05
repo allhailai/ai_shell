@@ -17,60 +17,17 @@ import type {
   EpicScope as EpicScopeType,
   EpicScopeEntry,
   ScopeDiff,
-  TopicDepth,
   WikiTopic,
   Concept,
 } from "../codaScopeTypes";
+import { DepthBadge, TypeBadge, SourceBadge, EnrichmentStatus } from "../components/ScopeBadges";
+import { ScopeDiffModal } from "../components/ScopeDiffModal";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface EpicScopeProps {
   epic: EpicDesignDetail;
   setEpic: (e: EpicDesignDetail) => void;
-}
-
-/* ── Depth badge helpers ─────────────────────────────────────────────── */
-
-const DEPTH_LABELS: Record<string, string> = {
-  none: "None",
-  stub: "Stub",
-  outline: "Outline",
-  developed: "Developed",
-  comprehensive: "Comprehensive",
-};
-
-
-function DepthBadge({ depth, size = "sm" }: { depth?: TopicDepth; size?: "sm" | "md" }) {
-  if (!depth) return null;
-  const cls = size === "md" ? "codascope-scope-depth-badge codascope-scope-depth-badge--md" : "codascope-scope-depth-badge";
-  return (
-    <span className={`${cls} codascope-scope-depth-badge--${depth}`}>
-      {DEPTH_LABELS[depth] ?? depth}
-    </span>
-  );
-}
-
-function TypeBadge({ type }: { type: EpicScopeEntry["type"] }) {
-  const labels: Record<string, string> = {
-    "existing-wiki": "Wiki",
-    "existing-concept": "Concept",
-    "new": "New",
-  };
-  return <span className={`codascope-scope-type-badge codascope-scope-type-badge--${type}`}>{labels[type] ?? type}</span>;
-}
-
-function SourceBadge({ source }: { source: EpicScopeEntry["source"] }) {
-  return (
-    <span className={`codascope-scope-source-badge codascope-scope-source-badge--${source}`}>
-      {source === "agent" ? "Agent" : "User"}
-    </span>
-  );
-}
-
-function EnrichmentStatus({ entry }: { entry: EpicScopeEntry }) {
-  if (entry.enrichedAt) return <span className="codascope-scope-enriched-badge">Enriched</span>;
-  if (entry.enrichmentRunId) return <span className="codascope-scope-enriching-badge">Enriching…</span>;
-  return <span className="codascope-scope-queued-badge">Queued</span>;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
@@ -688,149 +645,4 @@ function TopicPickerModal({
   );
 }
 
-/* ── Scope Diff Review Modal ─────────────────────────────────────────── */
-
-function ScopeDiffModal({
-  diff,
-  accepted,
-  onToggle,
-  onApply,
-  onDismiss,
-}: {
-  diff: ScopeDiff;
-  accepted: { added: Set<string>; removed: Set<string>; changed: Set<string> };
-  onToggle: (category: "added" | "removed" | "changed", id: string) => void;
-  onApply: () => void;
-  onDismiss: () => void;
-}) {
-  const totalChanges = diff.added.length + diff.removed.length + diff.changed.length;
-  const totalAccepted = accepted.added.size + accepted.removed.size + accepted.changed.size;
-
-  return (
-    <div className="codascope-modal-overlay" onClick={onDismiss}>
-      <div className="codascope-scope-diff-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="codascope-scope-diff-header">
-          <h3>Review Scope Changes</h3>
-          <span className="codascope-scope-diff-summary">
-            {totalChanges} change{totalChanges !== 1 ? "s" : ""} · {totalAccepted} accepted
-          </span>
-          <button className="codascope-modal-close" onClick={onDismiss} type="button">×</button>
-        </div>
-
-        <div className="codascope-scope-diff-body">
-          {/* Added */}
-          {diff.added.length > 0 && (
-            <div className="codascope-scope-diff-section">
-              <h4 className="codascope-scope-diff-section-title codascope-scope-diff-added-title">
-                Added ({diff.added.length})
-              </h4>
-              {diff.added.map((entry) => (
-                <label
-                  key={entry.topicId}
-                  className="codascope-scope-diff-item codascope-scope-diff-item--added"
-                >
-                  <input
-                    type="checkbox"
-                    checked={accepted.added.has(entry.topicId)}
-                    onChange={() => onToggle("added", entry.topicId)}
-                  />
-                  <div className="codascope-scope-diff-item-info">
-                    <span className="codascope-scope-diff-item-title">{entry.topicTitle}</span>
-                    <TypeBadge type={entry.type} />
-                    {entry.targetDepth && <DepthBadge depth={entry.targetDepth} />}
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* Removed */}
-          {diff.removed.length > 0 && (
-            <div className="codascope-scope-diff-section">
-              <h4 className="codascope-scope-diff-section-title codascope-scope-diff-removed-title">
-                Removed ({diff.removed.length})
-              </h4>
-              {diff.removed.map((topicId) => (
-                <label
-                  key={topicId}
-                  className="codascope-scope-diff-item codascope-scope-diff-item--removed"
-                >
-                  <input
-                    type="checkbox"
-                    checked={accepted.removed.has(topicId)}
-                    onChange={() => onToggle("removed", topicId)}
-                  />
-                  <div className="codascope-scope-diff-item-info">
-                    <span className="codascope-scope-diff-item-title">{topicId}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* Changed */}
-          {diff.changed.length > 0 && (
-            <div className="codascope-scope-diff-section">
-              <h4 className="codascope-scope-diff-section-title codascope-scope-diff-changed-title">
-                Depth Changes ({diff.changed.length})
-              </h4>
-              {diff.changed.map((change) => (
-                <label
-                  key={change.topicId}
-                  className="codascope-scope-diff-item codascope-scope-diff-item--changed"
-                >
-                  <input
-                    type="checkbox"
-                    checked={accepted.changed.has(change.topicId)}
-                    onChange={() => onToggle("changed", change.topicId)}
-                  />
-                  <div className="codascope-scope-diff-item-info">
-                    <span className="codascope-scope-diff-item-title">{change.topicId}</span>
-                    <div className="codascope-scope-diff-depth-change">
-                      <DepthBadge depth={change.oldTargetDepth} />
-                      <span className="codascope-scope-depth-arrow">→</span>
-                      <DepthBadge depth={change.newTargetDepth} />
-                    </div>
-                    <span className="codascope-scope-diff-reason">{change.reason}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* Unchanged */}
-          {diff.unchanged.length > 0 && (
-            <div className="codascope-scope-diff-section codascope-scope-diff-unchanged-section">
-              <h4 className="codascope-scope-diff-section-title">
-                Unchanged ({diff.unchanged.length})
-              </h4>
-              <div className="codascope-scope-diff-unchanged-list">
-                {diff.unchanged.map((id) => (
-                  <span key={id} className="codascope-scope-diff-unchanged-tag">{id}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="codascope-scope-diff-footer">
-          <button
-            className="codascope-btn codascope-btn-ghost"
-            onClick={onDismiss}
-            type="button"
-          >
-            Dismiss
-          </button>
-          <button
-            className="codascope-btn codascope-btn-primary"
-            onClick={onApply}
-            disabled={totalAccepted === 0}
-            type="button"
-          >
-            Apply {totalAccepted} Change{totalAccepted !== 1 ? "s" : ""}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+/* ScopeDiffModal extracted to ../components/ScopeDiffModal.tsx */
