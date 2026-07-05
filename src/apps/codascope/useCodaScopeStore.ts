@@ -5,10 +5,10 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { create } from "zustand";
-import type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo, EpicDesign } from "./codaScopeTypes";
+import type { CodaScopeProject, WikiTopic, SkillInfo, EpicDesign } from "./codaScopeTypes";
 
 // Re-export shared types for existing consumers
-export type { CodaScopeRepo, CodaScopeProject, WikiTopic, SkillInfo, EpicDesign };
+export type { SkillInfo };
 
 
 
@@ -40,11 +40,6 @@ interface CodaScopeState {
 
   // Epics
   epics: EpicDesign[];
-  activeEpicId: string | null;
-
-  // Design doc context for chat
-  activeDesignDocId: string | null;
-  activeDesignEpicId: string | null;
 
   // Actions
   setProjectsRoot: (root: string) => void;
@@ -61,8 +56,6 @@ interface CodaScopeState {
   setSelectedModel: (model: string) => void;
   setBuildSummary: (summary: string | null) => void;
   setEpics: (epics: EpicDesign[]) => void;
-  setActiveEpic: (id: string | null) => void;
-  setActiveDesignDoc: (epicId: string | null, docId: string | null) => void;
 }
 
 export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
@@ -84,9 +77,6 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
     catch { return ""; }
   })(),
   epics: [],
-  activeEpicId: null,
-  activeDesignDocId: null,
-  activeDesignEpicId: null,
 
   // Actions
   setProjectsRoot: (root) => set({ projectsRoot: root }),
@@ -106,6 +96,4 @@ export const useCodaScopeStore = create<CodaScopeState>()((set) => ({
     set({ selectedModel: model });
   },
   setEpics: (epics) => set({ epics }),
-  setActiveEpic: (id) => set({ activeEpicId: id }),
-  setActiveDesignDoc: (epicId, docId) => set({ activeDesignEpicId: epicId, activeDesignDocId: docId }),
 }));

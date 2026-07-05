@@ -43,8 +43,7 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
   const [docData, setDocData] = useState<{ doc: EpicDesignDoc; content: string; contentHash?: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Phase 3: Rendering state
-  const [rendering, setRendering] = useState(false);
+
   const [renderedHtmlUrl, setRenderedHtmlUrl] = useState<string | null>(null);
 
   // Create dropdown state
@@ -106,7 +105,7 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
   const commandBus = useCommandBus();
   useEffect(() => {
     if (!commandBus || !activeProjectId) return;
-    const unsub = commandBus.on("codascope:design-doc-created", async (data: { epicId: string; docId: string }) => {
+    const unsub = commandBus.on("codascope:design-doc-created", (async (data: { epicId: string; docId: string }) => {
       if (data.epicId !== epic.id) return;
       try {
         // Refresh the doc list
@@ -120,7 +119,7 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
         // Navigate to the new doc
         navigate(`project/${activeProjectId}/epic/${epic.id}/design/${data.docId}`);
       } catch { /* best-effort */ }
-    });
+    }) as (payload: unknown) => void);
     return () => { unsub(); };
   }, [commandBus, activeProjectId, epic, setEpic, navigate]);
 
@@ -146,23 +145,7 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
     navigate(`project/${activeProjectId}/epic/${epic.id}/design`);
   }, [activeProjectId, epic.id, navigate]);
 
-  // Phase 3: Render as HTML
-  const renderAsHtml = useCallback(async () => {
-    if (!activeProjectId || !docId || rendering) return;
-    setRendering(true);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/render`,
-        { method: "POST" },
-      );
-      if (res.ok) {
-        setRenderedHtmlUrl(
-          `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/designs/${docId}/rendered`,
-        );
-      }
-    } catch { /* ignore */ }
-    setRendering(false);
-  }, [activeProjectId, epic.id, docId, rendering]);
+
 
   // ── Create artifact handler ───────────────────────────────────────────
 

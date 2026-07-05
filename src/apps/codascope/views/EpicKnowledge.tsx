@@ -18,10 +18,7 @@ import { SourceUpload } from "../components/SourceUpload";
 import { BlockedDownloadItem } from "../components/BlockedDownloadItem";
 import { ErrorSourceItem } from "../components/ErrorSourceItem";
 import {
-  IconKnowledge,
   IconFile,
-  IconClock,
-  IconBlocked,
   IconWarning,
   IconUpload,
   IconHelp,

@@ -575,15 +575,6 @@
 
 /* ── Loading / Status ────────────────────────────────────────────────── */
 
-.codascope-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--color-text-tertiary);
-  font-size: var(--text-sm);
-}
-
 .codascope-status-badge {
   display: inline-flex;
   align-items: center;
@@ -2093,8 +2084,7 @@
 }
 
 .codascope-epic-card:hover .codascope-epic-card-action,
-.codascope-epic-archive-item:hover .codascope-epic-card-action,
-.codascope-design-doc-card .codascope-epic-card-action {
+.codascope-epic-archive-item:hover .codascope-epic-card-action {
   opacity: 1;
 }
 
@@ -2261,18 +2251,6 @@
 .codascope-epic-sidebar-collapse-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
-}
-
-.codascope-epic-sidebar-title-area {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-  overflow: hidden;
-}
-
-.codascope-epic-sidebar--collapsed .codascope-epic-sidebar-title-area {
-  display: none;
 }
 
 .codascope-epic-sidebar-title {
@@ -2677,10 +2655,6 @@
 
 .codascope-definition-md {
   /* MarkdownViewer wrapper — inherits the container's styling */
-}
-
-.codascope-definition-list li {
-  margin-bottom: var(--space-1);
 }
 
 /* ── Edit Lock Banner ───────────────────────────────────────────────── */
@@ -3602,152 +3576,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* ── Design Document List (P2a) ─────────────────────────────────────── */
-
-.codascope-design-doc-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.codascope-design-doc-list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.codascope-design-doc-list-count {
-  font-size: var(--text-sm);
-  color: var(--color-text-tertiary);
-  font-weight: var(--weight-medium);
-}
-
-.codascope-design-doc-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: var(--space-3);
-}
-
-.codascope-design-doc-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-primary);
-  background: var(--color-bg-secondary);
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
-  position: relative;
-}
-
-.codascope-design-doc-card:hover {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border-secondary);
-  box-shadow: var(--shadow-sm);
-}
-
-.codascope-design-doc-card-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.codascope-design-doc-card-icon {
-  font-size: var(--text-lg);
-  flex-shrink: 0;
-}
-
-.codascope-design-doc-card-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.codascope-design-doc-card-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-}
-
-.codascope-design-doc-card-actions {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  display: flex;
-  gap: var(--space-1);
-  opacity: 0.5;
-  transition: opacity var(--transition-fast);
-}
-
-.codascope-design-doc-card:hover .codascope-design-doc-card-actions {
-  opacity: 1;
-}
-
-/* ── Archived Design Docs ────────────────────────────────────────────── */
-
-.codascope-design-doc-archived {
-  margin-top: var(--space-4);
-  border-top: 1px solid var(--color-border-primary);
-  padding-top: var(--space-3);
-}
-
-.codascope-design-doc-archived-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-}
-
-.codascope-design-doc-archived-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  opacity: 0.55;
-  transition: opacity var(--transition-fast), background var(--transition-fast);
-}
-
-.codascope-design-doc-archived-item:hover {
-  opacity: 0.85;
-  background: var(--color-bg-tertiary);
-}
-
-.codascope-design-doc-archived-icon {
-  flex-shrink: 0;
-  color: var(--color-text-tertiary);
-}
-
-.codascope-design-doc-archived-title {
-  flex: 1;
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.codascope-design-doc-archived-meta {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-}
-
-/* ── Design Doc Card Creator Metadata ──────────────────────────────── */
-
-.codascope-design-doc-card-creator {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  font-style: italic;
 }
 
 /* ── Document Editor (P2a) ──────────────────────────────────────────── */
@@ -4846,10 +4674,6 @@
   min-height: 400px;
 }
 
-.codascope-render-btn:hover {
-  color: hsl(200 80% 65%);
-}
-
 /* ── Phase 3: Epic Brief Export Modal ──────────────────────────────── */
 
 .codascope-modal-overlay {
@@ -5569,15 +5393,6 @@
 
 /* ══ Knowledge Tab (Phase 6) ════════════════════════════════════════════ */
 
-/* ── Container ───────────────────────────────────────────────────────── */
-
-.codascope-knowledge-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  padding: var(--space-4) 0;
-}
-
 /* ── Workflow Guide ─────────────────────────────────────────────────── */
 
 .codascope-knowledge-guide {
@@ -5860,211 +5675,8 @@
   color: var(--color-text-tertiary);
 }
 
-/* ── Wiki Pages ──────────────────────────────────────────────────────── */
-
-.codascope-knowledge-wiki-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.codascope-knowledge-wiki-entry {
-  display: flex;
-  flex-wrap: wrap;
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  transition: border-color var(--transition-fast);
-}
-
-.codascope-knowledge-wiki-download {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--space-3);
-  color: var(--color-text-tertiary);
-  background: var(--color-bg-secondary);
-  border-left: 1px solid var(--color-border-primary);
-  transition: color var(--transition-fast), background var(--transition-fast);
-  text-decoration: none;
-}
-
-.codascope-knowledge-wiki-download:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-}
-
-.codascope-knowledge-wiki-entry:hover {
-  border-color: var(--color-border-secondary);
-}
-
-.codascope-knowledge-wiki-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-secondary);
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-primary);
-  text-align: left;
-  font-family: inherit;
-  transition: background var(--transition-fast);
-}
-
-.codascope-knowledge-wiki-row:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.codascope-knowledge-wiki-row-expanded {
-  border-bottom: 1px solid var(--color-border-primary);
-}
-
-.codascope-knowledge-wiki-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.codascope-knowledge-wiki-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .codascope-knowledge-wiki-sep {
   color: var(--color-text-quaternary);
-}
-
-.codascope-knowledge-wiki-chevron {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  flex-shrink: 0;
-  width: 16px;
-  text-align: center;
-}
-
-.codascope-knowledge-wiki-content {
-  width: 100%;
-  padding: var(--space-4);
-  background: var(--color-bg-primary);
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-/* ── Source Cards ─────────────────────────────────────────────────────── */
-
-.codascope-knowledge-source-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: var(--space-3);
-}
-
-.codascope-knowledge-source-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-primary);
-  background: var(--color-bg-secondary);
-  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.codascope-knowledge-source-card:hover {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border-secondary);
-  box-shadow: var(--shadow-sm);
-}
-
-.codascope-knowledge-source-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-
-.codascope-knowledge-source-card-title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.codascope-knowledge-source-card-badges {
-  display: flex;
-  gap: var(--space-1);
-  flex-shrink: 0;
-}
-
-.codascope-knowledge-source-card-meta {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-  min-width: 0;
-}
-
-.codascope-knowledge-source-card-url {
-  color: var(--color-accent-text);
-  text-decoration: none;
-  font-size: var(--text-2xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
-}
-
-.codascope-knowledge-source-card-url:hover {
-  text-decoration: underline;
-}
-
-.codascope-knowledge-source-card-filename {
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
-}
-
-.codascope-knowledge-source-card-topics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.codascope-knowledge-source-topic-tag {
-  padding: 1px var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-}
-
-.codascope-knowledge-source-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-top: auto;
-}
-
-.codascope-knowledge-source-card-date {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--text-2xs);
-  color: var(--color-text-tertiary);
 }
 
 /* ── Source Status Badge ─────────────────────────────────────────────── */
@@ -6213,10 +5825,6 @@
   background: hsla(var(--accent-hue, 220), 60%, 50%, 0.06);
 }
 
-.codascope-blocked-item-dismissed {
-  opacity: 0.5;
-}
-
 .codascope-blocked-item-header {
   display: flex;
   align-items: center;
@@ -6307,18 +5915,6 @@
   font-weight: var(--weight-medium);
   color: var(--color-accent-text);
   pointer-events: none;
-}
-
-.codascope-knowledge-dismissed-toggle {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-1) 0;
-}
-
-.codascope-knowledge-dismissed-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
 }
 
 /* ── Error Source Callout ───────────────────────────────────────────── */
@@ -6737,11 +6333,6 @@
   margin: 0;
 }
 
-.codascope-artifact-section-panel-controls {
-  display: flex;
-  gap: var(--space-1);
-}
-
 /* ── Inspection Mode Toggle ──────────────────────────────────────────── */
 
 .codascope-artifact-inspect-btn {
@@ -6880,13 +6471,6 @@
 }
 
 /* ── Batch Action Bar ────────────────────────────────────────────────── */
-
-.codascope-artifact-batch-bar {
-  display: flex;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--color-border-primary);
-}
 
 .codascope-artifact-batch-regen-btn {
   display: inline-flex;

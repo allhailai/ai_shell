@@ -6,7 +6,6 @@
 import type {
   ArtifactSpec,
   ArtifactAnnotation,
-  ArtifactSection,
   ArtifactSectionsResponse,
   ArtifactBuildVersion,
   ArtifactBuildProgress,

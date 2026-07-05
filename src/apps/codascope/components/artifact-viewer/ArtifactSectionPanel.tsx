@@ -16,7 +16,7 @@ import {
   IconAnnotation,
   IconEye,
   IconRefresh,
-  IconDelete,
+
   IconInsert,
   IconCheckmark,
   IconWarning,
@@ -181,7 +181,7 @@ export function ArtifactSectionPanel({
   );
 
   const handleDragOver = useCallback(
-    (idx: number) => (e: React.DragEvent) => {
+    (_idx: number) => (e: React.DragEvent) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
     },

@@ -67,7 +67,7 @@ export function RichChatInput({
   disabled = false,
   maxHeightPercent = 40,
   sendDisabled = false,
-  sendIcon,
+  sendIcon: _sendIcon,
 }: RichChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);

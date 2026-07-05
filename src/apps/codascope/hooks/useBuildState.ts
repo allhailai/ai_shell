@@ -14,7 +14,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { connectToSseStream, parseSseChunk } from "../codaScopeSseClient";
+import { connectToSseStream } from "../codaScopeSseClient";
 import type { PipelineStep } from "../codaScopeSseClient";
 
 export type HydratedBuildStatus = "idle" | "running" | "success" | "error";

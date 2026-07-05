@@ -32,7 +32,6 @@ import { CurationReasonsModal } from "../components/CurationReasonsModal";
 import { CurationProgressBanner } from "../components/CurationProgressBanner";
 import type {
   EpicDesignDetail,
-  EpicStatus,
   CurationReason,
   EpicWikiPage,
   EpicKnowledgeSource,
@@ -77,7 +76,7 @@ function getLastModelId(): string | null {
 
 export function EpicDetail() {
   const { segments, navigate, replace } = useAppSubRoute("codascope");
-  const { activeProjectId, setActiveEpic } = useCodaScopeStore();
+  const { activeProjectId } = useCodaScopeStore();
 
   // Parse URL: /codascope/project/:id/epic/:epicId/:section/:sub/:itemId
   const epicId = segments[3] ?? "";
@@ -136,11 +135,7 @@ export function EpicDetail() {
     }
   }, [section, subSection, activeProjectId, epicId, replace]);
 
-  // ── Sync active epic to store ────────────────────────────────────────
-  useEffect(() => {
-    setActiveEpic(epicId || null);
-    return () => setActiveEpic(null);
-  }, [epicId, setActiveEpic]);
+
 
   // ── Fetch epic detail ────────────────────────────────────────────────
   useEffect(() => {

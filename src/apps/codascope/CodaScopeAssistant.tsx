@@ -528,7 +528,7 @@ export function CodaScopeAssistant() {
       conversationId: convId,
       message: trimmed,
       modelId: selectedModelId,
-      context: getContext(),
+      context: getContext() as Record<string, unknown> | undefined,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       references: referenceAttachments.length > 0 ? referenceAttachments : undefined,
       selectionContext,
@@ -592,7 +592,7 @@ export function CodaScopeAssistant() {
           conversationId: convId,
           message: prompt,
           modelId: selectedModelId,
-          context: getContext(),
+          context: getContext() as Record<string, unknown> | undefined,
         });
 
         if (result.assistantMessage) {
@@ -732,7 +732,7 @@ export function CodaScopeAssistant() {
 
   useEffect(() => {
     if (!commandBus) return;
-    const unsub = commandBus.on("codascope:design-selection-to-chat", (payload: {
+    const unsub = commandBus.on("codascope:design-selection-to-chat", ((payload: {
       blockId: string;
       text: string;
       startLine: number;
@@ -763,7 +763,7 @@ export function CodaScopeAssistant() {
           },
         },
       ]);
-    });
+    }) as (payload: unknown) => void);
     return unsub;
   }, [commandBus]);
 
@@ -799,15 +799,6 @@ export function CodaScopeAssistant() {
     }
   }, [messages, streaming, commandBus, navigate, activeProjectId]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    },
-    [sendMessage],
-  );
 
   const stopStreaming = useCallback(async () => {
     if (activeProjectId) {

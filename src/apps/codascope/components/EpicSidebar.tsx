@@ -11,7 +11,6 @@ import {
   IconKnowledge,
   IconWiki,
   IconUpload,
-  IconBlocked,
   IconWarning,
   IconPaintbrush,
   IconClock,

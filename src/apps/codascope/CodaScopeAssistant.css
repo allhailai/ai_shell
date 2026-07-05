@@ -603,8 +603,7 @@
   background: var(--color-bg-hover);
 }
 
-.codascope-assistant-stop-btn,
-.codascope-assistant-clear-btn {
+.codascope-assistant-stop-btn {
   width: 28px;
   height: 28px;
   display: flex;
@@ -619,15 +618,6 @@
 .codascope-assistant-stop-btn:hover {
   background: var(--color-danger-muted, hsl(0, 60%, 20%));
   color: var(--color-danger, hsl(0, 75%, 60%));
-}
-
-.codascope-assistant-clear-btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.codascope-assistant-clear-btn:disabled {
-  opacity: 0.3;
 }
 
 .codascope-assistant-input-row {
@@ -983,15 +973,6 @@
   color: var(--color-accent-hover);
 }
 
-/* ── Input Actions Row (help + send) ─────────────────────────────── */
-
-.codascope-assistant-input-actions-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-self: flex-end;
-}
-
 .codascope-assistant-help-btn {
   flex-shrink: 0;
   width: 28px;
@@ -1174,16 +1155,5 @@
   padding: 1px 4px;
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
-}
-
-.codascope-help-modal-coming-soon {
-  display: inline-block;
-  margin-left: var(--space-2);
-  font-size: var(--text-2xs);
-  color: var(--color-accent-text);
-  background: var(--color-accent-muted);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-full);
-  font-weight: var(--weight-semibold);
 }
 

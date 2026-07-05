@@ -41,7 +41,7 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose, wikiPages }: DocumentEditorProps) {
+export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose: _onClose, wikiPages }: DocumentEditorProps) {
   const { activeProjectId } = useCodaScopeStore();
   const commandBus = useCommandBus();
   const { navigate } = useAppSubRoute("codascope");
@@ -117,7 +117,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
 
   useEffect(() => {
     if (!commandBus || !activeProjectId) return;
-    const unsub = commandBus.on("codascope:design-doc-edited", async (payload: { epicId: string; docId: string; summary?: string }) => {
+    const unsub = commandBus.on("codascope:design-doc-edited", (async (payload: { epicId: string; docId: string; summary?: string }) => {
       if (payload.docId !== doc.id) return;
       // Re-fetch the content from the API
       try {
@@ -144,7 +144,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
           }
         }
       } catch { /* ignore */ }
-    });
+    }) as (payload: unknown) => void);
     return unsub;
   }, [commandBus, activeProjectId, epicId, doc.id, onContentChange]);
 
