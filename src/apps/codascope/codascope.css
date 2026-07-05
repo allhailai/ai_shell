@@ -7416,3 +7416,92 @@
   justify-content: flex-end;
   gap: var(--space-2);
 }
+
+/* ── Dashboard Extracted Styles ─────────────────────────────────────── */
+/* Replaced inline styles from ProjectDashboard.tsx (Phase 4.3)         */
+
+.codascope-dashboard-alert {
+  margin-bottom: var(--space-4);
+}
+
+.codascope-dashboard-build-log {
+  margin-bottom: var(--space-4);
+}
+
+.codascope-dashboard-section-header {
+  margin-bottom: var(--space-3);
+}
+
+.codascope-dashboard-section-title {
+  font-size: var(--text-md);
+}
+
+.codascope-dashboard-build-history {
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+}
+
+.codascope-dashboard-build-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.codascope-dashboard-build-history-row--last {
+  border-bottom: none;
+}
+
+.codascope-dashboard-build-history-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-dashboard-build-history-status {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-dashboard-build-history-status--complete {
+  color: var(--color-success);
+}
+
+.codascope-dashboard-build-history-status--error {
+  color: var(--color-danger);
+}
+
+.codascope-dashboard-build-history-time {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-dashboard-empty-repos {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.codascope-pipeline-dismiss-btn {
+  font-size: var(--text-xs);
+  padding: 2px 6px;
+}
+
+.codascope-stat-card--clickable {
+  cursor: pointer;
+}
+
+.codascope-card--static {
+  cursor: default;
+}
+
+.codascope-card-desc--mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

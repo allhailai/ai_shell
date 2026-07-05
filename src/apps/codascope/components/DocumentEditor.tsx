@@ -8,10 +8,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
-import { AnnotationThread } from "./AnnotationThread";
-import { InsertionPrompt } from "./InsertionPrompt";
+import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconAnnotation, IconCheckmark, IconBolt, IconRefresh, IconWarning, IconDownload } from "./CodaScopeIcons";
+import { IconBolt, IconRefresh, IconWarning, IconDownload } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
@@ -513,230 +512,15 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [annotatedBlockIdsOrdered]);
 
-  /* ── Render blocks with annotation gutter ────────────────────────── */
+  /* ── Thread toggle handler ────────────────────────────────────────── */
 
-  const renderBlockView = () => {
-    if (!displayContent) {
-      return (
-        <div className="codascope-empty-state">
-          <p>This document is empty. Click Edit to start writing, or ask the agent to draft it.</p>
-        </div>
-      );
-    }
-
-    // Count mermaid fences and images in a block's content
-    const countMermaidFences = (text: string): number => {
-      const matches = text.match(/^[ \t]*(?:`{3,}|~{3,})\s*mermaid/gm);
-      return matches ? matches.length : 0;
-    };
-    const countImages = (text: string): number => {
-      const matches = text.match(/!\[[^\]]*\]\([^)]+\)/g);
-      return matches ? matches.length : 0;
-    };
-
-    // Pre-compute cumulative offsets for each block
-    let mermaidOffset = 0;
-    let imageOffset = 0;
-    const blockOffsets = blocks.map((block) => {
-      const offset = { mermaid: mermaidOffset, image: imageOffset };
-      mermaidOffset += countMermaidFences(block.content);
-      imageOffset += countImages(block.content);
-      return offset;
+  const handleToggleThread = useCallback((blockId: string) => {
+    setOpenThreadBlockIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(blockId)) next.delete(blockId); else next.add(blockId);
+      return next;
     });
-
-    return (
-      <div className="codascope-document-blocks">
-        {blocks.map((block, idx) => {
-          const blockAnns = annotationsByBlock.get(block.blockId);
-          const rootAnnotations = blockAnns?.roots ?? [];
-          const totalCount = rootAnnotations.length + rootAnnotations.reduce((sum, r) => sum + (blockAnns?.replies.get(r.id)?.length ?? 0), 0);
-          const blockDirs = directivesByBlock.get(block.blockId) ?? [];
-          const isThreadOpen = openThreadBlockIds.has(block.blockId);
-          const isInsertionOpen = insertionBlockId === block.blockId;
-          const isHovered = hoveredBlockId === block.blockId;
-          const isCommentOpen = commentBlockId === block.blockId;
-
-          const isChanged = changedBlockIds.has(block.blockId);
-          const isFading = fadingBlockIds.has(block.blockId);
-
-          // Offset-adjusted resize callbacks for this block
-          const offsets = blockOffsets[idx];
-          const blockMermaidResize = (withinBlockIndex: number, height: number) =>
-            handleMermaidResize(offsets.mermaid + withinBlockIndex, height);
-          const blockImageResize = (withinBlockIndex: number, width: number, height: number) =>
-            handleImageResize(offsets.image + withinBlockIndex, width, height);
-
-          return (
-            <div key={block.blockId}>
-              {/* Block with gutter */}
-              <div
-                className={`codascope-document-block${isHovered ? " codascope-document-block--hover" : ""}${isChanged ? " codascope-document-block--changed" : ""}${isFading ? " codascope-fade-out" : ""}`}
-                data-block-id={block.blockId}
-                onMouseEnter={() => setHoveredBlockId(block.blockId)}
-                onMouseLeave={() => setHoveredBlockId(null)}
-              >
-                {/* Main content */}
-                <div className="codascope-document-block-content">
-                  <MarkdownViewer
-                    content={block.content}
-                    onWikiLink={handleWikiLink}
-                    onMermaidResize={blockMermaidResize}
-                    onImageResize={blockImageResize}
-                  />
-                </div>
-
-                {/* Annotation gutter */}
-                <div className="codascope-annotation-gutter">
-                  {rootAnnotations.length > 0 && rootAnnotations.some((a) => a.status === "open") && (
-                    <button
-                      className="codascope-annotation-gutter-icon"
-                      onClick={() => setOpenThreadBlockIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(block.blockId)) next.delete(block.blockId); else next.add(block.blockId);
-                        return next;
-                      })}
-                      title={`${totalCount} comment${totalCount > 1 ? "s" : ""}`}
-                      type="button"
-                    >
-                      <IconAnnotation size={12} /> {totalCount}
-                    </button>
-                  )}
-                  {rootAnnotations.length > 0 && !rootAnnotations.some((a) => a.status === "open") && (
-                    <button
-                      className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--resolved"
-                      onClick={() => setOpenThreadBlockIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(block.blockId)) next.delete(block.blockId); else next.add(block.blockId);
-                        return next;
-                      })}
-                      title={`${rootAnnotations.length} resolved`}
-                      type="button"
-                    >
-                      <IconCheckmark size={12} />
-                    </button>
-                  )}
-                  {isHovered && rootAnnotations.length === 0 && (
-                    <button
-                      className="codascope-annotation-gutter-icon codascope-annotation-gutter-icon--add"
-                      onClick={() => setCommentBlockId(isCommentOpen ? null : block.blockId)}
-                      data-tooltip="Add comment"
-                      type="button"
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Inline comment input */}
-              {isCommentOpen && (
-                <div className="codascope-annotation-thread codascope-annotation-thread--new">
-                  <textarea
-                    className="codascope-annotation-thread-reply-input"
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Write a comment…"
-                    rows={2}
-                    autoFocus
-                  />
-                  <div className="codascope-annotation-thread-reply-actions">
-                    <button
-                      className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-                      onClick={() => { setCommentBlockId(null); setCommentText(""); }}
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      className="codascope-btn codascope-btn-primary codascope-btn-xs"
-                      onClick={() => handleAddComment(block.blockId)}
-                      disabled={commentSubmitting || !commentText.trim()}
-                      type="button"
-                    >
-                      {commentSubmitting ? "Posting…" : "Comment"}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Inline annotation thread */}
-              {isThreadOpen && rootAnnotations.map((root) => (
-                <AnnotationThread
-                  key={root.id}
-                  annotation={root}
-                  replies={blockAnns?.replies.get(root.id) ?? []}
-                  projectId={activeProjectId!}
-                  epicId={epicId}
-                  onUpdate={loadAnnotations}
-                  onClose={() => setOpenThreadBlockIds((prev) => {
-                    const next = new Set(prev);
-                    next.delete(block.blockId);
-                    return next;
-                  })}
-                />
-              ))}
-
-              {/* Existing directives for this block */}
-              {blockDirs.map((dir) => (
-                <InsertionPrompt
-                  key={dir.id}
-                  projectId={activeProjectId!}
-                  epicId={epicId}
-                  documentId={doc.id}
-                  afterLine={dir.afterLine}
-                  blockId={dir.blockId}
-                  existingDirective={dir}
-                  defaultType={dir.type}
-                  startLine={dir.startLine}
-                  endLine={dir.endLine}
-                  onUpdate={() => { loadDirectives(); loadAnnotations(); }}
-                  onClose={() => {}}
-                />
-              ))}
-
-              {/* Insertion trigger between blocks */}
-              {!editing && idx < blocks.length - 1 && (
-                <div
-                  className={`codascope-document-block-insert-trigger${isInsertionOpen ? " codascope-document-block-insert-trigger--active" : ""}`}
-                >
-                  {isInsertionOpen ? (
-                    <InsertionPrompt
-                      projectId={activeProjectId!}
-                      epicId={epicId}
-                      documentId={doc.id}
-                      afterLine={block.lineEnd}
-                      blockId={block.blockId}
-                      onUpdate={() => { loadDirectives(); }}
-                      onClose={() => setInsertionBlockId(null)}
-                    />
-                  ) : (
-                    <button
-                      className="codascope-document-block-insert-btn"
-                      onClick={() => setInsertionBlockId(block.blockId)}
-                      title="Insert content here"
-                      type="button"
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Fallback: if no blocks, render entire content */}
-        {blocks.length === 0 && (
-          <MarkdownViewer
-            content={displayContent}
-            onWikiLink={handleWikiLink}
-            onMermaidResize={handleMermaidResize}
-            onImageResize={handleImageResize}
-          />
-        )}
-      </div>
-    );
-  };
+  }, []);
 
 
 
@@ -951,7 +735,35 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         </div>
       ) : (
         <div className="codascope-document-editor-viewer" ref={viewerRef}>
-          {renderBlockView()}
+          <DocumentBlockRenderer
+            displayContent={displayContent}
+            blocks={blocks}
+            annotationsByBlock={annotationsByBlock}
+            directivesByBlock={directivesByBlock}
+            openThreadBlockIds={openThreadBlockIds}
+            onToggleThread={handleToggleThread}
+            hoveredBlockId={hoveredBlockId}
+            onHoverBlock={setHoveredBlockId}
+            commentBlockId={commentBlockId}
+            onToggleComment={setCommentBlockId}
+            commentText={commentText}
+            onCommentTextChange={setCommentText}
+            onSubmitComment={handleAddComment}
+            commentSubmitting={commentSubmitting}
+            changedBlockIds={changedBlockIds}
+            fadingBlockIds={fadingBlockIds}
+            insertionBlockId={insertionBlockId}
+            onSetInsertionBlockId={setInsertionBlockId}
+            editing={editing}
+            activeProjectId={activeProjectId!}
+            epicId={epicId}
+            docId={doc.id}
+            onReloadAnnotations={loadAnnotations}
+            onReloadDirectives={loadDirectives}
+            onWikiLink={handleWikiLink}
+            onMermaidResize={handleMermaidResize}
+            onImageResize={handleImageResize}
+          />
         </div>
       )}
 

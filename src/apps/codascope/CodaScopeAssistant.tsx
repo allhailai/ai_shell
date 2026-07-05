@@ -14,11 +14,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import { MarkdownViewer } from "../../shared/markdown";
-import { assembleContext, clearRecentViews } from "./contextAssembler";
+import { assembleContext } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
 import { IconSearch, IconCopy, IconCheck, IconCurate } from "./components/CodaScopeIcons";
-import { ConversationHeader, type ConversationSummary } from "./components/ConversationHeader";
+import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
@@ -26,6 +26,8 @@ import { ChatHelpModal } from "./components/ChatHelpModal";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
 import { useCommandBus } from "../../shell/hooks";
 import { useAssistantStream } from "./hooks/useAssistantStream";
+import { useConversationManager } from "./hooks/useConversationManager";
+import { useEpicContext } from "./hooks/useEpicContext";
 import type { EpicStatus } from "./codaScopeTypes";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -75,23 +77,37 @@ interface ChatMessage {
   images?: Array<{ url: string; filename: string }>;
 }
 
-interface Conversation {
-  id: string;
-  title: string;
-  messages: ChatMessage[];
-}
-
 // ── Component ───────────────────────────────────────────────────────
 
 export function CodaScopeAssistant() {
   const { segments, getParam, setParam, navigate } = useAppSubRoute("codascope");
   const { activeProjectId, projects, wikiTopics, epics } = useCodaScopeStore();
 
-  // Conversation state
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [activeTitle, setActiveTitle] = useState("New conversation");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Extracted hooks
+  const convManager = useConversationManager(activeProjectId);
+  const {
+    conversations,
+    activeConversationId,
+    setActiveConversationId,
+    activeTitle,
+    setActiveTitle,
+    messages,
+    setMessages,
+    loadConversationList,
+    createNewConversation,
+    switchConversation,
+  } = convManager;
+
+  const epicCtx = useEpicContext(
+    activeProjectId,
+    setActiveConversationId,
+    setActiveTitle,
+    setMessages,
+    loadConversationList,
+  );
+  const { currentEpicId, currentEpic, epicKnowledge, curationStatus } = epicCtx;
+
+  // Input state
   const [input, setInput] = useState("");
 
   // Streaming via extracted hook
@@ -112,115 +128,10 @@ export function CodaScopeAssistant() {
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const lastProjectRef = useRef<string | null>(null);
   const autoSendRef = useRef(false); // Prevents double auto-send
 
   // Get the current project name for context
   const projectName = projects.find((p) => p.id === activeProjectId)?.name ?? "Unknown";
-
-  // ── Load conversations on mount / project change ──────────────────
-
-  const loadConversationList = useCallback(async () => {
-    if (!activeProjectId) return;
-    try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`);
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data.conversations ?? []);
-        return data.conversations ?? [];
-      }
-    } catch {
-      // silently fail
-    }
-    return [];
-  }, [activeProjectId]);
-
-  const loadConversation = useCallback(async (convId: string) => {
-    if (!activeProjectId) return;
-    try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations/${convId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const conv: Conversation = data.conversation;
-        setActiveConversationId(conv.id);
-        setActiveTitle(conv.title);
-        setMessages(
-          conv.messages
-            .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => {
-              // Restore image URLs from metadata for conversation history
-              const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
-              const images = metaImages?.map((img) => ({
-                url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${img.filename}`,
-                filename: img.filename,
-              }));
-              return {
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                status: m.status ?? "complete",
-                createdAt: m.createdAt,
-                metadata: m.metadata,
-                images,
-              };
-            }),
-        );
-      }
-    } catch {
-      // silently fail
-    }
-  }, [activeProjectId]);
-
-  // On mount or project change — load conversations, open most recent
-  useEffect(() => {
-    if (!activeProjectId) return;
-    if (lastProjectRef.current === activeProjectId) return;
-    lastProjectRef.current = activeProjectId;
-
-    // Clear navigation history when switching projects
-    clearRecentViews();
-
-    let cancelled = false;
-    void (async () => {
-      const convs = await loadConversationList();
-      if (cancelled) return;
-
-      // Priority: URL param > localStorage > most recent
-      const urlConvId = getParam("conv");
-      let restoreId: string | null = urlConvId;
-
-      // Fall back to localStorage if no URL param
-      if (!restoreId) {
-        const lastConvKey = `codascope:lastConv:${activeProjectId}`;
-        try { restoreId = localStorage.getItem(lastConvKey); } catch { /* ignore */ }
-      }
-
-      // Check if the target conversation exists in the list
-      const restoreConv = restoreId && convs.find((c: ConversationSummary) => c.id === restoreId);
-      if (restoreConv) {
-        await loadConversation(restoreConv.id);
-      } else if (convs.length > 0) {
-        await loadConversation(convs[0].id);
-      } else {
-        // No conversations — show welcome
-        setActiveConversationId(null);
-        setActiveTitle("New conversation");
-        setMessages([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeProjectId, loadConversationList, loadConversation, getParam]);
-
-  // Persist active conversation to URL + localStorage
-  useEffect(() => {
-    if (!activeProjectId || !activeConversationId) return;
-    // Update URL query param (replaceState — no navigation)
-    setParam("conv", activeConversationId);
-    // Also keep localStorage as fallback
-    try {
-      localStorage.setItem(`codascope:lastConv:${activeProjectId}`, activeConversationId);
-    } catch { /* ignore */ }
-  }, [activeProjectId, activeConversationId, setParam]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -245,139 +156,6 @@ export function CodaScopeAssistant() {
     if (!ctx) return undefined;
     return ctx;
   }, [segments, projectName, activeProjectId, wikiTopics, epics]);
-
-  // Phase 3: Detect if user is viewing an epic
-  const currentEpicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
-  const currentEpic = currentEpicId ? epics.find((e) => e.id === currentEpicId) : null;
-  const currentEpicIdRef = useRef<string | null>(null);
-
-  // ── Epic knowledge summary for prompt chips & context ──────────────
-  const [epicKnowledge, setEpicKnowledge] = useState<{
-    sourceCount: number;
-    wikiPageCount: number;
-    curationReasonCount: number;
-    wikiPageTitles: Array<{ id: string; title: string }>;
-  }>({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
-
-  useEffect(() => {
-    if (!activeProjectId || !currentEpicId) {
-      setEpicKnowledge({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        // Fetch sources, wiki pages, and curation reasons in parallel
-        const [sourcesRes, wikiRes, reasonsRes] = await Promise.all([
-          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/knowledge/sources`),
-          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/knowledge/wiki`),
-          fetch(`/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/curation/reasons`),
-        ]);
-        if (cancelled) return;
-        const sources = sourcesRes.ok ? await sourcesRes.json() : { sources: [] };
-        const wiki = wikiRes.ok ? await wikiRes.json() : { pages: [] };
-        const reasons = reasonsRes.ok ? await reasonsRes.json() : { reasons: [] };
-        setEpicKnowledge({
-          sourceCount: (sources.sources ?? []).length,
-          wikiPageCount: (wiki.pages ?? []).length,
-          curationReasonCount: (reasons.reasons ?? []).length,
-          wikiPageTitles: (wiki.pages ?? []).map((p: { id: string; title: string }) => ({ id: p.id, title: p.title })),
-        });
-      } catch {
-        if (!cancelled) {
-          setEpicKnowledge({ sourceCount: 0, wikiPageCount: 0, curationReasonCount: 0, wikiPageTitles: [] });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeProjectId, currentEpicId]);
-
-  // ── Curation build-status poll (for chat status bar) ─────────────────
-  const [curationStatus, setCurationStatus] = useState<{
-    running: boolean;
-    step: string;
-  }>({ running: false, step: "" });
-
-  useEffect(() => {
-    if (!activeProjectId || !currentEpicId) {
-      setCurationStatus({ running: false, step: "" });
-      return;
-    }
-
-    const poll = async () => {
-      try {
-        const res = await fetch(
-          `/api/codascope/projects/${activeProjectId}/build-status?scope=curation::${currentEpicId}`,
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const build = data.build;
-
-        if (build?.status === "building") {
-          const steps = build.pipelineSteps;
-          let desc = "Curation in progress…";
-          if (Array.isArray(steps) && steps.length > 0) {
-            const latest = steps[steps.length - 1];
-            desc = latest.detail ?? latest.label ?? latest.id ?? desc;
-          }
-          setCurationStatus({ running: true, step: desc });
-        } else {
-          setCurationStatus((prev) => prev.running ? { running: false, step: "" } : prev);
-        }
-      } catch { /* silent */ }
-    };
-
-    void poll();
-    const id = setInterval(() => void poll(), 3000);
-    return () => clearInterval(id);
-  }, [activeProjectId, currentEpicId]);
-
-  // Auto-switch to epic conversation when navigating into an epic
-  useEffect(() => {
-    if (!activeProjectId || !currentEpicId || !currentEpic) {
-      currentEpicIdRef.current = null;
-      return;
-    }
-    if (currentEpicIdRef.current === currentEpicId) return;
-    currentEpicIdRef.current = currentEpicId;
-
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/codascope/projects/${activeProjectId}/epics/${currentEpicId}/conversation`,
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const conv = data.conversation;
-          setActiveConversationId(conv.id);
-          setActiveTitle(conv.title || `Epic: ${currentEpic.title}`);
-          // Load messages from the epic conversation
-          const msgs = (conv.messages ?? [])
-            .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => {
-              // Restore image URLs from metadata for conversation history
-              const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
-              const images = metaImages?.map((img) => ({
-                url: `/api/codascope/projects/${activeProjectId}/conversations/${conv.id}/images/${img.filename}`,
-                filename: img.filename,
-              }));
-              return {
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                status: m.status ?? "complete",
-                createdAt: m.createdAt,
-                metadata: m.metadata,
-                images,
-              };
-            });
-          setMessages(msgs);
-          // Update conversation list
-          await loadConversationList();
-        }
-      } catch { /* silently fail */ }
-    })();
-  }, [activeProjectId, currentEpicId, currentEpic, loadConversationList]);
 
   // Get context badge label
   const contextBadge = (() => {
@@ -407,43 +185,13 @@ export function CodaScopeAssistant() {
     }
   })();
 
-  // ── Create new conversation ───────────────────────────────────────
+  // ── Unified dispatch message ──────────────────────────────────────
+  // Merges the old sendMessage and handleSendPrompt into one function.
+  // `promptText` overrides the input field when provided (e.g. prompt chips).
 
-  const createNewConversation = useCallback(async () => {
-    if (!activeProjectId || streaming) return;
-    try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: selectedModelId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const conv = data.conversation;
-        setActiveConversationId(conv.id);
-        setActiveTitle(conv.title);
-        setMessages([]);
-        // Refresh list
-        await loadConversationList();
-        inputRef.current?.focus();
-      }
-    } catch {
-      // silently fail
-    }
-  }, [activeProjectId, streaming, selectedModelId, loadConversationList]);
-
-  // ── Switch conversation ───────────────────────────────────────────
-
-  const switchConversation = useCallback(async (convId: string) => {
-    if (streaming) return;
-    await loadConversation(convId);
-  }, [streaming, loadConversation]);
-
-  // ── Send message ──────────────────────────────────────────────────
-
-  const sendMessage = useCallback(async () => {
-    const trimmed = input.trim();
-    if (!trimmed || streaming || !selectedModelId || !activeProjectId) return;
+  const dispatchMessage = useCallback(async (promptText?: string) => {
+    const text = promptText ?? input.trim();
+    if (!text || streaming || !selectedModelId || !activeProjectId) return;
 
     // If no active conversation, create one first
     let convId = activeConversationId;
@@ -457,7 +205,7 @@ export function CodaScopeAssistant() {
         if (res.ok) {
           const data = await res.json();
           convId = data.conversation.id;
-          setActiveConversationId(convId);
+          setActiveConversationId(convId!);
           setActiveTitle(data.conversation.title);
         }
       } catch {
@@ -468,14 +216,15 @@ export function CodaScopeAssistant() {
     if (!convId) return;
 
     // Build image URLs from attachments for display in the chat bubble
-    const imageUrls = attachments
+    const currentAttachments = promptText ? [] : [...attachments];
+    const imageUrls = currentAttachments
       .filter((a) => a.type === "image" && a.metadata?.path)
       .map((a) => ({
         url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${(a.metadata?.path as string).split("/").pop()}`,
         filename: a.label,
       }));
     // Also capture blob previews for immediate display (before server URL is available)
-    const imagePreviews = attachments
+    const imagePreviews = currentAttachments
       .filter((a) => a.type === "image" && a.preview)
       .map((a) => ({
         url: a.preview!,
@@ -485,14 +234,13 @@ export function CodaScopeAssistant() {
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: trimmed,
+      content: text,
       status: "complete",
       images: imageUrls.length > 0 ? imageUrls : imagePreviews.length > 0 ? imagePreviews : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
-    const currentAttachments = [...attachments];
     setAttachments([]);
 
     // Build attachments payload
@@ -526,7 +274,7 @@ export function CodaScopeAssistant() {
     const result = await streamMessage({
       projectId: activeProjectId,
       conversationId: convId,
-      message: trimmed,
+      message: text,
       modelId: selectedModelId,
       context: getContext() as Record<string, unknown> | undefined,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
@@ -545,69 +293,18 @@ export function CodaScopeAssistant() {
 
     // Refresh conversation list to get updated titles/summaries
     await loadConversationList();
-  }, [input, streaming, selectedModelId, activeProjectId, activeConversationId, attachments, getContext, messages.length, loadConversationList, streamMessage]);
+  }, [input, streaming, selectedModelId, activeProjectId, activeConversationId, attachments, getContext, messages.length, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages]);
 
-  // ── Send prompt (for prompt chips + auto-send) ────────────────────
+  // Wrapper for send button (uses input field text)
+  const sendMessage = useCallback(() => {
+    void dispatchMessage();
+  }, [dispatchMessage]);
 
+  // Wrapper for prompt chips / auto-send (uses explicit prompt text)
   const handleSendPrompt = useCallback((prompt: string) => {
     setInput(prompt);
-    // Use a microtask to let React update input state before sending
-    queueMicrotask(() => {
-      const sendPrompt = async () => {
-        if (streaming || !selectedModelId || !activeProjectId) return;
-
-        let convId = activeConversationId;
-        if (!convId) {
-          try {
-            const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ modelId: selectedModelId }),
-            });
-            if (res.ok) {
-              const data = await res.json();
-              convId = data.conversation.id;
-              setActiveConversationId(convId);
-              setActiveTitle(data.conversation.title);
-            }
-          } catch {
-            return;
-          }
-        }
-        if (!convId) return;
-
-        const userMsg: ChatMessage = {
-          id: `user-${Date.now()}`,
-          role: "user",
-          content: prompt,
-          status: "complete",
-        };
-
-        setMessages((prev) => [...prev, userMsg]);
-        setInput("");
-
-        const isFirstMessage = messages.length === 0;
-        const result = await streamMessage({
-          projectId: activeProjectId,
-          conversationId: convId,
-          message: prompt,
-          modelId: selectedModelId,
-          context: getContext() as Record<string, unknown> | undefined,
-        });
-
-        if (result.assistantMessage) {
-          setMessages((prev) => [...prev, result.assistantMessage!]);
-        }
-
-        if (isFirstMessage && result.newTitle) {
-          setActiveTitle(result.newTitle);
-        }
-
-        await loadConversationList();
-      };
-      sendPrompt();
-    });
-  }, [streaming, selectedModelId, activeProjectId, activeConversationId, getContext, messages.length, loadConversationList, streamMessage]);
+    queueMicrotask(() => void dispatchMessage(prompt));
+  }, [dispatchMessage]);
 
   // ── Auto-send interview for new epics (?new=1) ────────────────────
 
@@ -841,6 +538,16 @@ export function CodaScopeAssistant() {
     };
   }, [currentEpicId, currentEpic, segments, epicKnowledge]);
 
+  // ── Create/switch wrappers for ConversationHeader ──────────────────
+
+  const handleNewConversation = useCallback(() => {
+    void createNewConversation({ streaming, selectedModelId });
+  }, [createNewConversation, streaming, selectedModelId]);
+
+  const handleSwitchConversation = useCallback((convId: string) => {
+    void switchConversation(convId, streaming);
+  }, [switchConversation, streaming]);
+
   // ── Render ────────────────────────────────────────────────────────
 
   if (!activeProjectId) {
@@ -860,8 +567,8 @@ export function CodaScopeAssistant() {
         activeTitle={activeTitle}
         conversations={conversations}
         disabled={streaming}
-        onNewConversation={createNewConversation}
-        onSelectConversation={switchConversation}
+        onNewConversation={handleNewConversation}
+        onSelectConversation={handleSwitchConversation}
       />
 
       {/* Context Badge */}
@@ -1020,7 +727,7 @@ export function CodaScopeAssistant() {
             <button
               className="codascope-conv-new-btn"
               disabled={streaming}
-              onClick={createNewConversation}
+              onClick={handleNewConversation}
               title="New conversation"
               type="button"
             >

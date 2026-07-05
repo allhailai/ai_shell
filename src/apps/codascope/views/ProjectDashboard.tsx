@@ -10,7 +10,7 @@
    - Shows build history with auto-generated summaries
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
@@ -25,13 +25,8 @@ import {
   IconChat,
   IconRules,
 } from "../components/CodaScopeIcons";
-import { connectToSseStream } from "../codaScopeSseClient";
-import type { BuildState, BuildLogEntry, PipelineStepStatus, PipelineStepRecord } from "../codaScopeTypes";
-
-// Local alias for template simplicity
-type PipelineStep = PipelineStepRecord;
-
-
+import { useDashboardBuildState } from "../hooks/useDashboardBuildState";
+import type { PipelineStepStatus } from "../codaScopeTypes";
 
 /** Format a relative timestamp (e.g., "2m 15s ago") */
 function timeAgo(iso: string): string {
@@ -42,17 +37,6 @@ function timeAgo(iso: string): string {
   const hr = Math.floor(min / 60);
   return `${hr}h ${min % 60}m ago`;
 }
-
-/** Format elapsed time from a start timestamp */
-function elapsedSince(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  return `${min}m ${sec % 60}s`;
-}
-
-
 
 /* ── Step Icon helpers ───────────────────────────────────────────────── */
 
@@ -81,15 +65,15 @@ export function ProjectDashboard() {
   } = useCodaScopeStore();
 
   const project = projects.find((p) => p.id === activeProjectId);
-  const [runOutput, setRunOutput] = useState("");
-  const [runError, setRunError] = useState("");
-  const [runningCommand, setRunningCommand] = useState<string | null>(null);
-  const [buildStartedAt, setBuildStartedAt] = useState<string | null>(null);
-  const [buildSummary, setBuildSummary] = useState<string | null>(null);
-  const [buildLogs, setBuildLogs] = useState<BuildLogEntry[]>([]);
-  const [elapsed, setElapsed] = useState("");
-  const logEndRef = useRef<HTMLDivElement | null>(null);
-  const streamRef = useRef<AbortController | null>(null);
+
+  // ── Extracted build state hook ─────────────────────────────────────
+  const build = useDashboardBuildState(
+    activeProjectId,
+    setAgentRunning,
+    setAgentStatus,
+    agentRunning,
+    selectedModel,
+  );
 
   // ── Analyze toggle state ──────────────────────────────────────────
   const [wikiEnabled, setWikiEnabled] = useState(true);
@@ -97,180 +81,11 @@ export function ProjectDashboard() {
   const [qualityEnabled, setQualityEnabled] = useState(true);
   const [scope, setScope] = useState("full");
 
-  // ── Pipeline progress ─────────────────────────────────────────────
-  const [pipelineSteps, setPipelineSteps] = useState<PipelineStep[]>([]);
-  const [showPipeline, setShowPipeline] = useState(false);
+  // ── Unified Analyze action ────────────────────────────────────────
 
-  // ── Check build status on mount ──────────────────────────────────
-
-  useEffect(() => {
-    if (!activeProjectId) return;
-
-    void (async () => {
-      try {
-        const res = await fetch(`/api/codascope/projects/${activeProjectId}/build-status`);
-        if (!res.ok) return;
-        const { build } = await res.json() as { build: BuildState | null };
-
-        if (build && build.status === "building") {
-          // A build is running! Reconnect to the stream
-          setRunningCommand(build.command);
-          setBuildStartedAt(build.startedAt);
-          setAgentRunning(true);
-          setAgentStatus(`Resuming ${build.command}…`);
-          setShowPipeline(true);
-
-          // Restore persisted pipeline steps immediately
-          if (build.pipelineSteps && build.pipelineSteps.length > 0) {
-            setPipelineSteps(build.pipelineSteps.map((s) => ({
-              id: s.id,
-              label: s.label,
-              status: s.status as PipelineStepStatus,
-              detail: s.detail,
-            })));
-          }
-
-          const controller = connectToSseStream(
-            `/api/codascope/projects/${activeProjectId}/build-log/${build.runId}/stream`,
-            {
-              onText: (text) => setRunOutput((prev) => prev + text),
-              onPipelineStep: (step) => {
-                setPipelineSteps((prev) => updatePipelineSteps(prev, step));
-              },
-              onDone: (summary) => {
-                setAgentRunning(false);
-                setAgentStatus("");
-                setRunningCommand(null);
-                setBuildSummary(summary);
-                refreshBuildLogs();
-              },
-              onError: (error) => {
-                setRunError(error);
-                setAgentRunning(false);
-                setAgentStatus("");
-                setRunningCommand(null);
-              },
-            },
-          );
-          streamRef.current = controller;
-        } else if (build && (build.status === "complete" || build.status === "error")) {
-          // Show last build result
-          setBuildSummary(build.summary);
-          if (build.error) setRunError(build.error);
-          // Restore pipeline steps from completed/errored build
-          if (build.pipelineSteps && build.pipelineSteps.length > 0) {
-            setPipelineSteps(build.pipelineSteps.map((s) => ({
-              id: s.id,
-              label: s.label,
-              status: s.status as PipelineStepStatus,
-              detail: s.detail,
-            })));
-            setShowPipeline(true);
-          }
-        }
-      } catch {
-        // Ignore — server may not be ready
-      }
-    })();
-
-    return () => {
-      streamRef.current?.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProjectId]);
-
-  // ── Load build logs on mount ──────────────────────────────────────
-
-  const refreshBuildLogs = useCallback(async () => {
-    if (!activeProjectId) return;
-    try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/build-logs?limit=10`);
-      if (res.ok) {
-        const data = await res.json();
-        setBuildLogs(data.logs ?? []);
-      }
-    } catch { /* ignore */ }
-  }, [activeProjectId]);
-
-  useEffect(() => {
-    void refreshBuildLogs();
-  }, [refreshBuildLogs]);
-
-  // ── Elapsed timer during builds ───────────────────────────────────
-
-  useEffect(() => {
-    if (!buildStartedAt || !runningCommand) return;
-    setElapsed(elapsedSince(buildStartedAt));
-    const interval = setInterval(() => {
-      setElapsed(elapsedSince(buildStartedAt));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [buildStartedAt, runningCommand]);
-
-  // ── Pipeline step updater ─────────────────────────────────────────
-
-  function updatePipelineSteps(
-    prev: PipelineStep[],
-    event: { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string },
-  ): PipelineStep[] {
-    const { step: stepId, status, repo, topic, progress, reason, error, mode } = event;
-    const next = [...prev];
-
-    // Build a detail string
-    let detail = "";
-    if (repo) detail = repo;
-    if (topic) detail = topic;
-    if (progress) detail = progress;
-    if (reason) detail = reason;
-    if (error) detail = `Error: ${error}`;
-    if (mode) detail = mode;
-
-    // Find and update existing step, or add a new one
-    const existing = next.findIndex((s) => s.id === stepId);
-    if (existing >= 0) {
-      next[existing] = {
-        ...next[existing],
-        status: status as PipelineStepStatus,
-        detail: detail || next[existing].detail,
-      };
-    } else {
-      const labelMap: Record<string, string> = {
-        "code-map": "Code Map",
-        "wiki": "Wiki",
-        "wiki-draft": "Wiki (Draft)",
-        "wiki-enrich": "Wiki (Enrichment)",
-        "wiki-outline": "Wiki (Outline)",
-        "wiki-delta": "Wiki (Delta)",
-        "wiki-state": "Wiki State",
-        "quality": "Quality Scan",
-      };
-      next.push({
-        id: stepId,
-        label: labelMap[stepId] ?? stepId,
-        status: status as PipelineStepStatus,
-        detail,
-      });
-    }
-
-    return next;
-  }
-
-  // ── Unified Analyze action — SSE streaming ───────────────────────
-
-  const handleAnalyze = useCallback(async () => {
-    if (agentRunning || !activeProjectId || !selectedModel) return;
-    setAgentRunning(true);
-    setAgentStatus("Running analysis…");
-    setRunningCommand("analyze");
-    setRunOutput("");
-    setRunError("");
-    setBuildSummary(null);
-    setBuildStartedAt(new Date().toISOString());
-    setShowPipeline(true);
-    setPipelineSteps([]);
-
-    const controller = connectToSseStream(
-      {
+  const handleAnalyze = useCallback(() => {
+    build.startBuildStream({
+      target: {
         url: `/api/codascope/projects/${activeProjectId}/analyze`,
         method: "POST",
         body: {
@@ -280,106 +95,24 @@ export function ProjectDashboard() {
           scope,
         },
       },
-      {
-        onText: (text) => setRunOutput((prev) => prev + text),
-        onRunStarted: (_runId) => {
-          // Pipeline started
-        },
-        onPipelineStep: (step) => {
-          setPipelineSteps((prev) => updatePipelineSteps(prev, step));
-        },
-        onDone: (summary) => {
-          setAgentRunning(false);
-          setAgentStatus("");
-          setRunningCommand(null);
-          setBuildSummary(summary);
-          void refreshBuildLogs();
-        },
-        onError: (error) => {
-          setRunError(error);
-          setAgentRunning(false);
-          setAgentStatus("");
-          setRunningCommand(null);
-        },
-      },
-    );
-    streamRef.current = controller;
-  }, [agentRunning, activeProjectId, selectedModel, wikiEnabled, wikiMode, qualityEnabled, scope, setAgentRunning, setAgentStatus, refreshBuildLogs]);
+      command: "analyze",
+      showPipeline: true,
+    });
+  }, [activeProjectId, selectedModel, wikiEnabled, wikiMode, qualityEnabled, scope, build]);
 
-  // ── Cancel Build ─────────────────────────────────────────────────
+  // ── Quick action (for individual commands like do_explore) ────────
 
-  const handleCancelBuild = useCallback(async () => {
-    if (!activeProjectId) return;
-    try {
-      await fetch(`/api/codascope/projects/${activeProjectId}/build/cancel`, { method: "POST" });
-      streamRef.current?.abort();
-      setAgentRunning(false);
-      setAgentStatus("");
-      setRunError("");
-      setBuildSummary("Build cancelled");
-      setRunningCommand(null);
-      refreshBuildLogs();
-    } catch {
-      // ignore
-    }
-  }, [activeProjectId, setAgentRunning, setAgentStatus, refreshBuildLogs]);
-
-  // ── Legacy quick action (for individual commands like do_explore) ──
-
-  const handleQuickAction = useCallback(async (command: string) => {
-    if (agentRunning || !activeProjectId || !selectedModel) return;
-    setAgentRunning(true);
-    setAgentStatus(`Running ${command}…`);
-    setRunningCommand(command);
-    setRunOutput("");
-    setRunError("");
-    setBuildSummary(null);
-    setBuildStartedAt(new Date().toISOString());
-
-    const controller = connectToSseStream(
-      {
+  const handleQuickAction = useCallback((command: string) => {
+    build.startBuildStream({
+      target: {
         url: `/api/codascope/projects/${activeProjectId}/runs`,
         method: "POST",
         body: { command, modelId: selectedModel },
       },
-      {
-        onText: (text) => setRunOutput((prev) => prev + text),
-        onRunStarted: (_runId) => {
-          // runId received
-        },
-        onDone: (summary) => {
-          setAgentRunning(false);
-          setAgentStatus("");
-          setRunningCommand(null);
-          setBuildSummary(summary);
-          void refreshBuildLogs();
-        },
-        onError: (error) => {
-          setRunError(error);
-          setAgentRunning(false);
-          setAgentStatus("");
-          setRunningCommand(null);
-        },
-      },
-    );
-    streamRef.current = controller;
-  }, [agentRunning, activeProjectId, selectedModel, setAgentRunning, setAgentStatus, refreshBuildLogs]);
-
-  // ── Auto-scroll log ───────────────────────────────────────────────
-
-  useEffect(() => {
-    if (logEndRef.current && runOutput) {
-      logEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [runOutput]);
-
-  // ── Cleanup on unmount ────────────────────────────────────────────
-
-  useEffect(() => {
-    return () => {
-      streamRef.current?.abort();
-    };
-  }, []);
+      command,
+      showPipeline: false,
+    });
+  }, [activeProjectId, selectedModel, build]);
 
   if (!project) {
     return (
@@ -395,9 +128,8 @@ export function ProjectDashboard() {
 
   /* ── Button label for Analyze ────────────────────────────────── */
 
-  const isAnalyzing = runningCommand === "analyze";
-  const analyzeButtonLabel = isAnalyzing
-    ? `⟳ Analyzing… (${elapsed})`
+  const analyzeButtonLabel = build.isAnalyzing
+    ? `⟳ Analyzing… (${build.elapsed})`
     : "Run ▶";
 
   return (
@@ -419,17 +151,17 @@ export function ProjectDashboard() {
           <div className="codascope-stat-card-value">{project.repositories.length}</div>
           <div className="codascope-stat-card-label">Repositories</div>
         </div>
-        <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/wiki`)} style={{ cursor: "pointer" }}>
+        <div className="codascope-stat-card codascope-stat-card--clickable" onClick={() => navigate(`project/${activeProjectId}/wiki`)}>
           <div className="codascope-stat-card-icon"><IconWiki size={20} /></div>
           <div className="codascope-stat-card-value">{project.wikiPageCount ?? 0}</div>
           <div className="codascope-stat-card-label">Wiki Pages</div>
         </div>
-        <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/quality`)} style={{ cursor: "pointer" }}>
+        <div className="codascope-stat-card codascope-stat-card--clickable" onClick={() => navigate(`project/${activeProjectId}/quality`)}>
           <div className="codascope-stat-card-icon"><IconQuality size={20} /></div>
           <div className="codascope-stat-card-value">{project.qualityScore ?? "—"}</div>
           <div className="codascope-stat-card-label">Quality Score</div>
         </div>
-        <div className="codascope-stat-card" onClick={() => navigate(`project/${activeProjectId}/concepts`)} style={{ cursor: "pointer" }}>
+        <div className="codascope-stat-card codascope-stat-card--clickable" onClick={() => navigate(`project/${activeProjectId}/concepts`)}>
           <div className="codascope-stat-card-icon"><IconConcepts size={20} /></div>
           <div className="codascope-stat-card-value">{project.conceptCount ?? 0}</div>
           <div className="codascope-stat-card-label">Concepts</div>
@@ -437,7 +169,7 @@ export function ProjectDashboard() {
       </div>
 
       {/* ── Unified Analyze Panel ──────────────────────────────────── */}
-      <div className={`codascope-analyze-panel ${isAnalyzing ? "codascope-analyze-panel--running" : ""}`} id="analyze-panel">
+      <div className={`codascope-analyze-panel ${build.isAnalyzing ? "codascope-analyze-panel--running" : ""}`} id="analyze-panel">
         <div className="codascope-analyze-header">
           <div className="codascope-analyze-title">
             <span className="codascope-analyze-title-icon"><IconSearch size={16} /></span>
@@ -446,7 +178,7 @@ export function ProjectDashboard() {
           {agentRunning ? (
             <button
               className="codascope-analyze-run-btn codascope-analyze-run-btn--stop"
-              onClick={handleCancelBuild}
+              onClick={build.cancelBuild}
               type="button"
               id="analyze-stop-btn"
             >
@@ -454,7 +186,7 @@ export function ProjectDashboard() {
             </button>
           ) : (
             <button
-              className={`codascope-analyze-run-btn ${isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
+              className={`codascope-analyze-run-btn ${build.isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
               onClick={handleAnalyze}
               disabled={!selectedModel}
               type="button"
@@ -560,20 +292,19 @@ export function ProjectDashboard() {
       </div>
 
       {/* ── Pipeline Progress ────────────────────────────────────────── */}
-      {showPipeline && pipelineSteps.length > 0 && (
+      {build.showPipeline && build.pipelineSteps.length > 0 && (
         <div className="codascope-pipeline-progress" id="pipeline-progress">
           <div className="codascope-pipeline-header">
             <div className="codascope-pipeline-title">
-              {isAnalyzing ? "⟳" : "✓"} Analysis Pipeline
+              {build.isAnalyzing ? "⟳" : "✓"} Analysis Pipeline
             </div>
-            {isAnalyzing && (
-              <span className="codascope-pipeline-elapsed">{elapsed}</span>
+            {build.isAnalyzing && (
+              <span className="codascope-pipeline-elapsed">{build.elapsed}</span>
             )}
-            {!isAnalyzing && (
+            {!build.isAnalyzing && (
               <button
-                className="codascope-btn codascope-btn-ghost"
-                style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
-                onClick={() => { setShowPipeline(false); setPipelineSteps([]); }}
+                className="codascope-btn codascope-btn-ghost codascope-pipeline-dismiss-btn"
+                onClick={build.clearPipeline}
                 type="button"
               >
                 Dismiss
@@ -581,7 +312,7 @@ export function ProjectDashboard() {
             )}
           </div>
           <div className="codascope-pipeline-steps">
-            {pipelineSteps.map((step) => (
+            {build.pipelineSteps.map((step) => (
               <div
                 key={step.id}
                 className={`codascope-pipeline-step codascope-pipeline-step--${step.status}`}
@@ -647,13 +378,13 @@ export function ProjectDashboard() {
       </div>
 
       {/* Build status banner */}
-      {buildSummary && !agentRunning && (
-        <div className="codascope-alert codascope-alert--success" style={{ marginBottom: "var(--space-4)" }}>
+      {build.buildSummary && !agentRunning && (
+        <div className="codascope-alert codascope-alert--success codascope-dashboard-alert">
           <span className="codascope-alert-icon">✓</span>
-          <span>{buildSummary}</span>
+          <span>{build.buildSummary}</span>
           <button
             className="codascope-alert-dismiss"
-            onClick={() => setBuildSummary(null)}
+            onClick={() => build.setBuildSummary(null)}
             type="button"
             aria-label="Dismiss"
           >
@@ -663,13 +394,13 @@ export function ProjectDashboard() {
       )}
 
       {/* Error alert */}
-      {runError && !agentRunning && (
-        <div className="codascope-alert codascope-alert--danger" style={{ marginBottom: "var(--space-4)" }}>
+      {build.runError && !agentRunning && (
+        <div className="codascope-alert codascope-alert--danger codascope-dashboard-alert">
           <span className="codascope-alert-icon">⚠</span>
-          <span>{runError}</span>
+          <span>{build.runError}</span>
           <button
             className="codascope-alert-dismiss"
-            onClick={() => setRunError("")}
+            onClick={() => build.setRunError("")}
             type="button"
             aria-label="Dismiss error"
           >
@@ -679,19 +410,18 @@ export function ProjectDashboard() {
       )}
 
       {/* Run output log */}
-      {(runOutput || agentRunning) && (
-        <div className="codascope-build-log" style={{ marginBottom: "var(--space-4)" }}>
+      {(build.runOutput || agentRunning) && (
+        <div className="codascope-build-log codascope-dashboard-build-log">
           <div className="codascope-build-log-header">
             <span>
               {agentRunning
-                ? `⟳ Agent Output — ${elapsed}`
+                ? `⟳ Agent Output — ${build.elapsed}`
                 : "✓ Complete"}
             </span>
             {!agentRunning && (
               <button
-                className="codascope-btn codascope-btn-ghost"
-                style={{ fontSize: "var(--text-xs)", padding: "2px 6px" }}
-                onClick={() => setRunOutput("")}
+                className="codascope-btn codascope-btn-ghost codascope-pipeline-dismiss-btn"
+                onClick={build.clearRunOutput}
                 type="button"
               >
                 Dismiss
@@ -699,49 +429,33 @@ export function ProjectDashboard() {
             )}
           </div>
           <pre className="codascope-build-log-content">
-            {runOutput || (agentRunning ? "Connecting to build stream…\n" : "")}
-            <div ref={logEndRef} />
+            {build.runOutput || (agentRunning ? "Connecting to build stream…\n" : "")}
+            <div ref={build.logEndRef} />
           </pre>
         </div>
       )}
 
       {/* Build History */}
-      {buildLogs.length > 0 && (
+      {build.buildLogs.length > 0 && (
         <>
-          <div className="codascope-page-header" style={{ marginBottom: "var(--space-3)" }}>
-            <div className="codascope-page-title" style={{ fontSize: "var(--text-md)" }}>
+          <div className="codascope-page-header codascope-dashboard-section-header">
+            <div className="codascope-page-title codascope-dashboard-section-title">
               Build History
             </div>
           </div>
-          <div style={{
-            marginBottom: "var(--space-4)",
-            borderRadius: "var(--radius-lg)",
-            background: "var(--color-bg-secondary)",
-            border: "1px solid var(--color-border-primary)",
-            overflow: "hidden",
-          }}>
-            {buildLogs.map((log, i) => (
+          <div className="codascope-dashboard-build-history">
+            {build.buildLogs.map((log, i) => (
               <div
                 key={log.runId}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "var(--space-3) var(--space-4)",
-                  borderBottom: i < buildLogs.length - 1 ? "1px solid var(--color-border-primary)" : "none",
-                  fontSize: "var(--text-sm)",
-                  color: "var(--color-text-secondary)",
-                }}
+                className={`codascope-dashboard-build-history-row${i < build.buildLogs.length - 1 ? "" : " codascope-dashboard-build-history-row--last"}`}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <span style={{
-                    color: log.status === "complete" ? "var(--color-success)" : log.status === "error" ? "var(--color-danger)" : "var(--color-text-tertiary)",
-                  }}>
+                <div className="codascope-dashboard-build-history-left">
+                  <span className={`codascope-dashboard-build-history-status codascope-dashboard-build-history-status--${log.status}`}>
                     {log.status === "complete" ? "✓" : log.status === "error" ? "✕" : "●"}
                   </span>
                   <span>{log.summary ?? log.command}</span>
                 </div>
-                <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
+                <span className="codascope-dashboard-build-history-time">
                   {log.startedAt ? timeAgo(log.startedAt) : ""}
                 </span>
               </div>
@@ -751,24 +465,19 @@ export function ProjectDashboard() {
       )}
 
       {/* Repositories */}
-      <div className="codascope-page-header" style={{ marginBottom: "var(--space-3)" }}>
-        <div className="codascope-page-title" style={{ fontSize: "var(--text-md)" }}>Repositories</div>
+      <div className="codascope-page-header codascope-dashboard-section-header">
+        <div className="codascope-page-title codascope-dashboard-section-title">Repositories</div>
       </div>
       {project.repositories.length === 0 ? (
-        <div style={{
-          padding: "var(--space-5)",
-          textAlign: "center",
-          color: "var(--color-text-tertiary)",
-          fontSize: "var(--text-sm)",
-        }}>
+        <div className="codascope-dashboard-empty-repos">
           No repositories added yet. Go to Settings to add code repositories.
         </div>
       ) : (
         <div className="codascope-cards">
           {project.repositories.map((repo) => (
-            <div key={repo.id} className="codascope-card" style={{ cursor: "default" }}>
+            <div key={repo.id} className="codascope-card codascope-card--static">
               <div className="codascope-card-title">{repo.name}</div>
-              <div className="codascope-card-desc" style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)" }}>
+              <div className="codascope-card-desc codascope-card-desc--mono">
                 {repo.path}
               </div>
               {repo.branch && (
