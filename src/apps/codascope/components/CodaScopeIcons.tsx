@@ -717,3 +717,14 @@ export function IconArchive({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Down arrow into branch — Git pull */
+export function IconGitPull({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 2v7" />
+      <path d="M5 6.5L8 9.5l3-3" />
+      <circle cx="8" cy="12.5" r="1.5" />
+    </svg>
+  );
+}
+

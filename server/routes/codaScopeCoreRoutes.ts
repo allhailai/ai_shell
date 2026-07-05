@@ -96,6 +96,27 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ deleted: true });
   }));
 
+  app.post("/api/codascope/projects/:id/repositories/:repoId/pull", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const repoId = param(req, "repoId");
+    const result = await projectSvc.gitPullRepository(id, repoId);
+    if (!result.success) {
+      res.status(result.error === "Project not found." || result.error === "Repository not found." ? 404 : 500)
+        .json(result);
+      return;
+    }
+    res.json(result);
+  }));
+
+  app.get("/api/codascope/projects/:id/repositories/:repoId/status", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const repoId = param(req, "repoId");
+    const result = await projectSvc.checkRepoStatus(id, repoId);
+    res.json(result);
+  }));
+
   // ── Models ──────────────────────────────────────────────────────
 
   app.get("/api/codascope/models", wrap(async (_req, res) => {

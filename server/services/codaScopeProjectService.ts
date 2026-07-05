@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import type { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
 interface RepoInfo {
@@ -89,7 +90,14 @@ export class CodaScopeProjectService {
 
     try {
       const raw = readFileSync(projectPath, "utf-8");
-      return JSON.parse(raw) as ProjectData;
+      const data = JSON.parse(raw) as ProjectData;
+      // Count wiki pages (same as listProjects)
+      const wikiDir = path.join(projectDir, "wiki");
+      let wikiPageCount = 0;
+      if (existsSync(wikiDir)) {
+        wikiPageCount = readdirSync(wikiDir).filter((f) => f.endsWith(".md") && !f.startsWith("_")).length;
+      }
+      return { ...data, wikiPageCount } as ProjectData & { wikiPageCount: number };
     } catch {
       return null;
     }
@@ -248,5 +256,139 @@ export class CodaScopeProjectService {
       return this.dirResolver.resolve(id);
     }
     return this.findProjectDir(id);
+  }
+
+  // ── Git status check ──────────────────────────────────────────────
+
+  /**
+   * Check if a repository is behind its remote tracking branch.
+   * Runs `git fetch` then compares local vs upstream.
+   */
+  async checkRepoStatus(
+    projectId: string,
+    repoId: string
+  ): Promise<{
+    status: "current" | "behind" | "ahead" | "diverged" | "unknown";
+    behind: number;
+    ahead: number;
+    branch: string | null;
+    error?: string;
+  }> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return { status: "unknown", behind: 0, ahead: 0, branch: null, error: "Project not found." };
+
+    const projectPath = path.join(projectDir, "project.json");
+    const raw = readFileSync(projectPath, "utf-8");
+    const project = JSON.parse(raw) as ProjectData;
+    const repo = project.repositories.find((r) => r.id === repoId);
+    if (!repo) return { status: "unknown", behind: 0, ahead: 0, branch: null, error: "Repository not found." };
+
+    if (!existsSync(repo.path) || !existsSync(path.join(repo.path, ".git"))) {
+      return { status: "unknown", behind: 0, ahead: 0, branch: repo.branch ?? null, error: "Not a git repository." };
+    }
+
+    // Detect the current branch
+    let branch = repo.branch ?? null;
+    try {
+      const headContent = readFileSync(path.join(repo.path, ".git", "HEAD"), "utf-8").trim();
+      if (headContent.startsWith("ref: refs/heads/")) {
+        branch = headContent.replace("ref: refs/heads/", "");
+      }
+    } catch { /* ignore */ }
+
+    // Fetch latest from remote (silent, with timeout)
+    try {
+      execSync("git fetch", {
+        cwd: repo.path,
+        encoding: "utf-8",
+        timeout: 30_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch {
+      // Fetch failed (no network, no remote, etc.) — return unknown
+      return { status: "unknown", behind: 0, ahead: 0, branch, error: "Could not fetch from remote." };
+    }
+
+    // Compare local HEAD vs upstream tracking branch
+    try {
+      const behindStr = execSync("git rev-list --count HEAD..@{u}", {
+        cwd: repo.path,
+        encoding: "utf-8",
+        timeout: 5_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+      const aheadStr = execSync("git rev-list --count @{u}..HEAD", {
+        cwd: repo.path,
+        encoding: "utf-8",
+        timeout: 5_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+
+      const behind = parseInt(behindStr, 10) || 0;
+      const ahead = parseInt(aheadStr, 10) || 0;
+
+      let status: "current" | "behind" | "ahead" | "diverged" = "current";
+      if (behind > 0 && ahead > 0) status = "diverged";
+      else if (behind > 0) status = "behind";
+      else if (ahead > 0) status = "ahead";
+
+      return { status, behind, ahead, branch };
+    } catch {
+      // No tracking branch set
+      return { status: "unknown", behind: 0, ahead: 0, branch, error: "No upstream tracking branch." };
+    }
+  }
+
+  // ── Git pull ──────────────────────────────────────────────────────
+
+  async gitPullRepository(
+    projectId: string,
+    repoId: string
+  ): Promise<{ success: boolean; output: string; branch?: string; error?: string }> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return { success: false, output: "", error: "Project not found." };
+
+    const projectPath = path.join(projectDir, "project.json");
+    const raw = readFileSync(projectPath, "utf-8");
+    const project = JSON.parse(raw) as ProjectData;
+    const repo = project.repositories.find((r) => r.id === repoId);
+    if (!repo) return { success: false, output: "", error: "Repository not found." };
+
+    if (!existsSync(repo.path)) {
+      return { success: false, output: "", error: `Repository path does not exist: ${repo.path}` };
+    }
+    if (!existsSync(path.join(repo.path, ".git"))) {
+      return { success: false, output: "", error: "Not a git repository." };
+    }
+
+    try {
+      const output = execSync("git pull", {
+        cwd: repo.path,
+        encoding: "utf-8",
+        timeout: 60_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      // Update the stored branch in case it changed
+      try {
+        const headPath = path.join(repo.path, ".git", "HEAD");
+        const head = readFileSync(headPath, "utf-8").trim();
+        if (head.startsWith("ref: refs/heads/")) {
+          repo.branch = head.replace("ref: refs/heads/", "");
+        }
+      } catch {
+        // ignore
+      }
+
+      project.updatedAt = new Date().toISOString();
+      writeFileSync(projectPath, JSON.stringify(project, null, 2));
+
+      return { success: true, output: output.trim(), branch: repo.branch };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "git pull failed";
+      // Extract stderr from exec error
+      const stderr = (err as { stderr?: string })?.stderr?.toString().trim();
+      return { success: false, output: stderr || message, error: stderr || message };
+    }
   }
 }

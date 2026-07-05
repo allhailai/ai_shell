@@ -1,7 +1,7 @@
 /* ── CodaScope: ProjectDashboard View ────────────────────────────────
    Overview dashboard for a selected project with stat cards,
-   unified Analyze panel with toggles, build state persistence,
-   pipeline progress tracking, and model picker.
+   repository status panel, unified Analyze panel with toggles,
+   build state persistence, pipeline progress tracking, and model picker.
 
    Build state features:
    - Button disables and shows progress during analysis
@@ -10,7 +10,7 @@
    - Shows build history with auto-generated summaries
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
@@ -24,6 +24,10 @@ import {
   IconConcepts,
   IconChat,
   IconRules,
+  IconGitPull,
+  IconCheck,
+  IconRefresh,
+  IconWarning,
 } from "../components/CodaScopeIcons";
 import { useDashboardBuildState } from "../hooks/useDashboardBuildState";
 import type { PipelineStepStatus } from "../codaScopeTypes";
@@ -50,6 +54,16 @@ function stepIcon(status: PipelineStepStatus): string {
   }
 }
 
+/* ── Repo status types ───────────────────────────────────────────────── */
+
+interface RepoStatus {
+  status: "current" | "behind" | "ahead" | "diverged" | "unknown";
+  behind: number;
+  ahead: number;
+  branch: string | null;
+  error?: string;
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function ProjectDashboard() {
@@ -74,6 +88,110 @@ export function ProjectDashboard() {
     agentRunning,
     selectedModel,
   );
+
+  // ── Repo status state ─────────────────────────────────────────────
+  const [repoStatuses, setRepoStatuses] = useState<Record<string, RepoStatus>>({});
+  const [checkingRepoId, setCheckingRepoId] = useState<string | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [pullingRepoId, setPullingRepoId] = useState<string | null>(null);
+  const [pullResult, setPullResult] = useState<{
+    repoId: string;
+    success: boolean;
+    message: string;
+  } | null>(null);
+
+  // ── Check status for a single repo ─────────────────────────────────
+  const checkRepoStatus = useCallback(async (repoId: string) => {
+    if (!activeProjectId) return;
+    setCheckingRepoId(repoId);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/repositories/${repoId}/status`
+      );
+      const data = await res.json() as RepoStatus;
+      setRepoStatuses((prev) => ({ ...prev, [repoId]: data }));
+    } catch {
+      setRepoStatuses((prev) => ({
+        ...prev,
+        [repoId]: { status: "unknown", behind: 0, ahead: 0, branch: null, error: "Network error." },
+      }));
+    } finally {
+      setCheckingRepoId(null);
+    }
+  }, [activeProjectId]);
+
+  // ── Check all repos on mount ──────────────────────────────────────
+  useEffect(() => {
+    if (!activeProjectId || !project?.repositories.length) return;
+    setCheckingAll(true);
+    let cancelled = false;
+
+    (async () => {
+      for (const repo of project.repositories) {
+        if (cancelled) break;
+        try {
+          const res = await fetch(
+            `/api/codascope/projects/${activeProjectId}/repositories/${repo.id}/status`
+          );
+          const data = await res.json() as RepoStatus;
+          if (!cancelled) {
+            setRepoStatuses((prev) => ({ ...prev, [repo.id]: data }));
+          }
+        } catch {
+          if (!cancelled) {
+            setRepoStatuses((prev) => ({
+              ...prev,
+              [repo.id]: { status: "unknown", behind: 0, ahead: 0, branch: null, error: "Network error." },
+            }));
+          }
+        }
+      }
+      if (!cancelled) setCheckingAll(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, [activeProjectId, project?.repositories.length]);
+
+  // ── Git pull handler ──────────────────────────────────────────────
+  const handleGitPull = useCallback(async (repoId: string) => {
+    if (!activeProjectId || pullingRepoId) return;
+    setPullingRepoId(repoId);
+    setPullResult(null);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/repositories/${repoId}/pull`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setPullResult({ repoId, success: true, message: data.output || "Already up to date." });
+        // Refresh project to pick up any branch changes
+        const projRes = await fetch(`/api/codascope/projects/${activeProjectId}`);
+        if (projRes.ok) {
+          const projData = await projRes.json();
+          useCodaScopeStore.getState().setProjects(
+            projects.map((p) => (p.id === activeProjectId ? projData.project : p))
+          );
+        }
+        // Update status to current after successful pull
+        setRepoStatuses((prev) => ({
+          ...prev,
+          [repoId]: { status: "current", behind: 0, ahead: 0, branch: data.branch ?? prev[repoId]?.branch ?? null },
+        }));
+      } else {
+        setPullResult({ repoId, success: false, message: data.error || "Pull failed." });
+      }
+    } catch (err) {
+      setPullResult({
+        repoId,
+        success: false,
+        message: err instanceof Error ? err.message : "Network error.",
+      });
+    } finally {
+      setPullingRepoId(null);
+      setTimeout(() => setPullResult(null), 5000);
+    }
+  }, [activeProjectId, pullingRepoId, projects]);
 
   // ── Analyze toggle state ──────────────────────────────────────────
   const [wikiEnabled, setWikiEnabled] = useState(true);
@@ -132,6 +250,10 @@ export function ProjectDashboard() {
     ? `⟳ Analyzing… (${build.elapsed})`
     : "Run ▶";
 
+  /* ── Repo status badge helper ────────────────────────────────── */
+
+  const hasAnyBehind = project.repositories.some((r) => repoStatuses[r.id]?.status === "behind");
+
   return (
     <div className="codascope-page">
       <div className="codascope-page-header">
@@ -167,6 +289,133 @@ export function ProjectDashboard() {
           <div className="codascope-stat-card-label">Concepts</div>
         </div>
       </div>
+
+      {/* ── Repositories Panel ───────────────────────────────────────── */}
+      {project.repositories.length > 0 && (
+        <div className="codascope-repo-panel" id="repo-panel">
+          <div className="codascope-repo-panel-header">
+            <div className="codascope-repo-panel-title">
+              <IconPackage size={14} />
+              Repositories
+            </div>
+            <button
+              className="codascope-btn codascope-btn-sm codascope-btn-ghost"
+              onClick={() => {
+                setCheckingAll(true);
+                setRepoStatuses({});
+                (async () => {
+                  for (const repo of project.repositories) {
+                    try {
+                      const res = await fetch(
+                        `/api/codascope/projects/${activeProjectId}/repositories/${repo.id}/status`
+                      );
+                      const data = await res.json() as RepoStatus;
+                      setRepoStatuses((prev) => ({ ...prev, [repo.id]: data }));
+                    } catch { /* ignore */ }
+                  }
+                  setCheckingAll(false);
+                })();
+              }}
+              disabled={checkingAll || !!pullingRepoId}
+              title="Refresh remote status"
+              type="button"
+            >
+              <IconRefresh size={12} className={checkingAll ? "codascope-spin" : ""} />
+              {checkingAll ? "Checking…" : "Check Remote"}
+            </button>
+          </div>
+
+          <div className="codascope-repo-list">
+            {project.repositories.map((repo) => {
+              const st = repoStatuses[repo.id];
+              const isChecking = checkingRepoId === repo.id || (!st && checkingAll);
+              const isPulling = pullingRepoId === repo.id;
+              const result = pullResult?.repoId === repo.id ? pullResult : null;
+
+              return (
+                <div key={repo.id} className="codascope-repo-row">
+                  {/* Name */}
+                  <div className="codascope-repo-row-name" title={repo.path}>
+                    {repo.name}
+                  </div>
+
+                  {/* Branch */}
+                  <div className="codascope-repo-row-branch">
+                    {repo.branch ?? "—"}
+                  </div>
+
+                  {/* Status badge */}
+                  <div className="codascope-repo-row-status">
+                    {isChecking ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-checking">
+                        <IconRefresh size={11} className="codascope-spin" /> Checking…
+                      </span>
+                    ) : isPulling ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-pulling">
+                        <IconGitPull size={11} className="codascope-spin" /> Pulling…
+                      </span>
+                    ) : result?.success ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-current">
+                        <IconCheck size={11} /> Pulled
+                      </span>
+                    ) : result && !result.success ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-error" title={result.message}>
+                        <IconWarning size={11} /> Failed
+                      </span>
+                    ) : st?.status === "current" ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-current">
+                        <IconCheck size={11} /> Up to date
+                      </span>
+                    ) : st?.status === "behind" ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-behind">
+                        <IconGitPull size={11} /> {st.behind} commit{st.behind !== 1 ? "s" : ""} behind
+                      </span>
+                    ) : st?.status === "ahead" ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-ahead">
+                        {st.ahead} ahead
+                      </span>
+                    ) : st?.status === "diverged" ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-diverged">
+                        <IconWarning size={11} /> {st.behind}↓ {st.ahead}↑
+                      </span>
+                    ) : st?.error ? (
+                      <span className="codascope-repo-badge codascope-repo-badge-unknown" title={st.error}>
+                        {st.error}
+                      </span>
+                    ) : (
+                      <span className="codascope-repo-badge codascope-repo-badge-unknown">
+                        —
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Pull button — only show when behind */}
+                  <div className="codascope-repo-row-action">
+                    {st?.status === "behind" && !isPulling && !result?.success && (
+                      <button
+                        className="codascope-btn codascope-btn-sm codascope-repo-pull-action"
+                        onClick={() => handleGitPull(repo.id)}
+                        disabled={!!pullingRepoId || agentRunning}
+                        title={`Pull ${st.behind} commit${st.behind !== 1 ? "s" : ""} from remote`}
+                        type="button"
+                      >
+                        <IconGitPull size={12} /> Pull
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Hint if repos are behind */}
+          {hasAnyBehind && (
+            <div className="codascope-repo-panel-hint">
+              Pull remote changes before analyzing to ensure your wiki and quality scans reflect the latest code.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Unified Analyze Panel ──────────────────────────────────── */}
       <div className={`codascope-analyze-panel ${build.isAnalyzing ? "codascope-analyze-panel--running" : ""}`} id="analyze-panel">
@@ -463,35 +712,7 @@ export function ProjectDashboard() {
           </div>
         </>
       )}
-
-      {/* Repositories */}
-      <div className="codascope-page-header codascope-dashboard-section-header">
-        <div className="codascope-page-title codascope-dashboard-section-title">Repositories</div>
-      </div>
-      {project.repositories.length === 0 ? (
-        <div className="codascope-dashboard-empty-repos">
-          No repositories added yet. Go to Settings to add code repositories.
-        </div>
-      ) : (
-        <div className="codascope-cards">
-          {project.repositories.map((repo) => (
-            <div key={repo.id} className="codascope-card codascope-card--static">
-              <div className="codascope-card-title">{repo.name}</div>
-              <div className="codascope-card-desc codascope-card-desc--mono">
-                {repo.path}
-              </div>
-              {repo.branch && (
-                <div className="codascope-card-stats">
-                  <div className="codascope-card-stat">
-                    <div className="codascope-card-stat-value">{repo.branch}</div>
-                    <div className="codascope-card-stat-label">Branch</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
+
