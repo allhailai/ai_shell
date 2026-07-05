@@ -9,20 +9,23 @@ import {
   buildReadOnlyTools,
   buildEpicTools,
   buildWriteTools,
+  buildArtifactTools,
   getToolsForPurpose,
   type AgentPurpose,
 } from "./codaScopeToolDefinitions.js";
+import { createToolServices } from "./codaScopeToolServiceFactory.js";
 
 /* ── Dummy values — tools aren't executed, just collected ────────── */
 
 const PROJECT_ID = "test-project";
 const PROJECTS_ROOT = "/tmp/nonexistent-projects-root";
+const services = createToolServices(PROJECTS_ROOT);
 
 /* ── Tier counts ─────────────────────────────────────────────────── */
 
 describe("tool tier builders", () => {
   it("buildReadOnlyTools returns non-empty tool set", () => {
-    const tools = buildReadOnlyTools(PROJECT_ID, PROJECTS_ROOT);
+    const tools = buildReadOnlyTools(PROJECT_ID, services);
     const keys = Object.keys(tools);
     expect(keys.length).toBeGreaterThanOrEqual(10);
     // Verify some known read-only tools are present
@@ -45,7 +48,7 @@ describe("tool tier builders", () => {
   });
 
   it("buildEpicTools returns non-empty tool set", () => {
-    const tools = buildEpicTools(PROJECT_ID, PROJECTS_ROOT);
+    const tools = buildEpicTools(PROJECT_ID, services);
     const keys = Object.keys(tools);
     expect(keys.length).toBeGreaterThanOrEqual(10);
     // Verify some known epic tools are present
@@ -60,16 +63,26 @@ describe("tool tier builders", () => {
   });
 
   it("buildWriteTools returns non-empty tool set", () => {
-    const tools = buildWriteTools(PROJECT_ID, PROJECTS_ROOT);
+    const tools = buildWriteTools(PROJECT_ID, services);
     const keys = Object.keys(tools);
     expect(keys.length).toBeGreaterThanOrEqual(1);
     expect(keys).toContain("update_code_map_section");
   });
 
+  it("buildArtifactTools returns non-empty tool set", () => {
+    const tools = buildArtifactTools(PROJECT_ID, services);
+    const keys = Object.keys(tools);
+    expect(keys.length).toBeGreaterThanOrEqual(3);
+    expect(keys).toContain("write_artifact_html");
+    expect(keys).toContain("read_artifact_html");
+    expect(keys).toContain("read_epic_context");
+  });
+
   it("no tool name collisions between tiers", () => {
-    const readKeys = new Set(Object.keys(buildReadOnlyTools(PROJECT_ID, PROJECTS_ROOT)));
-    const epicKeys = new Set(Object.keys(buildEpicTools(PROJECT_ID, PROJECTS_ROOT)));
-    const writeKeys = new Set(Object.keys(buildWriteTools(PROJECT_ID, PROJECTS_ROOT)));
+    const readKeys = new Set(Object.keys(buildReadOnlyTools(PROJECT_ID, services)));
+    const epicKeys = new Set(Object.keys(buildEpicTools(PROJECT_ID, services)));
+    const writeKeys = new Set(Object.keys(buildWriteTools(PROJECT_ID, services)));
+    const artifactKeys = new Set(Object.keys(buildArtifactTools(PROJECT_ID, services)));
 
     // No overlap between read and epic
     for (const key of epicKeys) {
@@ -85,13 +98,21 @@ describe("tool tier builders", () => {
     for (const key of writeKeys) {
       expect(epicKeys.has(key)).toBe(false);
     }
+
+    // No overlap between artifact and other tiers
+    for (const key of artifactKeys) {
+      expect(readKeys.has(key)).toBe(false);
+      expect(epicKeys.has(key)).toBe(false);
+      expect(writeKeys.has(key)).toBe(false);
+    }
   });
 
   it("all tools have description and execute function", () => {
     const allTools = {
-      ...buildReadOnlyTools(PROJECT_ID, PROJECTS_ROOT),
-      ...buildEpicTools(PROJECT_ID, PROJECTS_ROOT),
-      ...buildWriteTools(PROJECT_ID, PROJECTS_ROOT),
+      ...buildReadOnlyTools(PROJECT_ID, services),
+      ...buildEpicTools(PROJECT_ID, services),
+      ...buildWriteTools(PROJECT_ID, services),
+      ...buildArtifactTools(PROJECT_ID, services),
     };
     for (const [name, tool] of Object.entries(allTools)) {
       expect(tool.description, `${name} should have a description`).toBeTruthy();
@@ -103,15 +124,17 @@ describe("tool tier builders", () => {
 /* ── getToolsForPurpose ──────────────────────────────────────────── */
 
 describe("getToolsForPurpose", () => {
-  const readTools = buildReadOnlyTools(PROJECT_ID, PROJECTS_ROOT);
-  const epicTools = buildEpicTools(PROJECT_ID, PROJECTS_ROOT);
-  const writeTools = buildWriteTools(PROJECT_ID, PROJECTS_ROOT);
+  const readTools = buildReadOnlyTools(PROJECT_ID, services);
+  const epicTools = buildEpicTools(PROJECT_ID, services);
+  const writeTools = buildWriteTools(PROJECT_ID, services);
+  const artifactTools = buildArtifactTools(PROJECT_ID, services);
   const readCount = Object.keys(readTools).length;
   const epicCount = Object.keys(epicTools).length;
   const writeCount = Object.keys(writeTools).length;
-  const allCount = readCount + epicCount + writeCount;
+  const artifactCount = Object.keys(artifactTools).length;
+  const allCount = readCount + epicCount + writeCount + artifactCount;
 
-  it("'assistant' gets ALL tools (read + epic + write)", () => {
+  it("'assistant' gets ALL tools (read + epic + write + artifact)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "assistant");
     const keys = Object.keys(tools);
 
@@ -127,9 +150,13 @@ describe("getToolsForPurpose", () => {
 
     // Verify has write tools
     expect(keys).toContain("update_code_map_section");
+
+    // Verify has artifact tools
+    expect(keys).toContain("write_artifact_html");
+    expect(keys).toContain("read_epic_context");
   });
 
-  it("'chat' gets ALL tools (read + epic + write)", () => {
+  it("'chat' gets ALL tools (read + epic + write + artifact)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "chat");
     const keys = Object.keys(tools);
 
@@ -137,9 +164,10 @@ describe("getToolsForPurpose", () => {
     expect(keys).toContain("list_wiki_topics");
     expect(keys).toContain("create_design_doc");
     expect(keys).toContain("update_code_map_section");
+    expect(keys).toContain("write_artifact_html");
   });
 
-  it("'wiki-build' gets read + write (no epic tools)", () => {
+  it("'wiki-build' gets read + write (no epic or artifact tools)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "wiki-build");
     const keys = Object.keys(tools);
 
@@ -156,9 +184,12 @@ describe("getToolsForPurpose", () => {
     expect(keys).not.toContain("create_design_doc");
     expect(keys).not.toContain("edit_design_doc");
     expect(keys).not.toContain("add_scope_entry");
+
+    // Does NOT have artifact tools
+    expect(keys).not.toContain("write_artifact_html");
   });
 
-  it("'curation' gets read + epic (no write tools)", () => {
+  it("'curation' gets read + epic (no write or artifact tools)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "curation");
     const keys = Object.keys(tools);
 
@@ -175,9 +206,12 @@ describe("getToolsForPurpose", () => {
 
     // Does NOT have write tools
     expect(keys).not.toContain("update_code_map_section");
+
+    // Does NOT have artifact tools
+    expect(keys).not.toContain("write_artifact_html");
   });
 
-  it("'research' gets read + epic (no write tools)", () => {
+  it("'research' gets read + epic (no write or artifact tools)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "research");
     const keys = Object.keys(tools);
 
@@ -192,6 +226,40 @@ describe("getToolsForPurpose", () => {
 
     // Does NOT have write tools
     expect(keys).not.toContain("update_code_map_section");
+
+    // Does NOT have artifact tools
+    expect(keys).not.toContain("write_artifact_html");
+  });
+
+  it("'artifact-build' gets read + artifact (no epic or write tools)", () => {
+    const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "artifact-build");
+    const keys = Object.keys(tools);
+
+    expect(keys.length).toBe(readCount + artifactCount);
+
+    // Has read tools
+    expect(keys).toContain("list_wiki_topics");
+
+    // Has artifact tools
+    expect(keys).toContain("write_artifact_html");
+    expect(keys).toContain("read_artifact_html");
+    expect(keys).toContain("read_epic_context");
+
+    // Does NOT have epic tools
+    expect(keys).not.toContain("create_design_doc");
+
+    // Does NOT have write tools
+    expect(keys).not.toContain("update_code_map_section");
+  });
+
+  it("'artifact-section-regen' gets read + artifact (no epic or write tools)", () => {
+    const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "artifact-section-regen");
+    const keys = Object.keys(tools);
+
+    expect(keys.length).toBe(readCount + artifactCount);
+    expect(keys).toContain("write_artifact_html");
+    expect(keys).toContain("read_epic_context");
+    expect(keys).not.toContain("create_design_doc");
   });
 
   it("unknown purpose falls through to ALL tools (same as assistant)", () => {
@@ -203,6 +271,7 @@ describe("getToolsForPurpose", () => {
     expect(readCount).toBeGreaterThanOrEqual(15);
     expect(epicCount).toBeGreaterThanOrEqual(15);
     expect(writeCount).toBeGreaterThanOrEqual(1);
-    expect(allCount).toBeGreaterThanOrEqual(31);
+    expect(artifactCount).toBeGreaterThanOrEqual(3);
+    expect(allCount).toBeGreaterThanOrEqual(34);
   });
 });
