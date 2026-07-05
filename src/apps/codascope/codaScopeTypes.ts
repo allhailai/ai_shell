@@ -27,8 +27,6 @@ export interface CodaScopeProject {
   createdAt: string;
   updatedAt: string;
   wikiPageCount?: number;
-  qualityScore?: number;
-  conceptCount?: number;
 }
 
 // ── Wiki ────────────────────────────────────────────────────────────
@@ -102,9 +100,7 @@ export interface CodaScopeAction {
 export type CodaScopeActionType =
   | "build_wiki_page"
   | "build_full_wiki"
-  | "run_quality_scan"
   | "navigate"
-  | "create_golden_rule"
   | "explore_codebase"
   // Epic Design actions (P1)
   | "create_epic"
@@ -186,42 +182,6 @@ export interface SkillInfo {
   lockType: "read" | "write";
 }
 
-// ── Quality ─────────────────────────────────────────────────────────
-
-export interface QualityIssue {
-  id: string;
-  title: string;
-  severity: "critical" | "warning" | "info";
-  category: string;
-  file?: string;
-  line?: number;
-  description: string;
-}
-
-export interface QualitySummary {
-  score: number;
-  issueCount: number;
-  timestamp: string;
-  categories: Record<string, { score: number; issues: number }>;
-}
-
-// ── Concepts ────────────────────────────────────────────────────────
-
-export interface Concept {
-  name: string;
-  category: string;
-  description?: string;
-}
-
-// ── Golden Rules ────────────────────────────────────────────────────
-
-export interface GoldenRule {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  category?: string;
-}
 
 // ── Epic Design ─────────────────────────────────────────────────────
 
@@ -281,7 +241,7 @@ export interface EpicScope {
 export interface EpicScopeEntry {
   topicId: string;
   topicTitle: string;
-  type: "existing-wiki" | "existing-concept" | "new";
+  type: "existing-wiki" | "new";
   source: "agent" | "user";       // who added this entry
   included: boolean;
   previousDepth?: TopicDepth;
@@ -534,7 +494,6 @@ export interface CurationResults {
     updated: string[];
   };
   scope: { added: number; removed: number };
-  concepts: { created: number; enriched: number };
 }
 
 // ── Wiki Deletion Confirmation ──────────────────────────────────────

@@ -11,7 +11,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
+
 
 /* ── Template Variable Substitution ──────────────────────────────── */
 
@@ -102,9 +102,6 @@ export function buildBaseVars(ctx: ProjectContext): Record<string, string> {
   const codeMaps = codeMapService.getConcatenatedCodeMaps(projectId, reposForMap);
   vars.CODE_MAP = codeMaps;
 
-  // Golden Rules — formatted for prompt injection
-  const goldenRuleService = new CodaScopeGoldenRuleService(path.dirname(ctx.projectDir));
-  vars.GOLDEN_RULES = goldenRuleService.exportActiveRulesAsPrompt(projectId);
 
   // Default scan scope (can be overridden per-run)
   vars.SCAN_SCOPE = "Full repository scan — analyze all files and directories.";

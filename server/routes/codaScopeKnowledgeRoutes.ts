@@ -484,7 +484,6 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
             epicSvc: svcs.epicSvc,
             epicKnowledgeSvc: svcs.epicKnowledgeSvc,
             curationSvc: svcs.curationSvc,
-            conceptSvc: svcs.conceptSvc,
             codeMapSvc: svcs.codeMapSvc,
           },
         );

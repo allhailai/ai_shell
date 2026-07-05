@@ -16,9 +16,7 @@ import type { CodaScopeChatService } from "./codaScopeChatService.js";
 import type { CodaScopeProjectService } from "./codaScopeProjectService.js";
 import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import type { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js";
-import type { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
-import type { CodaScopeConceptService } from "./codaScopeConceptService.js";
-import type { CodaScopeQualityService } from "./codaScopeQualityService.js";
+
 import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
@@ -34,9 +32,6 @@ export interface ChatServices {
   projectSvc: CodaScopeProjectService;
   wikiSvc: CodaScopeWikiService;
   buildSvc: CodaScopeBuildStateService;
-  goldenRuleSvc: CodaScopeGoldenRuleService;
-  conceptSvc: CodaScopeConceptService;
-  qualitySvc: CodaScopeQualityService;
   wikiStateSvc: CodaScopeWikiStateService;
   codeMapSvc: CodaScopeCodeMapService;
   epicSvc?: CodaScopeEpicService;

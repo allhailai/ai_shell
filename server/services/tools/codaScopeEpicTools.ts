@@ -215,7 +215,7 @@ export function buildEpicTools(
           topicTitle: { type: "string", description: "Human-readable topic title" },
           type: {
             type: "string",
-            description: "Topic type: existing-wiki, existing-concept, or new",
+            description: "Topic type: existing-wiki or new",
           },
           targetDepth: {
             type: "string",
@@ -232,7 +232,7 @@ export function buildEpicTools(
         const epicId = args.epicId as string;
         const topicId = args.topicId as string;
         const topicTitle = args.topicTitle as string;
-        const type = args.type as "existing-wiki" | "existing-concept" | "new";
+        const type = args.type as "existing-wiki" | "new";
         const targetDepth = args.targetDepth as TopicDepth;
         const currentDepth = (args.currentDepth as TopicDepth) ?? "none";
         if (!epicId || !topicId || !topicTitle || !type || !targetDepth) {

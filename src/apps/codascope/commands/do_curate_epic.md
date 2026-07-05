@@ -48,12 +48,8 @@ For each included scope entry where `currentDepth < targetDepth`:
 5. Write the updated page using `write_wiki_topic`
 6. Update the scope entry using `update_scope_entry` with the new `currentDepth`
 
-### Phase 3: Concept Discovery
-1. As you analyze code, identify domain concepts not yet cataloged
-2. Create new concepts using `create_concept`
-3. Update existing concepts if you discover new relationships using `update_concept`
 
-### Phase 4: Epic Wiki Synthesis (if research sources exist)
+### Phase 3: Epic Wiki Synthesis (if research sources exist)
 1. Read each research source using `read_research_source`
 2. Synthesize findings into epic wiki pages using `write_epic_wiki_page`
 3. Link epic wiki pages to their research sources via `sourceRefs`
@@ -103,7 +99,7 @@ After completing all phases, summarize your actions:
 CURATION SUMMARY:
 - Scope: Added N entries, updated M entries
 - Main Wiki: Enriched P pages, created Q new pages
-- Concepts: Created R concepts, updated S concepts
+
 - Epic Wiki: Created T pages, updated U pages
 - Deletions requested: V (pending approval)
 ```

@@ -9,9 +9,6 @@
      /codascope/project/:id/wiki                     → wiki browser (no topic)
      /codascope/project/:id/wiki/:topicId            → wiki browser (specific topic)
      /codascope/project/:id/chat                     → redirects to dashboard (chat is in right panel)
-     /codascope/project/:id/quality                  → quality dashboard
-     /codascope/project/:id/rules                    → golden rules
-     /codascope/project/:id/concepts                 → concept explorer
      /codascope/project/:id/skills                   → skills manager
      /codascope/project/:id/settings                 → project settings
      /codascope/project/:id/epics                    → epic list
@@ -36,9 +33,7 @@ import { ProjectDashboard } from "./views/ProjectDashboard";
 import { WikiBrowser } from "./views/WikiBrowser";
 import { SkillsManager } from "./views/SkillsManager";
 import { Settings } from "./views/Settings";
-import { ConceptExplorer } from "./views/ConceptExplorer";
-import { GoldenRules } from "./views/GoldenRules";
-import { QualityDashboard } from "./views/QualityDashboard";
+
 import { SetupBanners } from "./components/SetupBanners";
 import { EpicList } from "./views/EpicList";
 import { EpicDetail } from "./views/EpicDetail";
@@ -167,15 +162,7 @@ export function CodaScopeContent() {
       case "settings":
         content = <Settings />;
         break;
-      case "quality":
-        content = <QualityDashboard />;
-        break;
-      case "rules":
-        content = <GoldenRules />;
-        break;
-      case "concepts":
-        content = <ConceptExplorer />;
-        break;
+
       case "epics":
         content = <EpicList />;
         break;

@@ -26,12 +26,8 @@ function ActionIcon({ type }: { type: string }) {
       return <span className="codascope-action-icon">📝</span>;
     case "build_full_wiki":
       return <span className="codascope-action-icon">📚</span>;
-    case "run_quality_scan":
-      return <span className="codascope-action-icon">🔍</span>;
     case "navigate":
       return <span className="codascope-action-icon">🔗</span>;
-    case "create_golden_rule":
-      return <span className="codascope-action-icon">⚖️</span>;
     case "explore_codebase":
       return <span className="codascope-action-icon">🧭</span>;
     case "create_epic":
@@ -67,9 +63,7 @@ function actionLabel(type: string): string {
   switch (type) {
     case "build_wiki_page": return "Build Wiki Page";
     case "build_full_wiki": return "Build Full Wiki";
-    case "run_quality_scan": return "Run Quality Scan";
     case "navigate": return "Go To";
-    case "create_golden_rule": return "Create Golden Rule";
     case "explore_codebase": return "Explore Codebase";
     case "create_epic": return "Create Epic";
     case "update_epic_definition": return "Update Definition";
@@ -93,7 +87,6 @@ function actionButtonLabel(type: string, status: ActionStatus): string {
   if (status === "error") return "✗ Failed";
   switch (type) {
     case "navigate": return "Go";
-    case "create_golden_rule": return "Create";
     case "create_epic": return "Create";
     case "update_epic_definition": return "Save";
     case "scope_epic": return "Scope";
@@ -199,10 +192,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
       navigate(path);
       return;
     }
-    if (type === "create_golden_rule") {
-      navigate(`project/${activeProjectId}/rules`);
-      return;
-    }
+
 
     // Epic actions — navigate to epic views
     if (type === "create_epic") {

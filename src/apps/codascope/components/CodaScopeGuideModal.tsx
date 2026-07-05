@@ -15,7 +15,7 @@ import {
   IconCodeMap,
   IconBook,
   IconMap,
-  IconShield,
+
   IconPlan,
   IconArrowRight,
 } from "./CodaScopeIcons";
@@ -177,13 +177,7 @@ function TabOverview() {
             rebuilt individually or all at once.
           </p>
         </ExpandableSection>
-        <ExpandableSection title="Run quality scans against your coding standards">
-          <p>
-            Define "Golden Rules" — your team's coding standards — and scan the codebase
-            against them. CodaScope surfaces violations with file-level detail and priority
-            ranking. Standards themselves are editable and versioned.
-          </p>
-        </ExpandableSection>
+
         <ExpandableSection title="Create Epics to plan features, research patterns, and design solutions">
           <p>
             Epics are planning workspaces. Define what you want to build, scope the relevant
@@ -216,13 +210,7 @@ function TabChatAgent() {
           example="Build a wiki page for the auth module"
           slashCommands={["/build wiki", "/build wiki-page", "/scan delta"]}
         />
-        <IntentCard
-          icon={<IconShield size={18} />}
-          title="Check Quality"
-          description="Scan code against coding standards"
-          example="Run a quality scan and explain the top issues"
-          slashCommands={["/scan quality"]}
-        />
+
         <IntentCard
           icon={<IconPlan size={18} />}
           title="Plan Features"
@@ -307,14 +295,7 @@ function TabProjects() {
         </p>
       </section>
 
-      <section className="codascope-guide-section">
-        <h4>Golden Rules</h4>
-        <p className="codascope-guide-text">
-          Golden Rules are your team's coding standards. Define rules like "All API endpoints
-          must validate input" or "Use dependency injection for services." Quality scans
-          check the codebase against these rules and surface violations with severity levels.
-        </p>
-      </section>
+
     </div>
   );
 }

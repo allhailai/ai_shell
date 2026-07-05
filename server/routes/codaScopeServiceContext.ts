@@ -12,9 +12,7 @@ import { CodaScopeSkillService } from "../services/codaScopeSkillService.js";
 import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
 import { CodaScopeBuildStateService } from "../services/codaScopeBuildStateService.js";
 import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js";
-import { CodaScopeConceptService } from "../services/codaScopeConceptService.js";
-import { CodaScopeGoldenRuleService } from "../services/codaScopeGoldenRuleService.js";
-import { CodaScopeQualityService } from "../services/codaScopeQualityService.js";
+
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
 import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
 import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
@@ -51,9 +49,7 @@ export interface CodaScopeServices {
   agentSvc: CodaScopeAgentService;
   buildSvc: CodaScopeBuildStateService;
   codeMapSvc: CodaScopeCodeMapService;
-  conceptSvc: CodaScopeConceptService;
-  goldenRuleSvc: CodaScopeGoldenRuleService;
-  qualitySvc: CodaScopeQualityService;
+
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
   designDocSvc: CodaScopeDesignDocService;
@@ -97,9 +93,7 @@ let skillService: CodaScopeSkillService | null = null;
 let agentService: CodaScopeAgentService | null = null;
 let buildStateService: CodaScopeBuildStateService | null = null;
 let codeMapService: CodaScopeCodeMapService | null = null;
-let conceptService: CodaScopeConceptService | null = null;
-let goldenRuleService: CodaScopeGoldenRuleService | null = null;
-let qualityService: CodaScopeQualityService | null = null;
+
 let wikiStateService: CodaScopeWikiStateService | null = null;
 let epicService: CodaScopeEpicService | null = null;
 let designDocService: CodaScopeDesignDocService | null = null;
@@ -174,14 +168,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!codeMapService) codeMapService = new CodaScopeCodeMapService(root);
   else codeMapService.setRoot(root);
 
-  if (!conceptService) conceptService = new CodaScopeConceptService(root);
-  else conceptService.setRoot(root);
 
-  if (!goldenRuleService) goldenRuleService = new CodaScopeGoldenRuleService(root);
-  else goldenRuleService.setRoot(root);
-
-  if (!qualityService) qualityService = new CodaScopeQualityService(root);
-  else qualityService.setRoot(root);
 
   if (!wikiStateService) wikiStateService = new CodaScopeWikiStateService(root);
   else wikiStateService.setRoot(root);
@@ -235,9 +222,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     agentSvc: agentService,
     buildSvc: buildStateService,
     codeMapSvc: codeMapService,
-    conceptSvc: conceptService,
-    goldenRuleSvc: goldenRuleService,
-    qualitySvc: qualityService,
+
     wikiStateSvc: wikiStateService,
     epicSvc: epicService,
     designDocSvc: designDocService,

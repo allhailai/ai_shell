@@ -32,7 +32,6 @@ export function DepthBadge({ depth, size = "sm" }: { depth?: TopicDepth; size?: 
 export function TypeBadge({ type }: { type: EpicScopeEntry["type"] }) {
   const labels: Record<string, string> = {
     "existing-wiki": "Wiki",
-    "existing-concept": "Concept",
     "new": "New",
   };
   return <span className={`codascope-scope-type-badge codascope-scope-type-badge--${type}`}>{labels[type] ?? type}</span>;

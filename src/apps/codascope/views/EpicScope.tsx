@@ -18,7 +18,6 @@ import type {
   EpicScopeEntry,
   ScopeDiff,
   WikiTopic,
-  Concept,
 } from "../codaScopeTypes";
 import { DepthBadge, TypeBadge, SourceBadge, EnrichmentStatus } from "../components/ScopeBadges";
 import { ScopeDiffModal } from "../components/ScopeDiffModal";
@@ -58,9 +57,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
 
   // Topic picker modal
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerType, setPickerType] = useState<"wiki" | "concept">("wiki");
   const [wikiTopics, setWikiTopics] = useState<WikiTopic[]>([]);
-  const [concepts, setConcepts] = useState<Concept[]>([]);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerLoading, setPickerLoading] = useState(false);
 
@@ -144,26 +141,16 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
 
   /* ── Open topic picker ─────────────────────────────────────────────── */
 
-  const openPicker = useCallback(async (type: "wiki" | "concept") => {
+  const openPicker = useCallback(async () => {
     if (!activeProjectId) return;
-    setPickerType(type);
     setPickerOpen(true);
-    setPickerSearch("");
     setPickerLoading(true);
-
+    setPickerSearch("");
     try {
-      if (type === "wiki") {
-        const res = await fetch(`/api/codascope/projects/${activeProjectId}/wiki`);
-        if (res.ok) {
-          const data = await res.json();
-          setWikiTopics(data.topics ?? []);
-        }
-      } else {
-        const res = await fetch(`/api/codascope/projects/${activeProjectId}/concepts`);
-        if (res.ok) {
-          const data = await res.json();
-          setConcepts(data.concepts ?? []);
-        }
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/wiki`);
+      if (res.ok) {
+        const data = await res.json();
+        setWikiTopics(data.topics ?? []);
       }
     } catch { /* ignore */ }
     setPickerLoading(false);
@@ -171,13 +158,13 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
 
   /* ── Add from picker ───────────────────────────────────────────────── */
 
-  const addFromPicker = useCallback(async (id: string, title: string, type: "existing-wiki" | "existing-concept") => {
+  const addFromPicker = useCallback(async (id: string, title: string) => {
     if (!activeProjectId) return;
 
     const newEntry: EpicScopeEntry = {
       topicId: id,
       topicTitle: title,
-      type,
+      type: "existing-wiki",
       source: "user",
       included: true,
       targetDepth: "developed",
@@ -301,7 +288,6 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
   /* ── Group entries by type ─────────────────────────────────────────── */
 
   const wikiEntries = scope.entries.filter((e) => e.type === "existing-wiki");
-  const conceptEntries = scope.entries.filter((e) => e.type === "existing-concept");
   const newEntries = scope.entries.filter((e) => e.type === "new");
   const includedCount = scope.entries.filter((e) => e.included).length;
   const enrichedCount = scope.entries.filter((e) => e.enrichedAt).length;
@@ -387,10 +373,10 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           </button>
           <button
             className="codascope-btn codascope-btn-secondary"
-            onClick={() => openPicker("concept")}
+            onClick={() => openPicker("wiki")}
             type="button"
           >
-            + Concept
+            + Wiki Page
           </button>
           {deepenDone ? (
             <button
@@ -443,14 +429,6 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           onRemove={removeEntry}
         />
       )}
-      {conceptEntries.length > 0 && (
-        <ScopeSection
-          title="Concepts"
-          entries={conceptEntries}
-          onToggle={toggleInclude}
-          onRemove={removeEntry}
-        />
-      )}
       {newEntries.length > 0 && (
         <ScopeSection
           title="New Topics"
@@ -463,9 +441,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
       {/* Topic Picker Modal */}
       {pickerOpen && (
         <TopicPickerModal
-          type={pickerType}
           wikiTopics={wikiTopics}
-          concepts={concepts}
           search={pickerSearch}
           onSearchChange={setPickerSearch}
           loading={pickerLoading}
@@ -563,14 +539,12 @@ function TopicPickerModal({
   onAdd,
   onClose,
 }: {
-  type: "wiki" | "concept";
   wikiTopics: WikiTopic[];
-  concepts: Concept[];
   search: string;
   onSearchChange: (s: string) => void;
   loading: boolean;
   existingTopicIds: Set<string>;
-  onAdd: (id: string, title: string, type: "existing-wiki" | "existing-concept") => void;
+  onAdd: (id: string, title: string) => void;
   onClose: () => void;
 }) {
   const searchLower = search.toLowerCase();
@@ -578,22 +552,19 @@ function TopicPickerModal({
   const filteredWiki = wikiTopics.filter(
     (t) => t.title.toLowerCase().includes(searchLower) && !existingTopicIds.has(t.id),
   );
-  const filteredConcepts = concepts.filter(
-    (c) => c.name.toLowerCase().includes(searchLower) && !existingTopicIds.has(c.name),
-  );
 
   return (
     <div className="codascope-modal-overlay" onClick={onClose}>
       <div className="codascope-scope-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="codascope-scope-picker-header">
-          <h3>Add {type === "wiki" ? "Wiki Page" : "Concept"} to Scope</h3>
+          <h3>Add Wiki Page to Scope</h3>
           <button className="codascope-modal-close" onClick={onClose} type="button">×</button>
         </div>
 
         <div className="codascope-scope-picker-search">
           <input
             type="text"
-            placeholder={`Search ${type === "wiki" ? "wiki pages" : "concepts"}…`}
+            placeholder="Search wiki pages…"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             autoFocus
@@ -603,12 +574,12 @@ function TopicPickerModal({
         <div className="codascope-scope-picker-list">
           {loading && <div className="codascope-scope-picker-loading">Loading…</div>}
 
-          {type === "wiki" && filteredWiki.map((topic) => (
+          {filteredWiki.map((topic) => (
             <button
               key={topic.id}
               className="codascope-scope-picker-item"
               onClick={() => {
-                onAdd(topic.id, topic.title, "existing-wiki");
+                onAdd(topic.id, topic.title);
               }}
               type="button"
             >
@@ -617,27 +588,8 @@ function TopicPickerModal({
             </button>
           ))}
 
-          {type === "concept" && filteredConcepts.map((concept) => (
-            <button
-              key={concept.name}
-              className="codascope-scope-picker-item"
-              onClick={() => {
-                const slug = concept.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-                onAdd(slug, concept.name, "existing-concept");
-              }}
-              type="button"
-            >
-              <span className="codascope-scope-picker-item-title">{concept.name}</span>
-              <span className="codascope-scope-picker-item-category">{concept.category}</span>
-              <span className="codascope-scope-picker-item-add">+ Add</span>
-            </button>
-          ))}
-
-          {!loading && type === "wiki" && filteredWiki.length === 0 && (
+          {!loading && filteredWiki.length === 0 && (
             <div className="codascope-scope-picker-empty">No matching wiki pages found</div>
-          )}
-          {!loading && type === "concept" && filteredConcepts.length === 0 && (
-            <div className="codascope-scope-picker-empty">No matching concepts found</div>
           )}
         </div>
       </div>

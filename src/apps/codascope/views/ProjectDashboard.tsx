@@ -17,13 +17,10 @@ import { ModelPicker } from "../components/ModelPicker";
 import {
   IconCodeMap,
   IconWiki,
-  IconQuality,
   IconFolder,
   IconSearch,
   IconPackage,
-  IconConcepts,
   IconChat,
-  IconRules,
   IconGitPull,
   IconCheck,
   IconRefresh,
@@ -196,7 +193,6 @@ export function ProjectDashboard() {
   // ── Analyze toggle state ──────────────────────────────────────────
   const [wikiEnabled, setWikiEnabled] = useState(true);
   const [wikiMode, setWikiMode] = useState<"auto" | "full">("auto");
-  const [qualityEnabled, setQualityEnabled] = useState(true);
   const [scope, setScope] = useState("full");
 
   // ── Unified Analyze action ────────────────────────────────────────
@@ -209,14 +205,13 @@ export function ProjectDashboard() {
         body: {
           modelId: selectedModel,
           wiki: wikiEnabled ? wikiMode : false,
-          quality: qualityEnabled,
           scope,
         },
       },
       command: "analyze",
       showPipeline: true,
     });
-  }, [activeProjectId, selectedModel, wikiEnabled, wikiMode, qualityEnabled, scope, build]);
+  }, [activeProjectId, selectedModel, wikiEnabled, wikiMode, scope, build]);
 
   // ── Quick action (for individual commands like do_explore) ────────
 
@@ -277,16 +272,6 @@ export function ProjectDashboard() {
           <div className="codascope-stat-card-icon"><IconWiki size={20} /></div>
           <div className="codascope-stat-card-value">{project.wikiPageCount ?? 0}</div>
           <div className="codascope-stat-card-label">Wiki Pages</div>
-        </div>
-        <div className="codascope-stat-card codascope-stat-card--clickable" onClick={() => navigate(`project/${activeProjectId}/quality`)}>
-          <div className="codascope-stat-card-icon"><IconQuality size={20} /></div>
-          <div className="codascope-stat-card-value">{project.qualityScore ?? "—"}</div>
-          <div className="codascope-stat-card-label">Quality Score</div>
-        </div>
-        <div className="codascope-stat-card codascope-stat-card--clickable" onClick={() => navigate(`project/${activeProjectId}/concepts`)}>
-          <div className="codascope-stat-card-icon"><IconConcepts size={20} /></div>
-          <div className="codascope-stat-card-value">{project.conceptCount ?? 0}</div>
-          <div className="codascope-stat-card-label">Concepts</div>
         </div>
       </div>
 
@@ -493,24 +478,7 @@ export function ProjectDashboard() {
               </div>
             </div>
 
-            {/* Quality toggle */}
-            <div className="codascope-analyze-toggle-row">
-              <div className="codascope-analyze-toggle-label">
-                <span className="codascope-analyze-toggle-icon"><IconQuality size={16} /></span>
-                <span className="codascope-analyze-toggle-text">Quality</span>
-              </div>
-              <div className="codascope-analyze-toggle-right">
-                <label className="codascope-rule-toggle codascope-analyze-toggle">
-                  <input
-                    type="checkbox"
-                    checked={qualityEnabled}
-                    onChange={(e) => setQualityEnabled(e.target.checked)}
-                    disabled={agentRunning}
-                  />
-                  <span className="codascope-rule-toggle-track" />
-                </label>
-              </div>
-            </div>
+
           </div>
 
           {/* Scope selector */}
@@ -594,27 +562,6 @@ export function ProjectDashboard() {
           type="button"
         >
           <IconWiki size={14} /> Browse Wiki
-        </button>
-        <button
-          className="codascope-quick-link"
-          onClick={() => navigate(`project/${activeProjectId}/quality`)}
-          type="button"
-        >
-          <IconQuality size={14} /> Quality Dashboard
-        </button>
-        <button
-          className="codascope-quick-link"
-          onClick={() => navigate(`project/${activeProjectId}/rules`)}
-          type="button"
-        >
-          <IconRules size={14} /> Golden Rules
-        </button>
-        <button
-          className="codascope-quick-link"
-          onClick={() => navigate(`project/${activeProjectId}/concepts`)}
-          type="button"
-        >
-          <IconConcepts size={14} /> Concepts
         </button>
         <button
           className="codascope-quick-link"

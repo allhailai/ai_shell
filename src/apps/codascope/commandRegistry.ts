@@ -96,17 +96,7 @@ export const COMMANDS: SlashCommand[] = [
     requiresEpic: true,
   },
 
-  // ── Analyze ──
-  {
-    id: "scan-quality",
-    slash: "/scan quality",
-    label: "Run Quality Scan",
-    description: "Scan code against your golden rules",
-    category: "analyze",
-    behavior: "dispatch",
-    relevance: [{ view: "dashboard" }, { view: "quality" }],
-    requiresProject: true,
-  },
+
   {
     id: "explore",
     slash: "/explore",
@@ -149,36 +139,7 @@ export const COMMANDS: SlashCommand[] = [
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
-  {
-    id: "goto-quality",
-    slash: "/goto quality",
-    label: "Go to Quality",
-    description: "Navigate to the quality dashboard",
-    category: "navigate",
-    behavior: "dispatch",
-    relevance: [{ view: "*" }],
-    requiresProject: true,
-  },
-  {
-    id: "goto-rules",
-    slash: "/goto rules",
-    label: "Go to Golden Rules",
-    description: "Navigate to golden rules",
-    category: "navigate",
-    behavior: "dispatch",
-    relevance: [{ view: "*" }],
-    requiresProject: true,
-  },
-  {
-    id: "goto-concepts",
-    slash: "/goto concepts",
-    label: "Go to Concepts",
-    description: "Navigate to the concept map",
-    category: "navigate",
-    behavior: "dispatch",
-    relevance: [{ view: "*" }],
-    requiresProject: true,
-  },
+
   {
     id: "goto-skills",
     slash: "/goto skills",

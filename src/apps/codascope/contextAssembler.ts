@@ -63,9 +63,6 @@ function viewLabel(view: string, topicId?: string | null, topicTitle?: string | 
     case "wiki":
       if (topicId) return topicTitle ?? topicId;
       return "Wiki";
-    case "quality": return "Quality";
-    case "rules": return "Golden Rules";
-    case "concepts": return "Concepts";
     case "settings": return "Settings";
     case "skills": return "Skills";
     case "epics": return "Epics";

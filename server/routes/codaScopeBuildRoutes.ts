@@ -401,10 +401,9 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       const svcs = await ensureServices();
       const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
-      const { modelId, wiki, quality, scope } = req.body as {
+      const { modelId, wiki, scope } = req.body as {
         modelId?: string;
         wiki?: "auto" | "full" | false;
-        quality?: boolean;
         scope?: string | { path: string };
       };
 
@@ -436,7 +435,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
         "X-Accel-Buffering": "no",
       });
 
-      res.write(`event: run-started\ndata: ${JSON.stringify({ runId, pipeline: { wiki, quality, scope } })}\n\n`);
+      res.write(`event: run-started\ndata: ${JSON.stringify({ runId, pipeline: { wiki, scope } })}\n\n`);
 
       // Clear any previous cancellation for this project
       buildSvc.clearCancellation(id);
@@ -463,7 +462,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await runAnalyzePipeline(
-          { projectId: id, modelId, wiki: wiki ?? false, quality: quality ?? false, scope },
+          { projectId: id, modelId, wiki: wiki ?? false, scope },
           { sendEvent, sendMessage, isAborted },
           svcs,
           runId,

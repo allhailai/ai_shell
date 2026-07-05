@@ -11,9 +11,6 @@ import {
   IconDashboard,
   IconWiki,
   IconChat,
-  IconQuality,
-  IconRules,
-  IconConcepts,
   IconSkills,
   IconSettings,
   IconFolder,
@@ -22,15 +19,12 @@ import {
   IconHelp,
 } from "./components/CodaScopeIcons";
 
-type CodaScopeView = "dashboard" | "epics" | "wiki" | "quality" | "rules" | "concepts" | "skills" | "settings";
+type CodaScopeView = "dashboard" | "epics" | "wiki" | "skills" | "settings";
 
 const NAV_ITEMS: { view: CodaScopeView; icon: ComponentType<{ size?: number }>; label: string }[] = [
   { view: "dashboard", icon: IconDashboard, label: "Dashboard" },
   { view: "epics", icon: IconEpic, label: "Epics" },
   { view: "wiki", icon: IconWiki, label: "Wiki" },
-  { view: "quality", icon: IconQuality, label: "Quality" },
-  { view: "rules", icon: IconRules, label: "Golden Rules" },
-  { view: "concepts", icon: IconConcepts, label: "Concepts" },
   { view: "skills", icon: IconSkills, label: "Skills" },
   { view: "settings", icon: IconSettings, label: "Settings" },
 ];

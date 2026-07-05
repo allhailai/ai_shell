@@ -2,7 +2,6 @@
    Orchestrates the multi-step build analysis pipeline:
      1. Code Map — scans repository structure
      2. Wiki — generates/updates documentation (outline, delta, or full)
-     3. Quality — runs quality analysis against golden rules
 
    Extracted from codaScopeRoutes.ts to keep the route file as a thin
    dispatcher. The route handler sets up SSE, creates the orchestrator
@@ -25,7 +24,6 @@ export interface AnalyzeOptions {
   projectId: string;
   modelId: string;
   wiki: "auto" | "full" | false;
-  quality: boolean;
   scope?: string | { path: string };
 }
 
@@ -70,7 +68,7 @@ function extractTokenUsage(result: { usage?: Record<string, number> } | undefine
  * - A build has been started via `buildSvc.startBuild()`
  * - The `run-started` event has already been emitted
  *
- * It handles: Code Map → Wiki → Quality → Done/Cancelled
+ * It handles: Code Map → Wiki → Done/Cancelled
  */
 export async function runAnalyzePipeline(
   options: AnalyzeOptions,
@@ -78,7 +76,7 @@ export async function runAnalyzePipeline(
   services: AnalyzeServices,
   runId: string,
 ): Promise<void> {
-  const { projectId, modelId, wiki, quality, scope } = options;
+  const { projectId, modelId, wiki, scope } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
   const { agentSvc, projectSvc, wikiSvc, buildSvc, codeMapSvc, wikiStateSvc, curationSvc, epicSvc } = services;
 
@@ -335,46 +333,7 @@ export async function runAnalyzePipeline(
     }
   }
 
-  // ── Step 3: Quality (if toggled on) ────────────────────────────
-  if (quality) {
-    sendEvent("pipeline-step", { step: "quality", status: "running" });
 
-    const vars = buildBaseVars({
-      projectName: project.name,
-      projectDir,
-      repositories: repos,
-    });
-    vars.MODEL_ID = modelId;
-
-    // Apply scope
-    if (scope && typeof scope === "string" && scope !== "full") {
-      vars.SCAN_SCOPE = `Scoped scan: focus on ${scope} areas only.`;
-    } else if (scope && typeof scope === "object" && scope.path) {
-      vars.SCAN_SCOPE = `Scoped scan: analyze only files under ${scope.path}`;
-    }
-
-    const prompt = loadCommandOrSkill("do_quality_scan", projectDir, vars);
-    if (prompt) {
-      await agentSvc.send({
-        projectId,
-        message: prompt,
-        modelId,
-        systemPrompt:
-          "You are CodaScope, a senior code reviewer conducting a quality audit. " +
-          "Follow the instructions precisely. Write the quality report to the project's quality/ directory. " +
-          "Do NOT modify files in the source repositories.",
-        purpose: "wiki-build",
-        onMessage: sendMessage,
-        onDone: async (result) => {
-          const tokenUsage = extractTokenUsage(result as { usage?: Record<string, number> });
-          sendEvent("pipeline-step", { step: "quality", status: "complete", tokenUsage });
-        },
-        onError: (err) => {
-          sendEvent("pipeline-step", { step: "quality", status: "error", error: err.message });
-        },
-      });
-    }
-  }
 
   // ── Post-build: fire code_delta_processed curation reason ──────
   if (topicsRebuilt > 0 && curationSvc && epicSvc) {
@@ -420,7 +379,7 @@ export interface EpicDeepenOptions {
   entries: Array<{
     topicId: string;
     topicTitle: string;
-    type: "existing-wiki" | "existing-concept" | "new";
+    type: "existing-wiki" | "new";
     targetDepth?: string;
   }>;
 }
@@ -434,7 +393,6 @@ export interface EpicDeepenServices extends AnalyzeServices {
  *
  * For each included scope entry:
  * - "existing-wiki" → run do_build_wiki_page to deepen the topic
- * - "existing-concept" → run do_build_wiki_page to create a page from the concept
  * - "new" → run do_build_wiki_page to create a new page
  *
  * Updates scope entry status as each completes.

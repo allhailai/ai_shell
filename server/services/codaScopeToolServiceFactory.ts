@@ -7,9 +7,7 @@
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import { CodaScopeQualityService } from "./codaScopeQualityService.js";
-import { CodaScopeGoldenRuleService } from "./codaScopeGoldenRuleService.js";
-import { CodaScopeConceptService } from "./codaScopeConceptService.js";
+
 import { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js";
 import { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
@@ -23,9 +21,6 @@ export interface ToolServices {
   wiki: CodaScopeWikiService;
   project: CodaScopeProjectService;
   codeMap: CodaScopeCodeMapService;
-  quality: CodaScopeQualityService;
-  goldenRule: CodaScopeGoldenRuleService;
-  concept: CodaScopeConceptService;
   buildState: CodaScopeBuildStateService;
   epic: CodaScopeEpicService;
   designDoc: CodaScopeDesignDocService;
@@ -45,9 +40,6 @@ export function createToolServices(projectsRoot: string): ToolServices {
     wiki: new CodaScopeWikiService(projectsRoot),
     project: new CodaScopeProjectService(projectsRoot),
     codeMap: new CodaScopeCodeMapService(projectsRoot),
-    quality: new CodaScopeQualityService(projectsRoot),
-    goldenRule: new CodaScopeGoldenRuleService(projectsRoot),
-    concept: new CodaScopeConceptService(projectsRoot),
     buildState: new CodaScopeBuildStateService(projectsRoot),
     epic: new CodaScopeEpicService(projectsRoot),
     designDoc: new CodaScopeDesignDocService(projectsRoot),

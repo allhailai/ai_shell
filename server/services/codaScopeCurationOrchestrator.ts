@@ -17,7 +17,7 @@ import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import type { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import type { CodaScopeCurationService } from "./codaScopeCurationService.js";
-import type { CodaScopeConceptService } from "./codaScopeConceptService.js";
+
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
 import type { CurationReason, CurationResults } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -45,7 +45,7 @@ export interface CurationServices {
   epicSvc: CodaScopeEpicService;
   epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
   curationSvc: CodaScopeCurationService;
-  conceptSvc: CodaScopeConceptService;
+
   codeMapSvc: CodaScopeCodeMapService;
 }
 
@@ -67,7 +67,7 @@ export async function runCurationPipeline(
 ): Promise<void> {
   const { projectId, epicId, modelId } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
-  const { agentSvc, projectSvc, wikiSvc, epicSvc, epicKnowledgeSvc, curationSvc, conceptSvc, codeMapSvc } = services;
+  const { agentSvc, projectSvc, wikiSvc, epicSvc, epicKnowledgeSvc, curationSvc, codeMapSvc } = services;
 
   const startTime = Date.now();
   let curationId: string | undefined;
@@ -321,7 +321,6 @@ function parseCurationSummary(response: string): CurationResults {
     mainWiki: { enriched: [], created: [] },
     epicWiki: { created: [], updated: [] },
     scope: { added: 0, removed: 0 },
-    concepts: { created: 0, enriched: 0 },
   };
 
   const summaryMatch = response.match(/CURATION SUMMARY:[\s\S]*?(?=```|$)/i);
@@ -357,12 +356,7 @@ function parseCurationSummary(response: string): CurationResults {
     }
   }
 
-  // Parse concept counts
-  const conceptMatch = summary.match(/Concepts:.*?Created\s+(\d+).*?updated\s+(\d+)/i);
-  if (conceptMatch) {
-    defaults.concepts.created = parseInt(conceptMatch[1], 10);
-    defaults.concepts.enriched = parseInt(conceptMatch[2], 10);
-  }
+
 
   // Parse epic wiki counts
   const epicWikiMatch = summary.match(/Epic Wiki:.*?Created\s+(\d+).*?updated\s+(\d+)/i);
