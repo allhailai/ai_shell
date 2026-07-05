@@ -29,6 +29,8 @@ import { CodaScopeArtifactService } from "../services/codaScopeArtifactService.j
 import { CodaScopeArtifactAnnotationService } from "../services/codaScopeArtifactAnnotationService.js";
 import { CodaScopeArtifactVersionService } from "../services/codaScopeArtifactVersionService.js";
 import { CodaScopeLockService } from "../services/codaScopeLockService.js";
+import { CodaScopeDirectiveService } from "../services/codaScopeDirectiveService.js";
+import { ProjectDirResolver } from "../services/codaScopeProjectDirResolver.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -66,6 +68,7 @@ export interface CodaScopeServices {
   artifactAnnotationSvc: CodaScopeArtifactAnnotationService;
   artifactVersionSvc: CodaScopeArtifactVersionService;
   lockSvc: CodaScopeLockService;
+  directiveSvc: CodaScopeDirectiveService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -87,6 +90,7 @@ export const APP_ID = "codascope";
 // ── Singleton Service Instances ──────────────────────────────────────
 
 let projectService: CodaScopeProjectService | null = null;
+let dirResolver: ProjectDirResolver | null = null;
 let wikiService: CodaScopeWikiService | null = null;
 let chatService: CodaScopeChatService | null = null;
 let skillService: CodaScopeSkillService | null = null;
@@ -110,6 +114,7 @@ let artifactService: CodaScopeArtifactService | null = null;
 let artifactAnnotationService: CodaScopeArtifactAnnotationService | null = null;
 let artifactVersionService: CodaScopeArtifactVersionService | null = null;
 let lockService: CodaScopeLockService | null = null;
+let directiveService: CodaScopeDirectiveService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -145,6 +150,11 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
 
   if (!projectService) projectService = new CodaScopeProjectService(root);
   else projectService.setRoot(root);
+
+  // Initialize or update the cached project directory resolver
+  if (!dirResolver) dirResolver = new ProjectDirResolver(root);
+  else dirResolver.setRoot(root);
+  projectService.setDirResolver(dirResolver);
 
   if (!wikiService) wikiService = new CodaScopeWikiService(root);
   else wikiService.setRoot(root);
@@ -214,6 +224,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!lockService) lockService = new CodaScopeLockService(root);
   else lockService.setRoot(root);
 
+  if (!directiveService) directiveService = new CodaScopeDirectiveService(root);
+  else directiveService.setRoot(root);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -239,6 +252,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     artifactAnnotationSvc: artifactAnnotationService,
     artifactVersionSvc: artifactVersionService,
     lockSvc: lockService,
+    directiveSvc: directiveService,
   };
 }
 

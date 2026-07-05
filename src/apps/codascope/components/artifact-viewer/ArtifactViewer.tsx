@@ -3,21 +3,23 @@
    Wires together ArtifactSpecEditor, ArtifactPreview, and
    ArtifactSectionPanel with tab switching, build lifecycle,
    annotation flow, and version management.
+
+   Build lifecycle → useArtifactBuild hook
+   Annotation flow → useArtifactAnnotations hook
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type {
   ArtifactSpec,
   ArtifactSection,
-  ArtifactAnnotation,
   ArtifactBuildVersion,
-  ArtifactBuildProgress,
-  ArtifactElementContext,
 } from "../../codaScopeTypes.js";
 import * as api from "./artifactApi";
 import { ArtifactSpecEditor } from "./ArtifactSpecEditor";
 import { ArtifactPreview, type ArtifactPreviewHandle } from "./ArtifactPreview";
 import { ArtifactSectionPanel } from "./ArtifactSectionPanel";
+import { useArtifactBuild } from "./hooks/useArtifactBuild";
+import { useArtifactAnnotations } from "./hooks/useArtifactAnnotations";
 
 /* ── Props ─────────────────────────────────────────────────────────── */
 
@@ -39,35 +41,16 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Build state
-  const [building, setBuilding] = useState(false);
-  const [buildProgress, setBuildProgress] = useState<ArtifactBuildProgress | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [previewKey, setPreviewKey] = useState(0);
-
-  // Section/annotation/version state
+  // Section/version state
   const [sections, setSections] = useState<ArtifactSection[]>([]);
-  const [annotations, setAnnotations] = useState<ArtifactAnnotation[]>([]);
   const [versions, setVersions] = useState<ArtifactBuildVersion[]>([]);
   const [hiddenSectionIds, setHiddenSectionIds] = useState<string[]>([]);
-
-  // Inspection mode
-  const [inspectionMode, setInspectionMode] = useState(false);
-  const [pendingElementContext, setPendingElementContext] = useState<{
-    sectionId: string;
-    sectionTitle: string;
-    elementContext: ArtifactElementContext;
-  } | null>(null);
-
-  // Rebuild warning modal
-  const [showRebuildWarning, setShowRebuildWarning] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Section panel collapse
   const [sectionPanelCollapsed, setSectionPanelCollapsed] = useState(false);
 
   const previewRef = useRef<ArtifactPreviewHandle>(null);
-  const sseCleanupRef = useRef<(() => void) | null>(null);
-
   const isBuilt = artifact?.status === "built";
 
   // Flash notice
@@ -113,18 +96,57 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     }
   }, [projectId, epicId, artifactId]);
 
-  // ── Load annotations ─────────────────────────────────────────────
+  // ── Build lifecycle (hook) ───────────────────────────────────────
 
-  const loadAnnotations = useCallback(async () => {
-    try {
-      const list = await api.listAnnotations(projectId, epicId, artifactId);
-      setAnnotations(list);
-    } catch {
-      /* non-fatal */
-    }
-  }, [projectId, epicId, artifactId]);
+  const {
+    building,
+    buildProgress,
+    showRebuildWarning,
+    previewKey,
+    handleBuild,
+    setShowRebuildWarning,
+    startBuildSubscription,
+  } = useArtifactBuild({
+    projectId,
+    epicId,
+    artifactId,
+    artifact,
+    hiddenSectionIds,
+    annotations: [], // Will be populated by annotation hook below
+    loadArtifact,
+    flash,
+  });
 
-  // ── Load versions ─────────────────────────────────────────────────
+  // ── Annotations (hook) ──────────────────────────────────────────
+
+  const {
+    annotations,
+    inspectionMode,
+    pendingElementContext,
+    loadAnnotations,
+    handleAddAnnotation,
+    handleUpdateAnnotation,
+    handleDeleteAnnotation,
+    handleToggleAnnotation,
+    handleBatchApply,
+    handleRetryFailed,
+    toggleInspectionMode,
+    handleAnnotationSelected,
+    handleHighlightAnnotation,
+  } = useArtifactAnnotations({
+    projectId,
+    epicId,
+    artifactId,
+    activeTab,
+    isBuilt: isBuilt ?? false,
+    sections,
+    previewRef,
+    loadSections,
+    flash,
+    startBuildSubscription,
+  });
+
+  // ── Load versions ──────────────────────────────────────────────
 
   const loadVersions = useCallback(async () => {
     try {
@@ -143,80 +165,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
       void loadVersions();
     }
   }, [activeTab, isBuilt, loadSections, loadAnnotations, loadVersions, previewKey]);
-
-  // ── Build lifecycle ──────────────────────────────────────────────
-
-  const handleBuild = useCallback(async () => {
-    if (!artifact) return;
-
-    // Check for modifications and show warning
-    const hasModifications =
-      hiddenSectionIds.length > 0 ||
-      annotations.some((a) => a.status === "applied" && a.type === "add_section");
-
-    if (hasModifications && isBuilt && !showRebuildWarning) {
-      setShowRebuildWarning(true);
-      return;
-    }
-    setShowRebuildWarning(false);
-
-    setBuilding(true);
-    setBuildProgress(null);
-    try {
-      await api.triggerBuild(
-        projectId,
-        epicId,
-        artifactId,
-        artifact.modelId ?? undefined,
-      );
-
-      // Subscribe to SSE build status
-      sseCleanupRef.current?.();
-      sseCleanupRef.current = api.subscribeBuildStatus(
-        projectId,
-        epicId,
-        artifactId,
-        (progress) => setBuildProgress(progress),
-        () => {
-          // Build done
-          setBuilding(false);
-          setBuildProgress(null);
-          void loadArtifact();
-          setPreviewKey((k) => k + 1);
-          setActiveTab("preview");
-          flash("Build complete ✓");
-        },
-        (err) => {
-          setBuilding(false);
-          flash(err.message);
-        },
-      );
-
-      setActiveTab("preview");
-      flash("Build started — agent is generating HTML…");
-    } catch (err) {
-      setBuilding(false);
-      flash(err instanceof Error ? err.message : "Build failed");
-    }
-  }, [
-    artifact,
-    projectId,
-    epicId,
-    artifactId,
-    hiddenSectionIds,
-    annotations,
-    isBuilt,
-    showRebuildWarning,
-    loadArtifact,
-    flash,
-  ]);
-
-  // Cleanup SSE on unmount
-  useEffect(() => {
-    return () => {
-      sseCleanupRef.current?.();
-    };
-  }, []);
 
   // ── Save spec ────────────────────────────────────────────────────
 
@@ -247,138 +195,11 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     [projectId, epicId, artifactId, flash],
   );
 
-  // ── Annotation handlers ──────────────────────────────────────────
-
-  const handleAddAnnotation = useCallback(
-    async (data: {
-      sectionId: string;
-      sectionTitle: string;
-      instruction: string;
-      elementContext?: ArtifactElementContext | null;
-    }) => {
-      try {
-        await api.addAnnotation(projectId, epicId, artifactId, data);
-        setPendingElementContext(null);
-        await loadAnnotations();
-        flash("Annotation added");
-      } catch (err) {
-        flash(err instanceof Error ? err.message : "Failed to add annotation");
-      }
-    },
-    [projectId, epicId, artifactId, loadAnnotations, flash],
-  );
-
-  const handleUpdateAnnotation = useCallback(
-    async (annotationId: string, instruction: string) => {
-      try {
-        await api.updateAnnotation(projectId, epicId, artifactId, annotationId, {
-          instruction,
-        });
-        await loadAnnotations();
-      } catch (err) {
-        flash(err instanceof Error ? err.message : "Update failed");
-      }
-    },
-    [projectId, epicId, artifactId, loadAnnotations, flash],
-  );
-
-  const handleDeleteAnnotation = useCallback(
-    async (annotationId: string) => {
-      try {
-        await api.deleteAnnotation(projectId, epicId, artifactId, annotationId);
-        await loadAnnotations();
-      } catch (err) {
-        flash(err instanceof Error ? err.message : "Delete failed");
-      }
-    },
-    [projectId, epicId, artifactId, loadAnnotations, flash],
-  );
-
-  const handleToggleAnnotation = useCallback(
-    async (annotationId: string) => {
-      try {
-        await api.toggleAnnotation(projectId, epicId, artifactId, annotationId);
-        await loadAnnotations();
-      } catch (err) {
-        flash(err instanceof Error ? err.message : "Toggle failed");
-      }
-    },
-    [projectId, epicId, artifactId, loadAnnotations, flash],
-  );
-
-  const handleBatchApply = useCallback(async () => {
-    try {
-      const result = await api.batchApplyAnnotations(
-        projectId,
-        epicId,
-        artifactId,
-      );
-      if (result.applied === 0) {
-        flash("No pending annotations to apply");
-        return;
-      }
-
-      // Enter building state and subscribe to SSE for real-time progress
-      setBuilding(true);
-      setBuildProgress(null);
-      flash(`Regenerating ${result.applied} annotation(s)…`);
-
-      // Subscribe to SSE build status — same pattern as handleBuild
-      sseCleanupRef.current?.();
-      sseCleanupRef.current = api.subscribeBuildStatus(
-        projectId,
-        epicId,
-        artifactId,
-        (progress) => setBuildProgress(progress),
-        () => {
-          // Regeneration done
-          setBuilding(false);
-          setBuildProgress(null);
-          void loadAnnotations();
-          void loadSections();
-          setPreviewKey((k) => k + 1);
-          flash("Sections regenerated ✓");
-        },
-        (err) => {
-          setBuilding(false);
-          setBuildProgress(null);
-          void loadAnnotations();
-          flash(err.message || "Regeneration failed");
-        },
-      );
-    } catch (err) {
-      flash(err instanceof Error ? err.message : "Batch apply failed");
-    }
-  }, [projectId, epicId, artifactId, loadAnnotations, loadSections, flash]);
-
-  const handleRetryFailed = useCallback(async () => {
-    try {
-      await api.retryFailedAnnotations(projectId, epicId, artifactId);
-      await loadAnnotations();
-    } catch (err) {
-      flash(err instanceof Error ? err.message : "Retry failed");
-    }
-  }, [projectId, epicId, artifactId, loadAnnotations, flash]);
-
   // ── Section handlers ─────────────────────────────────────────────
 
   const handleScrollToSection = useCallback(
     (sectionId: string) => {
       previewRef.current?.scrollToSection(sectionId);
-    },
-    [],
-  );
-
-  const handleHighlightAnnotation = useCallback(
-    (annotation: ArtifactAnnotation) => {
-      if (annotation.elementContext?.cssPath) {
-        previewRef.current?.highlightElement(
-          annotation.elementContext.cssPath,
-          annotation.sectionId,
-        );
-      } else {
-        previewRef.current?.scrollToSection(annotation.sectionId);
-      }
     },
     [],
   );
@@ -394,7 +215,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
         );
         setSections(result.sections);
         setHiddenSectionIds(result.hiddenSectionIds);
-        setPreviewKey((k) => k + 1);
         flash("Section hidden");
       } catch (err) {
         flash(err instanceof Error ? err.message : "Failed to hide section");
@@ -414,7 +234,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
         );
         setSections(result.sections);
         setHiddenSectionIds(result.hiddenSectionIds);
-        setPreviewKey((k) => k + 1);
         flash("Section visible again");
       } catch (err) {
         flash(err instanceof Error ? err.message : "Failed to show section");
@@ -433,7 +252,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
           orderedIds,
         );
         setSections(result.sections);
-        setPreviewKey((k) => k + 1);
         flash("Sections reordered");
       } catch (err) {
         flash(err instanceof Error ? err.message : "Reorder failed");
@@ -465,7 +283,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     async (dirName: string) => {
       try {
         await api.revertToVersion(projectId, epicId, artifactId, dirName);
-        setPreviewKey((k) => k + 1);
         void loadSections();
         void loadAnnotations();
         void loadVersions();
@@ -480,7 +297,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
   const handleRevertToLatest = useCallback(async () => {
     try {
       await api.revertToLatest(projectId, epicId, artifactId);
-      setPreviewKey((k) => k + 1);
       void loadSections();
       void loadAnnotations();
       void loadVersions();
@@ -489,44 +305,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
       flash(err instanceof Error ? err.message : "Revert failed");
     }
   }, [projectId, epicId, artifactId, loadSections, loadAnnotations, loadVersions, flash]);
-
-  // ── Inspection mode ──────────────────────────────────────────────
-
-  const toggleInspectionMode = useCallback(() => {
-    const next = !inspectionMode;
-    setInspectionMode(next);
-    if (next) {
-      previewRef.current?.enterAnnotationMode();
-    } else {
-      previewRef.current?.exitAnnotationMode();
-      setPendingElementContext(null);
-    }
-  }, [inspectionMode]);
-
-  // Exit inspection mode when leaving preview
-  useEffect(() => {
-    if (activeTab !== "preview" && inspectionMode) {
-      setInspectionMode(false);
-      previewRef.current?.exitAnnotationMode();
-      setPendingElementContext(null);
-    }
-  }, [activeTab, inspectionMode]);
-
-  const handleAnnotationSelected = useCallback(
-    (data: {
-      sectionId: string;
-      sectionTitle: string;
-      elementContext: ArtifactElementContext;
-    }) => {
-      // Resolve section title from loaded sections
-      const section = sections.find((s) => s.id === data.sectionId);
-      setPendingElementContext({
-        ...data,
-        sectionTitle: section?.title ?? data.sectionTitle,
-      });
-    },
-    [sections],
-  );
 
   // ── Download handlers ────────────────────────────────────────────
 

@@ -258,4 +258,55 @@ export class CodaScopeCurationService {
     const logs = await this.listLogs(projectId, epicId);
     return logs[0] ?? null;
   }
+
+  /**
+   * Trigger the curation pipeline via internal HTTP POST to the SSE endpoint.
+   * Consumes the SSE stream in the background so the connection stays alive
+   * and the pipeline runs to completion.
+   *
+   * Extracted from the `trigger_curation` tool definition to centralize
+   * the localhost HTTP call pattern.
+   */
+  async triggerCurationPipeline(
+    projectId: string,
+    epicId: string,
+    modelId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const port = process.env.AISHELL_PORT ?? "5175";
+    const url = `http://localhost:${port}/api/codascope/projects/${projectId}/epics/${epicId}/curation/run`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        let errorMsg: string;
+        try {
+          const parsed = JSON.parse(text);
+          errorMsg = parsed.error ?? text;
+        } catch {
+          errorMsg = text;
+        }
+        return { success: false, error: errorMsg };
+      }
+
+      // Consume the SSE stream in the background so the connection stays alive.
+      // The pipeline runs server-side; we just need to keep the client connection open.
+      if (res.body) {
+        const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader();
+        const pump = (): void => {
+          void reader.read().then(({ done }) => { if (!done) pump(); });
+        };
+        pump();
+      }
+
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
 }

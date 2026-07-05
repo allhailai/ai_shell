@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
 interface RepoInfo {
   id: string;
@@ -26,6 +27,7 @@ interface ProjectData {
 
 export class CodaScopeProjectService {
   private root: string;
+  private dirResolver: ProjectDirResolver | null = null;
 
   constructor(root: string) {
     this.root = root;
@@ -33,6 +35,11 @@ export class CodaScopeProjectService {
 
   setRoot(root: string): void {
     this.root = root;
+  }
+
+  /** Set an optional cached directory resolver. When set, getProjectDir delegates to it. */
+  setDirResolver(resolver: ProjectDirResolver): void {
+    this.dirResolver = resolver;
   }
 
   async ensureRootExists(): Promise<void> {
@@ -236,6 +243,10 @@ export class CodaScopeProjectService {
   // ── Get project directory (public) ────────────────────────────────
 
   getProjectDir(id: string): string | null {
+    // Use cached resolver when available
+    if (this.dirResolver) {
+      return this.dirResolver.resolve(id);
+    }
     return this.findProjectDir(id);
   }
 }

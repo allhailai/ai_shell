@@ -349,46 +349,15 @@ export function buildEpicTools(
           return `Curation is already running for this epic (run ${existing.runId}). The UI should show a progress banner.`;
         }
 
-        // Fire the curation pipeline via internal HTTP POST to the SSE endpoint.
-        // We consume the SSE stream in the background so the connection stays alive
-        // and the pipeline runs to completion.
-        const port = process.env.AISHELL_PORT ?? "5175";
-        const url = `http://localhost:${port}/api/codascope/projects/${projectId}/epics/${epicId}/curation/run`;
+        // Fire the curation pipeline via the curation service
+        const result = await services.curation.triggerCurationPipeline(projectId, epicId, modelId);
 
-        try {
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ modelId }),
-          });
-
-          if (!res.ok) {
-            const text = await res.text();
-            let errorMsg: string;
-            try {
-              const parsed = JSON.parse(text);
-              errorMsg = parsed.error ?? text;
-            } catch {
-              errorMsg = text;
-            }
-            return `Failed to start curation: ${errorMsg}`;
-          }
-
-          // Consume the SSE stream in the background so the connection stays alive.
-          // The pipeline runs server-side; we just need to keep the client connection open.
-          if (res.body) {
-            const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader();
-            const pump = (): void => {
-              void reader.read().then(({ done }) => { if (!done) pump(); });
-            };
-            pump();
-          }
-
-          return `Curation pipeline started for epic "${epicId}". The UI will show a progress ` +
-            `banner with live step-by-step updates. Pending curation reasons are being processed.`;
-        } catch (err) {
-          return `Failed to trigger curation: ${err instanceof Error ? err.message : String(err)}`;
+        if (!result.success) {
+          return `Failed to start curation: ${result.error ?? "Unknown error"}`;
         }
+
+        return `Curation pipeline started for epic "${epicId}". The UI will show a progress ` +
+          `banner with live step-by-step updates. Pending curation reasons are being processed.`;
       },
     },
 

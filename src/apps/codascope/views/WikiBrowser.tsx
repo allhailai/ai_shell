@@ -8,6 +8,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
+import type { WikiState } from "../codaScopeTypes";
 import { IconWiki, IconRefresh, IconFile, IconHome, IconDownload } from "../components/CodaScopeIcons";
 import { connectToSseStream } from "../codaScopeSseClient";
 
@@ -67,9 +68,10 @@ export function WikiBrowser() {
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
         if (data?.topics) {
+          const state = data as WikiState;
           const depths: Record<string, string> = {};
-          for (const [topicId, topicState] of Object.entries(data.topics)) {
-            depths[topicId] = (topicState as { depth: string }).depth;
+          for (const [topicId, topicState] of Object.entries(state.topics)) {
+            depths[topicId] = topicState.depth;
           }
           setTopicDepths(depths);
         }
@@ -153,6 +155,7 @@ export function WikiBrowser() {
             onText: (text) => setBuildLog((prev) => prev + text),
             onDone: () => resolve(),
             onError: (error) => reject(new Error(error)),
+            onWikiRefresh: () => void refreshTopics(),
           },
         );
       });

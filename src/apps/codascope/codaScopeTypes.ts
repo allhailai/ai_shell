@@ -618,3 +618,18 @@ export interface ArtifactBuildProgress {
   startedAt?: string;
   error?: string;
 }
+
+// ── API Response Types ──────────────────────────────────────────────
+
+/** Response shape for `GET /api/codascope/projects/:id/wiki-state` */
+export interface WikiState {
+  topics: Record<string, {
+    depth: TopicDepth;
+    updatedAt?: string;
+  }>;
+}
+
+/** Response shape for `GET /api/codascope/projects/:id/epics/:epicId/brief` */
+export interface EpicBriefResponse {
+  brief: string;
+}

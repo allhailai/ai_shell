@@ -10,6 +10,7 @@
 
 import { useState, useCallback } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import type { EpicBriefResponse } from "../codaScopeTypes";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { IconClipboard } from "./CodaScopeIcons";
 
@@ -39,7 +40,7 @@ export function EpicBriefExport({ epicId }: EpicBriefExportProps) {
         `/api/codascope/projects/${activeProjectId}/epics/${epicId}/brief`,
       );
       if (res.ok) {
-        const data = await res.json();
+        const data: EpicBriefResponse = await res.json();
         setBrief(data.brief);
         setShowModal(true);
       } else {
