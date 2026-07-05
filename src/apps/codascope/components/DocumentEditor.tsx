@@ -10,7 +10,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconBolt, IconRefresh, IconWarning, IconDownload } from "./CodaScopeIcons";
+import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
