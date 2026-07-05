@@ -8,6 +8,7 @@
 
 .left-nav {
   grid-area: leftnav;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -162,14 +163,15 @@
    matching CodaScope's nested panel collapse pattern. */
 
 .shell-panel-collapse-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: var(--space-1) var(--space-2);
-  flex-shrink: 0;
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  z-index: 1;
 }
 
 .shell[data-nav="collapsed"] .shell-panel-collapse-row {
+  position: static;
+  display: flex;
   justify-content: center;
   padding: var(--space-1);
 }
@@ -397,5 +399,17 @@
 
 .nav-item-home:hover {
   color: var(--color-text-primary);
+}
+
+/* ── Nav Section Label ── */
+/* Non-interactive heading for grouping shell-level nav items (e.g., "AISHELL"). */
+
+.nav-section-label {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 

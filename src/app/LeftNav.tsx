@@ -67,20 +67,10 @@ export function LeftNav({
       <LeftNavShell collapsed={collapsed} onToggle={toggleLeftNav} label={`${activeApp.name} navigation`}>
         <div className="left-nav-content scrollable-y">
           <div className="left-nav-top">
-            {/* Home button at the top */}
-            <HomeNavItem collapsed={collapsed} />
-            <div className="nav-divider" />
             <AppNav />
           </div>
           <div className="left-nav-bottom">
-            {systemApps.length > 0 && (
-              <>
-                <div className="nav-divider" />
-                {systemApps.map((app) => (
-                  <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-                ))}
-              </>
-            )}
+            <ShellNavSection collapsed={collapsed} systemApps={systemApps} />
           </div>
         </div>
       </LeftNavShell>
@@ -91,18 +81,9 @@ export function LeftNav({
   return (
     <LeftNavShell collapsed={collapsed} onToggle={toggleLeftNav}>
       <div className="left-nav-content scrollable-y">
-        <div className="left-nav-top">
-          <HomeNavItem collapsed={collapsed} />
-        </div>
+        <div className="left-nav-top" />
         <div className="left-nav-bottom">
-          {systemApps.length > 0 && (
-            <>
-              <div className="nav-divider" />
-              {systemApps.map((app) => (
-                <AppNavItem key={app.id} app={app} collapsed={collapsed} />
-              ))}
-            </>
-          )}
+          <ShellNavSection collapsed={collapsed} systemApps={systemApps} />
         </div>
       </div>
     </LeftNavShell>
@@ -144,23 +125,41 @@ function AppNavItem({
 }
 
 /**
- * Back button that navigates to the applications landing page.
+ * Shell-level nav section rendered at the bottom of the left nav.
+ * Groups the "← Applications" link and system apps (Settings) under
+ * an "AISHELL" label so users can clearly distinguish shell navigation
+ * from app-specific items.
  */
-function HomeNavItem({ collapsed }: { collapsed: boolean }) {
+function ShellNavSection({
+  collapsed,
+  systemApps,
+}: {
+  collapsed: boolean;
+  systemApps: AppManifest[];
+}) {
   const goHome = useShellStore((s) => s.goHome);
 
   return (
-    <button
-      className="nav-item nav-item-home"
-      onClick={goHome}
-      title={collapsed ? "Applications" : undefined}
-      type="button"
-    >
-      <span className="nav-item-icon">
-        <BackArrowIcon />
-      </span>
-      <span className="nav-item-label">Applications</span>
-    </button>
+    <>
+      <div className="nav-divider" />
+      {!collapsed && (
+        <div className="nav-section-label">AIShell</div>
+      )}
+      <button
+        className="nav-item nav-item-home"
+        onClick={goHome}
+        title={collapsed ? "Applications" : undefined}
+        type="button"
+      >
+        <span className="nav-item-icon">
+          <BackArrowIcon />
+        </span>
+        <span className="nav-item-label">Applications</span>
+      </button>
+      {systemApps.map((app) => (
+        <AppNavItem key={app.id} app={app} collapsed={collapsed} />
+      ))}
+    </>
   );
 }
 
