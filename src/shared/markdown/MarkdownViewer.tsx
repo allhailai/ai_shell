@@ -105,17 +105,31 @@ function scaleMermaidToHeight(container: HTMLElement, targetHeight: number): voi
   const padRight = parseFloat(cs.paddingRight) || 0;
   const availableWidth = containerWidth - padLeft - padRight;
 
+  const ratio = natW / natH;
+  const diagram = container.querySelector<HTMLElement>(".shared-md-mermaid-diagram");
+  if (!diagram) return;
+
+  // For very wide diagrams, allow horizontal scroll instead of scaling tiny
+  if (ratio > 2.5 && natW > availableWidth) {
+    // Use natural height (clamped to target), let the width overflow with scroll
+    const displayHeight = Math.min(natH, availableHeight);
+    diagram.style.transform = "none";
+    diagram.style.transformOrigin = "";
+    diagram.style.width = `${natW}px`;
+    container.style.height = `${Math.ceil(displayHeight + padTop + padBottom)}px`;
+    container.style.overflowX = "auto";
+    container.style.overflowY = "hidden";
+    return;
+  }
+
   const scaleByHeight = availableHeight / natH;
   const scaleByWidth = availableWidth / natW;
   const scale = Math.min(scaleByHeight, scaleByWidth, 1); // never scale up beyond natural
 
-  const diagram = container.querySelector<HTMLElement>(".shared-md-mermaid-diagram");
-  if (diagram) {
-    diagram.style.transform = `scale(${scale})`;
-    diagram.style.transformOrigin = "top center";
-    // Set container height to scaled diagram + padding
-    container.style.height = `${Math.ceil(natH * scale + padTop + padBottom)}px`;
-  }
+  diagram.style.transform = `scale(${scale})`;
+  diagram.style.transformOrigin = "top center";
+  // Set container height to scaled diagram + padding
+  container.style.height = `${Math.ceil(natH * scale + padTop + padBottom)}px`;
 }
 
 function attachResizeHandle(
@@ -294,7 +308,7 @@ export function MarkdownViewer({
           // Determine target height and scale the diagram to fit
           let targetHeight: number;
           if (explicitHeight && explicitHeight > 0) {
-            targetHeight = explicitHeight;
+            targetHeight = Math.max(explicitHeight, 100); // clamp to min 100px
           } else if (svgEl) {
             const { width: w, height: h } = tightenSvgViewBox(svgEl as SVGSVGElement);
             targetHeight = computeAdaptiveMaxHeight(w, h);

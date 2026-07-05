@@ -4361,10 +4361,16 @@
 
 .codascope-insertion-prompt {
   margin: var(--space-2) 0;
-  border: 1px dashed var(--color-accent-primary);
+  border: 1px dashed hsl(38 50% 40% / 0.5);
   border-radius: var(--radius-md);
-  background: hsl(220 60% 50% / 0.05);
+  background: hsl(38 30% 12% / 0.4);
   overflow: hidden;
+}
+
+.codascope-insertion-prompt--generating {
+  border-style: solid;
+  border-width: 2px;
+  animation: codascope-directive-pulse 2s ease-in-out infinite;
 }
 
 .codascope-insertion-prompt--applied {
@@ -4378,8 +4384,8 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-2) var(--space-3);
-  background: var(--color-bg-tertiary);
-  border-bottom: 1px solid var(--color-border-primary);
+  background: hsl(38 25% 10% / 0.6);
+  border-bottom: 1px solid hsl(38 50% 40% / 0.25);
 }
 
 .codascope-insertion-prompt-type-selector {
@@ -4398,7 +4404,7 @@
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-primary);
+  border: 1px solid hsl(38 50% 40% / 0.35);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: var(--text-sm);
@@ -4410,7 +4416,7 @@
 }
 
 .codascope-insertion-prompt-input:focus {
-  border-color: var(--color-accent-primary);
+  border-color: hsl(38 95% 60%);
 }
 
 .codascope-insertion-prompt-actions {
@@ -4434,7 +4440,7 @@
 
 .codascope-insertion-prompt-instruction-label {
   font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
+  color: hsl(38 95% 68%);
   margin-right: var(--space-1);
 }
 
@@ -4451,6 +4457,42 @@
   color: hsl(140 50% 60%);
 }
 
+/* ── Generating State ──────────────────────────────────────────────── */
+
+.codascope-insertion-prompt-pending--generating {
+  border-color: hsl(38 95% 60% / 0.6);
+  animation: codascope-directive-pulse 2s ease-in-out infinite;
+}
+
+@keyframes codascope-directive-pulse {
+  0%, 100% { border-color: hsl(38 95% 60% / 0.3); }
+  50% { border-color: hsl(38 95% 60% / 0.7); }
+}
+
+.codascope-directive-generating-btn {
+  background: hsl(38 30% 15%) !important;
+  border: 1px solid hsl(38 50% 40% / 0.5) !important;
+  color: hsl(38 95% 68%) !important;
+  cursor: wait !important;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-directive-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid hsl(38 50% 40% / 0.3);
+  border-top-color: hsl(38 95% 60%);
+  border-radius: 50%;
+  animation: codascope-directive-spin 0.8s linear infinite;
+}
+
+@keyframes codascope-directive-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Directive Preview (P2b) ────────────────────────────────────────── */
 
 .codascope-directive-preview {
@@ -4463,15 +4505,15 @@
 .codascope-directive-preview-label {
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-secondary);
+  color: hsl(38 90% 65%);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .codascope-directive-preview-content {
-  border: 1px solid hsl(220 60% 50% / 0.2);
+  border: 1px solid hsl(38 50% 40% / 0.3);
   border-radius: var(--radius-md);
-  background: hsl(220 60% 50% / 0.05);
+  background: hsl(38 30% 12% / 0.3);
   padding: var(--space-3);
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -4489,35 +4531,59 @@
 
 .codascope-document-block-insert-trigger {
   position: relative;
-  height: 4px;
-  margin: var(--space-1) 0;
+  height: 16px;
+  margin: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
 }
 
 .codascope-document-block-insert-trigger--active {
   height: auto;
 }
 
+/* Annotation-colored horizontal line on hover — visual insertion cue */
+.codascope-document-block-insert-trigger::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: hsl(38 95% 60%);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+}
+
+.codascope-document-block-insert-trigger:hover::before {
+  opacity: 1;
+}
+
+.codascope-document-block-insert-trigger--active::before {
+  display: none;
+}
+
 .codascope-document-block-insert-btn {
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: var(--radius-full);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-primary);
-  color: var(--color-text-tertiary);
+  background: var(--color-bg-primary);
+  border: 2px solid hsl(38 95% 60%);
+  color: hsl(38 95% 60%);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   cursor: pointer;
   opacity: 0;
   transition: opacity var(--transition-fast), background var(--transition-fast),
-    color var(--transition-fast), transform var(--transition-fast);
+    transform var(--transition-fast), box-shadow var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
   line-height: 1;
+  z-index: 1;
 }
 
 .codascope-document-block-insert-trigger:hover .codascope-document-block-insert-btn {
@@ -4525,10 +4591,10 @@
 }
 
 .codascope-document-block-insert-btn:hover {
-  background: var(--color-accent-primary);
-  color: var(--color-text-on-accent);
-  border-color: var(--color-accent-primary);
-  transform: scale(1.1);
+  background: hsl(38 95% 60%);
+  color: hsl(38 15% 10%);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px hsl(38 95% 60% / 0.25);
 }
 
 /* ── Selection Toolbar (P2b) ────────────────────────────────────────── */
@@ -4536,9 +4602,6 @@
 .codascope-selection-toolbar {
   position: fixed;
   z-index: 1000;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
   display: flex;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
@@ -4547,16 +4610,17 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   animation: codascope-toolbar-fade-in 0.15s ease-out;
+  pointer-events: auto;
 }
 
 @keyframes codascope-toolbar-fade-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.95);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -4572,6 +4636,49 @@
 
 .codascope-selection-toolbar-btn--primary:hover {
   background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* ── Editor Hint Banner ────────────────────────────────────────────── */
+
+.codascope-editor-hint-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-3);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 15%, transparent);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2);
+  animation: codascope-toolbar-fade-in 0.2s ease-out;
+}
+
+.codascope-editor-hint-bar-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  flex-wrap: wrap;
+}
+
+.codascope-editor-hint-bar-text strong {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-editor-hint-bar-sep {
+  opacity: 0.3;
+  margin: 0 var(--space-1);
+}
+
+.codascope-editor-hint-bar-dismiss {
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity var(--transition-fast);
+}
+
+.codascope-editor-hint-bar-dismiss:hover {
+  opacity: 1;
 }
 
 /* ── Phase 3: Diff Highlighting for Agent Edits ─────────────────────── */

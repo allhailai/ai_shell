@@ -3,9 +3,11 @@
    Appears between document blocks when the user clicks the + trigger.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { IconInsert, IconRewrite, IconExpand, IconGenerate, IconPending, IconClose, IconCheckmark, IconUndo } from "./CodaScopeIcons";
+import { useCommandBus } from "../../../shell/hooks";
+import { useShellStore } from "../../../shell/store";
 import type { InsertionDirective, DirectiveType } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -65,6 +67,7 @@ export function InsertionPrompt({
   const [generating, setGenerating] = useState(false);
   const [applying, setApplying] = useState(false);
   const [directive, setDirective] = useState<InsertionDirective | undefined>(existingDirective);
+  const commandBus = useCommandBus();
 
   const hasGenerated = !!directive?.generatedContent;
   const isApplied = directive?.status === "applied";
@@ -96,37 +99,72 @@ export function InsertionPrompt({
         const data = await res.json();
         setDirective(data.directive);
         onUpdate();
+        // Close the insertion trigger — the directive will now render
+        // as an existing directive via blockDirs in DocumentBlockRenderer
+        onClose();
       }
     } catch { /* ignore */ }
     setCreating(false);
   }, [projectId, epicId, documentId, type, afterLine, startLine, endLine, blockId, anchorText, instruction, onUpdate]);
 
-  /* ── Execute (generate content) ──────────────────────────────────── */
+  /* ── Execute (generate via assistant) ─────────────────────────────── */
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(() => {
     if (!directive) return;
     setGenerating(true);
-    try {
-      // For now, send a placeholder generated content request
-      // In production, this triggers the agent for content generation
-      const res = await fetch(
-        `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${directive.id}/execute`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            generatedContent: `<!-- Generated content for: ${directive.instruction} -->\n\n_Agent-generated content will appear here once the agent integration is complete._`,
-          }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setDirective(data.directive);
+
+    // Build a contextual prompt for the assistant
+    const typeLabel = directive.type === "insert" ? "Insert" : directive.type === "replace" ? "Rewrite" : "Expand";
+    const lineRange = directive.startLine && directive.endLine
+      ? ` (lines ${directive.startLine}–${directive.endLine})`
+      : ` (after line ${directive.afterLine})`;
+    const prompt = `${typeLabel} directive${lineRange} for design doc ${documentId}:\n\n${directive.instruction}`;
+
+    // Route to assistant chat with directive context
+    commandBus?.emit("codascope:design-selection-to-chat", {
+      blockId: directive.blockId ?? "",
+      text: directive.instruction,
+      startLine: directive.startLine ?? directive.afterLine,
+      endLine: directive.endLine ?? directive.afterLine,
+      docId: documentId,
+      epicId,
+      directiveType: directive.type,
+      directiveId: directive.id,
+    });
+
+    // Open the assistant panel and pre-fill the prompt
+    useShellStore.getState().openRightPanel("assistant");
+    commandBus?.emit("codascope:assistant-prefill", { prompt });
+  }, [directive, documentId, epicId, commandBus]);
+
+  /* ── Auto-cleanup on generation complete ──────────────────────────── */
+
+  const generatingDirIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    generatingDirIdRef.current = generating && directive ? directive.id : null;
+  }, [generating, directive]);
+
+  useEffect(() => {
+    if (!commandBus || !generating) return;
+    const unsub = commandBus.on("codascope:design-doc-edited", (async (payload: {
+      docId: string;
+    }) => {
+      // When the agent edits this document while we're generating, auto-cleanup
+      if (payload.docId === documentId && generatingDirIdRef.current) {
+        // Delete the directive since the agent applied the edit directly
+        try {
+          await fetch(
+            `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${generatingDirIdRef.current}`,
+            { method: "DELETE" },
+          );
+        } catch { /* best effort */ }
+        setGenerating(false);
         onUpdate();
+        onClose();
       }
-    } catch { /* ignore */ }
-    setGenerating(false);
-  }, [projectId, epicId, documentId, directive, onUpdate]);
+    }) as (payload: unknown) => void);
+    return unsub;
+  }, [commandBus, generating, projectId, epicId, documentId, onUpdate, onClose]);
 
   /* ── Apply ───────────────────────────────────────────────────────── */
 
@@ -198,8 +236,9 @@ export function InsertionPrompt({
   /* ── Render ──────────────────────────────────────────────────────── */
 
   return (
-    <div className={`codascope-insertion-prompt${isApplied ? " codascope-insertion-prompt--applied" : ""}`}>
-      {/* Header */}
+    <div className={`codascope-insertion-prompt${isApplied ? " codascope-insertion-prompt--applied" : ""}${generating ? " codascope-insertion-prompt--generating" : ""}`}>
+      {/* Header — hidden during generation */}
+      {!generating && (
       <div className="codascope-insertion-prompt-header">
         <div className="codascope-insertion-prompt-type-selector">
           {TYPE_OPTIONS.map((opt) => (
@@ -223,6 +262,7 @@ export function InsertionPrompt({
           <IconClose size={12} />
         </button>
       </div>
+      )}
 
       {/* Instruction input */}
       {!directive && (
@@ -256,18 +296,27 @@ export function InsertionPrompt({
 
       {/* Directive created — show instruction + generate button */}
       {directive && !hasGenerated && !isApplied && (
-        <div className="codascope-insertion-prompt-pending">
+        <div className={`codascope-insertion-prompt-pending${generating ? " codascope-insertion-prompt-pending--generating" : ""}`}>
           <div className="codascope-insertion-prompt-instruction">
-            <span className="codascope-insertion-prompt-instruction-label">Instruction:</span>
+            <span className="codascope-insertion-prompt-instruction-label">
+              {generating ? "Generating:" : "Instruction:"}
+            </span>
             {directive.instruction}
           </div>
           <button
-            className="codascope-btn codascope-btn-primary codascope-btn-xs"
+            className={`codascope-btn codascope-btn-xs${generating ? " codascope-directive-generating-btn" : " codascope-btn-primary"}`}
             onClick={handleGenerate}
             disabled={generating}
             type="button"
           >
-            {generating ? <><IconPending size={12} /> Generating…</> : <><IconGenerate size={12} /> Generate</>}
+            {generating ? (
+              <>
+                <span className="codascope-directive-spinner" />
+                Generating…
+              </>
+            ) : (
+              <><IconGenerate size={12} /> Generate</>
+            )}
           </button>
         </div>
       )}

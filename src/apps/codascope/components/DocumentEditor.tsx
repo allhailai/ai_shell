@@ -10,7 +10,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation } from "./CodaScopeIcons";
+import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation, IconSparkle, IconInsert, IconClose } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
@@ -65,6 +65,9 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
   const [insertionBlockId, setInsertionBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfo | null>(null);
+  const [hintDismissed, setHintDismissed] = useState(() =>
+    typeof localStorage !== "undefined" && localStorage.getItem("codascope:editor-hints-dismissed") === "1",
+  );
   const viewerRef = useRef<HTMLDivElement>(null);
 
   // Extracted hooks
@@ -449,11 +452,16 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
     const blockId = blockEl.getAttribute("data-block-id") ?? "";
     const block = blocks.find((b) => b.blockId === blockId);
 
+    // Capture the bounding rect of the selection range for toolbar positioning
+    const range = selection.getRangeAt(0);
+    const rangeRect = range.getBoundingClientRect();
+
     setSelectionInfo({
       blockId,
       text,
       startLine: block?.lineStart ?? 0,
       endLine: block?.lineEnd ?? 0,
+      rect: { top: rangeRect.top, left: rangeRect.left, width: rangeRect.width },
     });
   }, [blocks]);
 
@@ -617,6 +625,28 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
           )}
         </div>
       </div>
+
+      {/* First-visit hint banner */}
+      {!hintDismissed && !editing && (
+        <div className="codascope-editor-hint-bar">
+          <span className="codascope-editor-hint-bar-text">
+            <IconSparkle size={12} /> Select text to <strong>edit with the agent</strong>
+            <span className="codascope-editor-hint-bar-sep">·</span>
+            <IconInsert size={12} /> Hover between blocks to <strong>insert content</strong>
+          </span>
+          <button
+            className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-editor-hint-bar-dismiss"
+            onClick={() => {
+              setHintDismissed(true);
+              try { localStorage.setItem("codascope:editor-hints-dismissed", "1"); } catch { /* ignore */ }
+            }}
+            type="button"
+            title="Dismiss"
+          >
+            <IconClose size={10} />
+          </button>
+        </div>
+      )}
 
       {/* Lock warning (P4: heartbeat-aware) */}
       {lockWarning && (

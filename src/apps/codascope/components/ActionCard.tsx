@@ -416,12 +416,22 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
 
 /* ── Action Card List (renders inline after a message) ─────────────── */
 
+/** Action types that represent already-completed operations — they are
+ *  handled by the event bus and should not appear as actionable cards. */
+const COMPLETED_ACTION_TYPES = new Set([
+  "design_doc_edited",
+  "design_doc_created",
+]);
+
 export function ActionCardList({ actions }: { actions: CodaScopeAction[] }) {
   if (!actions || actions.length === 0) return null;
 
+  const actionable = actions.filter((a) => !COMPLETED_ACTION_TYPES.has(a.type));
+  if (actionable.length === 0) return null;
+
   return (
     <div className="codascope-action-cards">
-      {actions.map((action, i) => (
+      {actionable.map((action, i) => (
         <ActionCard key={`${action.type}-${i}`} action={action} />
       ))}
     </div>

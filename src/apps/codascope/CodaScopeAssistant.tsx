@@ -741,6 +741,20 @@ export function CodaScopeAssistant() {
     return unsub;
   }, [commandBus]);
 
+  // ── Directive generate → prefill and auto-send ─────────────────────
+
+  useEffect(() => {
+    if (!commandBus) return;
+    const unsub = commandBus.on("codascope:assistant-prefill", ((payload: {
+      prompt: string;
+    }) => {
+      if (payload.prompt) {
+        handleSendPrompt(payload.prompt);
+      }
+    }) as (payload: unknown) => void);
+    return unsub;
+  }, [commandBus, handleSendPrompt]);
+
   // ── Design doc action tag handlers ────────────────────────────────
 
   // After SSE completes, check for design doc actions in the final message
