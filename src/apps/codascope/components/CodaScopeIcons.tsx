@@ -56,40 +56,6 @@ export function IconChat({ size = 16, style, className }: IconProps) {
   );
 }
 
-/** Bar chart — Quality */
-export function IconQuality({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <line x1="4" y1="13" x2="4" y2="7" />
-      <line x1="8" y1="13" x2="8" y2="3" />
-      <line x1="12" y1="13" x2="12" y2="9" />
-    </svg>
-  );
-}
-
-/** Shield with check — Golden Rules */
-export function IconRules({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <path d="M8 1.5L2.5 4v4c0 3.5 2.5 5.5 5.5 6.5 3-1 5.5-3 5.5-6.5V4L8 1.5z" />
-      <path d="M6 8l1.5 1.5L10 6.5" />
-    </svg>
-  );
-}
-
-/** Network/nodes — Concepts */
-export function IconConcepts({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <circle cx="8" cy="4" r="2" />
-      <circle cx="4" cy="12" r="2" />
-      <circle cx="12" cy="12" r="2" />
-      <line x1="6.5" y1="5.5" x2="5" y2="10.5" />
-      <line x1="9.5" y1="5.5" x2="11" y2="10.5" />
-    </svg>
-  );
-}
-
 /** Wrench — Skills */
 export function IconSkills({ size = 16, style, className }: IconProps) {
   return (

@@ -56,10 +56,6 @@ export async function buildManifestFromServices(
   const project = await svcs.projectSvc.getProject(projectId);
   const repos = project?.repositories ?? [];
   const topics = await svcs.wikiSvc.listTopics(projectId);
-  const rules = svcs.goldenRuleSvc.listRules(projectId);
-  const concepts = svcs.conceptSvc.listConcepts(projectId);
-  const qualityScore = svcs.qualitySvc.getOverallScore(projectId);
-  const qualitySummary = svcs.qualitySvc.getLatestSummary(projectId);
   const buildState = svcs.buildSvc.getBuildState(projectId);
 
   // Get wiki build freshness from wiki-state
@@ -83,10 +79,6 @@ export async function buildManifestFromServices(
     repositoryCount: repos.length,
     repositories: repos.map((r: { name: string; path: string }) => ({ name: r.name, path: r.path })),
     wikiTopicTitles: topics.map((t: { id: string; title: string }) => ({ id: t.id, title: t.title })),
-    goldenRuleNames: rules.map((r: { name: string; enabled: boolean }) => ({ name: r.name, enabled: r.enabled })),
-    conceptNames: concepts.map((c: { name: string; category: string }) => ({ name: c.name, category: c.category })),
-    qualityScore,
-    lastQualityScanTimestamp: qualitySummary?.timestamp ?? null,
     currentBuildStatus: buildState?.status ?? "idle",
     lastBuildTimestamp: buildState?.completedAt ?? buildState?.startedAt ?? null,
     lastBuildCommand: buildState?.command ?? null,

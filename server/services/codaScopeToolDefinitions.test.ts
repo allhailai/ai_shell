@@ -34,9 +34,6 @@ describe("tool tier builders", () => {
     expect(keys).toContain("search_wiki");
     expect(keys).toContain("list_repositories");
     expect(keys).toContain("read_code_map");
-    expect(keys).toContain("read_quality_report");
-    expect(keys).toContain("list_golden_rules");
-    expect(keys).toContain("list_concepts");
     expect(keys).toContain("read_build_status");
     expect(keys).toContain("list_epic_designs");
     expect(keys).toContain("read_epic_definition");

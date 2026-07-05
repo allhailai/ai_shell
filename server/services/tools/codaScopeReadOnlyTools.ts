@@ -20,9 +20,6 @@ export function buildReadOnlyTools(
   const {
     wiki: wikiService,
     project: projectService,
-    quality: qualityService,
-    goldenRule: goldenRuleService,
-    concept: conceptService,
     buildState: buildStateService,
     epic: epicService,
     designDoc: designDocService,
@@ -214,129 +211,6 @@ export function buildReadOnlyTools(
           return content;
         } catch {
           return `Failed to read Code Map for "${repoName}".`;
-        }
-      },
-    },
-
-    read_quality_report: {
-      description:
-        "Read the latest quality scan report for this project. Returns overall score, " +
-        "category scores, issue counts by severity, and top issues. Use this when the " +
-        "user asks about code quality, issues, or standards compliance.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-      },
-      execute: async () => {
-        try {
-          const report = qualityService.getLatestReport(projectId);
-          if (!report) {
-            return "No quality scan has been run yet. Suggest running a quality scan to analyze the codebase.";
-          }
-          // Return a compact summary with top issues
-          const result: Record<string, unknown> = {
-            scanId: report.scanId,
-            timestamp: report.timestamp,
-            scanScope: report.scanScope,
-            duration: report.duration,
-            summary: report.summary,
-            categories: Object.fromEntries(
-              Object.entries(report.categories).map(([name, cat]) => [
-                name,
-                {
-                  score: cat.score,
-                  issueCount: cat.issueCount,
-                  bySeverity: cat.bySeverity,
-                  // Include top 5 issues per category for context
-                  topIssues: cat.issues.slice(0, 5).map((i) => ({
-                    severity: i.severity,
-                    title: i.title,
-                    file: i.file,
-                    line: i.line,
-                    suggestion: i.suggestion,
-                  })),
-                },
-              ]),
-            ),
-          };
-          return JSON.stringify(result, null, 2);
-        } catch {
-          return "Failed to read quality report.";
-        }
-      },
-    },
-
-    list_golden_rules: {
-      description:
-        "List all golden rules (coding standards) configured for this project. " +
-        "Returns rule names, descriptions, categories, severities, and enabled status. " +
-        "Use this when the user asks about coding standards or golden rules.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-      },
-      execute: async () => {
-        try {
-          const rules = goldenRuleService.listRules(projectId);
-          if (rules.length === 0) {
-            return "No golden rules have been configured yet.";
-          }
-          return JSON.stringify(
-            rules.map((r) => ({
-              id: r.id,
-              name: r.name,
-              description: r.description,
-              category: r.category,
-              severity: r.severity,
-              enabled: r.enabled,
-              appliesTo: r.appliesTo,
-            })),
-            null,
-            2,
-          );
-        } catch {
-          return "Failed to list golden rules.";
-        }
-      },
-    },
-
-    list_concepts: {
-      description:
-        "List domain concepts extracted from the codebase. Concepts represent key " +
-        "abstractions, patterns, and domain vocabulary. Use this when the user asks " +
-        "about domain concepts, architecture patterns, or codebase terminology.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          category: {
-            type: "string",
-            description: "Optional category filter (architecture, backend, frontend, data, devops, cross-cutting, features, other)",
-          },
-        },
-      },
-      execute: async (args) => {
-        try {
-          const category = args.category as string | undefined;
-          const concepts = conceptService.listConcepts(projectId, category);
-          if (concepts.length === 0) {
-            return category
-              ? `No concepts found in category "${category}".`
-              : "No domain concepts have been extracted yet. Run a codebase exploration to discover concepts.";
-          }
-          return JSON.stringify(
-            concepts.map((c) => ({
-              id: c.id,
-              name: c.name,
-              description: c.description,
-              category: c.category,
-              relatedConcepts: c.relatedConcepts,
-              wikiTopicId: c.wikiTopicId,
-            })),
-            null,
-            2,
-          );
-        } catch {
-          return "Failed to list concepts.";
         }
       },
     },

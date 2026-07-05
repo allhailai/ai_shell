@@ -1,6 +1,6 @@
 /* ── CodaScope: EpicScope View ──────────────────────────────────────
    The Scope tab content. Shows:
-   - Scope entries grouped by type (Wiki Pages, Concepts, New Topics)
+   - Scope entries grouped by type (Wiki Pages, New Topics)
    - Include/exclude checkboxes with depth indicators
    - "Add Topic" button with picker modal
    - "Re-scan" button → triggers agent scoping, shows ScopeDiff review modal
@@ -305,7 +305,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
             </svg>
           </div>
           <h3>No scope yet</h3>
-          <p>Scope identifies which wiki pages, concepts, and topics are relevant to this epic. The agent can analyze your definition to suggest a scope, or you can add topics manually.</p>
+          <p>Scope identifies which wiki pages and topics are relevant to this epic. The agent can analyze your definition to suggest a scope, or you can add topics manually.</p>
           <div className="codascope-scope-empty-actions">
             <button
               className="codascope-btn codascope-btn-secondary"
@@ -313,13 +313,6 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
               type="button"
             >
               Add from Wiki
-            </button>
-            <button
-              className="codascope-btn codascope-btn-secondary"
-              onClick={() => openPicker("concept")}
-              type="button"
-            >
-              Add from Concepts
             </button>
             <span className="codascope-scope-empty-hint">
               or ask the agent to <strong>"scope this epic"</strong> in the chat panel →
@@ -330,9 +323,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
         {/* Modals must render even in empty state */}
         {pickerOpen && (
           <TopicPickerModal
-            type={pickerType}
             wikiTopics={wikiTopics}
-            concepts={concepts}
             search={pickerSearch}
             onSearchChange={setPickerSearch}
             loading={pickerLoading}
@@ -529,9 +520,7 @@ function ScopeSection({
 /* ── Topic Picker Modal ──────────────────────────────────────────────── */
 
 function TopicPickerModal({
-  type,
   wikiTopics,
-  concepts,
   search,
   onSearchChange,
   loading,

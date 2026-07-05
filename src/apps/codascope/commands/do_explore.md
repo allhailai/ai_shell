@@ -14,7 +14,7 @@ Perform a comprehensive exploration of the codebase:
 
 1. **Identify the tech stack** — languages, frameworks, libraries, build tools
 2. **Map the architecture** — modules, layers, services, data flow
-3. **Discover key concepts** — domain entities, business logic patterns, data models
+3. **Discover key patterns** — domain entities, business logic patterns, data models
 4. **Catalog entry points** — API endpoints, CLI commands, UI routes, event handlers
 5. **Identify cross-cutting concerns** — authentication, logging, error handling, caching
 6. **Note testing patterns** — test frameworks, coverage approach, test organization
@@ -23,7 +23,6 @@ Perform a comprehensive exploration of the codebase:
 
 Write your findings to the project directory as structured JSON and markdown:
 
-- `concepts.json` — array of discovered concepts with categories
 - `wiki/_index.md` — table of contents for future wiki pages
 - `wiki/architecture.md` — high-level architecture overview with Mermaid diagrams
 

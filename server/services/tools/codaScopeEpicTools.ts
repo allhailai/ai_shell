@@ -22,7 +22,6 @@ export function buildEpicTools(
   const {
     wiki: wikiService,
     epic: epicService,
-    concept: conceptService,
     annotation: annotationService,
     epicKnowledge: epicKnowledgeService,
     curation: curationService,
@@ -130,75 +129,6 @@ export function buildEpicTools(
           return `Epic wiki page "${title}" (${pageId}) written successfully. Word count: ${page.wordCount}`;
         } catch (err) {
           return `Failed to write epic wiki page: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      },
-    },
-
-    create_concept: {
-      description:
-        "Create a new domain concept. Concepts represent key abstractions, patterns, " +
-        "and vocabulary discovered in the codebase.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Concept name" },
-          category: {
-            type: "string",
-            description: "Category: architecture, backend, frontend, data, devops, cross-cutting, features, other",
-          },
-          description: { type: "string", description: "Description of the concept" },
-          relatedConcepts: {
-            type: "array",
-            items: { type: "string" },
-            description: "Optional: IDs of related concepts",
-          },
-        },
-        required: ["name", "category", "description"],
-      },
-      execute: async (args) => {
-        const name = args.name as string;
-        const category = args.category as string;
-        const description = args.description as string;
-        if (!name || !category || !description) return "name, category, and description are required.";
-        try {
-          const concept = conceptService.createConcept(projectId, {
-            name, category, description,
-            relatedConcepts: args.relatedConcepts as string[] | undefined,
-          });
-          return `Concept "${name}" created with ID: ${concept.id}`;
-        } catch (err) {
-          return `Failed to create concept: ${err instanceof Error ? err.message : String(err)}`;
-        }
-      },
-    },
-
-    update_concept: {
-      description:
-        "Update an existing domain concept. Use list_concepts to find concept IDs. " +
-        "Only provided fields are updated.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          conceptId: { type: "string", description: "The concept ID to update" },
-          name: { type: "string", description: "New name (optional)" },
-          description: { type: "string", description: "New description (optional)" },
-          category: { type: "string", description: "New category (optional)" },
-        },
-        required: ["conceptId"],
-      },
-      execute: async (args) => {
-        const conceptId = args.conceptId as string;
-        if (!conceptId) return "conceptId is required.";
-        try {
-          const updated = conceptService.updateConcept(projectId, conceptId, {
-            name: args.name as string | undefined,
-            description: args.description as string | undefined,
-            category: args.category as string | undefined,
-          });
-          if (!updated) return `Concept "${conceptId}" not found.`;
-          return `Concept "${updated.name}" updated successfully.`;
-        } catch (err) {
-          return `Failed to update concept: ${err instanceof Error ? err.message : String(err)}`;
         }
       },
     },

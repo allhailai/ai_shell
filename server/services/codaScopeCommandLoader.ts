@@ -38,7 +38,7 @@ export interface ProjectContext {
 
 /**
  * Build the standard set of template variables from project context.
- * Includes Code Map, Golden Rules, file inventory, and other Phase 2 variables.
+ * Includes Code Map, file inventory, and other context variables.
  */
 export function buildBaseVars(ctx: ProjectContext): Record<string, string> {
   const vars: Record<string, string> = {
@@ -65,18 +65,6 @@ export function buildBaseVars(ctx: ProjectContext): Record<string, string> {
     }
   } else {
     vars.WIKI_INDEX = "(No wiki pages exist yet)";
-  }
-
-  // Concepts JSON — load concepts.json if it exists
-  const conceptsPath = path.join(ctx.projectDir, "concepts.json");
-  if (existsSync(conceptsPath)) {
-    try {
-      vars.CONCEPTS_JSON = readFileSync(conceptsPath, "utf-8");
-    } catch {
-      vars.CONCEPTS_JSON = "[]";
-    }
-  } else {
-    vars.CONCEPTS_JSON = "[]";
   }
 
   // Wiki context — abbreviated list for chat context

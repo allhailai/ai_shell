@@ -545,18 +545,6 @@ export function CodaScopeAssistant() {
         break;
 
       // ── Analyze commands ──
-      case "scan-quality":
-        if (activeProjectId && selectedModelId) {
-          showSlashToast("Running quality scan…");
-          try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ command: "do_quality_scan", modelId: selectedModelId }),
-            });
-          } catch { /* error handled by server */ }
-        }
-        break;
       case "explore":
         if (activeProjectId && selectedModelId) {
           showSlashToast("Exploring codebase…");

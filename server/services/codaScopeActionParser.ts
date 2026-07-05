@@ -21,9 +21,7 @@ export type { CodaScopeAction };
 export const VALID_ACTION_TYPES = new Set([
   "build_wiki_page",
   "build_full_wiki",
-  "run_quality_scan",
   "navigate",
-  "create_golden_rule",
   "explore_codebase",
   // Epic Design actions (P1)
   "create_epic",

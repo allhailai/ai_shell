@@ -30,14 +30,14 @@ Here is my analysis.
 
 Some text in between.
 
-<codascope_action type="run_quality_scan">
-  Run a quality scan
+<codascope_action type="explore_codebase">
+  Explore the codebase
 </codascope_action>
 `;
     const actions = extractActions(text);
     expect(actions).toHaveLength(2);
     expect(actions[0].type).toBe("build_wiki_page");
-    expect(actions[1].type).toBe("run_quality_scan");
+    expect(actions[1].type).toBe("explore_codebase");
   });
 
   it("skips actions with invalid/unknown types", () => {
@@ -148,7 +148,7 @@ More text after.`;
     const text = `
 <codascope_action type="navigate" view="wiki">Go to wiki</codascope_action>
 Hello
-<codascope_action type="run_quality_scan">Scan</codascope_action>
+<codascope_action type="explore_codebase">Explore</codascope_action>
 `;
     const result = stripActionTags(text);
     expect(result).toBe("Hello");

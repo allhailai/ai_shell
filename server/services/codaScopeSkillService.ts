@@ -25,10 +25,6 @@ const FRAMEWORK_SKILLS: SkillInfo[] = [
   { id: "do_build_wiki_page", name: "Build Wiki Page", description: "Build or update a single wiki topic page with Mermaid diagrams", category: "documentation", tags: ["wiki", "mermaid"], tier: "framework", lockType: "write" },
   { id: "do_build_full_wiki", name: "Build Full Wiki", description: "Orchestrate building the complete wiki from codebase analysis", category: "documentation", tags: ["wiki", "full-build"], tier: "framework", lockType: "write" },
   { id: "do_chat", name: "Codebase Q&A", description: "Answer a user's question using wiki and code context", category: "exploration", tags: ["chat", "qa"], tier: "framework", lockType: "read" },
-  { id: "do_quality_scan", name: "Quality Scan", description: "Run quality analysis across all categories", category: "review", tags: ["quality", "analysis"], tier: "framework", lockType: "write" },
-  { id: "do_check_rules", name: "Check Rules", description: "Validate golden rules against current code", category: "review", tags: ["rules", "validation"], tier: "framework", lockType: "write" },
-  { id: "do_suggest_rules", name: "Suggest Rules", description: "Analyze code and suggest golden rules", category: "analysis", tags: ["rules", "suggestions"], tier: "framework", lockType: "write" },
-  { id: "do_extract_concepts", name: "Extract Concepts", description: "Identify and categorize concepts in the codebase", category: "analysis", tags: ["concepts", "categorization"], tier: "framework", lockType: "write" },
   { id: "do_diff_analysis", name: "Diff Analysis", description: "Analyze changes since last version", category: "analysis", tags: ["diff", "changes"], tier: "framework", lockType: "read" },
   { id: "do_git_insights", name: "Git Insights", description: "Analyze git history for hot files, churn, contributors", category: "analysis", tags: ["git", "churn", "hot-files"], tier: "framework", lockType: "write" },
 ];

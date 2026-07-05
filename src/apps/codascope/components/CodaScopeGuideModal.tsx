@@ -10,7 +10,6 @@ import { createPortal } from "react-dom";
 import {
   IconSearch,
   IconWiki,
-  IconQuality,
   IconEpic,
   IconCodeMap,
   IconBook,
@@ -133,11 +132,6 @@ function TabOverview() {
           <div className="codascope-guide-pipeline-node codascope-guide-pipeline-node--primary">
             <IconWiki size={16} />
             <span>Wiki</span>
-          </div>
-          <div className="codascope-guide-pipeline-arrow">→</div>
-          <div className="codascope-guide-pipeline-node codascope-guide-pipeline-node--primary">
-            <IconQuality size={16} />
-            <span>Quality Scan</span>
           </div>
         </div>
         <div className="codascope-guide-pipeline-branch">
@@ -407,7 +401,6 @@ function TabShortcuts() {
         </p>
         <div className="codascope-guide-shortcuts">
           <div className="codascope-guide-shortcut"><kbd>/build wiki</kbd><span>Generate full wiki</span></div>
-          <div className="codascope-guide-shortcut"><kbd>/scan quality</kbd><span>Run quality scan</span></div>
           <div className="codascope-guide-shortcut"><kbd>/explore</kbd><span>Explore codebase</span></div>
           <div className="codascope-guide-shortcut"><kbd>/goto ...</kbd><span>Navigate to a view</span></div>
           <div className="codascope-guide-shortcut"><kbd>/help</kbd><span>Open this guide</span></div>

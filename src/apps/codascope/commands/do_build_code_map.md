@@ -61,23 +61,7 @@ The file MUST follow this exact progressive disclosure format:
 
 ### Also Output
 
-1. **concepts.json** — Array of discovered domain concepts. Each concept:
-   ```json
-   {
-     "id": "concept-<8-char-uuid>",
-     "name": "Human-readable concept name",
-     "description": "2-3 sentence description",
-     "category": "architecture|backend|frontend|data|devops|cross-cutting|features",
-     "relatedConcepts": [],
-     "relatedFiles": ["path/to/relevant/files"],
-     "wikiTopicId": null,
-     "source": "extracted",
-     "createdAt": "{{TIMESTAMP}}"
-   }
-   ```
-   Include 10-30 concepts covering all major areas.
-
-2. **wiki/_index.md** — Detailed topic outlines for future wiki generation. Each topic should have:
+1. **wiki/_index.md** — Detailed topic outlines for future wiki generation. Each topic should have:
    - A clear title
    - A 2-3 sentence outline of what the page should cover
    - Key files the wiki page should reference

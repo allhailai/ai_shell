@@ -18,16 +18,6 @@ export interface ManifestInput {
   /** Wiki */
   wikiTopicTitles: Array<{ id: string; title: string }>;
 
-  /** Golden rules */
-  goldenRuleNames: Array<{ name: string; enabled: boolean }>;
-
-  /** Concepts */
-  conceptNames: Array<{ name: string; category: string }>;
-
-  /** Quality */
-  qualityScore: number | null;
-  lastQualityScanTimestamp: string | null;
-
   /** Build state */
   currentBuildStatus: string;
   lastBuildTimestamp: string | null;
@@ -65,8 +55,6 @@ export interface ViewContext {
 
 const MAX_ASSISTANT_HISTORY_CHARS = 300;
 const MAX_WIKI_TOPICS_IN_MANIFEST = 30;
-const MAX_RULES_IN_MANIFEST = 15;
-const MAX_CONCEPTS_IN_MANIFEST = 20;
 
 /** Only include messages created within this window */
 const HISTORY_FRESHNESS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -86,9 +74,6 @@ export function buildProjectManifest(input: ManifestInput): string {
     `### Project: ${input.projectName}`,
     `- Repositories: ${input.repositoryCount}`,
     `- Wiki topics: ${input.wikiTopicTitles.length}`,
-    `- Golden rules: ${input.goldenRuleNames.length}`,
-    `- Concepts: ${input.conceptNames.length}`,
-    `- Quality score: ${input.qualityScore !== null ? `${input.qualityScore}/100` : "No scan yet"}`,
   );
 
   // Repositories
@@ -116,34 +101,6 @@ export function buildProjectManifest(input: ManifestInput): string {
     sections.push("", "### Wiki Topics", "- _No wiki pages yet. Consider running a wiki build._");
   }
 
-  // Golden rules (truncated)
-  if (input.goldenRuleNames.length > 0) {
-    const shown = input.goldenRuleNames.slice(0, MAX_RULES_IN_MANIFEST);
-    const remaining = input.goldenRuleNames.length - shown.length;
-    sections.push(
-      "",
-      "### Golden Rules",
-      ...shown.map((r) => `- ${r.name}${r.enabled ? "" : " (disabled)"}`),
-    );
-    if (remaining > 0) {
-      sections.push(`- _(+${remaining} more — use list_golden_rules to see all)_`);
-    }
-  }
-
-  // Concepts (truncated)
-  if (input.conceptNames.length > 0) {
-    const shown = input.conceptNames.slice(0, MAX_CONCEPTS_IN_MANIFEST);
-    const remaining = input.conceptNames.length - shown.length;
-    sections.push(
-      "",
-      "### Domain Concepts",
-      ...shown.map((c) => `- ${c.name} [${c.category}]`),
-    );
-    if (remaining > 0) {
-      sections.push(`- _(+${remaining} more — use list_concepts to see all)_`);
-    }
-  }
-
   // Data freshness
   sections.push(
     "",
@@ -151,7 +108,6 @@ export function buildProjectManifest(input: ManifestInput): string {
     `- Current build: ${input.currentBuildStatus}`,
     `- Last build: ${input.lastBuildTimestamp ?? "never"}${input.lastBuildCommand ? ` (${input.lastBuildCommand})` : ""}`,
     `- Last wiki build: ${input.lastWikiBuildTimestamp ?? "never"}`,
-    `- Last quality scan: ${input.lastQualityScanTimestamp ?? "never"}`,
     `- Last code map build: ${input.lastCodeMapBuildTimestamp ?? "never"}`,
   );
 
@@ -258,18 +214,6 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
       } else {
         lines.push(`The user is browsing the wiki topic list${project}. Use list_wiki_topics to see available topics.`);
       }
-      break;
-
-    case "quality":
-      lines.push(`The user is viewing the quality analysis dashboard${project}. Use read_quality_report for detailed scores and issues.`);
-      break;
-
-    case "rules":
-      lines.push(`The user is viewing the golden rules (coding standards)${project}. Use list_golden_rules to see all rules.`);
-      break;
-
-    case "concepts":
-      lines.push(`The user is viewing domain concepts${project}. Use list_concepts to see extracted concepts.`);
       break;
 
     case "settings":

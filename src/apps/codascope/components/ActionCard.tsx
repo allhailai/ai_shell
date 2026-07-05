@@ -119,7 +119,6 @@ function getBuildScope(type: string, attributes: Record<string, string>): string
     // Project-level builds (wiki, explore) use unscoped project-level tracking
     case "build_wiki_page":
     case "build_full_wiki":
-    case "run_quality_scan":
     case "explore_codebase":
       return null; // These use the default project-level build key (no scope)
     default:
@@ -132,7 +131,7 @@ function getBuildScope(type: string, attributes: Record<string, string>): string
  */
 function isAsyncAction(type: string): boolean {
   return [
-    "build_wiki_page", "build_full_wiki", "run_quality_scan",
+    "build_wiki_page", "build_full_wiki",
     "explore_codebase", "deepen_wiki", "trigger_research",
   ].includes(type);
 }
@@ -290,15 +289,6 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           return;
         }
 
-        case "run_quality_scan": {
-          await awaitSseStream({
-            url: `/api/codascope/projects/${activeProjectId}/runs`,
-            method: "POST",
-            body: { command: "do_quality_scan", modelId: selectedModel ?? "" },
-          });
-          setLocalStatus("success");
-          return;
-        }
 
         case "explore_codebase": {
           await awaitSseStream({
