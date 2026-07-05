@@ -19,112 +19,145 @@ src/apps/codascope/
 ├── ARCHITECTURE.md                   # App architecture (progressive disclosure, 15 levels)
 ├── AGENTS.md                         # App-specific agent development guidelines
 ├── manifest.tsx                      # AppManifest — wires CodaScope into the shell (65 lines)
-├── codascope.css                     # Primary CodaScope styles (5668 lines)
-├── CodaScopeAssistant.css            # Assistant panel styles (1067 lines)
-├── useCodaScopeStore.ts              # Zustand store (111 lines)
-├── contextAssembler.ts               # Lightweight context for assistant (127 lines)
-├── codaScopeSseClient.ts             # Shared SSE streaming utilities (182 lines)
-├── codaScopeTypes.ts                 # Shared API type definitions (546 lines)
-├── CodaScopeContent.tsx              # Root content router (193 lines)
-├── CodaScopeNav.tsx                  # Left nav — project picker + view nav (193 lines)
-├── CodaScopeAssistant.tsx            # Right panel — persistent AI chat (992 lines)
+├── codascope.css                     # Primary CodaScope styles (7545 lines)
+├── CodaScopeAssistant.css            # Assistant panel styles (2286 lines)
+├── useCodaScopeStore.ts              # Zustand store (95 lines)
+├── contextAssembler.ts               # Lightweight context for assistant (124 lines)
+├── codaScopeSseClient.ts             # Shared SSE streaming utilities (173 lines)
+├── codaScopeTypes.ts                 # Shared API type definitions (597 lines)
+├── commandRegistry.ts               # Slash command palette registry (403 lines)
+├── CodaScopeContent.tsx              # Root content router (186 lines)
+├── CodaScopeNav.tsx                  # Left nav — project picker + view nav (202 lines)
+├── CodaScopeAssistant.tsx            # Right panel — persistent AI chat (1118 lines)
 ├── components/
-│   ├── ActionCard.tsx                # Interactive action cards (329 lines)
+│   ├── ActionCard.tsx                # Interactive action cards (552 lines)
 │   ├── AnnotationThread.tsx          # Threaded annotation comments (212 lines)
 │   ├── AtMentionPicker.tsx           # @-mention autocomplete (393 lines)
-│   ├── AtMentionPicker.css           # @-mention picker styles (163 lines)
 │   ├── BlockedDownloadItem.tsx       # Blocked download resolution (199 lines)
-│   ├── ChatHelpModal.tsx             # Chat help modal (150 lines)
-│   ├── CodaScopeIcons.tsx            # Centralized SVG icons (586 lines)
+│   ├── CodaScopeGuideModal.tsx       # Tabbed help/guide modal (624 lines)
+│   ├── CodaScopeIcons.tsx            # Centralized SVG icons (648 lines)
 │   ├── ConversationHeader.tsx        # Chat header with history popover (148 lines)
 │   ├── CurateButton.tsx              # Curation trigger button (52 lines)
-│   ├── CurationProgressBanner.tsx    # Live curation pipeline progress (146 lines)
+│   ├── CurationProgressBanner.tsx    # Live curation pipeline progress (245 lines)
 │   ├── CurationReasonsModal.tsx      # Modal showing curation reasons (150 lines)
 │   ├── DiffViewer.tsx                # Side-by-side version diff viewer (122 lines)
-│   ├── DocumentEditor.tsx            # Rich markdown editor (766 lines)
-│   ├── EditorSelectionToolbar.tsx    # Floating selection toolbar (77 lines)
-│   ├── EpicBriefExport.tsx           # Epic brief export modal (129 lines)
-│   ├── InsertionPrompt.tsx           # Inline directive prompt UI (325 lines)
+│   ├── DocumentBlockRenderer.tsx     # Block-level document renderer (375 lines)
+│   ├── DocumentEditor.tsx            # Rich markdown editor (815 lines)
+│   ├── EditorSelectionToolbar.tsx    # Floating selection toolbar (114 lines)
+│   ├── EpicBriefExport.tsx           # Epic brief export modal (130 lines)
+│   ├── EpicSidebar.tsx               # Collapsible epic navigation sidebar (761 lines)
+│   ├── ErrorSourceItem.tsx           # Failed knowledge source resolution (326 lines)
+│   ├── InsertionPrompt.tsx           # Inline directive prompt UI (374 lines)
 │   ├── ModelPicker.tsx               # AI model selection dropdown (235 lines)
-│   ├── PromptChips.tsx               # Quick-action prompt chips (192 lines)
+│   ├── PromptChips.tsx               # Quick-action prompt chips (226 lines)
+│   ├── ScopeBadges.tsx               # Scope status badge components (56 lines)
+│   ├── ScopeDiffModal.tsx            # Scope diff visualization modal (160 lines)
 │   ├── SetupBanners.tsx              # Inline banners for missing config (130 lines)
+│   ├── SlashCommandPalette.tsx       # Slash command autocomplete palette (213 lines)
 │   ├── SourceUpload.tsx              # File upload for knowledge sources (138 lines)
-│   └── SourceViewer.tsx              # Research source content viewer (188 lines)
+│   ├── SourceViewer.tsx              # Research source content viewer (188 lines)
+│   └── artifact-viewer/              # Visual HTML artifact subsystem
+│       ├── ArtifactViewer.tsx         # Main orchestrator (502 lines)
+│       ├── ArtifactSpecEditor.tsx     # Spec editing with model picker (195 lines)
+│       ├── ArtifactPreview.tsx        # Sandboxed iframe preview (109 lines)
+│       ├── ArtifactSectionPanel.tsx   # Section/annotation/version panel (667 lines)
+│       ├── ArtifactAnnotationCard.tsx # Individual annotation card (186 lines)
+│       ├── artifactApi.ts             # Typed API wrappers (365 lines)
+│       ├── useArtifactAnnotations.ts  # Artifact annotation state hook (205 lines)
+│       ├── useArtifactBuild.ts        # Artifact build state hook (179 lines)
+│       └── hooks/                     # Dedicated artifact hooks
+│           ├── useArtifactAnnotations.ts # Annotation lifecycle hook (261 lines)
+│           └── useArtifactBuild.ts     # Build lifecycle hook (159 lines)
 ├── hooks/
 │   ├── useAssistantStream.ts         # Chat SSE streaming + action parsing (207 lines)
+│   ├── useBuildState.ts              # Build lifecycle SSE hook (147 lines)
+│   ├── useConversationManager.ts     # Conversation lifecycle management (208 lines)
+│   ├── useDashboardBuildState.ts     # Dashboard-specific build state (356 lines)
 │   ├── useEditorDiff.ts              # Diff highlighting with fade-out (77 lines)
-│   └── useEditorResize.ts            # Mermaid/image resize handlers (115 lines)
+│   ├── useEditorResize.ts            # Mermaid/image resize handlers (129 lines)
+│   └── useEpicContext.ts             # Epic context for tabs/sidebar (204 lines)
 ├── views/
 │   ├── ProjectList.tsx               # Project cards + first-launch wizard (239 lines)
-│   ├── ProjectDashboard.tsx          # Project overview + analyze pipeline (788 lines)
-│   ├── WikiBrowser.tsx               # Wiki topic tree + markdown editor (431 lines)
-│   ├── QualityDashboard.tsx          # Quality scores + category drill-down (334 lines)
-│   ├── GoldenRules.tsx               # CRUD for coding standards (354 lines)
-│   ├── ConceptExplorer.tsx           # Filterable domain concepts (298 lines)
+│   ├── ProjectDashboard.tsx          # Project overview + analyze pipeline (665 lines)
+│   ├── WikiBrowser.tsx               # Wiki topic tree + markdown editor (444 lines)
 │   ├── SkillsManager.tsx             # Framework + project skills (345 lines)
-│   ├── Settings.tsx                  # API key, repos, project config (569 lines)
+│   ├── Settings.tsx                  # API key, repos, project config (633 lines)
 │   ├── EpicList.tsx                  # Epic cards list with badges (373 lines)
-│   ├── EpicDetail.tsx                # Epic detail shell with tab routing (288 lines)
-│   ├── EpicDefine.tsx                # Epic definition editor tab (379 lines)
-│   ├── EpicScope.tsx                 # Epic scope management tab (798 lines)
-│   ├── EpicKnowledge.tsx             # Epic knowledge + research tab (467 lines)
-│   ├── EpicDesignDocs.tsx            # Design document list + editor tab (382 lines)
-│   └── EpicHistory.tsx               # Version history + diff viewer tab (475 lines)
-└── commands/                         # Agent prompt templates (10 files, 867 lines total)
-    ├── do_build_code_map.md          # Generates repo structure map (100 lines)
-    ├── do_build_full_wiki.md         # Builds complete wiki from code map (85 lines)
+│   ├── EpicDetail.tsx                # Epic detail shell with tab routing (647 lines)
+│   ├── EpicDefine.tsx                # Epic definition editor tab (388 lines)
+│   ├── EpicScope.tsx                 # Epic scope management tab (589 lines)
+│   ├── EpicKnowledge.tsx             # Epic knowledge + research tab (714 lines)
+│   ├── EpicDesignDocs.tsx            # Design document list + editor tab (318 lines)
+│   └── EpicHistory.tsx               # Version history + diff viewer tab (501 lines)
+└── commands/                         # Agent prompt templates (11 files, 931 lines total)
+    ├── do_build_code_map.md          # Generates repo structure map (84 lines)
+    ├── do_build_full_wiki.md         # Builds complete wiki from code map (84 lines)
     ├── do_build_wiki_page.md         # Builds/rebuilds a single wiki page (44 lines)
     ├── do_build_wiki_delta.md        # Incremental wiki update (58 lines)
-    ├── do_explore.md                 # Lightweight codebase exploration (35 lines)
-    ├── do_quality_scan.md            # Quality analysis against golden rules (114 lines)
-    ├── do_chat.md                    # Codebase Q&A system prompt (169 lines)
-    ├── do_curate_epic.md             # Curation pipeline prompt (109 lines)
-    ├── do_process_source.md          # Research source processing prompt (66 lines)
-    └── do_research_epic.md           # Web research pipeline prompt (87 lines)
+    ├── do_explore.md                 # Lightweight codebase exploration (34 lines)
+    ├── do_chat.md                    # Codebase Q&A system prompt (213 lines)
+    ├── do_curate_epic.md             # Curation pipeline prompt (105 lines)
+    ├── do_process_source.md          # Research source processing prompt (64 lines)
+    ├── do_research_epic.md           # Web research pipeline prompt (85 lines)
+    ├── do_build_artifact.md          # Artifact HTML generation prompt (96 lines)
+    └── do_regen_sections.md          # Section regeneration prompt (64 lines)
 ```
 
 **Backend** (under `server/`):
 ```
 server/
 ├── routes/
-│   ├── codaScopeRoutes.ts            # Thin hub — assembles sub-routes (33 lines)
-│   ├── codaScopeServiceContext.ts    # Shared service context + helpers (244 lines)
-│   ├── codaScopeCoreRoutes.ts        # Config, projects, repos, models (137 lines)
-│   ├── codaScopeWikiRoutes.ts        # Wiki, concepts, rules, quality, code map (284 lines)
-│   ├── codaScopeBuildRoutes.ts       # Skills, runs, build status, analyze (479 lines)
+│   ├── codaScopeRoutes.ts            # Thin hub — assembles sub-routes (35 lines)
+│   ├── codaScopeServiceContext.ts    # Shared service context + helpers (271 lines)
+│   ├── codaScopeCoreRoutes.ts        # Config, projects, repos, models (158 lines)
+│   ├── codaScopeWikiRoutes.ts        # Wiki CRUD, state, pending deletions, code map (136 lines)
+│   ├── codaScopeBuildRoutes.ts       # Skills, runs, build status, analyze (480 lines)
 │   ├── codaScopeChatRoutes.ts        # Conversations, messages, assistant (490 lines)
-│   ├── codaScopeEpicRoutes.ts        # Epic CRUD, scope, designs, versions (658 lines)
+│   ├── codaScopeEpicRoutes.ts        # Epic CRUD, scope, designs, versions (779 lines)
 │   ├── codaScopeAnnotationRoutes.ts  # Annotations, directives, batch (284 lines)
-│   └── codaScopeKnowledgeRoutes.ts   # Knowledge sources, research, curation (470 lines)
+│   ├── codaScopeKnowledgeRoutes.ts   # Knowledge sources, research, curation (519 lines)
+│   └── codaScopeArtifactRoutes.ts    # Artifact CRUD, build, preview, sections (562 lines)
 └── services/
+    ├── codaScopeProjectService.ts     # Project CRUD + repo management (394 lines)
+    ├── codaScopeProjectDirResolver.ts # Project directory resolution cache (134 lines)
     ├── codaScopeAgentService.ts       # Cursor SDK agent wrapper (375 lines)
-    ├── codaScopeToolDefinitions.ts    # Agent tool factory — read/write/epic (1589 lines)
+    ├── codaScopeToolDefinitions.ts    # Tool facade — purpose-based composition (90 lines)
+    ├── codaScopeToolServiceFactory.ts # Tool service instantiation factory (51 lines)
     ├── codaScopeCodeMapService.ts     # Progressive code map builder (606 lines)
-    ├── codaScopeBuildStateService.ts  # Build state tracking (532 lines)
-    ├── codaScopeBuildOrchestrator.ts  # Multi-step build pipeline (591 lines)
+    ├── codaScopeBuildStateService.ts  # Build state tracking (575 lines)
+    ├── codaScopeBuildOrchestrator.ts  # Multi-step build pipeline (550 lines)
     ├── codaScopeChatService.ts        # Conversation CRUD + streaming detection (585 lines)
-    ├── codaScopeChatOrchestrator.ts   # Chat prompt assembly + dispatch (201 lines)
-    ├── codaScopeChatPromptHelpers.ts  # System prompt assembly (527 lines)
+    ├── codaScopeChatOrchestrator.ts   # Chat prompt assembly + dispatch (188 lines)
+    ├── codaScopeChatPromptHelpers.ts  # System prompt assembly (471 lines)
     ├── codaScopeWikiStateService.ts   # Wiki depth tracking + delta detection (362 lines)
-    ├── codaScopeQualityService.ts     # Quality scan persistence + scoring (262 lines)
-    ├── codaScopeGoldenRuleService.ts  # Golden rule CRUD (252 lines)
-    ├── codaScopeProjectService.ts     # Project CRUD + repo management (241 lines)
-    ├── codaScopeCommandLoader.ts      # Template loader + variable substitution (212 lines)
     ├── codaScopeWikiService.ts        # Wiki topic CRUD (211 lines)
-    ├── codaScopeConceptService.ts     # Domain concept extraction (197 lines)
-    ├── codaScopeSkillService.ts       # Skills management (162 lines)
+    ├── codaScopeProjectService.ts     # Project CRUD + repo management (394 lines)
+    ├── codaScopeCommandLoader.ts      # Template loader + variable substitution (368 lines)
+    ├── codaScopeSkillService.ts       # Skills management (158 lines)
     ├── codaScopeImageService.ts       # Image upload, storage, serving (145 lines)
-    ├── codaScopeActionParser.ts       # Action tag extraction (117 lines)
-    ├── codaScopeEpicService.ts        # Epic CRUD, lifecycle, scope, locks (807 lines)
-    ├── codaScopeDesignDocService.ts   # Design doc CRUD (466 lines)
+    ├── codaScopeActionParser.ts       # Action tag extraction (119 lines)
+    ├── codaScopeEpicService.ts        # Epic CRUD, lifecycle, scope, health (683 lines)
+    ├── codaScopeLockService.ts        # Edit lock management (223 lines)
+    ├── codaScopeDesignDocService.ts   # Design doc CRUD + versioning (733 lines)
     ├── codaScopeVersionService.ts     # Snapshot-based version history (354 lines)
-    ├── codaScopeAnnotationService.ts  # Annotations, directives, batch (803 lines)
+    ├── codaScopeAnnotationService.ts  # Inline annotations and comment threads (462 lines)
+    ├── codaScopeDirectiveService.ts   # Insertion directives and batch execution (412 lines)
     ├── codaScopeEpicRenderService.ts  # HTML rendering + storage (432 lines)
-    ├── codaScopeEpicKnowledgeService.ts # Epic knowledge + source management (525 lines)
-    ├── codaScopeContentService.ts     # Content extraction + processing (421 lines)
-    ├── codaScopeCurationService.ts    # Curation trigger tracking (261 lines)
-    ├── codaScopeCurationOrchestrator.ts # Curation pipeline (377 lines)
-    └── codaScopeResearchOrchestrator.ts # Web research pipeline (672 lines)
+    ├── codaScopeEpicKnowledgeService.ts # Epic knowledge + source management (529 lines)
+    ├── codaScopeContentService.ts     # Content extraction + processing (425 lines)
+    ├── codaScopeCurationService.ts    # Curation trigger tracking (312 lines)
+    ├── codaScopeCurationOrchestrator.ts # Curation pipeline (371 lines)
+    ├── codaScopeResearchOrchestrator.ts # Web research pipeline (681 lines)
+    ├── codaScopeWebSearchService.ts   # Web search integration (68 lines)
+    ├── codaScopeArtifactService.ts    # Artifact spec CRUD + build (818 lines)
+    ├── codaScopeArtifactAnnotationService.ts # Artifact annotation lifecycle (320 lines)
+    ├── codaScopeArtifactVersionService.ts   # Artifact build version snapshots (249 lines)
+    ├── codaScopeArtifactAnnotationScript.ts # DOM inspection overlay script (228 lines)
+    └── tools/                         # Agent tool implementations (split by domain)
+        ├── codaScopeReadOnlyTools.ts   # 14 read-only discovery tools (545 lines)
+        ├── codaScopeEpicTools.ts       # 21 epic read/write tools (702 lines)
+        ├── codaScopeWriteTools.ts      # 1 code map write tool (65 lines)
+        └── codaScopeArtifactTools.ts   # 3 artifact tools (223 lines)
 ```
 
 ---
@@ -187,9 +220,10 @@ Identify files that are never imported or rendered:
 For each file, check for exported functions, types, or constants that nothing imports:
 
 Priority files to check:
-- `useCodaScopeStore.ts` (143 lines) — are all store fields and actions consumed by components?
-- `contextAssembler.ts` (107 lines) — are all exports used?
-- `CodaScopeIcons.tsx` (324 lines) — are all icon exports used? This is likely to accumulate dead icons.
+- `useCodaScopeStore.ts` (95 lines) — are all store fields and actions consumed by components?
+- `contextAssembler.ts` (124 lines) — are all exports used?
+- `CodaScopeIcons.tsx` (648 lines) — are all icon exports used? This is likely to accumulate dead icons.
+- `commandRegistry.ts` (403 lines) — are all registered commands wired to handlers in the assistant?
 - Each backend service — are all exported functions called by routes or other services?
 
 ### 2.3 Dead Views or Routes
@@ -200,11 +234,10 @@ Verify the route table in `CodaScopeContent.tsx` matches reality:
 /codascope/projects              → ProjectList
 /codascope/project/:id/dashboard → ProjectDashboard
 /codascope/project/:id/wiki      → WikiBrowser
-/codascope/project/:id/quality   → QualityDashboard
-/codascope/project/:id/rules     → GoldenRules
-/codascope/project/:id/concepts  → ConceptExplorer
 /codascope/project/:id/skills    → SkillsManager
 /codascope/project/:id/settings  → Settings
+/codascope/project/:id/epics     → EpicList
+/codascope/project/:id/epic/:eid → EpicDetail (with tab sub-routing)
 ```
 
 - Are there routes defined that are never linked to from the nav?
@@ -218,23 +251,23 @@ For each command in `commands/`:
 - Is the corresponding agent pipeline step wired in the routes?
 
 Current commands to verify:
-- `do_build_code_map.md` (100 lines)
-- `do_build_full_wiki.md` (85 lines)
+- `do_build_code_map.md` (84 lines)
+- `do_build_full_wiki.md` (84 lines)
 - `do_build_wiki_page.md` (44 lines)
 - `do_build_wiki_delta.md` (58 lines)
-- `do_explore.md` (35 lines)
-- `do_quality_scan.md` (114 lines)
-- `do_chat.md` (169 lines)
-- `do_curate_epic.md` (109 lines)
-- `do_process_source.md` (66 lines)
-- `do_research_epic.md` (87 lines)
+- `do_explore.md` (34 lines)
+- `do_chat.md` (213 lines)
+- `do_curate_epic.md` (105 lines)
+- `do_process_source.md` (64 lines)
+- `do_research_epic.md` (85 lines)
+- `do_build_artifact.md` (96 lines)
+- `do_regen_sections.md` (64 lines)
 
 ### 2.5 Dead CSS
 
-CodaScope has two CSS files totaling **6735 lines**:
-- `codascope.css` (5668 lines)
-- `CodaScopeAssistant.css` (1067 lines)
-- `AtMentionPicker.css` (163 lines)
+CodaScope has two CSS files totaling **9831 lines**:
+- `codascope.css` (7545 lines)
+- `CodaScopeAssistant.css` (2286 lines)
 
 For each CSS file:
 - Sample-check 10+ class names to confirm they appear in a `.tsx` file

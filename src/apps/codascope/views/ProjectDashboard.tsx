@@ -396,7 +396,7 @@ export function ProjectDashboard() {
           {/* Hint if repos are behind */}
           {hasAnyBehind && (
             <div className="codascope-repo-panel-hint">
-              Pull remote changes before analyzing to ensure your wiki and quality scans reflect the latest code.
+              Pull remote changes before analyzing to ensure your wiki reflects the latest code.
             </div>
           )}
         </div>

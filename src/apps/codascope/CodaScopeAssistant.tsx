@@ -182,9 +182,7 @@ export function CodaScopeAssistant() {
       case "dashboard": return "Dashboard";
       case "settings": return "Settings";
       case "skills": return "Skills";
-      case "quality": return "Quality";
-      case "rules": return "Golden Rules";
-      case "concepts": return "Concepts";
+
       case "epics": return "Epics";
       case "epic": {
         const epicId = segments[3] ?? null;
@@ -481,18 +479,7 @@ export function CodaScopeAssistant() {
         navigate(`project/${activeProjectId}/wiki`);
         showSlashToast("Navigating to Wiki…");
         break;
-      case "goto-quality":
-        navigate(`project/${activeProjectId}/quality`);
-        showSlashToast("Navigating to Quality…");
-        break;
-      case "goto-rules":
-        navigate(`project/${activeProjectId}/rules`);
-        showSlashToast("Navigating to Golden Rules…");
-        break;
-      case "goto-concepts":
-        navigate(`project/${activeProjectId}/concepts`);
-        showSlashToast("Navigating to Concepts…");
-        break;
+
       case "goto-skills":
         navigate(`project/${activeProjectId}/skills`);
         showSlashToast("Navigating to Skills…");

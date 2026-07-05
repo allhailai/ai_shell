@@ -31,129 +31,145 @@ These principles govern all CodaScope development. Violating them creates archit
 ```
 src/apps/codascope/
 ├── ARCHITECTURE.md             # ← You are here
-├── manifest.tsx                # AppManifest — wires CodaScope into the shell
-├── codascope.css               # All CodaScope-specific styles
-├── CodaScopeAssistant.css      # Styles for the assistant panel
-├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend)
-├── useCodaScopeStore.ts        # Zustand store — projects, topics, agent state
-├── contextAssembler.ts         # Builds lightweight context for the assistant
-├── codaScopeSseClient.ts       # Shared SSE streaming utilities
-├── CodaScopeContent.tsx        # Root content router (view switching)
-├── CodaScopeNav.tsx            # Left nav — project picker + view navigation
-├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant
+├── manifest.tsx                # AppManifest — wires CodaScope into the shell (65 lines)
+├── codascope.css               # All CodaScope-specific styles (7545 lines)
+├── CodaScopeAssistant.css      # Styles for the assistant panel (2286 lines)
+├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend) (597 lines)
+├── useCodaScopeStore.ts        # Zustand store — projects, topics, agent state (95 lines)
+├── contextAssembler.ts         # Builds lightweight context for the assistant (124 lines)
+├── codaScopeSseClient.ts       # Shared SSE streaming utilities (173 lines)
+├── commandRegistry.ts          # Slash command palette registry (403 lines)
+├── CodaScopeContent.tsx        # Root content router (view switching) (186 lines)
+├── CodaScopeNav.tsx            # Left nav — project picker + view navigation (202 lines)
+├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant (1118 lines)
 ├── components/
-│   ├── ActionCard.tsx          # Interactive action cards from agent suggestions
-│   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs
-│   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input
-│   ├── AtMentionPicker.css     # Styles for the @-mention picker
-│   ├── BlockedDownloadItem.tsx # Blocked download resolution UI
-│   ├── ChatHelpModal.tsx       # Help modal for chat commands and tips
-│   ├── CodaScopeIcons.tsx      # Centralized SVG icon components
-│   ├── ConversationHeader.tsx  # Chat header with history popover & search
-│   ├── CurateButton.tsx        # Curation trigger button with status
-│   ├── CurationProgressBanner.tsx # Live curation pipeline progress
-│   ├── CurationReasonsModal.tsx # Modal showing curation trigger reasons
-│   ├── DiffViewer.tsx          # Side-by-side version diff viewer
-│   ├── DocumentEditor.tsx      # Rich markdown editor for design docs
-│   ├── EditorSelectionToolbar.tsx # Floating toolbar on text selection
-│   ├── EpicBriefExport.tsx     # Epic brief export modal + clipboard
-│   ├── EpicSidebar.tsx         # Collapsible left panel for epic detail
-│   ├── ErrorSourceItem.tsx     # Failed knowledge source resolution UI
-│   ├── InsertionPrompt.tsx     # Inline directive prompt UI
-│   ├── ModelPicker.tsx         # AI model selection dropdown
-│   ├── PromptChips.tsx         # Quick-action prompt chip suggestions
-│   ├── SetupBanners.tsx        # Inline banners for missing config
-│   ├── SourceUpload.tsx        # File upload for knowledge sources
-│   ├── SourceViewer.tsx        # Research source content viewer
+│   ├── ActionCard.tsx          # Interactive action cards from agent suggestions (552 lines)
+│   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs (212 lines)
+│   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input (393 lines)
+│   ├── BlockedDownloadItem.tsx # Blocked download resolution UI (199 lines)
+│   ├── CodaScopeGuideModal.tsx # Tabbed help/guide modal (624 lines)
+│   ├── CodaScopeIcons.tsx      # Centralized SVG icon components (648 lines)
+│   ├── ConversationHeader.tsx  # Chat header with history popover & search (148 lines)
+│   ├── CurateButton.tsx        # Curation trigger button with status (52 lines)
+│   ├── CurationProgressBanner.tsx # Live curation pipeline progress (245 lines)
+│   ├── CurationReasonsModal.tsx # Modal showing curation trigger reasons (150 lines)
+│   ├── DiffViewer.tsx          # Side-by-side version diff viewer (122 lines)
+│   ├── DocumentBlockRenderer.tsx # Block-level document renderer (375 lines)
+│   ├── DocumentEditor.tsx      # Rich markdown editor for design docs (815 lines)
+│   ├── EditorSelectionToolbar.tsx # Floating toolbar on text selection (114 lines)
+│   ├── EpicBriefExport.tsx     # Epic brief export modal + clipboard (130 lines)
+│   ├── EpicSidebar.tsx         # Collapsible left panel for epic detail (761 lines)
+│   ├── ErrorSourceItem.tsx     # Failed knowledge source resolution UI (326 lines)
+│   ├── InsertionPrompt.tsx     # Inline directive prompt UI (374 lines)
+│   ├── ModelPicker.tsx         # AI model selection dropdown (235 lines)
+│   ├── PromptChips.tsx         # Quick-action prompt chip suggestions (226 lines)
+│   ├── ScopeBadges.tsx         # Scope status badge components (56 lines)
+│   ├── ScopeDiffModal.tsx      # Scope diff visualization modal (160 lines)
+│   ├── SetupBanners.tsx        # Inline banners for missing config (130 lines)
+│   ├── SlashCommandPalette.tsx # Slash command autocomplete palette (213 lines)
+│   ├── SourceUpload.tsx        # File upload for knowledge sources (138 lines)
+│   ├── SourceViewer.tsx        # Research source content viewer (188 lines)
 │   └── artifact-viewer/        # Visual HTML artifact subsystem
-│       ├── ArtifactViewer.tsx   # Main orchestrator (spec/preview tabs)
-│       ├── ArtifactSpecEditor.tsx # Spec editing with model picker
-│       ├── ArtifactPreview.tsx  # Sandboxed iframe preview
-│       ├── ArtifactSectionPanel.tsx # Section/annotation/version panel
-│       ├── ArtifactAnnotationCard.tsx # Individual annotation card
-│       └── artifactApi.ts      # Typed API wrappers
+│       ├── ArtifactViewer.tsx   # Main orchestrator (spec/preview tabs) (502 lines)
+│       ├── ArtifactSpecEditor.tsx # Spec editing with model picker (195 lines)
+│       ├── ArtifactPreview.tsx  # Sandboxed iframe preview (109 lines)
+│       ├── ArtifactSectionPanel.tsx # Section/annotation/version panel (667 lines)
+│       ├── ArtifactAnnotationCard.tsx # Individual annotation card (186 lines)
+│       ├── artifactApi.ts      # Typed API wrappers (365 lines)
+│       ├── useArtifactAnnotations.ts # Artifact annotation state hook (205 lines)
+│       ├── useArtifactBuild.ts # Artifact build state hook (179 lines)
+│       └── hooks/              # Dedicated artifact hooks
+│           ├── useArtifactAnnotations.ts # Annotation lifecycle hook (261 lines)
+│           └── useArtifactBuild.ts # Build lifecycle hook (159 lines)
 ├── hooks/
-│   ├── useAssistantStream.ts   # Chat SSE streaming, action parsing, auto-title
-│   ├── useBuildState.ts        # Build lifecycle SSE hook
-│   ├── useEditorDiff.ts        # Diff highlighting with fade-out timer
-│   └── useEditorResize.ts      # Mermaid/image resize handlers + API persistence
+│   ├── useAssistantStream.ts   # Chat SSE streaming, action parsing, auto-title (207 lines)
+│   ├── useBuildState.ts        # Build lifecycle SSE hook (147 lines)
+│   ├── useConversationManager.ts # Conversation lifecycle management (208 lines)
+│   ├── useDashboardBuildState.ts # Dashboard-specific build state (356 lines)
+│   ├── useEditorDiff.ts        # Diff highlighting with fade-out timer (77 lines)
+│   ├── useEditorResize.ts      # Mermaid/image resize handlers + API persistence (129 lines)
+│   └── useEpicContext.ts       # Epic context for tabs/sidebar (204 lines)
 ├── views/
-│   ├── ProjectList.tsx         # Project cards + first-launch setup wizard
-│   ├── ProjectDashboard.tsx    # Project overview, analyze pipeline, build state
-│   ├── WikiBrowser.tsx         # Wiki topic tree + markdown editor
-│   ├── QualityDashboard.tsx    # Quality scores, category drill-down, issue list
-│   ├── GoldenRules.tsx         # CRUD for coding/architectural standards
-│   ├── ConceptExplorer.tsx     # Filterable domain concepts extracted from code
-│   ├── SkillsManager.tsx       # Framework + project skills display and runner
-│   ├── Settings.tsx            # API key, repositories, project configuration
-│   ├── EpicList.tsx            # Epic cards list with status/health badges
-│   ├── EpicDetail.tsx          # Epic detail shell with tab routing
-│   ├── EpicDefine.tsx          # Epic definition editor tab
-│   ├── EpicScope.tsx           # Epic scope management tab
-│   ├── EpicKnowledge.tsx       # Epic knowledge directory + research tab
-│   ├── EpicDesignDocs.tsx      # Design document list + editor tab
-│   └── EpicHistory.tsx         # Version history + diff viewer tab
+│   ├── ProjectList.tsx         # Project cards + first-launch setup wizard (239 lines)
+│   ├── ProjectDashboard.tsx    # Project overview, analyze pipeline, build state (665 lines)
+│   ├── WikiBrowser.tsx         # Wiki topic tree + markdown editor (444 lines)
+│   ├── SkillsManager.tsx       # Framework + project skills display and runner (345 lines)
+│   ├── Settings.tsx            # API key, repositories, project configuration (633 lines)
+│   ├── EpicList.tsx            # Epic cards list with status/health badges (373 lines)
+│   ├── EpicDetail.tsx          # Epic detail shell with tab routing (647 lines)
+│   ├── EpicDefine.tsx          # Epic definition editor tab (388 lines)
+│   ├── EpicScope.tsx           # Epic scope management tab (589 lines)
+│   ├── EpicKnowledge.tsx       # Epic knowledge directory + research tab (714 lines)
+│   ├── EpicDesignDocs.tsx      # Design document list + editor tab (318 lines)
+│   └── EpicHistory.tsx         # Version history + diff viewer tab (501 lines)
 └── commands/                   # Agent prompt templates (markdown files)
-    ├── do_build_code_map.md    # Generates repository structure map
-    ├── do_build_full_wiki.md   # Builds complete wiki from code map
-    ├── do_build_wiki_page.md   # Builds/rebuilds a single wiki page
-    ├── do_build_wiki_delta.md  # Incremental wiki update from git changes
-    ├── do_explore.md           # Lightweight codebase exploration
-    ├── do_quality_scan.md      # Runs quality analysis against golden rules
-    ├── do_chat.md              # Codebase Q&A system prompt
-    ├── do_curate_epic.md       # Curation pipeline prompt
-    ├── do_process_source.md    # Research source processing prompt
-    ├── do_research_epic.md     # Web research pipeline prompt
-    ├── do_build_artifact.md    # Artifact HTML generation prompt
-    └── do_regen_sections.md    # Section regeneration prompt
+    ├── do_build_code_map.md    # Generates repository structure map (84 lines)
+    ├── do_build_full_wiki.md   # Builds complete wiki from code map (84 lines)
+    ├── do_build_wiki_page.md   # Builds/rebuilds a single wiki page (44 lines)
+    ├── do_build_wiki_delta.md  # Incremental wiki update from git changes (58 lines)
+    ├── do_explore.md           # Lightweight codebase exploration (34 lines)
+    ├── do_chat.md              # Codebase Q&A system prompt (213 lines)
+    ├── do_curate_epic.md       # Curation pipeline prompt (105 lines)
+    ├── do_process_source.md    # Research source processing prompt (64 lines)
+    ├── do_research_epic.md     # Web research pipeline prompt (85 lines)
+    ├── do_build_artifact.md    # Artifact HTML generation prompt (96 lines)
+    └── do_regen_sections.md    # Section regeneration prompt (64 lines)
 ```
 
 **Backend** (under `server/`):
 ```
 server/
 ├── routes/
-│   ├── codaScopeRoutes.ts              # Thin hub — assembles all sub-route modules
-│   ├── codaScopeServiceContext.ts      # Shared service context, ensureServices(), helpers
-│   ├── codaScopeCoreRoutes.ts          # Config, projects, repositories, models, API key
-│   ├── codaScopeWikiRoutes.ts          # Wiki CRUD, state, concepts, golden rules, quality, code map
-│   ├── codaScopeBuildRoutes.ts         # Skills, runs, build status, log streaming, analyze
-│   ├── codaScopeChatRoutes.ts          # Conversations, messages, assistant, images
-│   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief
-│   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution
-│   └── codaScopeKnowledgeRoutes.ts     # Knowledge sources, blocked sources, research, curation
+│   ├── codaScopeRoutes.ts              # Thin hub — assembles all sub-route modules (35 lines)
+│   ├── codaScopeServiceContext.ts      # Shared service context, ensureServices(), helpers (271 lines)
+│   ├── codaScopeCoreRoutes.ts          # Config, projects, repositories, models, API key (158 lines)
+│   ├── codaScopeWikiRoutes.ts          # Wiki CRUD, state, pending deletions, code map (136 lines)
+│   ├── codaScopeBuildRoutes.ts         # Skills, runs, build status, log streaming, analyze (480 lines)
+│   ├── codaScopeChatRoutes.ts          # Conversations, messages, assistant, images (490 lines)
+│   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief (779 lines)
+│   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution (284 lines)
+│   ├── codaScopeKnowledgeRoutes.ts     # Knowledge sources, blocked sources, research, curation (519 lines)
+│   └── codaScopeArtifactRoutes.ts      # Artifact CRUD, build, preview, sections, annotations, versions (562 lines)
 └── services/
-    ├── codaScopeProjectService.ts      # Project CRUD, repository management
-    ├── codaScopeWikiService.ts         # Wiki topic CRUD (markdown files on disk)
-    ├── codaScopeAgentService.ts        # Cursor SDK agent lifecycle (pool, cancel, send)
-    ├── codaScopeToolDefinitions.ts     # Agent tool factory — read/write/epic tool sets
-    ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk)
-    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration
-    ├── codaScopeChatService.ts         # Conversation CRUD, auto-title, streaming detection
-    ├── codaScopeChatOrchestrator.ts    # Chat prompt assembly + streaming dispatch
-    ├── codaScopeChatPromptHelpers.ts   # System prompt assembly & context formatting
-    ├── codaScopeActionParser.ts        # Extracts <codascope_action> tags from agent output
-    ├── codaScopeCodeMapService.ts      # Progressive code map builder & staleness detection
-    ├── codaScopeWikiStateService.ts    # Wiki depth tracking, delta detection, study schema
-    ├── codaScopeCommandLoader.ts       # Template loader with {{VAR}} substitution
-    ├── codaScopeConceptService.ts      # Domain concept extraction & storage
-    ├── codaScopeGoldenRuleService.ts   # Golden rule CRUD for coding standards
-    ├── codaScopeQualityService.ts      # Quality scan result storage & scoring
-    ├── codaScopeSkillService.ts        # Framework + project skills management
-    ├── codaScopeImageService.ts        # Image upload, storage, and serving
-    ├── codaScopeEpicService.ts         # Epic CRUD, lifecycle, scope, locks, health
-    ├── codaScopeDesignDocService.ts    # Design doc CRUD with markdown templates
-    ├── codaScopeVersionService.ts      # Snapshot-based version history
-    ├── codaScopeAnnotationService.ts   # Annotations, directives, batch execution
-    ├── codaScopeEpicRenderService.ts   # HTML rendering + storage
-    ├── codaScopeEpicKnowledgeService.ts # Epic knowledge directory + source management
-    ├── codaScopeContentService.ts      # Content extraction & processing
-    ├── codaScopeCurationService.ts     # Curation trigger tracking & log persistence
-    ├── codaScopeCurationOrchestrator.ts # Curation pipeline orchestration
-    ├── codaScopeResearchOrchestrator.ts # Web research pipeline orchestration
-    ├── codaScopeArtifactService.ts     # Artifact spec CRUD + build orchestration
-    ├── codaScopeArtifactAnnotationService.ts # Artifact annotation lifecycle
-    ├── codaScopeArtifactVersionService.ts   # Artifact build version snapshots
-    └── codaScopeArtifactAnnotationScript.ts # DOM inspection overlay script
+    ├── codaScopeProjectService.ts      # Project CRUD, repository management (394 lines)
+    ├── codaScopeProjectDirResolver.ts  # Project directory resolution cache (134 lines)
+    ├── codaScopeWikiService.ts         # Wiki topic CRUD (markdown files on disk) (211 lines)
+    ├── codaScopeAgentService.ts        # Cursor SDK agent lifecycle (pool, cancel, send) (375 lines)
+    ├── codaScopeToolDefinitions.ts     # Tool facade — purpose-based composition (90 lines)
+    ├── codaScopeToolServiceFactory.ts  # Tool service instantiation factory (51 lines)
+    ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk) (575 lines)
+    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration (550 lines)
+    ├── codaScopeChatService.ts         # Conversation CRUD, auto-title, streaming detection (585 lines)
+    ├── codaScopeChatOrchestrator.ts    # Chat prompt assembly + streaming dispatch (188 lines)
+    ├── codaScopeChatPromptHelpers.ts   # System prompt assembly & context formatting (471 lines)
+    ├── codaScopeActionParser.ts        # Extracts <codascope_action> tags from agent output (119 lines)
+    ├── codaScopeCodeMapService.ts      # Progressive code map builder & staleness detection (606 lines)
+    ├── codaScopeWikiStateService.ts    # Wiki depth tracking, delta detection, study schema (362 lines)
+    ├── codaScopeCommandLoader.ts       # Template loader with {{VAR}} substitution (368 lines)
+    ├── codaScopeSkillService.ts        # Framework + project skills management (158 lines)
+    ├── codaScopeImageService.ts        # Image upload, storage, and serving (145 lines)
+    ├── codaScopeEpicService.ts         # Epic CRUD, lifecycle, scope, health (683 lines)
+    ├── codaScopeLockService.ts         # Edit lock management (acquire, heartbeat, release) (223 lines)
+    ├── codaScopeDesignDocService.ts    # Design doc CRUD with per-doc versioning (733 lines)
+    ├── codaScopeVersionService.ts      # Snapshot-based epic version history (354 lines)
+    ├── codaScopeAnnotationService.ts   # Inline annotations and comment threads (462 lines)
+    ├── codaScopeDirectiveService.ts    # Insertion directives and batch execution (412 lines)
+    ├── codaScopeEpicRenderService.ts   # HTML rendering + storage (432 lines)
+    ├── codaScopeEpicKnowledgeService.ts # Epic knowledge directory + source management (529 lines)
+    ├── codaScopeContentService.ts      # Content extraction & processing (425 lines)
+    ├── codaScopeCurationService.ts     # Curation trigger tracking & log persistence (312 lines)
+    ├── codaScopeCurationOrchestrator.ts # Curation pipeline orchestration (371 lines)
+    ├── codaScopeResearchOrchestrator.ts # Web research pipeline orchestration (681 lines)
+    ├── codaScopeWebSearchService.ts    # Web search integration (68 lines)
+    ├── codaScopeArtifactService.ts     # Artifact spec CRUD + build orchestration (818 lines)
+    ├── codaScopeArtifactAnnotationService.ts # Artifact annotation lifecycle (320 lines)
+    ├── codaScopeArtifactVersionService.ts   # Artifact build version snapshots (249 lines)
+    ├── codaScopeArtifactAnnotationScript.ts # DOM inspection overlay script (228 lines)
+    └── tools/                          # Agent tool implementations (split by domain)
+        ├── codaScopeReadOnlyTools.ts   # 14 read-only discovery tools (545 lines)
+        ├── codaScopeEpicTools.ts       # 21 epic read/write tools (702 lines)
+        ├── codaScopeWriteTools.ts      # 1 code map write tool (65 lines)
+        └── codaScopeArtifactTools.ts   # 3 artifact tools (223 lines)
 ```
 
 ---
@@ -174,9 +190,6 @@ server/
 /codascope/projects              → ProjectList
 /codascope/project/:id/dashboard → ProjectDashboard
 /codascope/project/:id/wiki      → WikiBrowser
-/codascope/project/:id/quality   → QualityDashboard
-/codascope/project/:id/rules     → GoldenRules
-/codascope/project/:id/concepts  → ConceptExplorer
 /codascope/project/:id/skills    → SkillsManager
 /codascope/project/:id/settings  → Settings
 /codascope/project/:id/epics     → EpicList
@@ -191,7 +204,7 @@ Backend API routes are split into domain-specific sub-modules under `server/rout
 
 - `codaScopeServiceContext.ts` — shared service context, `ensureServices()`, helper utilities
 - `codaScopeCoreRoutes.ts` — config, projects, repositories, models
-- `codaScopeWikiRoutes.ts` — wiki CRUD, concepts, golden rules, quality, code map
+- `codaScopeWikiRoutes.ts` — wiki CRUD, wiki state, pending deletions, code map
 - `codaScopeBuildRoutes.ts` — skills, runs, build status, log streaming, analyze
 - `codaScopeChatRoutes.ts` — conversations, messages, assistant, images
 - `codaScopeEpicRoutes.ts` — epic CRUD, scope, designs, versions, rendering
@@ -207,7 +220,6 @@ Analysis runs through a multi-step pipeline orchestrated by the `analyze` endpoi
 
 1. **Code Map** — scans repository structure → `code_map_<repo-slug>.md`
 2. **Wiki Generation** — builds topic pages from code map → `wiki/*.md`
-3. **Quality Scan** — evaluates code against golden rules → `quality/*.json`
 
 Each step emits SSE events that the frontend renders as a live pipeline progress visualization.
 
@@ -304,11 +316,11 @@ This hybrid approach avoids token waste (no guessing at relevance) and gives the
 
 ### Tool Set
 
-Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool definitions are organized into four builder functions:
-- `buildReadOnlyTools()` — wiki, quality, code map, concepts, golden rules, build status
-- `buildEpicTools()` — epic CRUD, scope management, design doc operations
-- `buildWriteTools()` — wiki write, code map write, quality write
-- `buildArtifactTools()` — artifact HTML read/write, epic context assembly
+Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool implementations live in `tools/` subdirectory, organized into four builder functions:
+- `buildReadOnlyTools()` — wiki, code map, build status, skills (14 tools in `tools/codaScopeReadOnlyTools.ts`)
+- `buildEpicTools()` — epic CRUD, scope, design docs, research, wiki write (21 tools in `tools/codaScopeEpicTools.ts`)
+- `buildWriteTools()` — code map write (1 tool in `tools/codaScopeWriteTools.ts`)
+- `buildArtifactTools()` — artifact HTML read/write, epic context assembly (3 tools in `tools/codaScopeArtifactTools.ts`)
 
 Purpose-based filtering:
 - **Assistant/chat** → ALL tools (read + write + epic + artifact) — full agent autonomy
@@ -325,9 +337,6 @@ The table below is a representative subset of read-only tools:
 | `search_wiki(query)` | Full-text search results |
 | `read_code_map(repoName)` | Repository architecture map |
 | `list_repositories` | Repo names and filesystem paths |
-| `read_quality_report` | Quality scores, top issues, violations |
-| `list_golden_rules` | Active coding standards |
-| `list_concepts` | Extracted domain concepts |
 | `read_build_status` | Current and historical build state |
 | `list_project_skills` | Available framework commands |
 
@@ -345,7 +354,7 @@ The agent can propose structured actions via XML tags embedded in responses:
 
 **Server-side** (`codaScopeActionParser.ts`):
 - Extracts all `<codascope_action>` tags from agent text
-- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `run_quality_scan`, `navigate`, `create_golden_rule`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`
+- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `navigate`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`
 - **Notification-only tags**: `design_doc_created`, `design_doc_edited`, and `artifact_built` are emitted automatically by agent write tools — they are not user-actionable cards in the ActionCard UI. They trigger side effects (auto-navigation, diff highlighting, build status updates) via the command bus.
 - Parsed actions are stored in `message.metadata.actions`
 
@@ -491,11 +500,12 @@ Unresolved variables are left as-is (the agent can still see them as placeholder
 
 | Service | Responsibility |
 |---------|---------------|
-| `codaScopeConceptService.ts` | Domain concept extraction and storage from codebase analysis |
-| `codaScopeGoldenRuleService.ts` | CRUD for coding/architectural standards used in quality scans |
-| `codaScopeQualityService.ts` | Quality scan result persistence, scoring, and category breakdown |
 | `codaScopeSkillService.ts` | Framework + project skills management and listing |
 | `codaScopeImageService.ts` | Image upload, storage, and serving for design docs and chat |
+| `codaScopeLockService.ts` | Edit lock acquire, heartbeat, release, and expiry cleanup |
+| `codaScopeDirectiveService.ts` | Insertion directive CRUD and batch execution |
+| `codaScopeProjectDirResolver.ts` | Cached project directory resolution for cross-service use |
+| `codaScopeWebSearchService.ts` | Web search integration for research pipeline |
 
 ---
 

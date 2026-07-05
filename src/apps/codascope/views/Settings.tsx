@@ -345,7 +345,7 @@ export function Settings() {
           <IconFolderOpen size={14} /> Projects Root Directory
         </div>
         <div className="codascope-settings-section-desc">
-          All CodaScope project data (wiki, build logs, code maps, quality reports) is stored in this directory.
+          All CodaScope project data (wiki, build logs, code maps, conversations) is stored in this directory.
         </div>
         {!editingRoot ? (
           <div className="codascope-settings-root-display">

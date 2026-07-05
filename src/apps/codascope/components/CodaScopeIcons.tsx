@@ -152,16 +152,7 @@ export function IconKey({ size = 16, style, className }: IconProps) {
   );
 }
 
-/** Link chain — Cross-cutting */
-export function IconLink({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <path d="M7 9l2-2" />
-      <path d="M5.5 7.5L3.3 9.7a2.5 2.5 0 003.5 3.5l2.2-2.2" />
-      <path d="M10.5 8.5l2.2-2.2a2.5 2.5 0 00-3.5-3.5L7 5" />
-    </svg>
-  );
-}
+
 
 /** Star sparkle — Features */
 export function IconSparkle({ size = 16, style, className }: IconProps) {
@@ -181,37 +172,7 @@ export function IconBolt({ size = 16, style, className }: IconProps) {
   );
 }
 
-/** Building blocks — Architecture */
-export function IconArchitecture({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <rect x="2" y="9" width="5" height="5" rx="0.5" />
-      <rect x="9" y="9" width="5" height="5" rx="0.5" />
-      <rect x="5.5" y="2" width="5" height="5" rx="0.5" />
-    </svg>
-  );
-}
 
-/** Lock — Security */
-export function IconLock({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <rect x="3" y="7" width="10" height="7" rx="1" />
-      <path d="M5 7V5a3 3 0 016 0v2" />
-    </svg>
-  );
-}
-
-/** Flask — Testing */
-export function IconFlask({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <path d="M6 2v4L2.5 12a1 1 0 00.9 1.5h9.2a1 1 0 00.9-1.5L10 6V2" />
-      <line x1="5" y1="2" x2="11" y2="2" />
-      <line x1="4" y1="9.5" x2="12" y2="9.5" />
-    </svg>
-  );
-}
 
 /** Paintbrush — Style */
 export function IconPaintbrush({ size = 16, style, className }: IconProps) {
@@ -634,16 +595,7 @@ export function IconPlan({ size = 16, style, className }: IconProps) {
   );
 }
 
-/** Compass — Navigation / Direction */
-export function IconCompass({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <circle cx="8" cy="8" r="6.5" />
-      <polygon points="6,10 5,5 10,6 11,11" />
-      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
+
 
 /** Browser viewport with code brackets — Visual Artifact */
 export function IconArtifact({ size = 16, style, className }: IconProps) {

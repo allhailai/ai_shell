@@ -110,8 +110,8 @@ Always follow this pattern when adding write operations to conversation files.
 
 The chat agent is built on a **manifest + tool use** architecture:
 
-- The agent receives a **lightweight manifest** (~500 tokens) — project name, repo list, wiki topic titles, golden rule names, concept names, quality score, build status, and freshness timestamps
-- The agent has **read-only tools** to fetch full content on demand (wiki pages, quality reports, code maps, etc.)
+- The agent receives a **lightweight manifest** (~500 tokens) — project name, repo list, wiki topic titles, build status, and freshness timestamps
+- The agent has **read-only tools** to fetch full content on demand (wiki pages, code maps, etc.)
 - The agent **decides what to read** based on the user's question — it is not force-fed content
 - **Tool safety**: assistant/chat = ALL tools (full autonomy — read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic tools. Artifact-build/regen = read + artifact tools.
 
@@ -119,7 +119,7 @@ When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
 - Add corresponding card rendering in `ActionCard.tsx`
 - Actions must dispatch through existing CodaScope APIs — never bypass the API layer
-- New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, `buildWriteTools()`, or `buildArtifactTools()` in `codaScopeToolDefinitions.ts`
+- New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, `buildWriteTools()`, or `buildArtifactTools()` in the `tools/` subdirectory under `server/services/tools/`
 - Artifact tools (`write_artifact_html`, `read_artifact_html`, `read_epic_context`) are in `buildArtifactTools()`
 - Tool safety: assistant/chat = ALL tools (read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic. Artifact-build/regen = read + artifact.
 - Update `do_chat.md` system prompt with new tool descriptions and behavioral guidance
@@ -132,12 +132,16 @@ When extending agent capabilities:
 |------|-------|
 | New view component | `views/<ViewName>.tsx` |
 | New reusable component | `components/<ComponentName>.tsx` |
+| New custom React hook | `hooks/use<HookName>.ts` |
 | New agent command | `commands/do_<action>.md` |
+| New agent tool definition | `server/services/tools/codaScope<Domain>Tools.ts` |
 | New backend service | `server/services/codaScope<Domain>Service.ts` |
 | New API endpoints | Add to the appropriate domain route file in `server/routes/codaScope*Routes.ts` |
 | New artifact component | `components/artifact-viewer/<ComponentName>.tsx` |
+| New artifact hook | `components/artifact-viewer/hooks/use<HookName>.ts` |
 | New artifact service | `server/services/codaScopeArtifact*Service.ts` |
 | Artifact API endpoints | `server/routes/codaScopeArtifactRoutes.ts` |
+| New slash commands | `commandRegistry.ts` |
 | New styles | Add to `codascope.css` (or `CodaScopeAssistant.css` for assistant) |
 | New icons | Add to `components/CodaScopeIcons.tsx` |
 

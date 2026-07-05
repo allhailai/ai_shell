@@ -103,7 +103,7 @@ export function ProjectList() {
               onKeyDown={(e) => e.key === "Enter" && handleSetup()}
             />
             <div className="codascope-form-hint">
-              CodaScope will create a <code>codascope_projects</code> folder here for all project data (wiki pages, quality reports, etc).
+              CodaScope will create a <code>codascope_projects</code> folder here for all project data (wiki pages, build logs, etc).
             </div>
           </div>
 
@@ -226,8 +226,8 @@ export function ProjectList() {
                   <div className="codascope-card-stat-label">Wiki Pages</div>
                 </div>
                 <div className="codascope-card-stat">
-                  <div className="codascope-card-stat-value">{project.conceptCount ?? 0}</div>
-                  <div className="codascope-card-stat-label">Concepts</div>
+                  <div className="codascope-card-stat-value">{project.epicCount ?? 0}</div>
+                  <div className="codascope-card-stat-label">Epics</div>
                 </div>
               </div>
             </div>
