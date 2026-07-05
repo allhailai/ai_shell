@@ -1585,6 +1585,7 @@
 }
 
 .codascope-guide-modal {
+  position: relative;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
@@ -1595,6 +1596,7 @@
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: codascope-guide-slide 0.25s ease-out;
+  overflow: hidden;
 }
 
 @keyframes codascope-guide-slide {
@@ -1641,6 +1643,39 @@
 .codascope-guide-modal-close:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
+}
+
+.codascope-guide-modal-header:active {
+  cursor: grabbing;
+}
+
+/* ── Resize Handle ────────────────────────────────────────────────── */
+
+.codascope-guide-modal-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 10;
+}
+
+.codascope-guide-modal-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--color-text-tertiary);
+  border-bottom: 2px solid var(--color-text-tertiary);
+  opacity: 0.4;
+  transition: opacity var(--transition-fast);
+}
+
+.codascope-guide-modal-resize-handle:hover::after {
+  opacity: 0.8;
 }
 
 /* ── Tab Bar ──────────────────────────────────────────────────────── */

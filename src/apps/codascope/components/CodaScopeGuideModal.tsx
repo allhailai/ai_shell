@@ -6,6 +6,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   IconSearch,
   IconWiki,
@@ -458,6 +459,14 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
   const [activeTab, setActiveTab] = useState<GuideTab>(initialTab);
   const modalRef = useRef<HTMLDivElement>(null);
 
+  // ── Drag state ──────────────────────────────────────────────────
+  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+  // ── Resize state ────────────────────────────────────────────────
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
+
   // Reset tab when opened with a specific initial tab
   useEffect(() => {
     if (isOpen) {
@@ -483,6 +492,95 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
     [onClose],
   );
 
+  // ── Drag handlers ───────────────────────────────────────────────
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // Only drag from the header itself, not buttons inside it
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    const rect = modal.getBoundingClientRect();
+    const currentX = position?.x ?? rect.left;
+    const currentY = position?.y ?? rect.top;
+
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: currentX,
+      origY: currentY,
+    };
+
+    const handleMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = ev.clientX - dragRef.current.startX;
+      const dy = ev.clientY - dragRef.current.startY;
+      setPosition({
+        x: dragRef.current.origX + dx,
+        y: dragRef.current.origY + dy,
+      });
+    };
+
+    const handleUp = () => {
+      dragRef.current = null;
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  }, [position]);
+
+  // ── Resize handlers ─────────────────────────────────────────────
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    const rect = modal.getBoundingClientRect();
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origW: size?.w ?? rect.width,
+      origH: size?.h ?? rect.height,
+    };
+
+    // Also pin position if not already pinned
+    if (!position) {
+      setPosition({ x: rect.left, y: rect.top });
+    }
+
+    const handleMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const dw = ev.clientX - resizeRef.current.startX;
+      const dh = ev.clientY - resizeRef.current.startY;
+      setSize({
+        w: Math.max(400, resizeRef.current.origW + dw),
+        h: Math.max(300, resizeRef.current.origH + dh),
+      });
+    };
+
+    const handleUp = () => {
+      resizeRef.current = null;
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  }, [size, position]);
+
+  // Reset position/size when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      setSize(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const renderTab = () => {
@@ -495,11 +593,31 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
     }
   };
 
-  return (
+  // Build inline styles for positioned/resized modal
+  const modalStyle: React.CSSProperties = {};
+  if (position) {
+    modalStyle.position = "fixed";
+    modalStyle.left = position.x;
+    modalStyle.top = position.y;
+    modalStyle.transform = "none";
+    modalStyle.margin = 0;
+  }
+  if (size) {
+    modalStyle.width = size.w;
+    modalStyle.height = size.h;
+    modalStyle.maxWidth = "none";
+    modalStyle.maxHeight = "none";
+  }
+
+  return createPortal(
     <div className="codascope-guide-modal-backdrop" onClick={handleBackdropClick}>
-      <div className="codascope-guide-modal" ref={modalRef}>
-        {/* Header */}
-        <div className="codascope-guide-modal-header">
+      <div className="codascope-guide-modal" ref={modalRef} style={modalStyle}>
+        {/* Header — draggable */}
+        <div
+          className="codascope-guide-modal-header"
+          onMouseDown={handleDragStart}
+          style={{ cursor: "grab" }}
+        >
           <h2>CodaScope Guide</h2>
           <button
             className="codascope-guide-modal-close"
@@ -529,7 +647,14 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
         <div className="codascope-guide-modal-content">
           {renderTab()}
         </div>
+
+        {/* Resize Handle */}
+        <div
+          className="codascope-guide-modal-resize-handle"
+          onMouseDown={handleResizeStart}
+        />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
