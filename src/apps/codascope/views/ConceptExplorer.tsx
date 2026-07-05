@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import {
   IconSearch,
   IconArchitecture,
@@ -43,11 +44,23 @@ const CATEGORIES: { key: string; label: string; icon: ComponentType<{ size?: num
 
 export function ConceptExplorer() {
   const { activeProjectId: activeProject } = useCodaScopeStore();
+  const { getParam, setParam } = useAppSubRoute("codascope");
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState("all");
+  const [search, setSearchRaw] = useState(getParam("q") ?? "");
+  const [activeCategory, setActiveCategoryRaw] = useState(getParam("cat") ?? "all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Sync filter state to URL
+  const setSearch = useCallback((v: string) => {
+    setSearchRaw(v);
+    setParam("q", v || null);
+  }, [setParam]);
+
+  const setActiveCategory = useCallback((v: string) => {
+    setActiveCategoryRaw(v);
+    setParam("cat", v === "all" ? null : v);
+  }, [setParam]);
   const [showAddModal, setShowAddModal] = useState(false);
 
   const fetchConcepts = useCallback(async () => {

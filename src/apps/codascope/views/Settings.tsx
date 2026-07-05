@@ -309,8 +309,8 @@ export function Settings() {
             <code className="codascope-settings-api-key-value">{apiKeyMasked}</code>
           </div>
         )}
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
-          <div style={{ flex: 1 }}>
+        <div className="codascope-settings-input-row">
+          <div className="codascope-settings-flex-1">
             <label className="codascope-form-label" htmlFor="cursor-api-key">
               {apiKeyMasked ? "Replace API Key" : "Enter API Key"}
             </label>
@@ -325,11 +325,10 @@ export function Settings() {
             />
           </div>
           <button
-            className="codascope-btn codascope-btn-primary"
+            className="codascope-btn codascope-btn-primary codascope-settings-save-key-btn"
             onClick={handleSaveApiKey}
             disabled={apiKeySaving || !apiKey.trim()}
             type="button"
-            style={{ marginBottom: "1px" }}
           >
             {apiKeySaving ? "Validating…" : "Save Key"}
           </button>
@@ -345,8 +344,8 @@ export function Settings() {
           All CodaScope project data (wiki, build logs, code maps, quality reports) is stored in this directory.
         </div>
         {!editingRoot ? (
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
-            <code className="codascope-settings-api-key-value" style={{ flex: 1 }}>{projectsRoot || "(not set)"}</code>
+          <div className="codascope-settings-root-display">
+            <code className="codascope-settings-api-key-value codascope-settings-flex-1">{projectsRoot || "(not set)"}</code>
             <button
               className="codascope-btn codascope-btn-ghost"
               onClick={() => { setNewRoot(projectsRoot); setEditingRoot(true); setRootError(null); }}
@@ -356,16 +355,15 @@ export function Settings() {
             </button>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          <div className="codascope-settings-root-edit">
+            <div className="codascope-settings-root-edit-row">
               <input
-                className="codascope-form-input"
+                className="codascope-form-input codascope-settings-flex-1"
                 id="projects-root-input"
                 type="text"
                 value={newRoot}
                 onChange={(e) => setNewRoot(e.target.value)}
                 placeholder="/path/to/codascope_projects"
-                style={{ flex: 1 }}
               />
               <button
                 className="codascope-btn codascope-btn-ghost"
@@ -377,9 +375,9 @@ export function Settings() {
               </button>
             </div>
             {rootError && (
-              <div style={{ color: "var(--color-error, #ef4444)", fontSize: "var(--text-xs)" }}>{rootError}</div>
+              <div className="codascope-settings-root-error">{rootError}</div>
             )}
-            <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <div className="codascope-settings-root-actions">
               <button
                 className="codascope-btn codascope-btn-primary"
                 disabled={rootSaving || !newRoot.trim() || newRoot.trim() === projectsRoot}
@@ -462,26 +460,17 @@ export function Settings() {
         </div>
 
         {project.repositories.map((repo) => (
-          <div key={repo.id} style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "var(--space-3) var(--space-4)",
-            marginBottom: "var(--space-2)",
-            borderRadius: "var(--radius-md)",
-            background: "var(--color-bg-tertiary)",
-          }}>
+          <div key={repo.id} className="codascope-settings-repo-row">
             <div>
-              <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--color-text-primary)" }}>
+              <div className="codascope-settings-repo-name">
                 {repo.name}
               </div>
-              <div style={{ fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-tertiary)" }}>
+              <div className="codascope-settings-repo-path">
                 {repo.path}
               </div>
             </div>
             <button
-              className="codascope-btn codascope-btn-ghost"
-              style={{ fontSize: "var(--text-xs)", color: "var(--color-danger)" }}
+              className="codascope-btn codascope-btn-ghost codascope-settings-repo-remove"
               onClick={() => handleRemoveRepo(repo.id)}
               type="button"
             >
@@ -491,36 +480,29 @@ export function Settings() {
         ))}
 
         {/* Add repo form */}
-        <div style={{
-          display: "flex",
-          gap: "var(--space-3)",
-          marginTop: "var(--space-4)",
-          alignItems: "flex-end",
-        }}>
-          <div style={{ flex: 1 }}>
+        <div className="codascope-settings-add-repo-form">
+          <div className="codascope-settings-flex-1">
             <label className="codascope-form-label" htmlFor="repo-path">Repository Path</label>
-            <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <div className="codascope-settings-repo-path-input-row">
               <input
-                className="codascope-form-input"
+                className="codascope-form-input codascope-settings-flex-1"
                 id="repo-path"
                 type="text"
                 placeholder="/path/to/repository"
                 value={repoPath}
                 onChange={(e) => setRepoPath(e.target.value)}
-                style={{ flex: 1 }}
               />
               <button
-                className="codascope-btn codascope-btn-secondary"
+                className="codascope-btn codascope-btn-secondary codascope-settings-browse-btn"
                 onClick={() => setShowFolderPicker(true)}
                 type="button"
                 title="Browse filesystem to select a repository folder"
-                style={{ whiteSpace: "nowrap", flexShrink: 0 }}
               >
                 <IconFolderOpen size={12} /> Browse
               </button>
             </div>
           </div>
-          <div style={{ width: "200px" }}>
+          <div className="codascope-settings-repo-name-col">
             <label className="codascope-form-label" htmlFor="repo-name">Name (optional)</label>
             <input
               className="codascope-form-input"

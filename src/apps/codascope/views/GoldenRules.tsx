@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback, type ComponentType } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import {
   IconLock,
   IconArchitecture,
@@ -46,13 +47,25 @@ const SEVERITIES = [
 
 export function GoldenRules() {
   const { activeProjectId: activeProject } = useCodaScopeStore();
+  const { getParam, setParam } = useAppSubRoute("codascope");
   const [rules, setRules] = useState<GoldenRule[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filterCategory, setFilterCategory] = useState<string>("");
-  const [filterSeverity, setFilterSeverity] = useState<string>("");
+  const [filterCategory, setFilterCategoryRaw] = useState<string>(getParam("cat") ?? "");
+  const [filterSeverity, setFilterSeverityRaw] = useState<string>(getParam("sev") ?? "");
   const [showAddModal, setShowAddModal] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Sync filter state to URL
+  const setFilterCategory = useCallback((v: string) => {
+    setFilterCategoryRaw(v);
+    setParam("cat", v || null);
+  }, [setParam]);
+
+  const setFilterSeverity = useCallback((v: string) => {
+    setFilterSeverityRaw(v);
+    setParam("sev", v || null);
+  }, [setParam]);
 
   const fetchRules = useCallback(async () => {
     if (!activeProject) return;

@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { DiffViewer } from "../components/DiffViewer";
 import { IconCurate, IconCheckCircle, IconWarning, IconClock } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EpicVersion, VersionDiff, CurationLogEntry, CurationResults } from "../codaScopeTypes";
@@ -85,16 +86,41 @@ function summarizeResults(results?: CurationResults): string {
 
 export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { getParam, setParam } = useAppSubRoute("codascope");
 
   const [creating, setCreating] = useState(false);
   const [snapshotLabel, setSnapshotLabel] = useState("");
   const [snapshotNote, setSnapshotNote] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [compareMode, setCompareMode] = useState(false);
-  const [compareFrom, setCompareFrom] = useState<number | null>(null);
-  const [compareTo, setCompareTo] = useState<number | null>(null);
+
+  // URL-synced compare state
+  const urlFrom = getParam("cmpFrom");
+  const urlTo = getParam("cmpTo");
+  const [compareMode, setCompareModeRaw] = useState(urlFrom != null || urlTo != null);
+  const [compareFrom, setCompareFromRaw] = useState<number | null>(urlFrom ? Number(urlFrom) : null);
+  const [compareTo, setCompareToRaw] = useState<number | null>(urlTo ? Number(urlTo) : null);
   const [diff, setDiff] = useState<VersionDiff | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
+
+  const setCompareMode = useCallback((v: boolean) => {
+    setCompareModeRaw(v);
+    if (!v) {
+      setCompareFromRaw(null);
+      setCompareToRaw(null);
+      setParam("cmpFrom", null);
+      setParam("cmpTo", null);
+    }
+  }, [setParam]);
+
+  const setCompareFrom = useCallback((v: number | null) => {
+    setCompareFromRaw(v);
+    setParam("cmpFrom", v != null ? String(v) : null);
+  }, [setParam]);
+
+  const setCompareTo = useCallback((v: number | null) => {
+    setCompareToRaw(v);
+    setParam("cmpTo", v != null ? String(v) : null);
+  }, [setParam]);
 
   // Curation history state
   const [curationLogs, setCurationLogs] = useState<CurationLogEntry[]>([]);

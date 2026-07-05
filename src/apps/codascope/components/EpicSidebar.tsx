@@ -348,20 +348,13 @@ export function EpicSidebar({
             <>
               <div className="codascope-epic-sidebar-subitems-header">
                 <span>Wiki Pages</span>
-                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                <span className="codascope-epic-sidebar-subitems-count">
                   {wikiPages.length}
                 </span>
               </div>
               <div className="codascope-epic-sidebar-subitems-list">
                 {wikiPages.length === 0 && (
-                  <div
-                    style={{
-                      padding: "var(--space-3)",
-                      textAlign: "center",
-                      color: "var(--color-text-tertiary)",
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
+                  <div className="codascope-epic-sidebar-empty-msg">
                     No wiki pages yet
                   </div>
                 )}
@@ -393,20 +386,13 @@ export function EpicSidebar({
             <>
               <div className="codascope-epic-sidebar-subitems-header">
                 <span>Sources</span>
-                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                <span className="codascope-epic-sidebar-subitems-count">
                   {sources.length}
                 </span>
               </div>
               <div className="codascope-epic-sidebar-subitems-list">
                 {sources.length === 0 && (
-                  <div
-                    style={{
-                      padding: "var(--space-3)",
-                      textAlign: "center",
-                      color: "var(--color-text-tertiary)",
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
+                  <div className="codascope-epic-sidebar-empty-msg">
                     No sources yet
                   </div>
                 )}
@@ -453,20 +439,13 @@ export function EpicSidebar({
             <>
               <div className="codascope-epic-sidebar-subitems-header">
                 <span>Failed Sources</span>
-                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                <span className="codascope-epic-sidebar-subitems-count">
                   {failedCount}
                 </span>
               </div>
               <div className="codascope-epic-sidebar-subitems-list">
                 {failedCount === 0 && (
-                  <div
-                    style={{
-                      padding: "var(--space-3)",
-                      textAlign: "center",
-                      color: "var(--color-text-tertiary)",
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
+                  <div className="codascope-epic-sidebar-empty-msg">
                     No failed sources
                   </div>
                 )}
@@ -520,12 +499,7 @@ export function EpicSidebar({
                     <span className="codascope-epic-sidebar-blocked-item-url">
                       {item.url}
                     </span>
-                    <span
-                      style={{
-                        fontSize: "var(--text-2xs)",
-                        color: "var(--color-text-tertiary)",
-                      }}
-                    >
+                    <span className="codascope-epic-sidebar-blocked-reason">
                       {item.reason}
                     </span>
                   </div>
@@ -539,20 +513,13 @@ export function EpicSidebar({
             <>
               <div className="codascope-epic-sidebar-subitems-header">
                 <span>Design Docs</span>
-                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                <span className="codascope-epic-sidebar-subitems-count">
                   {designDocs.length}
                 </span>
               </div>
               <div className="codascope-epic-sidebar-subitems-list">
                 {designDocs.length === 0 && (
-                  <div
-                    style={{
-                      padding: "var(--space-3)",
-                      textAlign: "center",
-                      color: "var(--color-text-tertiary)",
-                      fontSize: "var(--text-xs)",
-                    }}
-                  >
+                  <div className="codascope-epic-sidebar-empty-msg">
                     No design docs yet
                   </div>
                 )}
@@ -584,16 +551,16 @@ export function EpicSidebar({
             <>
               <div className="codascope-epic-sidebar-subitems-header">
                 <span>Visual Artifacts</span>
-                <span style={{ fontWeight: "normal", textTransform: "none", letterSpacing: "0" }}>
+                <span className="codascope-epic-sidebar-subitems-count">
                   {artifacts.length}
                 </span>
               </div>
               <div className="codascope-epic-sidebar-subitems-list">
                 {artifacts.map((art) => {
-                  const statusColor =
-                    art.status === "built" ? "var(--color-success, #22c55e)"
-                    : art.status === "building" ? "var(--color-warning, #f59e0b)"
-                    : "var(--color-text-tertiary)";
+                  const dotModifier =
+                    art.status === "built" ? "codascope-epic-sidebar-artifact-dot--built"
+                    : art.status === "building" ? "codascope-epic-sidebar-artifact-dot--building"
+                    : "codascope-epic-sidebar-artifact-dot--pending";
 
                   return (
                     <button
@@ -613,15 +580,7 @@ export function EpicSidebar({
                         {art.title}
                       </span>
                       <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: statusColor,
-                          flexShrink: 0,
-                          marginLeft: "auto",
-                          animation: art.status === "building" ? "codascope-pulse 1.5s ease-in-out infinite" : undefined,
-                        }}
+                        className={`codascope-epic-sidebar-artifact-dot ${dotModifier}`}
                         title={art.status}
                       />
                     </button>
