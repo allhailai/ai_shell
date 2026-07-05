@@ -22,6 +22,10 @@ export function Settings() {
   const [saving, setSaving] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
 
+  // ── Remove confirmation modal state ─────────────────────────────────
+  const [pendingRemoveRepo, setPendingRemoveRepo] = useState<{ id: string; name: string } | null>(null);
+  const [removeConfirmText, setRemoveConfirmText] = useState("");
+
   // ── Projects root state ─────────────────────────────────────────────
 
   const [editingRoot, setEditingRoot] = useState(false);
@@ -471,7 +475,10 @@ export function Settings() {
             </div>
             <button
               className="codascope-btn codascope-btn-ghost codascope-settings-repo-remove"
-              onClick={() => handleRemoveRepo(repo.id)}
+              onClick={() => {
+                setPendingRemoveRepo({ id: repo.id, name: repo.name });
+                setRemoveConfirmText("");
+              }}
               type="button"
             >
               Remove
@@ -546,6 +553,81 @@ export function Settings() {
         title="Select Projects Root Directory"
         initialPath={newRoot || projectsRoot || undefined}
       />
+
+      {/* ── Remove repository confirmation modal ──────────────────────── */}
+      {pendingRemoveRepo && (
+        <div
+          className="codascope-modal-overlay"
+          onClick={() => setPendingRemoveRepo(null)}
+        >
+          <div
+            className="codascope-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="codascope-modal-header">
+              <div className="codascope-modal-title codascope-settings-remove-modal-title">
+                ⚠ Remove Repository
+              </div>
+              <button
+                className="codascope-modal-close"
+                onClick={() => setPendingRemoveRepo(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="codascope-modal-body">
+              <p className="codascope-settings-remove-modal-text">
+                You are about to remove <strong>{pendingRemoveRepo.name}</strong> from
+                this project. This action cannot be undone.
+              </p>
+              <label
+                className="codascope-form-label"
+                htmlFor="remove-repo-confirm"
+              >
+                Type <strong>YES</strong> to confirm
+              </label>
+              <input
+                className="codascope-form-input codascope-settings-remove-confirm-input"
+                id="remove-repo-confirm"
+                type="text"
+                autoFocus
+                placeholder="YES"
+                value={removeConfirmText}
+                onChange={(e) => setRemoveConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && removeConfirmText === "YES") {
+                    handleRemoveRepo(pendingRemoveRepo.id);
+                    setPendingRemoveRepo(null);
+                  }
+                }}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="codascope-modal-footer">
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                onClick={() => setPendingRemoveRepo(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="codascope-btn codascope-btn-danger"
+                disabled={removeConfirmText !== "YES"}
+                onClick={() => {
+                  handleRemoveRepo(pendingRemoveRepo.id);
+                  setPendingRemoveRepo(null);
+                }}
+                type="button"
+              >
+                Remove Repository
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

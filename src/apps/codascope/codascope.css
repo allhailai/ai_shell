@@ -7859,6 +7859,29 @@
   color: var(--color-danger);
 }
 
+.codascope-settings-remove-modal-title {
+  color: hsl(0, 70%, 68%);
+}
+
+.codascope-settings-remove-modal-text {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  margin: 0 0 var(--space-4) 0;
+}
+
+.codascope-settings-remove-modal-text strong {
+  color: var(--color-text-primary);
+}
+
+.codascope-settings-remove-confirm-input {
+  margin-top: var(--space-2);
+  text-align: center;
+  font-size: var(--text-base);
+  letter-spacing: 0.1em;
+  font-weight: var(--weight-semibold);
+}
+
 .codascope-settings-add-repo-form {
   display: flex;
   gap: var(--space-3);
