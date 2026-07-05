@@ -821,3 +821,23 @@ The `artifact:` prefix distinguishes artifact routes from design doc routes with
 | `POST` | `/epics/:epicId/artifacts/:artId/annotations/apply` | Batch apply pending annotations |
 | `GET` | `/epics/:epicId/artifacts/:artId/versions` | List build versions |
 | `POST` | `/epics/:epicId/artifacts/:artId/versions/:ver/revert` | Revert to version |
+
+## Level 17 — Discoverability System
+
+### Slash Command Palette
+- Triggered by `/` as first character in chat input
+- Command registry in `commandRegistry.ts` — single source of truth
+- Two behaviors: `dispatch` (direct API call) and `chat` (inject prompt)
+- Deterministic soft filtering by current view context
+
+### Guide Modal
+- Tabbed modal: Overview, Chat Agent, Projects & Wiki, Epics & Design, Shortcuts
+- Triggered by: nav help button, chat `?` button, `/help` command, first visit
+- Content is lean and visual — diagrams + expandable sections
+- Component: `CodaScopeGuideModal.tsx` (replaces old `ChatHelpModal.tsx`)
+
+### Agent Self-Awareness
+- `do_chat.md` includes capability summary
+- Agent answers "what can you do?" naturally
+- Only teaches when asked — no unsolicited suggestions
+

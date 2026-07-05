@@ -616,6 +616,69 @@ export function IconArrowRight({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Grid/compass — Map / Explore */
+export function IconMap({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 3.5l4-1.5v10L2 13.5V3.5z" />
+      <path d="M6 2l4 2v10l-4-2V2z" />
+      <path d="M10 4l4-1.5V13l-4 1V4z" />
+    </svg>
+  );
+}
+
+/** Open book with pages — Build Wiki */
+export function IconBook({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 2.5v10a1 1 0 001 1h10a1 1 0 001-1v-10" />
+      <path d="M2 2.5C2 2.5 4 1 8 1s6 1.5 6 1.5" />
+      <line x1="8" y1="1" x2="8" y2="13.5" />
+      <line x1="5" y1="5" x2="7" y2="5" />
+      <line x1="5" y1="7.5" x2="7" y2="7.5" />
+      <line x1="9" y1="5" x2="11" y2="5" />
+      <line x1="9" y1="7.5" x2="11" y2="7.5" />
+    </svg>
+  );
+}
+
+/** Shield with checkmark — Quality / Protect */
+export function IconShield({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 1.5L2.5 4v4c0 3.5 2.5 5.5 5.5 6.5 3-1 5.5-3 5.5-6.5V4L8 1.5z" />
+      <polyline points="5.5,8 7,9.5 10.5,6" />
+    </svg>
+  );
+}
+
+/** Clipboard with checklist — Plan / Epic */
+export function IconPlan({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="3" y="3" width="10" height="11" rx="1" />
+      <path d="M6 1h4v3H6z" />
+      <line x1="5.5" y1="7" x2="6.5" y2="7" />
+      <line x1="8" y1="7" x2="10.5" y2="7" />
+      <line x1="5.5" y1="9.5" x2="6.5" y2="9.5" />
+      <line x1="8" y1="9.5" x2="10.5" y2="9.5" />
+      <line x1="5.5" y1="12" x2="6.5" y2="12" />
+      <line x1="8" y1="12" x2="10.5" y2="12" />
+    </svg>
+  );
+}
+
+/** Compass — Navigation / Direction */
+export function IconCompass({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6.5" />
+      <polygon points="6,10 5,5 10,6 11,11" />
+      <circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Browser viewport with code brackets — Visual Artifact */
 export function IconArtifact({ size = 16, style, className }: IconProps) {
   return (

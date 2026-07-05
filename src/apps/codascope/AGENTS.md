@@ -220,6 +220,24 @@ When adding new pipeline steps:
 
 ---
 
+### Help System Content Sync
+
+CodaScope has a discoverability system (slash command palette + guide modal).
+The canonical source of truth for available commands is
+[`commandRegistry.ts`](commandRegistry.ts).
+
+When modifying commands, action types, or agent capabilities:
+1. Update `commandRegistry.ts` (slash commands, categories, descriptions)
+2. Update the guide modal content in `CodaScopeGuideModal.tsx` (if a new
+   capability category is added)
+3. Update the self-awareness section in `commands/do_chat.md`
+
+The guide modal reads from the command registry for the Chat Agent tab,
+so individual command changes are automatically reflected. Only structural
+changes (new categories, new tabs) require manual guide modal updates.
+
+---
+
 ## Testing Checklist
 
 Before marking work as complete:

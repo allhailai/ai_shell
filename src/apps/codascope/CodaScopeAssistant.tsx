@@ -17,12 +17,12 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch, IconCopy, IconCheck, IconCurate } from "./components/CodaScopeIcons";
+import { IconSearch, IconCopy, IconCheck, IconCurate, IconMap, IconBook, IconShield, IconPlan } from "./components/CodaScopeIcons";
 import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
-import { ChatHelpModal } from "./components/ChatHelpModal";
+import { CodaScopeGuideModal } from "./components/CodaScopeGuideModal";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
 import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
 import type { SlashCommand, CommandContext } from "./commandRegistry";
@@ -118,7 +118,8 @@ export function CodaScopeAssistant() {
 
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [helpModalOpen, setHelpModalOpen] = useState(false);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [guideInitialTab, setGuideInitialTab] = useState<"overview" | "chat-agent" | "projects" | "epics" | "shortcuts">("overview");
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // @-mention picker state
@@ -601,13 +602,16 @@ export function CodaScopeAssistant() {
 
       // ── Help commands ──
       case "help":
-        setHelpModalOpen(true);
+        setGuideInitialTab("overview");
+        setGuideModalOpen(true);
         break;
       case "commands":
-        setHelpModalOpen(true);
+        setGuideInitialTab("chat-agent");
+        setGuideModalOpen(true);
         break;
       case "shortcuts":
-        setHelpModalOpen(true);
+        setGuideInitialTab("shortcuts");
+        setGuideModalOpen(true);
         break;
 
       default:
@@ -676,6 +680,27 @@ export function CodaScopeAssistant() {
       setSlashActiveIndex(0);
     }
   }, [input, slashPaletteOpen]);
+
+  // ── First-visit auto-pop guide modal ─────────────────────────────
+
+  useEffect(() => {
+    const seen = localStorage.getItem("codascope-guide-seen");
+    if (!seen) {
+      setGuideModalOpen(true);
+      localStorage.setItem("codascope-guide-seen", "1");
+    }
+  }, []);
+
+  // ── Listen for codascope:open-guide from nav button ─────────────
+
+  useEffect(() => {
+    if (!commandBus) return;
+    const unsub = commandBus.on("codascope:open-guide", (() => {
+      setGuideInitialTab("overview");
+      setGuideModalOpen(true);
+    }) as (payload: unknown) => void);
+    return unsub;
+  }, [commandBus]);
 
   // ── Phase 3: Selection-to-chat listener ────────────────────────────
 
@@ -848,9 +873,62 @@ export function CodaScopeAssistant() {
             <div className="codascope-assistant-welcome-icon"><IconSearch size={24} /></div>
             <h3>CodaScope Assistant</h3>
             <p>
-              Ask questions about your codebase. I can browse your wiki,
-              search repositories, and help you understand the code.
+              I help you understand, document, and analyze your codebase.
             </p>
+            <div className="codascope-assistant-welcome-cards">
+              {wikiTopics.length === 0 ? (
+                /* New project — no wiki yet */
+                <>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Explore and map the codebase structure")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconMap size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Explore Codebase</span>
+                  </button>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Build wiki documentation from the code map")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconBook size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Build Wiki</span>
+                  </button>
+                </>
+              ) : (
+                /* Established project — wiki exists */
+                <>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Help me understand how this codebase is structured")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconSearch size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Ask About Code</span>
+                  </button>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Run a quality scan and explain the top issues")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconShield size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Check Quality</span>
+                  </button>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Help me plan a new feature epic")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconPlan size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Plan Epic</span>
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="codascope-assistant-welcome-hint">
+              Type <code>/</code> for commands &nbsp;·&nbsp; <code>@</code> to add context &nbsp;·&nbsp; <code>?</code> for the full guide
+            </div>
           </div>
         )}
 
@@ -969,10 +1047,10 @@ export function CodaScopeAssistant() {
             )}
             <button
               className="codascope-assistant-help-btn"
-              onClick={() => setHelpModalOpen(true)}
+              onClick={() => { setGuideInitialTab("overview"); setGuideModalOpen(true); }}
               type="button"
-              title="Chat help"
-              aria-label="Chat help"
+              title="CodaScope Guide"
+              aria-label="CodaScope Guide"
             >
               ?
             </button>
@@ -1036,7 +1114,7 @@ export function CodaScopeAssistant() {
             </svg>
           </button>
         </div>
-        <ChatHelpModal isOpen={helpModalOpen} onClose={() => setHelpModalOpen(false)} />
+        <CodaScopeGuideModal isOpen={guideModalOpen} onClose={() => setGuideModalOpen(false)} initialTab={guideInitialTab} />
 
         {/* Slash command toast */}
         {slashToast && (
