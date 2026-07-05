@@ -453,27 +453,53 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ doc: result.doc, contentHash: result.contentHash });
   }));
 
-  // Resize metadata — server-side atomic mutation (no lock, no version snapshot)
+  // Resize / delete metadata — server-side atomic mutation
   app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/resize", wrap(async (req, res) => {
     const { designDocSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const resize = req.body as { type: string; index: number; width?: number; height?: number };
-    if (!resize || !resize.type || resize.index === undefined) {
+    const body = req.body as { type: string; index: number; width?: number; height?: number };
+    if (!body || !body.type || body.index === undefined) {
       throw httpError("type and index are required.", 400, "invalid_input");
     }
-    if (resize.type === "mermaid" && resize.height === undefined) {
+    if (body.type === "mermaid" && body.height === undefined) {
       throw httpError("height is required for mermaid resize.", 400, "invalid_input");
     }
-    if (resize.type === "image" && (resize.width === undefined || resize.height === undefined)) {
+    if (body.type === "image" && (body.width === undefined || body.height === undefined)) {
       throw httpError("width and height are required for image resize.", 400, "invalid_input");
     }
-    const resizeOp = resize.type === "mermaid"
-      ? { type: "mermaid" as const, index: resize.index, height: resize.height! }
-      : { type: "image" as const, index: resize.index, width: resize.width!, height: resize.height! };
+
+    const isDelete = body.type.startsWith("delete-");
+
+    let resizeOp: import("../services/codaScopeDesignDocService.js").ResizeOp;
+    switch (body.type) {
+      case "mermaid":
+        resizeOp = { type: "mermaid", index: body.index, height: body.height! };
+        break;
+      case "image":
+        resizeOp = { type: "image", index: body.index, width: body.width!, height: body.height! };
+        break;
+      case "delete-mermaid":
+        resizeOp = { type: "delete-mermaid", index: body.index };
+        break;
+      case "delete-image":
+        resizeOp = { type: "delete-image", index: body.index };
+        break;
+      case "delete-codeblock":
+        resizeOp = { type: "delete-codeblock", index: body.index };
+        break;
+      default:
+        throw httpError(`Unknown operation type: ${body.type}`, 400, "invalid_input");
+    }
+
+    // Create a version snapshot before destructive deletes (best effort)
+    if (isDelete) {
+      try { await designDocSvc.createVersion(id, epicId, docId, "user", `Delete ${body.type.replace("delete-", "")}`); } catch { /* ignore */ }
+    }
+
     const result = await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);
-    if (!result) throw httpError("Design doc not found or resize target not found.", 404, "not_found");
+    if (!result) throw httpError("Design doc not found or target not found.", 404, "not_found");
     res.json({ doc: result.doc, content: result.content, contentHash: result.contentHash });
   }));
 

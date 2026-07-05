@@ -21,6 +21,12 @@ interface MarkdownViewerProps {
   onMermaidResize?: (index: number, height: number) => void;
   /** Callback when user resizes an image. index = occurrence order, width/height = new px values. */
   onImageResize?: (index: number, width: number, height: number) => void;
+  /** Callback when user deletes a mermaid diagram. index = occurrence order. */
+  onMermaidDelete?: (index: number) => void;
+  /** Callback when user deletes an image. index = occurrence order. */
+  onImageDelete?: (index: number) => void;
+  /** Callback when user deletes a code block. index = occurrence order (excludes mermaid). */
+  onCodeBlockDelete?: (index: number) => void;
 }
 
 // ── Mermaid CDN loader (shared singleton) ───────────────────────────
@@ -130,6 +136,51 @@ function scaleMermaidToHeight(container: HTMLElement, targetHeight: number): voi
   diagram.style.transformOrigin = "top center";
   // Set container height to scaled diagram + padding
   container.style.height = `${Math.ceil(natH * scale + padTop + padBottom)}px`;
+}
+
+// ── Delete button helper ────────────────────────────────────────────
+
+/**
+ * Attaches a hover-revealed delete button (with confirmation) to a container.
+ * The button appears in the top-right on hover and requires a confirmation click.
+ */
+function attachDeleteButton(
+  container: HTMLElement,
+  onDelete: () => void,
+  className: string,
+): void {
+  const btn = document.createElement("button");
+  btn.className = className;
+  btn.type = "button";
+  btn.title = "Delete";
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>`;
+
+  let confirming = false;
+  let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (confirming) {
+      // Second click — execute delete
+      if (confirmTimer) clearTimeout(confirmTimer);
+      onDelete();
+    } else {
+      // First click — enter confirmation state
+      confirming = true;
+      btn.classList.add("shared-md-delete-confirming");
+      btn.title = "Click again to confirm";
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg><span class="shared-md-delete-confirm-label">Delete?</span>`;
+      confirmTimer = setTimeout(() => {
+        confirming = false;
+        btn.classList.remove("shared-md-delete-confirming");
+        btn.title = "Delete";
+        btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>`;
+      }, 3000);
+    }
+  });
+
+  container.appendChild(btn);
 }
 
 function attachResizeHandle(
@@ -242,11 +293,18 @@ export function MarkdownViewer({
   onWikiLink,
   onMermaidResize,
   onImageResize,
+  onMermaidDelete,
+  onImageDelete,
+  onCodeBlockDelete,
 }: MarkdownViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Track resize callbacks in refs so the useEffect closure stays stable
+  // Track resize/delete callbacks in refs so the useEffect closure stays stable
   const onMermaidResizeRef = useRef(onMermaidResize);
   onMermaidResizeRef.current = onMermaidResize;
+  const onMermaidDeleteRef = useRef(onMermaidDelete);
+  onMermaidDeleteRef.current = onMermaidDelete;
+  const onCodeBlockDeleteRef = useRef(onCodeBlockDelete);
+  onCodeBlockDeleteRef.current = onCodeBlockDelete;
 
   // ── Render mermaid blocks after mount ────────────────────────────
 
@@ -326,6 +384,13 @@ export function MarkdownViewer({
           attachResizeHandle(resizable, (newHeight) => {
             onMermaidResizeRef.current?.(currentIndex, newHeight);
           });
+
+          // Attach delete button if callback provided
+          if (onMermaidDeleteRef.current) {
+            attachDeleteButton(resizable, () => {
+              onMermaidDeleteRef.current?.(currentIndex);
+            }, "shared-md-element-delete-btn");
+          }
         } catch {
           pre.dataset.mermaidRendered = "true";
           const errorEl = document.createElement("div");
@@ -341,6 +406,44 @@ export function MarkdownViewer({
     return () => { cancelled = true; };
   }, [content]);
 
+  // ── Attach delete buttons to non-mermaid code blocks ──────────────
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Find all <pre> elements that contain <code> elements (code blocks)
+    const allPre = container.querySelectorAll<HTMLElement>("pre");
+    let codeBlockIndex = 0;
+
+    for (const pre of allPre) {
+      // Skip mermaid-rendered blocks (they have their own delete button)
+      if (pre.dataset.mermaidRendered === "true" || pre.classList.contains("shared-md-mermaid-rendered-pre")) {
+        continue;
+      }
+
+      const code = pre.querySelector("code");
+      if (!code) continue;
+
+      // Skip if already has a delete button
+      if (pre.dataset.deleteAttached === "true") {
+        codeBlockIndex++;
+        continue;
+      }
+
+      if (onCodeBlockDeleteRef.current) {
+        pre.dataset.deleteAttached = "true";
+        pre.style.position = "relative";
+        const currentIdx = codeBlockIndex;
+        attachDeleteButton(pre, () => {
+          onCodeBlockDeleteRef.current?.(currentIdx);
+        }, "shared-md-element-delete-btn shared-md-codeblock-delete-btn");
+      }
+
+      codeBlockIndex++;
+    }
+  }, [content]);
+
   // ── Process wiki links [[topic]] ──────────────────────────────────
 
   const processWikiLinks = useCallback((text: string): string => {
@@ -353,9 +456,11 @@ export function MarkdownViewer({
 
   // ── Custom component overrides ────────────────────────────────────
 
-  // Track image resize callback in ref
+  // Track image resize/delete callbacks in refs
   const onImageResizeRef = useRef(onImageResize);
   onImageResizeRef.current = onImageResize;
+  const onImageDeleteRef = useRef(onImageDelete);
+  onImageDeleteRef.current = onImageDelete;
   const imageIndexRef = useRef(0);
 
   // Reset image index counter on each render
@@ -382,6 +487,13 @@ export function MarkdownViewer({
         attachImageResizeHandle(wrapper, img, (w, h) => {
           onImageResizeRef.current?.(currentIdx, w, h);
         });
+
+        // Attach delete button if callback provided
+        if (onImageDeleteRef.current) {
+          attachDeleteButton(wrapper, () => {
+            onImageDeleteRef.current?.(currentIdx);
+          }, "shared-md-element-delete-btn");
+        }
       };
 
       return (

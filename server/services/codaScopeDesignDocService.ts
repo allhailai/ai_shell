@@ -48,11 +48,14 @@ interface DesignDocVersionsIndex {
   maxVersions: number;
 }
 
-/* ── Resize types ─────────────────────────────────────────────────── */
+/* ── Resize / delete types ────────────────────────────────────────── */
 
 export type ResizeOp =
   | { type: "mermaid"; index: number; height: number }
-  | { type: "image"; index: number; width: number; height: number };
+  | { type: "image"; index: number; width: number; height: number }
+  | { type: "delete-mermaid"; index: number }
+  | { type: "delete-image"; index: number }
+  | { type: "delete-codeblock"; index: number };
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
@@ -388,9 +391,10 @@ export class CodaScopeDesignDocService {
   /* ── Server-Side Resize ─────────────────────────────────────────────── */
 
   /**
-   * Apply resize metadata to the document content server-side.
-   * Reads the current content.md from disk, applies the resize transformation,
-   * and writes it back. Does NOT create a version snapshot (resizes are cosmetic).
+   * Apply resize or delete mutation to the document content server-side.
+   * Reads the current content.md from disk, applies the transformation,
+   * and writes it back. Resize ops do NOT create version snapshots (cosmetic);
+   * delete ops DO create snapshots (destructive).
    * Returns the updated content + hash, or null if the doc doesn't exist.
    */
   async applyResizeMetadata(
@@ -449,6 +453,123 @@ export class CodaScopeDesignDocService {
         }
         imgIdx++;
       }
+    } else if (resize.type === "delete-mermaid") {
+      // Remove the Nth mermaid fence block (opening fence + content + closing fence)
+      let mermaidIdx = 0;
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})\s*mermaid\s*(?:\{height=\d+\})?\s*$/);
+        if (fenceMatch) {
+          if (mermaidIdx === resize.index) {
+            const fenceChar = fenceMatch[2][0]; // ` or ~
+            const fenceLen = fenceMatch[2].length;
+            // Find closing fence
+            let closeIdx = -1;
+            for (let j = i + 1; j < lines.length; j++) {
+              const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
+              if (closeMatch) { closeIdx = j; break; }
+            }
+            if (closeIdx >= 0) {
+              // Remove lines i..closeIdx, plus trailing blank line if present
+              let removeEnd = closeIdx + 1;
+              if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
+              // Also remove leading blank line if present
+              let removeStart = i;
+              if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
+              lines.splice(removeStart, removeEnd - removeStart);
+              updated = true;
+            }
+            break;
+          }
+          mermaidIdx++;
+        }
+      }
+      if (updated) content = lines.join("\n");
+    } else if (resize.type === "delete-image") {
+      // Remove the Nth markdown image
+      let imgIdx = 0;
+      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+      let match: RegExpExecArray | null;
+
+      while ((match = imgRegex.exec(content)) !== null) {
+        if (imgIdx === resize.index) {
+          const before = content.slice(0, match.index);
+          const after = content.slice(match.index + match[0].length);
+          // If the image was on its own line, remove the entire line (+ trailing newline)
+          const lineStart = before.lastIndexOf("\n") + 1;
+          const lineEnd = after.indexOf("\n");
+          const lineBefore = before.slice(lineStart);
+          const lineAfter = lineEnd >= 0 ? after.slice(0, lineEnd) : after;
+          if (lineBefore.trim() === "" && lineAfter.trim() === "") {
+            // Image was alone on the line — remove the whole line
+            let removeFrom = lineStart > 0 ? lineStart - 1 : lineStart; // eat preceding newline
+            let removeTo = match.index + match[0].length + (lineEnd >= 0 ? lineEnd + 1 : after.length);
+            // Also eat one extra blank line after if present
+            const restAfter = content.slice(removeTo);
+            if (restAfter.startsWith("\n")) removeTo++;
+            content = content.slice(0, removeFrom) + content.slice(removeTo);
+          } else {
+            // Image is inline — just remove the tag
+            content = before + after;
+          }
+          updated = true;
+          break;
+        }
+        imgIdx++;
+      }
+    } else if (resize.type === "delete-codeblock") {
+      // Remove the Nth code fence block (any language, including bare fences)
+      let codeIdx = 0;
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})(.*)$/);
+        if (fenceMatch) {
+          // Skip mermaid fences — those are handled by delete-mermaid
+          const lang = fenceMatch[3].trim().split(/\s/)[0].toLowerCase();
+          if (lang === "mermaid") {
+            // Skip past the closing fence
+            const fc = fenceMatch[2][0];
+            const fl = fenceMatch[2].length;
+            for (let j = i + 1; j < lines.length; j++) {
+              if (new RegExp(`^\\s*${fc.replace(/[`~]/g, "\\$&")}{${fl},}\\s*$`).test(lines[j])) {
+                i = j;
+                break;
+              }
+            }
+            continue;
+          }
+          if (codeIdx === resize.index) {
+            const fenceChar = fenceMatch[2][0];
+            const fenceLen = fenceMatch[2].length;
+            // Find closing fence
+            let closeIdx = -1;
+            for (let j = i + 1; j < lines.length; j++) {
+              const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
+              if (closeMatch) { closeIdx = j; break; }
+            }
+            if (closeIdx >= 0) {
+              let removeEnd = closeIdx + 1;
+              if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
+              let removeStart = i;
+              if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
+              lines.splice(removeStart, removeEnd - removeStart);
+              updated = true;
+            }
+            break;
+          }
+          // Not our target — skip to closing fence
+          const fc = fenceMatch[2][0];
+          const fl = fenceMatch[2].length;
+          for (let j = i + 1; j < lines.length; j++) {
+            if (new RegExp(`^\\s*${fc.replace(/[`~]/g, "\\$&")}{${fl},}\\s*$`).test(lines[j])) {
+              i = j;
+              break;
+            }
+          }
+          codeIdx++;
+        }
+      }
+      if (updated) content = lines.join("\n");
     }
 
     if (!updated) return null;

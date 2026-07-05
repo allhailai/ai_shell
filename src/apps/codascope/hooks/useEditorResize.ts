@@ -1,8 +1,8 @@
 /* ── useEditorResize ────────────────────────────────────────────────
-   Mermaid diagram and image resize handlers for the DocumentEditor.
-   Delegates resize mutations to the server-side PATCH endpoint, which
+   Mermaid diagram and image resize + delete handlers for the DocumentEditor.
+   Delegates resize/delete mutations to the server-side PATCH endpoint, which
    reads → mutates → writes content.md atomically. This eliminates
-   stale-closure bugs and ensures resizes persist across page refresh.
+   stale-closure bugs and ensures changes persist across page refresh.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useRef } from "react";
@@ -17,6 +17,9 @@ interface UseEditorResizeOptions {
 interface UseEditorResizeResult {
   handleMermaidResize: (index: number, height: number) => Promise<void>;
   handleImageResize: (index: number, width: number, height: number) => Promise<void>;
+  handleMermaidDelete: (index: number) => Promise<void>;
+  handleImageDelete: (index: number) => Promise<void>;
+  handleCodeBlockDelete: (index: number) => Promise<void>;
 }
 
 export function useEditorResize({
@@ -84,5 +87,43 @@ export function useEditorResize({
     } catch { /* best effort */ }
   }, [epicId, docId]);
 
-  return { handleMermaidResize, handleImageResize };
+  /**
+   * Generic helper to send a delete-* operation to the server.
+   * Creates a version snapshot server-side before applying the deletion.
+   */
+  const sendDelete = useCallback(async (type: string, index: number) => {
+    const projId = activeProjectIdRef.current;
+    if (!projId) return;
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${projId}/epics/${epicId}/designs/${docId}/resize`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type, index }),
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        onContentChangeRef.current(data.content, data.contentHash);
+      }
+    } catch { /* best effort */ }
+  }, [epicId, docId]);
+
+  const handleMermaidDelete = useCallback(
+    (index: number) => sendDelete("delete-mermaid", index),
+    [sendDelete],
+  );
+
+  const handleImageDelete = useCallback(
+    (index: number) => sendDelete("delete-image", index),
+    [sendDelete],
+  );
+
+  const handleCodeBlockDelete = useCallback(
+    (index: number) => sendDelete("delete-codeblock", index),
+    [sendDelete],
+  );
+
+  return { handleMermaidResize, handleImageResize, handleMermaidDelete, handleImageDelete, handleCodeBlockDelete };
 }

@@ -79,7 +79,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
     onContentChange(newContent, newHash);
   }, [onContentChange]);
 
-  const { handleMermaidResize, handleImageResize } = useEditorResize({
+  const { handleMermaidResize, handleImageResize, handleMermaidDelete, handleImageDelete, handleCodeBlockDelete } = useEditorResize({
     activeProjectId,
     epicId,
     docId: doc.id,
@@ -793,6 +793,9 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
             onWikiLink={handleWikiLink}
             onMermaidResize={handleMermaidResize}
             onImageResize={handleImageResize}
+            onMermaidDelete={handleMermaidDelete}
+            onImageDelete={handleImageDelete}
+            onCodeBlockDelete={handleCodeBlockDelete}
           />
         </div>
       )}

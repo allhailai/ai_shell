@@ -72,6 +72,12 @@ interface DocumentBlockRendererProps {
   onMermaidResize: (index: number, height: number) => void;
   /** Image resize handler */
   onImageResize: (index: number, width: number, height: number) => void;
+  /** Mermaid diagram delete handler */
+  onMermaidDelete?: (index: number) => void;
+  /** Image delete handler */
+  onImageDelete?: (index: number) => void;
+  /** Code block delete handler */
+  onCodeBlockDelete?: (index: number) => void;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -86,6 +92,29 @@ function countMermaidFences(text: string): number {
 function countImages(text: string): number {
   const matches = text.match(/!\[[^\]]*\]\([^)]+\)/g);
   return matches ? matches.length : 0;
+}
+
+/** Count non-mermaid code fences in a block's content */
+function countCodeBlocks(text: string): number {
+  let count = 0;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^[ \t]*(`{3,}|~{3,})(.*)$/);
+    if (m) {
+      const lang = m[2].trim().split(/\s/)[0].toLowerCase();
+      const fc = m[1][0];
+      const fl = m[1].length;
+      // Skip past closing fence
+      for (let j = i + 1; j < lines.length; j++) {
+        if (new RegExp(`^[ \\t]*${fc === "`" ? "\\`" : "~"}{${fl},}\\s*$`).test(lines[j])) {
+          i = j;
+          break;
+        }
+      }
+      if (lang !== "mermaid") count++;
+    }
+  }
+  return count;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
@@ -118,6 +147,9 @@ export function DocumentBlockRenderer({
   onWikiLink,
   onMermaidResize,
   onImageResize,
+  onMermaidDelete,
+  onImageDelete,
+  onCodeBlockDelete,
 }: DocumentBlockRendererProps) {
 
   // Toggle thread helper
@@ -136,10 +168,12 @@ export function DocumentBlockRenderer({
   // Pre-compute cumulative offsets for each block
   let mermaidOffset = 0;
   let imageOffset = 0;
+  let codeBlockOffset = 0;
   const blockOffsets = blocks.map((block) => {
-    const offset = { mermaid: mermaidOffset, image: imageOffset };
+    const offset = { mermaid: mermaidOffset, image: imageOffset, codeBlock: codeBlockOffset };
     mermaidOffset += countMermaidFences(block.content);
     imageOffset += countImages(block.content);
+    codeBlockOffset += countCodeBlocks(block.content);
     return offset;
   });
 
@@ -164,6 +198,15 @@ export function DocumentBlockRenderer({
           onMermaidResize(offsets.mermaid + withinBlockIndex, height);
         const blockImageResize = (withinBlockIndex: number, width: number, height: number) =>
           onImageResize(offsets.image + withinBlockIndex, width, height);
+        const blockMermaidDelete = onMermaidDelete
+          ? (withinBlockIndex: number) => onMermaidDelete(offsets.mermaid + withinBlockIndex)
+          : undefined;
+        const blockImageDelete = onImageDelete
+          ? (withinBlockIndex: number) => onImageDelete(offsets.image + withinBlockIndex)
+          : undefined;
+        const blockCodeBlockDelete = onCodeBlockDelete
+          ? (withinBlockIndex: number) => onCodeBlockDelete(offsets.codeBlock + withinBlockIndex)
+          : undefined;
 
         return (
           <div key={block.blockId}>
@@ -181,6 +224,9 @@ export function DocumentBlockRenderer({
                   onWikiLink={onWikiLink}
                   onMermaidResize={blockMermaidResize}
                   onImageResize={blockImageResize}
+                  onMermaidDelete={blockMermaidDelete}
+                  onImageDelete={blockImageDelete}
+                  onCodeBlockDelete={blockCodeBlockDelete}
                 />
               </div>
 
@@ -319,6 +365,9 @@ export function DocumentBlockRenderer({
           onWikiLink={onWikiLink}
           onMermaidResize={onMermaidResize}
           onImageResize={onImageResize}
+          onMermaidDelete={onMermaidDelete}
+          onImageDelete={onImageDelete}
+          onCodeBlockDelete={onCodeBlockDelete}
         />
       )}
     </div>

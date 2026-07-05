@@ -372,3 +372,60 @@
 .shared-md-image-resizing .shared-md-image-resize-handle {
   opacity: 1 !important;
 }
+
+/* ── Element Delete Buttons (Viewer) ─────────────────────────────────── */
+
+.shared-md-element-delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  z-index: 10;
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
+/* Show on container hover */
+.shared-md-mermaid-resizable:hover .shared-md-element-delete-btn,
+.shared-md-image-resizable:hover .shared-md-element-delete-btn,
+pre:hover > .shared-md-element-delete-btn {
+  opacity: 0.7;
+}
+
+.shared-md-element-delete-btn:hover {
+  opacity: 1 !important;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+
+/* Confirmation state — button stays visible, labeled "Delete?" */
+.shared-md-element-delete-btn.shared-md-delete-confirming {
+  opacity: 1 !important;
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+
+.shared-md-delete-confirm-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+/* Code block delete — adjust position within <pre> */
+.shared-md-codeblock-delete-btn {
+  top: 4px;
+  right: 4px;
+}
