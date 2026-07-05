@@ -2,9 +2,15 @@
    Collapsible, resizable left panel for Epic Detail view. Handles
    section navigation (Define, Scope, Knowledge→Wiki/Sources/Blocked,
    Design, History) and contextual sub-item listing.
+
+   Design section shows a unified "Documents" list with:
+   - Type filter (Both | MD | HTML)
+   - Pin/archive hover actions
+   - Pinned items sorted first, then by updatedAt desc
+   - Collapsible archived section at the bottom
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useRef, type ComponentType } from "react";
+import { useState, useCallback, useMemo, useRef, type ComponentType } from "react";
 import {
   IconFile,
   IconSearch,
@@ -15,6 +21,8 @@ import {
   IconPaintbrush,
   IconClock,
   IconArtifact,
+  IconPin,
+  IconArchive,
 } from "./CodaScopeIcons";
 import { CurateButton } from "./CurateButton";
 import type {
@@ -53,6 +61,20 @@ function storeWidth(w: number): void {
 
 /* ── Types ───────────────────────────────────────────────────────────── */
 
+type DocFilterType = "both" | "md" | "html";
+
+/** Unified document item for the merged list. */
+interface UnifiedDocItem {
+  type: "md" | "html";
+  id: string;          // raw id (doc.id or art.id)
+  navId: string;       // id used for navigation (doc.id or "artifact:<art.id>")
+  title: string;
+  updatedAt: string;
+  pinnedAt?: string;
+  archivedAt?: string;
+  status?: string;     // artifact build status
+}
+
 interface EpicSidebarProps {
   epic: EpicDesignDetail;
   activeSection: string;
@@ -60,13 +82,18 @@ interface EpicSidebarProps {
   onToggleCollapse: () => void;
   // Sub-item data
   wikiPages: EpicWikiPage[];
-  designDocs: EpicDesignDoc[];          // non-archived design docs
-  artifacts: ArtifactSpec[];             // visual HTML artifacts
-  sources: EpicKnowledgeSource[];        // non-error sources only
-  errorSources: EpicKnowledgeSource[];   // error-status sources
+  allDesignDocs: EpicDesignDoc[];      // ALL design docs including archived
+  allArtifacts: ArtifactSpec[];         // ALL artifacts including archived
+  sources: EpicKnowledgeSource[];       // non-error sources only
+  errorSources: EpicKnowledgeSource[];  // error-status sources
   blockedItems: BlockedDownload[];
   activeSubItemId: string | null;
   onNavigate: (section: string, subItemId?: string) => void;
+  // Pin/archive callbacks
+  onPin: (type: "md" | "html", id: string) => void;
+  onUnpin: (type: "md" | "html", id: string) => void;
+  onArchive: (type: "md" | "html", id: string) => void;
+  onUnarchive: (type: "md" | "html", id: string) => void;
   // Curation
   curationReasons: CurationReason[];
   isCurating: boolean;
@@ -119,13 +146,17 @@ export function EpicSidebar({
   collapsed,
   onToggleCollapse,
   wikiPages,
-  designDocs,
-  artifacts,
+  allDesignDocs,
+  allArtifacts,
   sources,
   errorSources,
   blockedItems,
   activeSubItemId,
   onNavigate,
+  onPin,
+  onUnpin,
+  onArchive,
+  onUnarchive,
   curationReasons,
   isCurating,
   onStartCuration,
@@ -175,6 +206,10 @@ export function EpicSidebar({
   /* ── Nav section collapsed state ──────────────────────────────────── */
   const [navCollapsed, setNavCollapsed] = useState(false);
 
+  /* ── Design filter and archived expand state ──────────────────────── */
+  const [docFilter, setDocFilter] = useState<DocFilterType>("both");
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+
   /* ── Helpers ──────────────────────────────────────────────────────── */
 
   const isActive = useCallback(
@@ -198,6 +233,66 @@ export function EpicSidebar({
     [collapsed, onToggleCollapse, onToggleKnowledge, onNavigate],
   );
 
+  /* ── Build unified document list ──────────────────────────────────── */
+
+  const unifiedDocs = useMemo<UnifiedDocItem[]>(() => {
+    const items: UnifiedDocItem[] = [];
+
+    for (const doc of allDesignDocs) {
+      items.push({
+        type: "md",
+        id: doc.id,
+        navId: doc.id,
+        title: doc.title,
+        updatedAt: doc.updatedAt,
+        pinnedAt: doc.pinnedAt,
+        archivedAt: doc.archivedAt,
+      });
+    }
+
+    for (const art of allArtifacts) {
+      items.push({
+        type: "html",
+        id: art.id,
+        navId: `artifact:${art.id}`,
+        title: art.title,
+        updatedAt: art.updatedAt,
+        pinnedAt: art.pinnedAt,
+        archivedAt: art.archivedAt,
+        status: art.status,
+      });
+    }
+
+    return items;
+  }, [allDesignDocs, allArtifacts]);
+
+  // Apply type filter
+  const filteredDocs = useMemo(() => {
+    if (docFilter === "both") return unifiedDocs;
+    return unifiedDocs.filter((d) => d.type === docFilter);
+  }, [unifiedDocs, docFilter]);
+
+  // Split active vs archived
+  const activeDocs = useMemo(() =>
+    filteredDocs
+      .filter((d) => !d.archivedAt)
+      .sort((a, b) => {
+        // Pinned first
+        if (a.pinnedAt && !b.pinnedAt) return -1;
+        if (!a.pinnedAt && b.pinnedAt) return 1;
+        // Within same pin group: most recently modified first
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }),
+    [filteredDocs],
+  );
+
+  const archivedDocs = useMemo(() =>
+    filteredDocs
+      .filter((d) => !!d.archivedAt)
+      .sort((a, b) => new Date(b.archivedAt!).getTime() - new Date(a.archivedAt!).getTime()),
+    [filteredDocs],
+  );
+
   /* ── Determine what sub-items to show ─────────────────────────────── */
 
   const showWikiSubItems = activeSection === "knowledge/wiki";
@@ -211,6 +306,81 @@ export function EpicSidebar({
   /* ── Render ─────────────────────────────────────────────────────────── */
 
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : width;
+
+  const renderDocItem = (item: UnifiedDocItem, showUnarchive?: boolean) => {
+    const isItemActive = activeSubItemId === item.navId;
+    const dotModifier = item.type === "html"
+      ? (item.status === "built" ? "codascope-epic-sidebar-artifact-dot--built"
+        : item.status === "building" ? "codascope-epic-sidebar-artifact-dot--building"
+        : "codascope-epic-sidebar-artifact-dot--pending")
+      : null;
+
+    return (
+      <div
+        key={item.navId}
+        className={`codascope-epic-sidebar-doc-item ${
+          isItemActive ? "codascope-epic-sidebar-doc-item--active" : ""
+        } ${item.pinnedAt ? "codascope-epic-sidebar-doc-item--pinned" : ""}`}
+      >
+        <button
+          className="codascope-epic-sidebar-doc-item-btn"
+          onClick={() => onNavigate("design", item.navId)}
+          type="button"
+        >
+          <span className="codascope-epic-sidebar-wiki-item-icon">
+            {item.type === "md" ? <IconPaintbrush size={12} /> : <IconArtifact size={12} />}
+          </span>
+          <span className="codascope-epic-sidebar-wiki-item-title">
+            {item.title}
+          </span>
+          {dotModifier && (
+            <span
+              className={`codascope-epic-sidebar-artifact-dot ${dotModifier}`}
+              title={item.status}
+            />
+          )}
+        </button>
+        {/* Action buttons: archive (left) then pin (right) — pin stays in stable position */}
+        <div className={`codascope-epic-sidebar-item-actions ${
+          item.pinnedAt && !showUnarchive ? "codascope-epic-sidebar-item-actions--pinned" : ""
+        }`}>
+          {showUnarchive ? (
+            <button
+              className="codascope-epic-sidebar-action-btn"
+              onClick={(e) => { e.stopPropagation(); onUnarchive(item.type, item.id); }}
+              type="button"
+              title="Unarchive"
+            >
+              <IconArchive size={11} />
+            </button>
+          ) : (
+            <>
+              <button
+                className="codascope-epic-sidebar-action-btn codascope-epic-sidebar-action-btn--archive"
+                onClick={(e) => { e.stopPropagation(); onArchive(item.type, item.id); }}
+                type="button"
+                title="Archive"
+              >
+                <IconArchive size={11} />
+              </button>
+              <button
+                className={`codascope-epic-sidebar-action-btn ${item.pinnedAt ? "codascope-epic-sidebar-action-btn--active" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (item.pinnedAt) onUnpin(item.type, item.id);
+                  else onPin(item.type, item.id);
+                }}
+                type="button"
+                title={item.pinnedAt ? "Unpin" : "Pin"}
+              >
+                <IconPin size={11} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -508,84 +678,62 @@ export function EpicSidebar({
             </>
           )}
 
-          {/* Design docs */}
+          {/* ── Unified Documents (Design Docs + Visual Artifacts) ──── */}
           {showDesignSubItems && (
             <>
               <div className="codascope-epic-sidebar-subitems-header">
-                <span>Design Docs</span>
-                <span className="codascope-epic-sidebar-subitems-count">
-                  {designDocs.length}
-                </span>
-              </div>
-              <div className="codascope-epic-sidebar-subitems-list">
-                {designDocs.length === 0 && (
-                  <div className="codascope-epic-sidebar-empty-msg">
-                    No design docs yet
-                  </div>
-                )}
-                {designDocs.map((doc) => (
-                  <button
-                    key={doc.id}
-                    className={`codascope-epic-sidebar-wiki-item ${
-                      activeSubItemId === doc.id
-                        ? "codascope-epic-sidebar-wiki-item--active"
-                        : ""
-                    }`}
-                    onClick={() => onNavigate("design", doc.id)}
-                    type="button"
-                  >
-                    <span className="codascope-epic-sidebar-wiki-item-icon">
-                      <IconPaintbrush size={12} />
-                    </span>
-                    <span className="codascope-epic-sidebar-wiki-item-title">
-                      {doc.title}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {/* Visual Artifacts */}
-          {showDesignSubItems && artifacts.length > 0 && (
-            <>
-              <div className="codascope-epic-sidebar-subitems-header">
-                <span>Visual Artifacts</span>
-                <span className="codascope-epic-sidebar-subitems-count">
-                  {artifacts.length}
-                </span>
-              </div>
-              <div className="codascope-epic-sidebar-subitems-list">
-                {artifacts.map((art) => {
-                  const dotModifier =
-                    art.status === "built" ? "codascope-epic-sidebar-artifact-dot--built"
-                    : art.status === "building" ? "codascope-epic-sidebar-artifact-dot--building"
-                    : "codascope-epic-sidebar-artifact-dot--pending";
-
-                  return (
+                <span>Documents</span>
+                <div className="codascope-design-filter">
+                  {(["both", "md", "html"] as DocFilterType[]).map((opt) => (
                     <button
-                      key={art.id}
-                      className={`codascope-epic-sidebar-wiki-item ${
-                        activeSubItemId === `artifact:${art.id}`
-                          ? "codascope-epic-sidebar-wiki-item--active"
-                          : ""
+                      key={opt}
+                      className={`codascope-design-filter-option ${
+                        docFilter === opt ? "codascope-design-filter-option--active" : ""
                       }`}
-                      onClick={() => onNavigate("design", `artifact:${art.id}`)}
+                      onClick={() => setDocFilter(opt)}
                       type="button"
                     >
-                      <span className="codascope-epic-sidebar-wiki-item-icon">
-                        <IconArtifact size={12} />
-                      </span>
-                      <span className="codascope-epic-sidebar-wiki-item-title">
-                        {art.title}
-                      </span>
-                      <span
-                        className={`codascope-epic-sidebar-artifact-dot ${dotModifier}`}
-                        title={art.status}
-                      />
+                      {opt === "both" ? "All" : opt.toUpperCase()}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+              </div>
+              <div className="codascope-epic-sidebar-subitems-list">
+                {activeDocs.length === 0 && archivedDocs.length === 0 && (
+                  <div className="codascope-epic-sidebar-empty-msg">
+                    No documents yet
+                  </div>
+                )}
+                {activeDocs.length === 0 && archivedDocs.length > 0 && (
+                  <div className="codascope-epic-sidebar-empty-msg">
+                    No active documents
+                  </div>
+                )}
+                {activeDocs.map((item) => renderDocItem(item))}
+
+                {/* Archived section */}
+                {archivedDocs.length > 0 && (
+                  <div className="codascope-sidebar-archived-section">
+                    <button
+                      className="codascope-sidebar-archived-toggle"
+                      onClick={() => setArchivedExpanded((p) => !p)}
+                      type="button"
+                    >
+                      <span className="codascope-sidebar-archived-toggle-chevron">
+                        {archivedExpanded ? "▾" : "▸"}
+                      </span>
+                      <span>Archived</span>
+                      <span className="codascope-sidebar-archived-toggle-count">
+                        {archivedDocs.length}
+                      </span>
+                    </button>
+                    {archivedExpanded && (
+                      <div className="codascope-sidebar-archived-list">
+                        {archivedDocs.map((item) => renderDocItem(item, true))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}

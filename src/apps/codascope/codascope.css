@@ -7779,3 +7779,198 @@
   background: var(--color-text-tertiary);
 }
 
+/* ── Unified Document List — Filter, Pin, Archive ──────────────────── */
+
+/* Segmented filter control in the header row */
+.codascope-design-filter {
+  display: flex;
+  gap: 1px;
+  background: var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.codascope-design-filter-option {
+  padding: 1px 6px;
+  font-size: 9px;
+  font-family: inherit;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: none;
+  cursor: pointer;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-tertiary);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-design-filter-option:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-design-filter-option--active {
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+}
+
+/* Document item — wrapper with hover-reveal actions */
+.codascope-epic-sidebar-doc-item {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.codascope-epic-sidebar-doc-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-epic-sidebar-doc-item--active {
+  background: var(--color-accent-muted);
+}
+
+.codascope-epic-sidebar-doc-item--pinned {
+  /* subtle left accent for pinned items */
+}
+
+/* The clickable button inside each doc item */
+.codascope-epic-sidebar-doc-item-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.codascope-epic-sidebar-doc-item:hover .codascope-epic-sidebar-doc-item-btn {
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-sidebar-doc-item--active .codascope-epic-sidebar-doc-item-btn {
+  color: var(--color-accent-text);
+  font-weight: var(--weight-medium);
+}
+
+/* Hover-reveal action buttons container */
+.codascope-epic-sidebar-item-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding-right: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* On hover of the doc item, show ALL action buttons */
+.codascope-epic-sidebar-doc-item:hover .codascope-epic-sidebar-item-actions {
+  display: flex;
+}
+
+/* For pinned items: always show the actions container (pin is visible) */
+.codascope-epic-sidebar-item-actions--pinned {
+  display: flex;
+}
+
+/* But hide the archive button until hover on pinned items */
+.codascope-epic-sidebar-item-actions--pinned .codascope-epic-sidebar-action-btn--archive {
+  display: none;
+}
+
+.codascope-epic-sidebar-doc-item:hover .codascope-epic-sidebar-item-actions--pinned .codascope-epic-sidebar-action-btn--archive {
+  display: inline-flex;
+}
+
+/* Individual action button (pin / archive) */
+.codascope-epic-sidebar-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+  padding: 0;
+}
+
+.codascope-epic-sidebar-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.codascope-epic-sidebar-action-btn--active {
+  color: var(--color-accent-text);
+}
+
+.codascope-epic-sidebar-action-btn--active:hover {
+  color: var(--color-accent-text);
+}
+
+/* Archived section — collapsible group at bottom */
+.codascope-sidebar-archived-section {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+  padding-top: var(--space-1);
+}
+
+.codascope-sidebar-archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-sidebar-archived-toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.codascope-sidebar-archived-toggle-chevron {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.codascope-sidebar-archived-toggle-count {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  min-width: 16px;
+  text-align: center;
+}
+
+.codascope-sidebar-archived-list {
+  opacity: 0.7;
+}
+
+.codascope-sidebar-archived-list .codascope-epic-sidebar-doc-item-btn {
+  color: var(--color-text-tertiary);
+}

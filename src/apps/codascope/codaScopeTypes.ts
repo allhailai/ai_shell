@@ -317,6 +317,7 @@ export interface EpicDesignDoc {
   annotationCount: number;
   directiveCount: number;
   archivedAt?: string;
+  pinnedAt?: string;
 }
 
 export interface EpicVersion {
@@ -565,6 +566,8 @@ export interface ArtifactSpec {
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  pinnedAt?: string;
+  archivedAt?: string;
 }
 
 export interface ArtifactSection {

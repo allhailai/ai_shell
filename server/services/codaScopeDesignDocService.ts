@@ -360,7 +360,7 @@ export class CodaScopeDesignDocService {
     return { doc, contentHash };
   }
 
-  /** Archive a design doc (soft delete — preserves file on disk). */
+  /** Archive a design doc (soft delete — preserves file on disk). Also clears pin. */
   async archiveDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
@@ -370,6 +370,35 @@ export class CodaScopeDesignDocService {
     if (!doc) return false;
 
     doc.archivedAt = new Date().toISOString();
+    delete doc.pinnedAt;
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
+  /** Pin a design doc. */
+  async pinDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const doc = index.docs.find((d) => d.id === docId);
+    if (!doc) return false;
+
+    doc.pinnedAt = new Date().toISOString();
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
+  /** Unpin a design doc. */
+  async unpinDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const doc = index.docs.find((d) => d.id === docId);
+    if (!doc || !doc.pinnedAt) return false;
+
+    delete doc.pinnedAt;
     this.writeIndex(projectDir, epicId, index);
     return true;
   }

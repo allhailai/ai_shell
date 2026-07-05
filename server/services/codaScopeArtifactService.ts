@@ -306,6 +306,63 @@ export class CodaScopeArtifactService {
     return true;
   }
 
+  /** Pin an artifact. */
+  async pinArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const spec = index.artifacts.find((a) => a.id === artifactId);
+    if (!spec) return false;
+
+    spec.pinnedAt = new Date().toISOString();
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
+  /** Unpin an artifact. */
+  async unpinArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const spec = index.artifacts.find((a) => a.id === artifactId);
+    if (!spec || !spec.pinnedAt) return false;
+
+    delete spec.pinnedAt;
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
+  /** Archive an artifact (soft delete). Also clears pin. */
+  async archiveArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const spec = index.artifacts.find((a) => a.id === artifactId);
+    if (!spec) return false;
+
+    spec.archivedAt = new Date().toISOString();
+    delete spec.pinnedAt;
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
+  /** Unarchive an artifact (restore from soft delete). */
+  async unarchiveArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+
+    const index = this.readIndex(projectDir, epicId);
+    const spec = index.artifacts.find((a) => a.id === artifactId);
+    if (!spec || !spec.archivedAt) return false;
+
+    delete spec.archivedAt;
+    this.writeIndex(projectDir, epicId, index);
+    return true;
+  }
+
   /* ── Spec file I/O ─────────────────────────────────────────────── */
 
   private writeSpecFile(artDir: string, spec: ArtifactSpec): void {

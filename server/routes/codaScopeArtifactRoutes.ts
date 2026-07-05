@@ -116,6 +116,50 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ deleted: true });
   }));
 
+  // Pin artifact
+  app.patch("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/pin", wrap(async (req, res) => {
+    const { artifactSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const artId = param(req, "artId");
+    const pinned = await artifactSvc.pinArtifact(id, epicId, artId);
+    if (!pinned) throw httpError("Artifact not found.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // Unpin artifact
+  app.patch("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/unpin", wrap(async (req, res) => {
+    const { artifactSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const artId = param(req, "artId");
+    const unpinned = await artifactSvc.unpinArtifact(id, epicId, artId);
+    if (!unpinned) throw httpError("Artifact not found or not pinned.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // Archive artifact
+  app.patch("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/archive", wrap(async (req, res) => {
+    const { artifactSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const artId = param(req, "artId");
+    const archived = await artifactSvc.archiveArtifact(id, epicId, artId);
+    if (!archived) throw httpError("Artifact not found.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // Unarchive artifact
+  app.patch("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId/unarchive", wrap(async (req, res) => {
+    const { artifactSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const artId = param(req, "artId");
+    const unarchived = await artifactSvc.unarchiveArtifact(id, epicId, artId);
+    if (!unarchived) throw httpError("Artifact not found or not archived.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
   // ── Build ────────────────────────────────────────────────────────
 
   // Trigger artifact build (async — returns immediately, client polls SSE status)

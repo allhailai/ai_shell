@@ -525,6 +525,28 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ success: true });
   }));
 
+  // Pin design doc
+  app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/pin", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const pinned = await designDocSvc.pinDesignDoc(id, epicId, docId);
+    if (!pinned) throw httpError("Design doc not found.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
+  // Unpin design doc
+  app.patch("/api/codascope/projects/:id/epics/:epicId/designs/:docId/unpin", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const unpinned = await designDocSvc.unpinDesignDoc(id, epicId, docId);
+    if (!unpinned) throw httpError("Design doc not found or not pinned.", 404, "not_found");
+    res.json({ success: true });
+  }));
+
   // ── Design Doc Versions ───────────────────────────────────────────
 
   // List versions for a design doc

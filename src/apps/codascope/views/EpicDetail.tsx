@@ -407,6 +407,99 @@ export function EpicDetail() {
     [],
   );
 
+  // ── Pin/unpin/archive/unarchive handlers ─────────────────────────────
+  const handlePin = useCallback(async (type: "md" | "html", id: string) => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const endpoint = type === "md"
+        ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/pin`
+        : `/api/codascope/projects/${activeProjectId}/epics/${epicId}/artifacts/${id}/pin`;
+      const res = await fetch(endpoint, { method: "PATCH" });
+      if (!res.ok) return;
+      if (type === "md") {
+        setEpic({
+          ...epic,
+          designDocs: epic.designDocs.map((d) =>
+            d.id === id ? { ...d, pinnedAt: new Date().toISOString() } : d
+          ),
+        });
+      } else {
+        setArtifacts((prev) =>
+          prev.map((a) => a.id === id ? { ...a, pinnedAt: new Date().toISOString() } : a)
+        );
+      }
+    } catch { /* silent */ }
+  }, [activeProjectId, epicId, epic, setEpic]);
+
+  const handleUnpin = useCallback(async (type: "md" | "html", id: string) => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const endpoint = type === "md"
+        ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/unpin`
+        : `/api/codascope/projects/${activeProjectId}/epics/${epicId}/artifacts/${id}/unpin`;
+      const res = await fetch(endpoint, { method: "PATCH" });
+      if (!res.ok) return;
+      if (type === "md") {
+        setEpic({
+          ...epic,
+          designDocs: epic.designDocs.map((d) =>
+            d.id === id ? { ...d, pinnedAt: undefined } : d
+          ),
+        });
+      } else {
+        setArtifacts((prev) =>
+          prev.map((a) => a.id === id ? { ...a, pinnedAt: undefined } : a)
+        );
+      }
+    } catch { /* silent */ }
+  }, [activeProjectId, epicId, epic, setEpic]);
+
+  const handleArchiveDoc = useCallback(async (type: "md" | "html", id: string) => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const endpoint = type === "md"
+        ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/archive`
+        : `/api/codascope/projects/${activeProjectId}/epics/${epicId}/artifacts/${id}/archive`;
+      const res = await fetch(endpoint, { method: "PATCH" });
+      if (!res.ok) return;
+      if (type === "md") {
+        setEpic({
+          ...epic,
+          designDocs: epic.designDocs.map((d) =>
+            d.id === id ? { ...d, archivedAt: new Date().toISOString(), pinnedAt: undefined } : d
+          ),
+        });
+      } else {
+        setArtifacts((prev) =>
+          prev.map((a) => a.id === id ? { ...a, archivedAt: new Date().toISOString(), pinnedAt: undefined } : a)
+        );
+      }
+    } catch { /* silent */ }
+  }, [activeProjectId, epicId, epic, setEpic]);
+
+  const handleUnarchiveDoc = useCallback(async (type: "md" | "html", id: string) => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const endpoint = type === "md"
+        ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/unarchive`
+        : `/api/codascope/projects/${activeProjectId}/epics/${epicId}/artifacts/${id}/unarchive`;
+      const res = await fetch(endpoint, { method: "PATCH" });
+      if (!res.ok) return;
+      if (type === "md") {
+        setEpic({
+          ...epic,
+          designDocs: epic.designDocs.map((d) =>
+            d.id === id ? { ...d, archivedAt: undefined } : d
+          ),
+        });
+      } else {
+        setArtifacts((prev) =>
+          prev.map((a) => a.id === id ? { ...a, archivedAt: undefined } : a)
+        );
+      }
+    } catch { /* silent */ }
+  }, [activeProjectId, epicId, epic, setEpic]);
+
   // ── Loading / Error ──────────────────────────────────────────────────
   if (loading) {
     return (
@@ -504,13 +597,17 @@ export function EpicDetail() {
         collapsed={collapsed}
         onToggleCollapse={handleToggleCollapse}
         wikiPages={wikiPages}
-        designDocs={epic.designDocs.filter((d) => !d.archivedAt)}
-        artifacts={artifacts}
+        allDesignDocs={epic.designDocs}
+        allArtifacts={artifacts}
         sources={goodSources}
         errorSources={errorSources}
         blockedItems={blockedItems}
         activeSubItemId={activeSubItemId}
         onNavigate={handleSidebarNavigate}
+        onPin={handlePin}
+        onUnpin={handleUnpin}
+        onArchive={handleArchiveDoc}
+        onUnarchive={handleUnarchiveDoc}
         curationReasons={curationReasons}
         isCurating={isCurating}
         onStartCuration={handleStartCuration}

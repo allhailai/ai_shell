@@ -695,3 +695,25 @@ export function IconArtifact({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Thumbtack — Pin */
+export function IconPin({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M9.5 2.5L13.5 6.5L10 10L9 13L3 7L6 6L9.5 2.5Z" />
+      <line x1="3" y1="13" x2="5.5" y2="10.5" />
+    </svg>
+  );
+}
+
+/** Box with down arrow — Archive */
+export function IconArchive({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 4.5h12L13 2.5H3L2 4.5z" />
+      <path d="M2 4.5v8a1 1 0 001 1h10a1 1 0 001-1v-8" />
+      <line x1="8" y1="7" x2="8" y2="11" />
+      <polyline points="6,9.5 8,11 10,9.5" />
+    </svg>
+  );
+}
+
