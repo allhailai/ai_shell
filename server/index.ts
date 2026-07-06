@@ -228,7 +228,7 @@ if (SHELL_MODE === "server") {
 
     // SPA catch-all: serve index.html for any non-API route so that
     // client-side routing (pushState) works on refresh/deep-link.
-    app.get("*", (_req, res) => {
+    app.get("/{*path}", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
 
