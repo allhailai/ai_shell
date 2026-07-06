@@ -24,6 +24,7 @@ interface ProjectData {
   repositories: RepoInfo[];
   createdAt: string;
   updatedAt: string;
+  archived?: boolean;
 }
 
 export class CodaScopeProjectService {
@@ -156,7 +157,7 @@ export class CodaScopeProjectService {
 
   // ── Update project ────────────────────────────────────────────────
 
-  async updateProject(id: string, updates: { name?: string; description?: string }): Promise<ProjectData | null> {
+  async updateProject(id: string, updates: { name?: string; description?: string; archived?: boolean }): Promise<ProjectData | null> {
     const projectDir = this.findProjectDir(id);
     if (!projectDir) return null;
 
@@ -166,6 +167,7 @@ export class CodaScopeProjectService {
 
     if (updates.name !== undefined) project.name = updates.name;
     if (updates.description !== undefined) project.description = updates.description;
+    if (updates.archived !== undefined) project.archived = updates.archived;
     project.updatedAt = new Date().toISOString();
 
     writeFileSync(projectPath, JSON.stringify(project, null, 2));

@@ -459,7 +459,12 @@ export function Settings() {
           <button
             className="codascope-btn codascope-btn-secondary"
             onClick={() => {
-              window.location.href = `/api/codascope/projects/${activeProjectId}/export`;
+              const a = document.createElement("a");
+              a.href = `/api/codascope/projects/${activeProjectId}/export`;
+              a.download = "";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
             }}
             type="button"
             title="Download this project as a portable .zip file"

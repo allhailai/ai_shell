@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef, type DragEvent } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconFolder } from "../components/CodaScopeIcons";
+import { IconFolder, IconArchive } from "../components/CodaScopeIcons";
 import { CodaScopeRepoRemapModal } from "../components/CodaScopeRepoRemapModal";
 
 interface ImportState {
@@ -35,12 +35,17 @@ export function ProjectList() {
 
   const [setupPath, setSetupPath] = useState("");
   const [error, setError] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   // ── Import state ──────────────────────────────────────────────────
   const [importState, setImportState] = useState<ImportState>({ status: "idle" });
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [showRemapModal, setShowRemapModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Derived lists ─────────────────────────────────────────────────
+  const activeProjects = projects.filter((p) => !p.archived);
+  const archivedProjects = projects.filter((p) => p.archived);
 
   // ── Setup handler ─────────────────────────────────────────────────
 
@@ -186,6 +191,26 @@ export function ProjectList() {
     }
   }, [importResult, setProjects, navigate]);
 
+  // ── Archive handler ───────────────────────────────────────────────
+
+  const handleArchiveToggle = useCallback(async (projectId: string, archived: boolean) => {
+    try {
+      const res = await fetch(`/api/codascope/projects/${projectId}/archive`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived }),
+      });
+      if (res.ok) {
+        // Refresh projects list
+        const listRes = await fetch("/api/codascope/projects");
+        if (listRes.ok) {
+          const data = await listRes.json();
+          setProjects(data.projects ?? []);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [setProjects]);
+
   const handleRemapClose = useCallback(() => {
     setShowRemapModal(false);
     // Project is created but with unmapped repos — user can fix later via Settings
@@ -245,16 +270,28 @@ export function ProjectList() {
         <div>
           <div className="codascope-page-title">Projects</div>
           <div className="codascope-page-subtitle">
-            {projects.length} project{projects.length !== 1 ? "s" : ""} • {projectsRoot}
+            {activeProjects.length} active{archivedProjects.length > 0 ? ` • ${archivedProjects.length} archived` : ""} • {projectsRoot}
           </div>
         </div>
-        <button
-          className="codascope-btn codascope-btn-primary"
-          onClick={() => setShowCreate(true)}
-          type="button"
-        >
-          + New Project
-        </button>
+        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+          {archivedProjects.length > 0 && (
+            <button
+              className={`codascope-btn ${showArchived ? "codascope-btn-secondary" : "codascope-btn-ghost"}`}
+              onClick={() => setShowArchived((v) => !v)}
+              type="button"
+              title={showArchived ? "Hide archived projects" : "Show archived projects"}
+            >
+              {showArchived ? "Hide Archived" : `Archived (${archivedProjects.length})`}
+            </button>
+          )}
+          <button
+            className="codascope-btn codascope-btn-primary"
+            onClick={() => setShowCreate(true)}
+            type="button"
+          >
+            + New Project
+          </button>
+        </div>
       </div>
 
       {/* Create project form */}
@@ -303,7 +340,7 @@ export function ProjectList() {
         </div>
       )}
 
-      {projects.length === 0 ? (
+      {activeProjects.length === 0 && archivedProjects.length === 0 ? (
         <div className="codascope-empty-state">
           <div className="codascope-empty-state-icon"><IconFolder size={32} /></div>
           <div className="codascope-empty-state-title">No Projects Yet</div>
@@ -319,34 +356,96 @@ export function ProjectList() {
           </button>
         </div>
       ) : (
-        <div className="codascope-cards">
-          {projects.map((project) => (
-            <div
-              key={project.id}
-              className="codascope-card"
-              onClick={() => navigate(`project/${project.id}/dashboard`)}
-            >
-              <div className="codascope-card-title">{project.name}</div>
-              <div className="codascope-card-desc">
-                {project.description || "No description"}
-              </div>
-              <div className="codascope-card-stats">
-                <div className="codascope-card-stat">
-                  <div className="codascope-card-stat-value">{project.repositories.length}</div>
-                  <div className="codascope-card-stat-label">Repos</div>
-                </div>
-                <div className="codascope-card-stat">
-                  <div className="codascope-card-stat-value">{project.wikiPageCount ?? 0}</div>
-                  <div className="codascope-card-stat-label">Wiki Pages</div>
-                </div>
-                <div className="codascope-card-stat">
-                  <div className="codascope-card-stat-value">{project.epicCount ?? 0}</div>
-                  <div className="codascope-card-stat-label">Epics</div>
-                </div>
+        <>
+          {activeProjects.length === 0 ? (
+            <div className="codascope-empty-state" style={{ marginBottom: "var(--space-4)" }}>
+              <div className="codascope-empty-state-title">No Active Projects</div>
+              <div className="codascope-empty-state-text">
+                All projects are archived. Unarchive one or create a new project.
               </div>
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="codascope-cards">
+              {activeProjects.map((project) => (
+                <div
+                  key={project.id}
+                  className="codascope-card"
+                  onClick={() => navigate(`project/${project.id}/dashboard`)}
+                >
+                  <div className="codascope-card-title">{project.name}</div>
+                  <div className="codascope-card-desc">
+                    {project.description || "No description"}
+                  </div>
+                  <div className="codascope-card-stats">
+                    <div className="codascope-card-stat">
+                      <div className="codascope-card-stat-value">{project.repositories.length}</div>
+                      <div className="codascope-card-stat-label">Repos</div>
+                    </div>
+                    <div className="codascope-card-stat">
+                      <div className="codascope-card-stat-value">{project.wikiPageCount ?? 0}</div>
+                      <div className="codascope-card-stat-label">Wiki Pages</div>
+                    </div>
+                    <div className="codascope-card-stat">
+                      <div className="codascope-card-stat-value">{project.epicCount ?? 0}</div>
+                      <div className="codascope-card-stat-label">Epics</div>
+                    </div>
+                  </div>
+                  <button
+                    className="codascope-card-archive-btn"
+                    title="Archive this project"
+                    onClick={(e) => { e.stopPropagation(); handleArchiveToggle(project.id, true); }}
+                  >
+                    <IconArchive size={12} /> Archive
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Archived projects section */}
+          {showArchived && archivedProjects.length > 0 && (
+            <>
+              <div className="codascope-section-divider">
+                <span>Archived</span>
+              </div>
+              <div className="codascope-cards">
+                {archivedProjects.map((project) => (
+                  <div
+                    key={project.id}
+                    className="codascope-card codascope-card--archived"
+                    onClick={() => navigate(`project/${project.id}/dashboard`)}
+                  >
+                    <div className="codascope-card-title">{project.name}</div>
+                    <div className="codascope-card-desc">
+                      {project.description || "No description"}
+                    </div>
+                    <div className="codascope-card-stats">
+                      <div className="codascope-card-stat">
+                        <div className="codascope-card-stat-value">{project.repositories.length}</div>
+                        <div className="codascope-card-stat-label">Repos</div>
+                      </div>
+                      <div className="codascope-card-stat">
+                        <div className="codascope-card-stat-value">{project.wikiPageCount ?? 0}</div>
+                        <div className="codascope-card-stat-label">Wiki Pages</div>
+                      </div>
+                      <div className="codascope-card-stat">
+                        <div className="codascope-card-stat-value">{project.epicCount ?? 0}</div>
+                        <div className="codascope-card-stat-label">Epics</div>
+                      </div>
+                    </div>
+                    <button
+                      className="codascope-card-archive-btn"
+                      title="Unarchive this project"
+                      onClick={(e) => { e.stopPropagation(); handleArchiveToggle(project.id, false); }}
+                    >
+                      <IconArchive size={12} /> Unarchive
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* Import project drop zone */}

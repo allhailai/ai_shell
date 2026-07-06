@@ -7,19 +7,20 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { getProjectsRoot, setProjectsRoot, getAgentServiceSingleton } from "./codaScopeServiceContext.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
 import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
-// archiver's @types don't declare the default factory function, so we use
-// createRequire to get the actual CommonJS export cleanly.
+// archiver v8 exports class constructors, not a factory function.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const archiver: (format: string, options?: Record<string, unknown>) => import("stream").Transform & {
-  append: (source: import("stream").Readable | Buffer | string, data?: { name: string }) => unknown;
-  directory: (dirpath: string, destpath: false | string) => unknown;
-  finalize: () => Promise<void>;
-  on: (event: string, listener: (...args: unknown[]) => void) => unknown;
-  pipe: (dest: import("stream").Writable) => import("stream").Writable;
-} = require("archiver");
+const { ZipArchive } = require("archiver") as {
+  ZipArchive: new (options?: Record<string, unknown>) => import("stream").Transform & {
+    append: (source: import("stream").Readable | Buffer | string, data?: { name: string }) => unknown;
+    directory: (dirpath: string, destpath: false | string) => unknown;
+    finalize: () => Promise<void>;
+    on: (event: string, listener: (...args: unknown[]) => void) => unknown;
+    pipe: (dest: import("stream").Writable) => import("stream").Writable;
+  };
+};
 import * as unzipper from "unzipper";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { rename, rm, readdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -108,6 +109,15 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     await projectSvc.deleteProject(id);
     res.json({ deleted: true });
+  }));
+
+  app.patch("/api/codascope/projects/:id/archive", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const { archived } = req.body as { archived?: boolean };
+    const project = await projectSvc.updateProject(id, { archived: archived ?? true });
+    if (!project) throw httpError("Project not found.", 404, "not_found");
+    res.json({ project });
   }));
 
   // ── Repositories ────────────────────────────────────────────────
@@ -200,7 +210,7 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="codascope_${safeName}.zip"`);
 
-    const archive = archiver("zip", { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.on("error", (err: Error) => {
       console.error("[CodaScope] Export archive error:", err);
       if (!res.headersSent) {
@@ -241,14 +251,10 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
       const tmpZipPath = path.join(tmpDir, "upload.zip");
       writeFileSync(tmpZipPath, file.buffer);
 
-      await new Promise<void>((resolve, reject) => {
-        createReadStream(tmpZipPath)
-          .pipe(unzipper.Extract({ path: path.join(tmpDir, "extracted") }))
-          .on("close", resolve)
-          .on("error", reject);
-      });
-
       const extractedDir = path.join(tmpDir, "extracted");
+      mkdirSync(extractedDir, { recursive: true });
+      const zipDir = await unzipper.Open.file(tmpZipPath);
+      await zipDir.extract({ path: extractedDir });
 
       // Validate: project.json must exist
       if (!existsSync(path.join(extractedDir, "project.json"))) {
@@ -269,7 +275,9 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
       let targetSlug = baseSlug;
       let targetDir = path.join(projectsRoot, targetSlug);
       let counter = 2;
+      let collision = false;
       while (existsSync(targetDir)) {
+        collision = true;
         targetSlug = `${baseSlug}-${counter}`;
         targetDir = path.join(projectsRoot, targetSlug);
         counter++;
@@ -283,6 +291,7 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
       const newProjectData = {
         ...originalProject,
         id: newId,
+        name: collision ? `${baseName} (imported)` : baseName,
         updatedAt: now,
       };
       writeFileSync(path.join(targetDir, "project.json"), JSON.stringify(newProjectData, null, 2));

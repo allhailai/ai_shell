@@ -203,6 +203,69 @@
   color: var(--color-text-tertiary);
 }
 
+/* Card: archive button */
+.codascope-card {
+  position: relative;
+}
+
+.codascope-card-archive-btn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-card:hover .codascope-card-archive-btn {
+  opacity: 1;
+}
+
+.codascope-card-archive-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Card: archived state */
+.codascope-card--archived {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.codascope-card--archived:hover {
+  opacity: 0.85;
+}
+
+/* Section divider */
+.codascope-section-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-5) 0 var(--space-4);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-section-divider::before,
+.codascope-section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border-primary);
+}
+
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 
 .codascope-btn {
