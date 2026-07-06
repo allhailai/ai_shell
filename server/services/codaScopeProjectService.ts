@@ -38,6 +38,10 @@ export class CodaScopeProjectService {
     this.root = root;
   }
 
+  getRoot(): string {
+    return this.root;
+  }
+
   /** Set an optional cached directory resolver. When set, getProjectDir delegates to it. */
   setDirResolver(resolver: ProjectDirResolver): void {
     this.dirResolver = resolver;
@@ -224,6 +228,73 @@ export class CodaScopeProjectService {
     project.repositories = project.repositories.filter((r) => r.id !== repoId);
     project.updatedAt = new Date().toISOString();
     writeFileSync(projectPath, JSON.stringify(project, null, 2));
+  }
+
+  // ── Validate repositories ─────────────────────────────────────────
+
+  /**
+   * Check whether each repository's local path is valid (exists and is a git repo).
+   * Used after import to detect repos that need remapping on the target machine.
+   */
+  async validateRepositories(projectId: string): Promise<{
+    valid: boolean;
+    unmappedRepos: Array<{ id: string; name: string; path: string }>;
+  }> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return { valid: true, unmappedRepos: [] };
+
+    const projectPath = path.join(projectDir, "project.json");
+    if (!existsSync(projectPath)) return { valid: true, unmappedRepos: [] };
+
+    try {
+      const raw = readFileSync(projectPath, "utf-8");
+      const project = JSON.parse(raw) as ProjectData;
+      const unmappedRepos: Array<{ id: string; name: string; path: string }> = [];
+
+      for (const repo of project.repositories) {
+        if (!existsSync(repo.path) || !existsSync(path.join(repo.path, ".git"))) {
+          unmappedRepos.push({ id: repo.id, name: repo.name, path: repo.path });
+        }
+      }
+
+      return { valid: unmappedRepos.length === 0, unmappedRepos };
+    } catch {
+      return { valid: true, unmappedRepos: [] };
+    }
+  }
+
+  // ── Update a single repository's path ─────────────────────────────
+
+  /**
+   * Update the path for a specific repository in a project.
+   * Used during repo remapping after import.
+   */
+  async updateRepositoryPath(projectId: string, repoId: string, newPath: string): Promise<boolean> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return false;
+
+    const projectPath = path.join(projectDir, "project.json");
+    const raw = readFileSync(projectPath, "utf-8");
+    const project = JSON.parse(raw) as ProjectData;
+    const repo = project.repositories.find((r) => r.id === repoId);
+    if (!repo) return false;
+
+    repo.path = newPath;
+
+    // Try to detect branch from new path
+    try {
+      const headPath = path.join(newPath, ".git", "HEAD");
+      if (existsSync(headPath)) {
+        const head = readFileSync(headPath, "utf-8").trim();
+        if (head.startsWith("ref: refs/heads/")) {
+          repo.branch = head.replace("ref: refs/heads/", "");
+        }
+      }
+    } catch { /* ignore */ }
+
+    project.updatedAt = new Date().toISOString();
+    writeFileSync(projectPath, JSON.stringify(project, null, 2));
+    return true;
   }
 
   // ── Internal: find project directory by ID ────────────────────────

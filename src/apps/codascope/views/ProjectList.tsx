@@ -1,12 +1,26 @@
 /* ── CodaScope: ProjectList View ──────────────────────────────────────
    Shows the project list as cards, plus first-launch setup wizard
    for configuring the projects root directory.
+   Includes project import via drag-and-drop zip upload.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, type DragEvent } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { IconFolder } from "../components/CodaScopeIcons";
+import { CodaScopeRepoRemapModal } from "../components/CodaScopeRepoRemapModal";
+
+interface ImportState {
+  status: "idle" | "dragging" | "uploading" | "success" | "error";
+  error?: string;
+}
+
+interface ImportResult {
+  projectId: string;
+  projectName: string;
+  needsRepoMapping: boolean;
+  unmappedRepos: Array<{ id: string; name: string; path: string }>;
+}
 
 export function ProjectList() {
   const { navigate } = useAppSubRoute("codascope");
@@ -22,6 +36,11 @@ export function ProjectList() {
   const [setupPath, setSetupPath] = useState("");
   const [error, setError] = useState("");
 
+  // ── Import state ──────────────────────────────────────────────────
+  const [importState, setImportState] = useState<ImportState>({ status: "idle" });
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showRemapModal, setShowRemapModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Setup handler ─────────────────────────────────────────────────
 
@@ -76,6 +95,101 @@ export function ProjectList() {
       // Silently fail
     }
   }, [newName, newDesc, projects, setProjects, navigate]);
+
+  // ── Import handlers ───────────────────────────────────────────────
+
+  const handleImportFile = useCallback(async (file: File) => {
+    if (!file.name.endsWith(".zip")) {
+      setImportState({ status: "error", error: "Please upload a .zip file." });
+      return;
+    }
+
+    setImportState({ status: "uploading" });
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/codascope/projects/import", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Import failed.");
+      }
+
+      const data = await res.json();
+
+      // Add the new project to the store
+      setProjects([...projects, data.project]);
+
+      if (data.needsRepoMapping) {
+        setImportResult({
+          projectId: data.project.id,
+          projectName: data.project.name,
+          needsRepoMapping: true,
+          unmappedRepos: data.unmappedRepos ?? [],
+        });
+        setShowRemapModal(true);
+        setImportState({ status: "success" });
+      } else {
+        setImportState({ status: "success" });
+        navigate(`project/${data.project.id}/dashboard`);
+      }
+    } catch (err) {
+      setImportState({
+        status: "error",
+        error: err instanceof Error ? err.message : "Import failed.",
+      });
+    }
+  }, [projects, setProjects, navigate]);
+
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImportState({ status: "idle" });
+
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      handleImportFile(file);
+    }
+  }, [handleImportFile]);
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImportState((prev) => prev.status === "uploading" ? prev : { status: "dragging" });
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setImportState((prev) => prev.status === "uploading" ? prev : { status: "idle" });
+  }, []);
+
+  const handleRemapComplete = useCallback(() => {
+    setShowRemapModal(false);
+    if (importResult) {
+      // Refresh projects list
+      void (async () => {
+        try {
+          const res = await fetch("/api/codascope/projects");
+          if (res.ok) {
+            const data = await res.json();
+            setProjects(data.projects ?? []);
+          }
+        } catch { /* ignore */ }
+      })();
+      navigate(`project/${importResult.projectId}/dashboard`);
+    }
+  }, [importResult, setProjects, navigate]);
+
+  const handleRemapClose = useCallback(() => {
+    setShowRemapModal(false);
+    // Project is created but with unmapped repos — user can fix later via Settings
+  }, []);
 
   // ── Setup wizard (first launch) ───────────────────────────────────
 
@@ -234,6 +348,62 @@ export function ProjectList() {
           ))}
         </div>
       )}
+
+      {/* Import project drop zone */}
+      <div
+        className={`codascope-import-dropzone ${importState.status === "dragging" ? "codascope-import-dropzone--active" : ""} ${importState.status === "uploading" ? "codascope-import-dropzone--uploading" : ""}`}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => importState.status !== "uploading" && fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleImportFile(file);
+            e.target.value = "";
+          }}
+        />
+        {importState.status === "uploading" ? (
+          <>
+            <div className="codascope-import-dropzone-icon">⟳</div>
+            <div className="codascope-import-dropzone-text">Importing project…</div>
+          </>
+        ) : importState.status === "error" ? (
+          <>
+            <div className="codascope-import-dropzone-icon codascope-import-dropzone-icon--error">✕</div>
+            <div className="codascope-import-dropzone-text codascope-import-dropzone-text--error">
+              {importState.error}
+            </div>
+            <div className="codascope-import-dropzone-hint">Click or drag to try again</div>
+          </>
+        ) : (
+          <>
+            <div className="codascope-import-dropzone-icon">↑</div>
+            <div className="codascope-import-dropzone-text">Import Project</div>
+            <div className="codascope-import-dropzone-hint">
+              Drop a CodaScope .zip export here, or click to browse
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Repo remapping modal */}
+      {importResult && (
+        <CodaScopeRepoRemapModal
+          isOpen={showRemapModal}
+          onClose={handleRemapClose}
+          onComplete={handleRemapComplete}
+          projectId={importResult.projectId}
+          projectName={importResult.projectName}
+          unmappedRepos={importResult.unmappedRepos}
+        />
+      )}
     </div>
   );
 }
+

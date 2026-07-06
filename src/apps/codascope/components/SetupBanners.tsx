@@ -4,6 +4,8 @@
    
    1. Cursor API key — needed for all agent/assistant features
    2. Repositories — needed for a project to be useful
+   3. Unmapped repositories — repos from an imported project that
+      don't exist on this machine
    
    Each banner is clickable and navigates to the appropriate settings.
    ──────────────────────────────────────────────────────────────────── */
@@ -11,17 +13,19 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconKey, IconPackage } from "./CodaScopeIcons";
+import { IconKey, IconPackage, IconWarning } from "./CodaScopeIcons";
 
 interface SetupStatus {
   hasApiKey: boolean;
   hasRepos: boolean;
+  unmappedRepos: Array<{ id: string; name: string; path: string }>;
   loading: boolean;
 }
 
 function useSetupStatus(): SetupStatus {
   const { activeProjectId, projects } = useCodaScopeStore();
   const [hasApiKey, setHasApiKey] = useState(true); // Assume configured until proven otherwise
+  const [unmappedRepos, setUnmappedRepos] = useState<Array<{ id: string; name: string; path: string }>>([]);
   const [loading, setLoading] = useState(true);
 
   const project = projects.find((p) => p.id === activeProjectId);
@@ -55,13 +59,40 @@ function useSetupStatus(): SetupStatus {
     };
   }, []);
 
-  return { hasApiKey, hasRepos, loading };
+  // Check for unmapped repos
+  useEffect(() => {
+    if (!activeProjectId || !hasRepos) {
+      setUnmappedRepos([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/codascope/projects/${activeProjectId}/validate-repos`);
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          setUnmappedRepos(data.unmappedRepos ?? []);
+        }
+      } catch {
+        if (!cancelled) setUnmappedRepos([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, hasRepos]);
+
+  return { hasApiKey, hasRepos, unmappedRepos, loading };
 }
 
 export function SetupBanners() {
   const { navigate } = useAppSubRoute("codascope");
   const { activeProjectId } = useCodaScopeStore();
-  const { hasApiKey, hasRepos, loading } = useSetupStatus();
+  const { hasApiKey, hasRepos, unmappedRepos, loading } = useSetupStatus();
 
   if (loading) return null;
 
@@ -104,6 +135,23 @@ export function SetupBanners() {
     });
   }
 
+  if (activeProjectId && unmappedRepos.length > 0) {
+    const count = unmappedRepos.length;
+    banners.push({
+      key: "unmapped-repos",
+      icon: <IconWarning size={14} />,
+      text: `${count} repositor${count === 1 ? "y has" : "ies have"} unmapped paths — some features are disabled`,
+      action: "Fix Repository Mapping",
+      onClick: () => {
+        navigate(`project/${activeProjectId}/settings`);
+        setTimeout(() => {
+          document.getElementById("repos-section")?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      },
+      variant: "warning",
+    });
+  }
+
   if (banners.length === 0) return null;
 
   return (
@@ -128,3 +176,4 @@ export function SetupBanners() {
     </div>
   );
 }
+

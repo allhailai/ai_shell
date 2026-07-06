@@ -447,14 +447,26 @@ export function Settings() {
             onChange={(e) => setEditDesc(e.target.value)}
           />
         </div>
-        <button
-          className="codascope-btn codascope-btn-primary"
-          onClick={handleSaveProject}
-          disabled={saving}
-          type="button"
-        >
-          {saving ? "Saving…" : "Save Changes"}
-        </button>
+        <div className="codascope-settings-project-actions">
+          <button
+            className="codascope-btn codascope-btn-primary"
+            onClick={handleSaveProject}
+            disabled={saving}
+            type="button"
+          >
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+          <button
+            className="codascope-btn codascope-btn-secondary"
+            onClick={() => {
+              window.location.href = `/api/codascope/projects/${activeProjectId}/export`;
+            }}
+            type="button"
+            title="Download this project as a portable .zip file"
+          >
+            ↓ Export Project
+          </button>
+        </div>
       </div>
 
       {/* Repositories */}

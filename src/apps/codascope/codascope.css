@@ -7543,3 +7543,205 @@
 .codascope-sidebar-archived-list .codascope-epic-sidebar-doc-item-btn {
   color: var(--color-text-tertiary);
 }
+
+/* ── Import Drop Zone ────────────────────────────────────────────────── */
+
+.codascope-import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding: var(--space-6) var(--space-4);
+  border: 2px dashed var(--color-border-secondary);
+  border-radius: var(--radius-xl);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  min-height: 100px;
+}
+
+.codascope-import-dropzone:hover {
+  border-color: var(--color-border-hover);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-import-dropzone--active {
+  border-color: var(--color-accent-primary);
+  background: color-mix(in srgb, var(--color-accent-primary) 8%, transparent);
+  border-style: solid;
+}
+
+.codascope-import-dropzone--uploading {
+  pointer-events: none;
+  opacity: 0.7;
+  border-style: solid;
+  border-color: var(--color-accent-primary);
+}
+
+.codascope-import-dropzone-icon {
+  font-size: 1.5rem;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+}
+
+.codascope-import-dropzone--active .codascope-import-dropzone-icon {
+  color: var(--color-accent-primary);
+}
+
+.codascope-import-dropzone-icon--error {
+  color: var(--color-danger);
+}
+
+.codascope-import-dropzone-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.codascope-import-dropzone-text--error {
+  color: var(--color-danger);
+}
+
+.codascope-import-dropzone-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Repo Remap Modal ────────────────────────────────────────────────── */
+
+.codascope-remap-modal {
+  max-width: 640px;
+  width: 90vw;
+}
+
+.codascope-remap-desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-3);
+  line-height: 1.5;
+}
+
+.codascope-remap-progress {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-3);
+}
+
+.codascope-remap-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-remap-item {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-remap-item--mapped {
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 5%, var(--color-bg-tertiary));
+}
+
+.codascope-remap-item-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.codascope-remap-item-status {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-remap-item--mapped .codascope-remap-item-status {
+  color: var(--color-success);
+}
+
+.codascope-remap-item-ready {
+  color: var(--color-accent-primary);
+  font-size: 0.85rem;
+}
+
+.codascope-remap-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.codascope-remap-item-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-remap-item-original {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.codascope-remap-item-original code {
+  font-size: var(--text-xs);
+  background: var(--color-bg-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.codascope-remap-item-action {
+  margin-top: var(--space-2);
+  padding-left: calc(14px + var(--space-2)); /* align with name text */
+}
+
+.codascope-remap-item-newpath {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-remap-item-newpath code {
+  font-size: var(--text-xs);
+  color: var(--color-accent-primary);
+  background: var(--color-bg-secondary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-remap-change-btn {
+  flex-shrink: 0;
+  font-size: var(--text-xs) !important;
+  padding: 2px var(--space-2) !important;
+}
+
+.codascope-remap-error {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ── Settings: Project Actions (export button row) ───────────────────── */
+
+.codascope-settings-project-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+

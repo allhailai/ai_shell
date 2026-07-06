@@ -5,6 +5,7 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import { ensureReposMapped } from "./codaScopeCoreRoutes.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
@@ -42,6 +43,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       const { agentSvc, projectSvc, wikiSvc } = await ensureServices();
       const id = param(req, "id");
       const skillId = param(req, "skillId");
+      await ensureReposMapped(projectSvc, id, httpError);
       const { modelId } = req.body as { modelId?: string };
 
       if (!modelId || typeof modelId !== "string") {
@@ -401,6 +403,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       const svcs = await ensureServices();
       const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
+      await ensureReposMapped(projectSvc, id, httpError);
       const { modelId, wiki, scope } = req.body as {
         modelId?: string;
         wiki?: "auto" | "full" | false;

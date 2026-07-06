@@ -1,14 +1,53 @@
 /* ── CodaScope: Core Routes ───────────────────────────────────────────
-   Config, projects, repositories, models, and API key validation.
+   Config, projects, repositories, models, API key validation,
+   and project export/import.
    ──────────────────────────────────────────────────────────────────── */
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { getProjectsRoot, setProjectsRoot, getAgentServiceSingleton } from "./codaScopeServiceContext.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
 import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
+// archiver's @types don't declare the default factory function, so we use
+// createRequire to get the actual CommonJS export cleanly.
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const archiver: (format: string, options?: Record<string, unknown>) => import("stream").Transform & {
+  append: (source: import("stream").Readable | Buffer | string, data?: { name: string }) => unknown;
+  directory: (dirpath: string, destpath: false | string) => unknown;
+  finalize: () => Promise<void>;
+  on: (event: string, listener: (...args: unknown[]) => void) => unknown;
+  pipe: (dest: import("stream").Writable) => import("stream").Writable;
+} = require("archiver");
+import * as unzipper from "unzipper";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream } from "node:fs";
+import { rename, rm, readdir } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+
+// ── Write-blocking guard ──────────────────────────────────────────
+
+/**
+ * Reusable guard: rejects requests when a project has unmapped repositories.
+ * Import into other route files and call before write operations.
+ */
+export async function ensureReposMapped(
+  projectSvc: CodaScopeProjectService,
+  projectId: string,
+  httpError: (msg: string, status: number, code: string) => Error,
+): Promise<void> {
+  const { valid } = await projectSvc.validateRepositories(projectId);
+  if (!valid) {
+    throw httpError(
+      "Project has unmapped repositories. Fix in Settings → Repositories.",
+      400,
+      "repos_unmapped",
+    );
+  }
+}
 
 export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, secretService, httpError, ensureServices, wrap, param } = ctx;
+  const { app, secretService, httpError, ensureServices, wrap, param, upload } = ctx;
 
   // ── Config ──────────────────────────────────────────────────────
 
@@ -117,6 +156,159 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.json(result);
   }));
 
+  // ── Remap repository path (PATCH) ──────────────────────────────
+
+  app.patch("/api/codascope/projects/:id/repositories/:repoId", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const repoId = param(req, "repoId");
+    const { path: newPath } = req.body as { path?: string };
+    if (!newPath || typeof newPath !== "string" || !newPath.trim()) {
+      throw httpError("path is required.", 400, "invalid_input");
+    }
+    const ok = await projectSvc.updateRepositoryPath(id, repoId, newPath.trim());
+    if (!ok) throw httpError("Project or repository not found.", 404, "not_found");
+    res.json({ updated: true });
+  }));
+
+  // ── Validate repositories ──────────────────────────────────────
+
+  app.get("/api/codascope/projects/:id/validate-repos", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const result = await projectSvc.validateRepositories(id);
+    res.json(result);
+  }));
+
+  // ── Export project ─────────────────────────────────────────────
+
+  app.get("/api/codascope/projects/:id/export", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const projectDir = projectSvc.getProjectDir(id);
+    if (!projectDir) throw httpError("Project not found.", 404, "not_found");
+
+    // Read project.json for metadata
+    const projectJsonPath = path.join(projectDir, "project.json");
+    if (!existsSync(projectJsonPath)) throw httpError("Project data is corrupted.", 500, "corrupted");
+    const projectData = JSON.parse(readFileSync(projectJsonPath, "utf-8"));
+
+    // Derive a safe filename from the project slug (directory name)
+    const slug = path.basename(projectDir);
+    const safeName = slug.replace(/[^a-z0-9_-]/gi, "_");
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="codascope_${safeName}.zip"`);
+
+    const archive = archiver("zip", { zlib: { level: 6 } });
+    archive.on("error", (err: Error) => {
+      console.error("[CodaScope] Export archive error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to create archive." });
+      }
+    });
+
+    archive.pipe(res);
+
+    // Add _export_meta.json at the root
+    const exportMeta = {
+      exportVersion: 1,
+      exportedAt: new Date().toISOString(),
+      originalProjectId: projectData.id,
+      originalSlug: slug,
+    };
+    archive.append(JSON.stringify(exportMeta, null, 2), { name: "_export_meta.json" });
+
+    // Add the entire project directory
+    archive.directory(projectDir, false);
+
+    await archive.finalize();
+  }));
+
+  // ── Import project ─────────────────────────────────────────────
+
+  app.post("/api/codascope/projects/import", upload.single("file"), wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    if (!file) throw httpError("No file uploaded.", 400, "missing_file");
+
+    // Extract to a temp directory
+    const tmpDir = path.join(os.tmpdir(), `codascope-import-${crypto.randomUUID()}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    try {
+      // Write the uploaded buffer to a temp file and extract
+      const tmpZipPath = path.join(tmpDir, "upload.zip");
+      writeFileSync(tmpZipPath, file.buffer);
+
+      await new Promise<void>((resolve, reject) => {
+        createReadStream(tmpZipPath)
+          .pipe(unzipper.Extract({ path: path.join(tmpDir, "extracted") }))
+          .on("close", resolve)
+          .on("error", reject);
+      });
+
+      const extractedDir = path.join(tmpDir, "extracted");
+
+      // Validate: project.json must exist
+      if (!existsSync(path.join(extractedDir, "project.json"))) {
+        throw httpError("Invalid archive: project.json not found.", 400, "invalid_archive");
+      }
+
+      // Read the original project data
+      const rawProject = readFileSync(path.join(extractedDir, "project.json"), "utf-8");
+      const originalProject = JSON.parse(rawProject);
+
+      // Generate fresh UUID and slug
+      const newId = crypto.randomUUID();
+      const baseName = originalProject.name || "Imported Project";
+      const baseSlug = baseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || newId;
+      const projectsRoot = projectSvc.getRoot();
+
+      // Find a unique directory name
+      let targetSlug = baseSlug;
+      let targetDir = path.join(projectsRoot, targetSlug);
+      let counter = 2;
+      while (existsSync(targetDir)) {
+        targetSlug = `${baseSlug}-${counter}`;
+        targetDir = path.join(projectsRoot, targetSlug);
+        counter++;
+      }
+
+      // Move extracted content to the target directory
+      await rename(extractedDir, targetDir);
+
+      // Rewrite project.json with new UUID, keeping everything else
+      const now = new Date().toISOString();
+      const newProjectData = {
+        ...originalProject,
+        id: newId,
+        updatedAt: now,
+      };
+      writeFileSync(path.join(targetDir, "project.json"), JSON.stringify(newProjectData, null, 2));
+
+      // Remove export meta file if present
+      const metaPath = path.join(targetDir, "_export_meta.json");
+      if (existsSync(metaPath)) {
+        await rm(metaPath);
+      }
+
+      // Check repo validity
+      const repoStatus = await projectSvc.validateRepositories(newId);
+
+      res.status(201).json({
+        project: newProjectData,
+        needsRepoMapping: !repoStatus.valid,
+        unmappedRepos: repoStatus.unmappedRepos,
+      });
+    } finally {
+      // Clean up temp directory
+      try {
+        await rm(tmpDir, { recursive: true, force: true });
+      } catch { /* ignore cleanup errors */ }
+    }
+  }));
+
   // ── Models ──────────────────────────────────────────────────────
 
   app.get("/api/codascope/models", wrap(async (_req, res) => {
@@ -156,3 +348,4 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.json(result);
   }));
 }
+
