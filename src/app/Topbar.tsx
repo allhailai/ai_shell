@@ -83,15 +83,11 @@ export function Topbar({ activeApp }: { activeApp: AppManifest | null }) {
         </div>
       )}
 
-      {/* App header items (injected by active app) */}
-      {AppHeaderItems && (
-        <div className="topbar-app-items">
-          <AppHeaderItems />
-        </div>
-      )}
-
       {/* Actions */}
       <div className="topbar-actions">
+        {/* App header items (injected by active app) */}
+        {AppHeaderItems && <AppHeaderItems />}
+
         {hasBottomPanel && (
           <button
             className={`topbar-action-button${bottomPanelId ? " active" : ""}`}

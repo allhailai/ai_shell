@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, type ComponentType } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
-import { useRightPanel, useCommandBus } from "../../shell/hooks";
+import { useRightPanel } from "../../shell/hooks";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import {
   IconDashboard,
@@ -16,7 +16,6 @@ import {
   IconFolder,
   IconLaunch,
   IconEpic,
-  IconHelp,
 } from "./components/CodaScopeIcons";
 
 type CodaScopeView = "dashboard" | "epics" | "wiki" | "skills" | "settings";
@@ -41,11 +40,6 @@ export function CodaScopeNav() {
     setAgentStatus,
   } = useCodaScopeStore();
   const { isOpen: isAssistantOpen, toggle: toggleAssistant } = useRightPanel("assistant");
-  const commandBus = useCommandBus();
-
-  const handleOpenGuide = useCallback(() => {
-    commandBus?.emit("codascope:open-guide", {});
-  }, [commandBus]);
 
   // Derive current view from URL
   const section = segments[0] ?? "";
@@ -119,17 +113,6 @@ export function CodaScopeNav() {
 
   return (
     <div className="codascope-nav">
-      {/* Help Button */}
-      <button
-        className="codascope-nav-help-btn"
-        onClick={handleOpenGuide}
-        type="button"
-        title="Open CodaScope Guide"
-      >
-        <span className="codascope-nav-help-btn-icon"><IconHelp size={14} /></span>
-        CodaScope Help
-      </button>
-
       {/* Project picker */}
       <div className="codascope-nav-project-picker">
         <select

@@ -577,48 +577,48 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
 
   return createPortal(
     <div className="codascope-guide-modal" ref={modalRef} style={modalStyle}>
-      {/* Header — draggable */}
-      <div
-        className="codascope-guide-modal-header"
-        onMouseDown={handleDragStart}
-        style={{ cursor: "grab" }}
-      >
-        <h2>CodaScope Guide</h2>
-        <button
-          className="codascope-guide-modal-close"
-          onClick={onClose}
-          type="button"
-          aria-label="Close guide"
+        {/* Header — draggable */}
+        <div
+          className="codascope-guide-modal-header"
+          onMouseDown={handleDragStart}
+          style={{ cursor: "grab" }}
         >
-          ×
-        </button>
-      </div>
-
-      {/* Tab Bar */}
-      <div className="codascope-guide-modal-tabs">
-        {TABS.map((tab) => (
+          <h2>CodaScope Guide</h2>
           <button
-            key={tab.id}
-            className={`codascope-guide-modal-tab${activeTab === tab.id ? " codascope-guide-modal-tab--active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
+            className="codascope-guide-modal-close"
+            onClick={onClose}
             type="button"
+            aria-label="Close guide"
           >
-            {tab.label}
+            ×
           </button>
-        ))}
-      </div>
+        </div>
 
-      {/* Content */}
-      <div className="codascope-guide-modal-content">
-        {renderTab()}
-      </div>
+        {/* Tab Bar */}
+        <div className="codascope-guide-modal-tabs">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              className={`codascope-guide-modal-tab${activeTab === tab.id ? " codascope-guide-modal-tab--active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-      {/* Resize Handle */}
-      <div
-        className="codascope-guide-modal-resize-handle"
-        onMouseDown={handleResizeStart}
-      />
-    </div>,
+        {/* Content */}
+        <div className="codascope-guide-modal-content">
+          {renderTab()}
+        </div>
+
+        {/* Resize Handle */}
+        <div
+          className="codascope-guide-modal-resize-handle"
+          onMouseDown={handleResizeStart}
+        />
+      </div>,
     document.body,
   );
 }

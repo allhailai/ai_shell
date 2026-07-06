@@ -22,7 +22,6 @@ import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
-import { CodaScopeGuideModal } from "./components/CodaScopeGuideModal";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
 import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
 import type { SlashCommand, CommandContext } from "./commandRegistry";
@@ -118,8 +117,6 @@ export function CodaScopeAssistant() {
 
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [guideModalOpen, setGuideModalOpen] = useState(false);
-  const [guideInitialTab, setGuideInitialTab] = useState<"overview" | "chat-agent" | "projects" | "epics" | "shortcuts">("overview");
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // @-mention picker state
@@ -666,16 +663,7 @@ export function CodaScopeAssistant() {
     }
   }, []);
 
-  // ── Listen for codascope:open-guide from nav button ─────────────
 
-  useEffect(() => {
-    if (!commandBus) return;
-    const unsub = commandBus.on("codascope:open-guide", (() => {
-      setGuideInitialTab("overview");
-      setGuideModalOpen(true);
-    }) as (payload: unknown) => void);
-    return unsub;
-  }, [commandBus]);
 
   // ── Phase 3: Selection-to-chat listener ────────────────────────────
 
@@ -1103,7 +1091,7 @@ export function CodaScopeAssistant() {
             </svg>
           </button>
         </div>
-        <CodaScopeGuideModal isOpen={guideModalOpen} onClose={() => setGuideModalOpen(false)} initialTab={guideInitialTab} />
+
 
         {/* Slash command toast */}
         {slashToast && (

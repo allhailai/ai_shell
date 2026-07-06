@@ -1,6 +1,7 @@
 import type { AppManifest } from "../../types/app";
 import { CodaScopeContent } from "./CodaScopeContent";
 import { CodaScopeNav } from "./CodaScopeNav";
+import { CodaScopeHeaderItems } from "./CodaScopeHeaderItems";
 import { CodaScopeAssistant } from "./CodaScopeAssistant";
 
 function CodaScopeIcon({ size = 18 }: { size?: number }) {
@@ -32,6 +33,7 @@ export const codaScopeApp: AppManifest = {
   accentColor: "hsl(260, 65%, 55%)",
 
   leftNav: CodaScopeNav,
+  headerItems: CodaScopeHeaderItems,
   mainContent: CodaScopeContent,
 
   rightPanel: {

@@ -1574,15 +1574,18 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 900;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary, hsl(228, 14%, 14%));
+  border: 2px solid var(--color-accent, hsl(230, 80%, 62%));
   border-radius: var(--radius-lg);
   width: 720px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 20px rgba(99, 102, 241, 0.25),
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 24px 64px rgba(0, 0, 0, 0.4);
   animation: codascope-guide-slide 0.25s ease-out;
   overflow: hidden;
 }

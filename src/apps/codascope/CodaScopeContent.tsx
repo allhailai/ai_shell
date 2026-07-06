@@ -25,7 +25,7 @@
      /codascope/project/:id/epic/:epicId/history     → epic history
    ──────────────────────────────────────────────────────────────────── */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "./useCodaScopeStore";
 import { ProjectList } from "./views/ProjectList";
@@ -37,6 +37,8 @@ import { Settings } from "./views/Settings";
 import { SetupBanners } from "./components/SetupBanners";
 import { EpicList } from "./views/EpicList";
 import { EpicDetail } from "./views/EpicDetail";
+import { CodaScopeGuideModal } from "./components/CodaScopeGuideModal";
+import { useCommandBus } from "../../shell/hooks";
 
 /**
  * Global data loader — fetches config + projects once on mount,
@@ -95,6 +97,19 @@ export function CodaScopeContent() {
   // Bootstrap: load config + projects on mount (works for all routes)
   useCodaScopeBootstrap();
 
+  // ── Guide modal state (lives here so it works even when right panel is closed) ──
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [guideInitialTab, setGuideInitialTab] = useState<"overview" | "chat-agent" | "projects" | "epics" | "shortcuts">("overview");
+  const commandBus = useCommandBus();
+
+  useEffect(() => {
+    if (!commandBus) return;
+    return commandBus.on("codascope:open-guide", (() => {
+      setGuideInitialTab("overview");
+      setGuideModalOpen(true);
+    }) as (payload: unknown) => void);
+  }, [commandBus]);
+
   // Parse route
   const section = segments[0] ?? "";
 
@@ -133,11 +148,11 @@ export function CodaScopeContent() {
 
   // ── Route matching ────────────────────────────────────────────────
 
-  if (section === "" || section === "projects") {
-    return <ProjectList />;
-  }
+  let pageContent: React.ReactNode;
 
-  if (section === "project") {
+  if (section === "" || section === "projects") {
+    pageContent = <ProjectList />;
+  } else if (section === "project") {
     const view = segments[2] ?? "dashboard";
 
     // Don't show banners on settings page (user is already there)
@@ -173,14 +188,21 @@ export function CodaScopeContent() {
         content = <ProjectDashboard />;
     }
 
-    return (
+    pageContent = (
       <>
         {showBanners && <SetupBanners />}
         {content}
       </>
     );
+  } else {
+    // Fallback
+    pageContent = <ProjectList />;
   }
 
-  // Fallback
-  return <ProjectList />;
+  return (
+    <>
+      {pageContent}
+      <CodaScopeGuideModal isOpen={guideModalOpen} onClose={() => setGuideModalOpen(false)} initialTab={guideInitialTab} />
+    </>
+  );
 }
