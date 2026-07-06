@@ -215,6 +215,29 @@ registerAiShellUpdateRoutes(app, {
   dataDir: platformInfo.dataDir,
 });
 
+// ── Static file serving (server mode only) ──────────────────────────
+// In server mode, Express serves the Vite-built SPA from dist/.
+// In standalone mode, Vite's dev server handles the frontend separately.
+
+if (SHELL_MODE === "server") {
+  const { existsSync } = await import("node:fs");
+  const distPath = path.resolve(REPO_ROOT, "dist");
+
+  if (existsSync(distPath)) {
+    app.use(express.static(distPath));
+
+    // SPA catch-all: serve index.html for any non-API route so that
+    // client-side routing (pushState) works on refresh/deep-link.
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+
+    console.log(`[aishell] Serving SPA from ${distPath}`);
+  } else {
+    console.warn("[aishell] Warning: dist/ not found — frontend will not be served. Run 'npm run build' to generate it.");
+  }
+}
+
 // ── Error handler ───────────────────────────────────────────────────
 
 app.use((err: HttpError, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
