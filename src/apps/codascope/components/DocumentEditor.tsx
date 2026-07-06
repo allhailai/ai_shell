@@ -7,7 +7,6 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { MarkdownViewer } from "../../../shared/markdown";
 import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
 import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation, IconSparkle, IconInsert, IconClose } from "./CodaScopeIcons";

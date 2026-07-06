@@ -13,7 +13,6 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import {
   getFilteredCommands,
-  getCategoryLabel,
   type SlashCommand,
   type CommandContext,
   type CommandCategory,

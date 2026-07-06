@@ -88,7 +88,7 @@ export function ProjectDashboard() {
 
   // ── Repo status state ─────────────────────────────────────────────
   const [repoStatuses, setRepoStatuses] = useState<Record<string, RepoStatus>>({});
-  const [checkingRepoId, setCheckingRepoId] = useState<string | null>(null);
+  const [checkingRepoId] = useState<string | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
   const [pullingRepoId, setPullingRepoId] = useState<string | null>(null);
   const [pullResult, setPullResult] = useState<{
@@ -96,26 +96,6 @@ export function ProjectDashboard() {
     success: boolean;
     message: string;
   } | null>(null);
-
-  // ── Check status for a single repo ─────────────────────────────────
-  const checkRepoStatus = useCallback(async (repoId: string) => {
-    if (!activeProjectId) return;
-    setCheckingRepoId(repoId);
-    try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/repositories/${repoId}/status`
-      );
-      const data = await res.json() as RepoStatus;
-      setRepoStatuses((prev) => ({ ...prev, [repoId]: data }));
-    } catch {
-      setRepoStatuses((prev) => ({
-        ...prev,
-        [repoId]: { status: "unknown", behind: 0, ahead: 0, branch: null, error: "Network error." },
-      }));
-    } finally {
-      setCheckingRepoId(null);
-    }
-  }, [activeProjectId]);
 
   // ── Check all repos on mount ──────────────────────────────────────
   useEffect(() => {

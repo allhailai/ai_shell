@@ -76,8 +76,8 @@ function summarizeResults(results?: CurationResults): string {
   const scopeChanges = results.scope.added + results.scope.removed;
   if (scopeChanges > 0) parts.push(`${scopeChanges} scope change${scopeChanges !== 1 ? "s" : ""}`);
 
-  const conceptChanges = results.concepts.created + results.concepts.enriched;
-  if (conceptChanges > 0) parts.push(`${conceptChanges} concept${conceptChanges !== 1 ? "s" : ""}`);
+
+
 
   return parts.length > 0 ? parts.join(" · ") : "No changes";
 }

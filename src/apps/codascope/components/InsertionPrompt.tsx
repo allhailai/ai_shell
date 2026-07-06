@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { MarkdownViewer } from "../../../shared/markdown";
-import { IconInsert, IconRewrite, IconExpand, IconGenerate, IconPending, IconClose, IconCheckmark, IconUndo } from "./CodaScopeIcons";
+import { IconInsert, IconRewrite, IconExpand, IconGenerate, IconClose, IconCheckmark, IconUndo } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useShellStore } from "../../../shell/store";
 import type { InsertionDirective, DirectiveType } from "../codaScopeTypes";

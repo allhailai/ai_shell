@@ -134,7 +134,6 @@ export function CodaScopeAssistant() {
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const autoSendRef = useRef(false); // Prevents double auto-send
 
   // Get the current project name for context
@@ -574,16 +573,13 @@ export function CodaScopeAssistant() {
 
       // ── Help commands ──
       case "help":
-        setGuideInitialTab("overview");
-        setGuideModalOpen(true);
+        commandBus.emit("codascope:open-guide", {});
         break;
       case "commands":
-        setGuideInitialTab("chat-agent");
-        setGuideModalOpen(true);
+        commandBus.emit("codascope:open-guide", {});
         break;
       case "shortcuts":
-        setGuideInitialTab("shortcuts");
-        setGuideModalOpen(true);
+        commandBus.emit("codascope:open-guide", {});
         break;
 
       default:
@@ -658,7 +654,7 @@ export function CodaScopeAssistant() {
   useEffect(() => {
     const seen = localStorage.getItem("codascope-guide-seen");
     if (!seen) {
-      setGuideModalOpen(true);
+      commandBus.emit("codascope:open-guide", {});
       localStorage.setItem("codascope-guide-seen", "1");
     }
   }, []);
@@ -1024,7 +1020,7 @@ export function CodaScopeAssistant() {
             )}
             <button
               className="codascope-assistant-help-btn"
-              onClick={() => { setGuideInitialTab("overview"); setGuideModalOpen(true); }}
+              onClick={() => { commandBus.emit("codascope:open-guide", {}); }}
               type="button"
               title="CodaScope Guide"
               aria-label="CodaScope Guide"

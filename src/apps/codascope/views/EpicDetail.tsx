@@ -409,7 +409,7 @@ export function EpicDetail() {
 
   // ── Pin/unpin/archive/unarchive handlers ─────────────────────────────
   const handlePin = useCallback(async (type: "md" | "html", id: string) => {
-    if (!activeProjectId || !epicId) return;
+    if (!activeProjectId || !epicId || !epic) return;
     try {
       const endpoint = type === "md"
         ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/pin`
@@ -432,7 +432,7 @@ export function EpicDetail() {
   }, [activeProjectId, epicId, epic, setEpic]);
 
   const handleUnpin = useCallback(async (type: "md" | "html", id: string) => {
-    if (!activeProjectId || !epicId) return;
+    if (!activeProjectId || !epicId || !epic) return;
     try {
       const endpoint = type === "md"
         ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/unpin`
@@ -455,7 +455,7 @@ export function EpicDetail() {
   }, [activeProjectId, epicId, epic, setEpic]);
 
   const handleArchiveDoc = useCallback(async (type: "md" | "html", id: string) => {
-    if (!activeProjectId || !epicId) return;
+    if (!activeProjectId || !epicId || !epic) return;
     try {
       const endpoint = type === "md"
         ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/archive`
@@ -478,7 +478,7 @@ export function EpicDetail() {
   }, [activeProjectId, epicId, epic, setEpic]);
 
   const handleUnarchiveDoc = useCallback(async (type: "md" | "html", id: string) => {
-    if (!activeProjectId || !epicId) return;
+    if (!activeProjectId || !epicId || !epic) return;
     try {
       const endpoint = type === "md"
         ? `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${id}/unarchive`

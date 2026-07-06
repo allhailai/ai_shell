@@ -27,6 +27,7 @@ export interface CodaScopeProject {
   createdAt: string;
   updatedAt: string;
   wikiPageCount?: number;
+  epicCount?: number;
   archived?: boolean;
 }
 

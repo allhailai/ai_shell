@@ -309,7 +309,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           <div className="codascope-scope-empty-actions">
             <button
               className="codascope-btn codascope-btn-secondary"
-              onClick={() => openPicker("wiki")}
+              onClick={() => openPicker()}
               type="button"
             >
               Add from Wiki
@@ -357,14 +357,14 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
         <div className="codascope-scope-toolbar-right">
           <button
             className="codascope-btn codascope-btn-secondary"
-            onClick={() => openPicker("wiki")}
+            onClick={() => openPicker()}
             type="button"
           >
             + Wiki
           </button>
           <button
             className="codascope-btn codascope-btn-secondary"
-            onClick={() => openPicker("wiki")}
+            onClick={() => openPicker()}
             type="button"
           >
             + Wiki Page

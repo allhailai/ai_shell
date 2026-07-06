@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import type { EpicDesign } from "../codaScopeTypes";
 import type { ConversationSummary } from "../components/ConversationHeader";
 
 /* ── Types ───────────────────────────────────────────────────────── */
@@ -38,7 +39,7 @@ export interface UseEpicContextResult {
   /** The current epic ID from the URL, or null */
   currentEpicId: string | null;
   /** The current epic object, or null */
-  currentEpic: ReturnType<typeof useCodaScopeStore>["epics"][number] | null;
+  currentEpic: EpicDesign | null;
   /** Epic knowledge summary (source/wiki/curation counts) */
   epicKnowledge: EpicKnowledgeSummary;
   /** Curation build status for the current epic */

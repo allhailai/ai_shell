@@ -64,7 +64,7 @@ export function useArtifactAnnotations({
   epicId,
   artifactId,
   activeTab,
-  isBuilt,
+  isBuilt: _isBuilt,
   sections,
   previewRef,
   loadSections,
