@@ -609,3 +609,143 @@
   color: var(--color-text-tertiary);
   font-size: var(--text-sm);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UPDATE BANNER & TAB
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Update available banner (top of page) ── */
+
+.admin-update-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: hsl(200 60% 15% / 0.5);
+  border: 1px solid hsl(200 50% 35%);
+  border-radius: var(--radius-md);
+  color: hsl(200 80% 75%);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  animation: admin-slide-in 0.3s ease-out;
+}
+
+.admin-update-banner:hover {
+  background: hsl(200 60% 18% / 0.6);
+  border-color: hsl(200 50% 45%);
+}
+
+.admin-update-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: hsl(200 80% 60%);
+  flex-shrink: 0;
+  animation: admin-update-pulse 2s ease-in-out infinite;
+}
+
+/* ── Badge dot on the Updates tab label ── */
+
+.admin-update-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: hsl(200 80% 60%);
+  flex-shrink: 0;
+  animation: admin-update-pulse 2s ease-in-out infinite;
+}
+
+@keyframes admin-update-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Update tab content ── */
+
+.admin-update-description {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-4);
+  line-height: 1.6;
+}
+
+.admin-update-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.admin-update-available {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.admin-update-restart-btn {
+  align-self: flex-start;
+}
+
+/* ── Restarting state ── */
+
+.admin-update-restarting {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: hsl(200 40% 12% / 0.5);
+  border: 1px solid hsl(200 40% 28%);
+  border-radius: var(--radius-lg);
+  animation: admin-slide-in 0.3s ease-out;
+}
+
+.admin-update-restarting-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid hsl(200 40% 30%);
+  border-top-color: hsl(200 80% 65%);
+  border-radius: var(--radius-full);
+  animation: admin-update-spin 0.8s linear infinite;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+@keyframes admin-update-spin {
+  to { transform: rotate(360deg); }
+}
+
+.admin-update-restarting-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: hsl(200 70% 75%);
+  margin: 0 0 var(--space-2);
+}
+
+.admin-update-restarting-hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-1);
+  line-height: 1.5;
+}
+
+.admin-update-restarting-timing {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+  font-style: italic;
+}
+
+/* ── Button spinner (inline) ── */
+
+.admin-update-btn-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--radius-full);
+  animation: admin-update-spin 0.8s linear infinite;
+  opacity: 0.7;
+}
+

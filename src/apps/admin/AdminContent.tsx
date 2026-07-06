@@ -2,20 +2,38 @@
    Root component for the admin app. Tab-based navigation between:
    - Secrets management
    - User management
+   - Software updates
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState } from "react";
 import { SecretsTab } from "./SecretsTab";
 import { UsersTab } from "./UsersTab";
+import { UpdateTab, UpdateTabIcon, useAutoUpdateCheck } from "./UpdateTab";
 
-type Tab = "secrets" | "users";
+type Tab = "secrets" | "users" | "updates";
 
 export function AdminContent() {
   const [activeTab, setActiveTab] = useState<Tab>("secrets");
+  const updateAvailable = useAutoUpdateCheck();
 
   return (
     <div className="admin-page">
       <div className="admin-page-inner">
+        {/* Update available banner */}
+        {updateAvailable && activeTab !== "updates" ? (
+          <button
+            className="admin-update-banner"
+            onClick={() => setActiveTab("updates")}
+            type="button"
+          >
+            <span className="admin-update-banner-dot" />
+            <span>
+              A new AIShell version is available.{" "}
+              <strong>Go to Updates →</strong>
+            </span>
+          </button>
+        ) : null}
+
         {/* Header */}
         <div className="admin-header">
           <h1 className="admin-title">Settings</h1>
@@ -40,12 +58,22 @@ export function AdminContent() {
             <UsersIcon />
             Users
           </button>
+          <button
+            className={`admin-tab${activeTab === "updates" ? " active" : ""}`}
+            onClick={() => setActiveTab("updates")}
+            type="button"
+          >
+            <UpdateTabIcon />
+            Updates
+            {updateAvailable ? <span className="admin-update-badge-dot" /> : null}
+          </button>
         </div>
 
         {/* Tab content */}
         <div className="admin-tab-content">
           {activeTab === "secrets" && <SecretsTab />}
           {activeTab === "users" && <UsersTab />}
+          {activeTab === "updates" && <UpdateTab />}
         </div>
       </div>
     </div>

@@ -26,6 +26,9 @@ import { registerDbHelperRoutes } from "./routes/dbHelperRoutes.js";
 import { registerDbExplorerRoutes } from "./routes/dbExplorerRoutes.js";
 import { registerCodaScopeRoutes } from "./routes/codaScopeRoutes.js";
 import { registerFilesystemRoutes } from "./routes/filesystemRoutes.js";
+import { createAiShellUpdateService } from "./services/aiShellUpdateService.js";
+import { registerAiShellUpdateRoutes } from "./routes/aiShellUpdateRoutes.js";
+import { fileURLToPath } from "node:url";
 
 export type ShellMode = "standalone" | "server";
 
@@ -192,6 +195,25 @@ registerDbHelperRoutes(app, { secretService, authMiddleware, httpError });
 registerDbExplorerRoutes(app, { secretService, authMiddleware, httpError });
 registerCodaScopeRoutes(app, { secretService, authMiddleware, httpError });
 registerFilesystemRoutes(app, { authMiddleware, httpError });
+
+// ── Self-update infrastructure ──────────────────────────────────────
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const updateService = createAiShellUpdateService({
+  REPO_ROOT,
+  PORT,
+  httpError,
+});
+
+registerAiShellUpdateRoutes(app, {
+  checkUpdate: updateService.checkUpdate,
+  updateAndRestart: updateService.updateAndRestart,
+  authMiddleware,
+  httpError,
+  mode: SHELL_MODE,
+  dataDir: platformInfo.dataDir,
+});
 
 // ── Error handler ───────────────────────────────────────────────────
 
