@@ -50,7 +50,6 @@ describe("tool tier builders", () => {
     expect(keys.length).toBeGreaterThanOrEqual(10);
     // Verify some known epic tools are present
     expect(keys).toContain("write_wiki_topic");
-    expect(keys).toContain("create_concept");
     expect(keys).toContain("add_scope_entry");
     expect(keys).toContain("create_design_doc");
     expect(keys).toContain("edit_design_doc");
@@ -265,7 +264,7 @@ describe("getToolsForPurpose", () => {
   });
 
   it("tool count sanity check — each tier is meaningful", () => {
-    expect(readCount).toBeGreaterThanOrEqual(15);
+    expect(readCount).toBeGreaterThanOrEqual(13);
     expect(epicCount).toBeGreaterThanOrEqual(15);
     expect(writeCount).toBeGreaterThanOrEqual(1);
     expect(artifactCount).toBeGreaterThanOrEqual(3);

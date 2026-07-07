@@ -23,19 +23,42 @@ import { buildArtifactTools } from "./tools/codaScopeArtifactTools.js";
 export type AgentPurpose = "chat" | "assistant" | "wiki-build" | "curation" | "research" | "artifact-build" | "artifact-section-regen";
 
 // ── Tool Result Collector ───────────────────────────────────────────
-// Module-level collector for tool return values that contain action tags.
-// The agent service drains this after each run completes.
+// Per-run collector for tool return values that contain action tags.
+// Each agent run creates its own collector instance so concurrent runs
+// don't cross-contaminate results.
+//
+// Because the Cursor SDK agent pool caches agents with baked-in tool
+// closures, tools capture a *holder* (stable reference) whose `.current`
+// property is swapped to a fresh collector before each run.
 
-const toolResultCollector: string[] = [];
+/**
+ * Collects tool result text (e.g., action tags) during a single agent run.
+ */
+export class ToolResultCollector {
+  private results: string[] = [];
 
-/** Push a tool result text for later action-tag extraction. */
-export function collectToolResult(text: string): void {
-  toolResultCollector.push(text);
+  /** Push a tool result text for later action-tag extraction. */
+  collect(text: string): void {
+    this.results.push(text);
+  }
+
+  /** Drain all collected tool results (clears the collector). */
+  drain(): string[] {
+    return this.results.splice(0);  // returns and clears
+  }
 }
 
-/** Drain all collected tool results (clears the collector). */
-export function drainToolResults(): string[] {
-  return toolResultCollector.splice(0);  // returns and clears
+/**
+ * Stable holder that tool closures capture. Before each agent run,
+ * swap `.current` to a fresh `ToolResultCollector` instance.
+ */
+export class ToolResultCollectorHolder {
+  current = new ToolResultCollector();
+
+  /** Convenience: collect via the current collector. */
+  collect(text: string): void {
+    this.current.collect(text);
+  }
 }
 
 // ── Re-exports for backward compatibility ───────────────────────────
@@ -56,11 +79,15 @@ export { buildArtifactTools } from "./tools/codaScopeArtifactTools.js";
  * - artifact-build / artifact-section-regen: read-only + artifact tools
  *
  * Services are instantiated once and shared across all tool tiers.
+ *
+ * @param collectorHolder — optional per-run collector holder; when provided,
+ *   tools that emit action tags push results into holder.current.
  */
 export function getToolsForPurpose(
   projectId: string,
   projectsRoot: string,
   purpose: AgentPurpose | string,
+  collectorHolder?: ToolResultCollectorHolder,
 ): Record<string, SDKCustomTool> {
   const services = createToolServices(projectsRoot);
 
@@ -72,19 +99,19 @@ export function getToolsForPurpose(
   }
 
   if (purpose === "curation" || purpose === "research") {
-    const epicTools = buildEpicTools(projectId, services);
+    const epicTools = buildEpicTools(projectId, services, collectorHolder);
     return { ...readOnly, ...epicTools };
   }
 
   // Artifact purposes: read-only project context + artifact-specific tools
   if (purpose === "artifact-build" || purpose === "artifact-section-regen") {
-    const artifactTools = buildArtifactTools(projectId, services);
+    const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
     return { ...readOnly, ...artifactTools };
   }
 
   // assistant and chat get ALL tools — full agent autonomy
-  const epicTools = buildEpicTools(projectId, services);
+  const epicTools = buildEpicTools(projectId, services, collectorHolder);
   const write = buildWriteTools(projectId, services);
-  const artifactTools = buildArtifactTools(projectId, services);
+  const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
   return { ...readOnly, ...epicTools, ...write, ...artifactTools };
 }

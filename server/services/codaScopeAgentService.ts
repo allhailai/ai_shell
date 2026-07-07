@@ -21,7 +21,7 @@ import type {
 } from "@cursor/sdk";
 import type { SecretService } from "./secretService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
-import { getToolsForPurpose, drainToolResults } from "./codaScopeToolDefinitions.js";
+import { getToolsForPurpose, ToolResultCollector, ToolResultCollectorHolder } from "./codaScopeToolDefinitions.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -44,6 +44,7 @@ interface PoolEntry {
   purpose: string;
   lastUsed: number;
   busy: boolean;
+  collectorHolder: ToolResultCollectorHolder;
 }
 
 /* ── Model Cache ────────────────────────────────────────────────────── */
@@ -158,8 +159,9 @@ export class CodaScopeAgentService {
   private getToolsForPurpose(
     projectId: string,
     purpose: string,
+    collectorHolder?: ToolResultCollectorHolder,
   ): Record<string, SDKCustomTool> {
-    return getToolsForPurpose(projectId, this.projectsRoot, purpose);
+    return getToolsForPurpose(projectId, this.projectsRoot, purpose, collectorHolder);
   }
 
   /* ── Agent Pool ───────────────────────────────────────────────────── */
@@ -190,13 +192,18 @@ export class CodaScopeAgentService {
       (r: { path: string }) => r.path,
     ) ?? [];
 
+    // Create a stable collector holder for this pool entry.
+    // Tool closures capture the holder; before each run we swap
+    // holder.current to a fresh ToolResultCollector.
+    const collectorHolder = new ToolResultCollectorHolder();
+
     const agent = await Agent.create({
       model: { id: modelId },
       apiKey,
       name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
       local: {
         cwd: repoPaths.length > 0 ? repoPaths : undefined,
-        customTools: this.getToolsForPurpose(projectId, purpose),
+        customTools: this.getToolsForPurpose(projectId, purpose, collectorHolder),
       },
     });
 
@@ -206,6 +213,7 @@ export class CodaScopeAgentService {
       purpose,
       lastUsed: Date.now(),
       busy: false,
+      collectorHolder,
     });
 
     return agent;
@@ -258,11 +266,19 @@ export class CodaScopeAgentService {
       this.activeChatControllers.set(projectId, abortController);
     }
 
+    // Swap to a fresh per-run collector so concurrent runs don't cross-contaminate.
+    // The pool entry's collectorHolder is a stable reference captured by tool closures;
+    // swapping .current redirects all tool result collection to this run's collector.
+    const runCollector = new ToolResultCollector();
+
     try {
       const agent = await this.getOrCreateAgent(projectId, purpose, modelId);
 
       const entry = this.pool.get(key);
-      if (entry) entry.busy = true;
+      if (entry) {
+        entry.busy = true;
+        entry.collectorHolder.current = runCollector;
+      }
 
       // Build the full message with optional context
       let fullMessage = "";
@@ -318,12 +334,12 @@ export class CodaScopeAgentService {
       this.activeChatControllers.delete(projectId);
 
       if (abortController.signal.aborted) {
-        drainToolResults(); // discard collected results on cancel
+        runCollector.drain(); // discard collected results on cancel
         onError(new Error("Agent cancelled by user."));
       } else {
         // Forward any tool results collected during execution
         // (e.g., design doc tools push action tags to the collector)
-        for (const text of drainToolResults()) {
+        for (const text of runCollector.drain()) {
           onMessage({
             type: "tool-result",
             text,

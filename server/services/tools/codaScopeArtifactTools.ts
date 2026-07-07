@@ -6,7 +6,7 @@
 
 import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
-import { collectToolResult } from "../codaScopeToolDefinitions.js";
+import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 
 /**
  * Build artifact-specific tools for the artifact-build and artifact-section-regen
@@ -16,6 +16,7 @@ import { collectToolResult } from "../codaScopeToolDefinitions.js";
 export function buildArtifactTools(
   projectId: string,
   services: ToolServices,
+  collector?: ToolResultCollectorHolder,
 ): Record<string, SDKCustomTool> {
   const {
     epic: epicService,
@@ -89,7 +90,7 @@ export function buildArtifactTools(
               `<codascope_action type="artifact_built" epicId="${epicId}" artifactId="${artifactId}">` +
               `Visual artifact section "${sectionId}" updated` +
               `</codascope_action>`;
-            collectToolResult(sectionResultText);
+            collector?.collect(sectionResultText);
             return sectionResultText;
           }
 
@@ -111,7 +112,7 @@ export function buildArtifactTools(
             `<codascope_action type="artifact_built" epicId="${epicId}" artifactId="${artifactId}">` +
             `Visual artifact updated successfully` +
             `</codascope_action>`;
-          collectToolResult(resultText);
+          collector?.collect(resultText);
           return resultText;
         } catch (err) {
           return `Failed to write artifact HTML: ${err instanceof Error ? err.message : String(err)}`;

@@ -23,6 +23,7 @@ export interface SseStreamCallbacks {
   onRunStarted?: (runId: string, pipeline?: unknown) => void;
   onDone: (summary: string | null) => void;
   onError: (error: string) => void;
+  onCancelled?: (runId: string) => void;
   onWikiRefresh?: (topics: unknown[]) => void;
   onPipelineStep?: (step: PipelineStep) => void;
 }
@@ -140,6 +141,22 @@ export function connectToSseStream(
               callbacks.onError(parsed.error ?? "Unknown error");
             } catch {
               callbacks.onError("Unknown error");
+            }
+          } else if (event === "cancelled") {
+            try {
+              const parsed = JSON.parse(data);
+              if (callbacks.onCancelled) {
+                callbacks.onCancelled(parsed.runId ?? "");
+              } else {
+                // Fallback: treat cancellation as a clean completion
+                callbacks.onDone(null);
+              }
+            } catch {
+              if (callbacks.onCancelled) {
+                callbacks.onCancelled("");
+              } else {
+                callbacks.onDone(null);
+              }
             }
           } else if (event === "wiki-refresh") {
             try {

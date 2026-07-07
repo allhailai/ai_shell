@@ -8,7 +8,7 @@ import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import type { TopicDepth, CurationReasonType } from "../../../src/apps/codascope/codaScopeTypes.js";
 import { searchWeb } from "../codaScopeWebSearchService.js";
-import { collectToolResult } from "../codaScopeToolDefinitions.js";
+import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 
 /**
  * Build epic-related write tools and new read tools.
@@ -18,6 +18,7 @@ import { collectToolResult } from "../codaScopeToolDefinitions.js";
 export function buildEpicTools(
   projectId: string,
   services: ToolServices,
+  collector?: ToolResultCollectorHolder,
 ): Record<string, SDKCustomTool> {
   const {
     wiki: wikiService,
@@ -595,7 +596,7 @@ export function buildEpicTools(
             `<codascope_action type="design_doc_created" epicId="${epicId}" docId="${doc.id}">\n` +
             `Created design document "${title}"\n` +
             `</codascope_action>`;
-          collectToolResult(resultText);
+          collector?.collect(resultText);
           return resultText;
         } catch (err) {
           return `Failed to create design doc: ${err instanceof Error ? err.message : String(err)}`;
@@ -636,7 +637,7 @@ export function buildEpicTools(
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;
-          collectToolResult(resultText);
+          collector?.collect(resultText);
           return resultText;
         } catch (err) {
           return `Failed to edit design doc: ${err instanceof Error ? err.message : String(err)}`;
@@ -691,7 +692,7 @@ export function buildEpicTools(
             `<codascope_action type="design_doc_edited" epicId="${epicId}" docId="${docId}" summary="${editSummary}" startLine="${startLine}" endLine="${endLine}">\n` +
             `${editSummary}\n` +
             `</codascope_action>`;
-          collectToolResult(resultText);
+          collector?.collect(resultText);
           return resultText;
         } catch (err) {
           return `Failed to edit design doc section: ${err instanceof Error ? err.message : String(err)}`;
