@@ -392,7 +392,7 @@ export function WikiBrowser() {
         )}
 
         {activeTopicId && !buildLog ? (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{
               display: "flex",
               alignItems: "center",
@@ -421,7 +421,7 @@ export function WikiBrowser() {
                 {saving ? "Saving…" : "Save"}
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
               <MarkdownEditor
                 value={activeTopicContent}
                 onChange={setActiveTopicContent}
