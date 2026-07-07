@@ -46,6 +46,10 @@ export interface WikiState {
   lastBuildMode: string | null;
   gitHeads: Record<string, string>;
   topics: Record<string, TopicState>;
+  // Deep Run sync point metadata
+  lastSyncAt?: string;
+  lastSyncGitHeads?: Record<string, string>;
+  lastSyncRunId?: string;
 }
 
 /* ── Service ────────────────────────────────────────────────────────── */

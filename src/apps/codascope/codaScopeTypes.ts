@@ -157,6 +157,7 @@ export interface BuildState {
   summary: string | null;
   error: string | null;
   pipelineSteps?: PipelineStepRecord[];
+  buildType?: "analyze" | "deep-run";
 }
 
 export interface BuildLogEntry {
@@ -170,6 +171,8 @@ export interface BuildLogEntry {
   error: string | null;
   pageCount?: number | null;
   durationMs: number | null;
+  buildType?: string;
+  syncGitHeads?: Record<string, string>;
 }
 
 // ── Skills ──────────────────────────────────────────────────────────

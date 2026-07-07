@@ -8,7 +8,7 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { ensureReposMapped } from "./codaScopeCoreRoutes.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
-import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
+import { runAnalyzePipeline, runDeepRunPipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
@@ -466,6 +466,94 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       try {
         await runAnalyzePipeline(
           { projectId: id, modelId, wiki: wiki ?? false, scope },
+          { sendEvent, sendMessage, isAborted },
+          svcs,
+          runId,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        buildSvc.failBuild(id, runId, message);
+        buildSvc.clearCancellation(id);
+        sendEvent("error", { error: message });
+      }
+
+      if (!isAborted()) res.end();
+    })().catch(next);
+  });
+
+  // ── Deep Run Pipeline ───────────────────────────────────────────
+  // Full code-to-wiki sync: force-refresh code maps → outline if needed →
+  // deep-enrich each topic → cross-reference pass → regenerate index →
+  // update wiki-state.json with sync point.
+
+  app.post("/api/codascope/projects/:id/deep-run", (req: Request, res: Response, next: NextFunction) => {
+    (async () => {
+      const svcs = await ensureServices();
+      const { buildSvc, projectSvc } = svcs;
+      const id = param(req, "id");
+      await ensureReposMapped(projectSvc, id, httpError);
+      const { modelId } = req.body as { modelId?: string };
+
+      if (!modelId || typeof modelId !== "string") {
+        throw httpError("modelId is required.", 400, "invalid_input");
+      }
+
+      const project = await projectSvc.getProject(id);
+      if (!project) throw httpError("Project not found.", 404, "not_found");
+
+      const projectDir = projectSvc.getProjectDir(id);
+      if (!projectDir) throw httpError("Project directory not found.", 404, "not_found");
+
+      // Register project dir for build-logs co-location
+      buildSvc.registerProjectDir(id, projectDir);
+
+      // Reject duplicate builds (deep-run uses the main project scope)
+      const runId = buildSvc.startBuild(id, "deep-run", modelId);
+      if (!runId) {
+        res.status(409).json({ error: "A build is already running for this project.", code: "build_in_progress" });
+        return;
+      }
+
+      // Mark the build as a deep-run
+      const buildState = buildSvc.getBuildState(id);
+      if (buildState) buildState.buildType = "deep-run";
+
+      // SSE headers
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+
+      res.write(`event: run-started\ndata: ${JSON.stringify({ runId, buildType: "deep-run" })}\n\n`);
+
+      // Clear any previous cancellation for this project
+      buildSvc.clearCancellation(id);
+
+      let sseAborted = false;
+      req.on("close", () => { sseAborted = true; });
+
+      const isAborted = () => sseAborted || buildSvc.isCancelled(id);
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (event === "pipeline-step") {
+          buildSvc.addPipelineStep(id, runId, data as { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord });
+        }
+        if (isAborted()) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const sendMessage = (msg: unknown) => {
+        const msgJson = JSON.stringify(msg);
+        buildSvc.appendOutput(id, runId, msgJson + "\n");
+        if (isAborted()) return;
+        res.write(`data: ${msgJson}\n\n`);
+      };
+
+      try {
+        await runDeepRunPipeline(
+          { projectId: id, modelId },
           { sendEvent, sendMessage, isAborted },
           svcs,
           runId,

@@ -54,6 +54,7 @@ export interface BuildState {
   outputLength: number;  // bytes of output written so far
   pipelineSteps: PipelineStepRecord[];
   scope?: string;  // Optional scope key (e.g. "epic-deepen::epicId", "research::epicId")
+  buildType?: "analyze" | "deep-run";
 }
 
 export interface BuildLogEntry {
@@ -73,6 +74,8 @@ export interface BuildLogEntry {
   totalInputTokens?: number;
   totalOutputTokens?: number;
   buildMode?: string;
+  buildType?: string;
+  syncGitHeads?: Record<string, string>;
   topicsBuilt?: number;
   topicsSkipped?: number;
 }
@@ -330,6 +333,12 @@ export class CodaScopeBuildStateService {
       "generate-plan": "Research Plan",
       "execute-downloads": "Download Sources",
       "process-sources": "Process Sources",
+      // Deep Run pipeline steps
+      "deep-code-map": "⚡ Code Maps (Force Refresh)",
+      "deep-outline": "⚡ Wiki Outline",
+      "deep-cross-ref": "⚡ Cross-Reference Pass",
+      "deep-index": "⚡ Regenerate Index",
+      "deep-finalize": "⚡ Finalize Sync Point",
     };
 
     let detail = "";
@@ -400,8 +409,10 @@ export class CodaScopeBuildStateService {
     pageCount?: number,
     buildInfo?: {
       buildMode?: "outline" | "delta" | "full";
+      buildType?: "analyze" | "deep-run";
       topicsRebuilt?: number;
       topicsSkipped?: number;
+      syncGitHeads?: Record<string, string>;
     },
     scope?: string,
   ): void {
@@ -418,7 +429,9 @@ export class CodaScopeBuildStateService {
     const durationMs = now.getTime() - startTime;
     const durationStr = formatDuration(durationMs);
 
-    if (buildInfo?.buildMode === "delta") {
+    if (buildInfo?.buildType === "deep-run") {
+      state.summary = `⚡ Deep Run: ${buildInfo.topicsRebuilt ?? pageCount ?? 0} topics synced in ${durationStr}`;
+    } else if (buildInfo?.buildMode === "delta") {
       if (buildInfo.topicsRebuilt && buildInfo.topicsRebuilt > 0) {
         state.summary = `Delta: updated ${buildInfo.topicsRebuilt} of ${pageCount ?? "?"} topics in ${durationStr}`;
       } else {
@@ -432,7 +445,7 @@ export class CodaScopeBuildStateService {
     }
 
     // Save metadata to disk
-    this.saveMetadata(projectId, runId, state, pageCount, durationMs);
+    this.saveMetadata(projectId, runId, state, pageCount, durationMs, buildInfo);
   }
 
   /** Mark build as failed with error message. */
@@ -459,6 +472,13 @@ export class CodaScopeBuildStateService {
     state: BuildState,
     pageCount: number | null | undefined,
     durationMs: number | null,
+    buildInfo?: {
+      buildMode?: string;
+      buildType?: string;
+      topicsRebuilt?: number;
+      topicsSkipped?: number;
+      syncGitHeads?: Record<string, string>;
+    },
   ): void {
     const dir = this.ensureBuildLogsDir(projectId);
     const metaPath = path.join(dir, `${runId}.json`);
@@ -468,6 +488,8 @@ export class CodaScopeBuildStateService {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let buildMode: string | undefined;
+    let buildType: string | undefined;
+    let syncGitHeads: Record<string, string> | undefined;
     let topicsBuilt: number | undefined;
     let topicsSkipped: number | undefined;
 
@@ -484,10 +506,19 @@ export class CodaScopeBuildStateService {
       if (existsSync(metaPath)) {
         const existing = JSON.parse(readFileSync(metaPath, "utf-8"));
         if (existing.buildMode) buildMode = existing.buildMode;
+        if (existing.buildType) buildType = existing.buildType;
+        if (existing.syncGitHeads) syncGitHeads = existing.syncGitHeads;
         if (existing.topicsBuilt != null) topicsBuilt = existing.topicsBuilt;
         if (existing.topicsSkipped != null) topicsSkipped = existing.topicsSkipped;
       }
     } catch { /* skip */ }
+
+    // Override with buildInfo values if provided
+    if (buildInfo?.buildMode) buildMode = buildInfo.buildMode;
+    if (buildInfo?.buildType) buildType = buildInfo.buildType;
+    if (buildInfo?.syncGitHeads) syncGitHeads = buildInfo.syncGitHeads;
+    if (buildInfo?.topicsRebuilt != null) topicsBuilt = buildInfo.topicsRebuilt;
+    if (buildInfo?.topicsSkipped != null) topicsSkipped = buildInfo.topicsSkipped;
 
     const entry: BuildLogEntry = {
       runId,
@@ -505,6 +536,8 @@ export class CodaScopeBuildStateService {
       totalInputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
       totalOutputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
       buildMode,
+      buildType,
+      syncGitHeads,
       topicsBuilt,
       topicsSkipped,
     };
