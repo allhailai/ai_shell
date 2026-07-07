@@ -594,6 +594,10 @@ export interface WikiState {
     depth: TopicDepth;
     updatedAt?: string;
   }>;
+  // Deep Run sync point metadata
+  lastSyncAt?: string;
+  lastSyncGitHeads?: Record<string, string>;
+  lastSyncRunId?: string;
 }
 
 /** Response shape for `GET /api/codascope/projects/:id/epics/:epicId/brief` */

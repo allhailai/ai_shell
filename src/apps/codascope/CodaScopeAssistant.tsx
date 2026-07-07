@@ -28,6 +28,7 @@ import type { SlashCommand, CommandContext } from "./commandRegistry";
 import { getFilteredCommands } from "./commandRegistry";
 import { useCommandBus } from "../../shell/hooks";
 import { useAssistantStream } from "./hooks/useAssistantStream";
+import { openDeepRunModal } from "./views/ProjectDashboard";
 import { useConversationManager } from "./hooks/useConversationManager";
 import { useEpicContext } from "./hooks/useEpicContext";
 import type { EpicStatus } from "./codaScopeTypes";
@@ -580,6 +581,14 @@ export function CodaScopeAssistant() {
         break;
       case "shortcuts":
         commandBus.emit("codascope:open-guide", {});
+        break;
+
+      // ── Deep Run ──
+      case "deep-run":
+        navigate(`project/${activeProjectId}/dashboard`);
+        // Small delay to ensure dashboard mounts before opening modal
+        setTimeout(() => openDeepRunModal(), 100);
+        showSlashToast("Opening Deep Run…");
         break;
 
       default:

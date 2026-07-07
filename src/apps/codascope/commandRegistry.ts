@@ -84,6 +84,16 @@ export const COMMANDS: SlashCommand[] = [
     requiresProject: true,
   },
   {
+    id: "deep-run",
+    slash: "/deep-run",
+    label: "Deep Run",
+    description: "Run a full code-to-wiki deep sync",
+    category: "build",
+    behavior: "dispatch",
+    relevance: [{ view: "dashboard" }, { view: "wiki" }],
+    requiresProject: true,
+  },
+  {
     id: "build-artifact",
     slash: "/build artifact",
     label: "Build Artifact",

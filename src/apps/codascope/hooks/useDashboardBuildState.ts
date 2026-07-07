@@ -62,10 +62,25 @@ function updatePipelineSteps(
       "wiki-delta": "Wiki (Delta)",
       "wiki-state": "Wiki State",
       "quality": "Quality Scan",
+      // Deep Run pipeline steps
+      "deep-code-map": "Code Map (Deep)",
+      "deep-outline": "Outline Build",
+      "deep-cross-ref": "Cross-References",
+      "deep-index": "Index Regeneration",
+      "deep-finalize": "Finalize Sync",
     };
+
+    // Handle dynamic deep-topic-* steps: render the topic name as the label
+    let resolvedLabel = labelMap[stepId];
+    if (!resolvedLabel && stepId.startsWith("deep-topic-")) {
+      // The topic name is in the "topic" field or derive from the step ID
+      const topicSlug = stepId.slice("deep-topic-".length);
+      resolvedLabel = topic || topicSlug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      if (progress) resolvedLabel = `${resolvedLabel} — ${progress}`;
+    }
     next.push({
       id: stepId,
-      label: labelMap[stepId] ?? stepId,
+      label: resolvedLabel ?? stepId,
       status: status as PipelineStepStatus,
       detail,
     });
@@ -114,6 +129,10 @@ export interface UseDashboardBuildStateResult {
   cancelBuild: () => Promise<void>;
   /** Whether analyzing (command === "analyze") */
   isAnalyzing: boolean;
+  /** The build type of the current or last build ("analyze" | "deep-run") */
+  buildType: "analyze" | "deep-run" | null;
+  /** Whether a deep run is currently in progress */
+  isDeepRunning: boolean;
 }
 
 /* ── Hook ────────────────────────────────────────────────────────── */
@@ -128,6 +147,7 @@ export function useDashboardBuildState(
   const [runOutput, setRunOutput] = useState("");
   const [runError, setRunError] = useState("");
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
+  const [buildType, setBuildType] = useState<"analyze" | "deep-run" | null>(null);
   const [buildStartedAt, setBuildStartedAt] = useState<string | null>(null);
   const [buildSummary, setBuildSummary] = useState<string | null>(null);
   const [buildLogs, setBuildLogs] = useState<BuildLogEntry[]>([]);
@@ -153,6 +173,7 @@ export function useDashboardBuildState(
         if (build && build.status === "building") {
           // A build is running! Reconnect to the stream
           setRunningCommand(build.command);
+          setBuildType(build.buildType ?? "analyze");
           setBuildStartedAt(build.startedAt);
           setAgentRunning(true);
           setAgentStatus(`Resuming ${build.command}…`);
@@ -351,6 +372,8 @@ export function useDashboardBuildState(
     clearRunOutput,
     startBuildStream,
     cancelBuild,
-    isAnalyzing: runningCommand === "analyze",
+    isAnalyzing: runningCommand === "analyze" || runningCommand === "deep-run",
+    buildType,
+    isDeepRunning: buildType === "deep-run" && runningCommand != null,
   };
 }

@@ -8,6 +8,7 @@
    - Checks server build status on mount (survives refresh)
    - Reconnects to SSE stream on refresh to resume live output
    - Shows build history with auto-generated summaries
+   - Deep Run ⚡ button with confirmation modal and gold accent styling
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect } from "react";
@@ -27,7 +28,7 @@ import {
   IconWarning,
 } from "../components/CodaScopeIcons";
 import { useDashboardBuildState } from "../hooks/useDashboardBuildState";
-import type { PipelineStepStatus } from "../codaScopeTypes";
+import type { PipelineStepStatus, WikiState } from "../codaScopeTypes";
 
 /** Format a relative timestamp (e.g., "2m 15s ago") */
 function timeAgo(iso: string): string {
@@ -59,6 +60,15 @@ interface RepoStatus {
   ahead: number;
   branch: string | null;
   error?: string;
+}
+
+/* ── Deep Run modal state (for slash command integration) ────────────── */
+
+let _deepRunModalOpener: (() => void) | null = null;
+
+/** Open the Deep Run confirmation modal from outside (e.g., slash command dispatch) */
+export function openDeepRunModal(): void {
+  _deepRunModalOpener?.();
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
@@ -96,6 +106,35 @@ export function ProjectDashboard() {
     success: boolean;
     message: string;
   } | null>(null);
+
+  // ── Deep Run modal state ──────────────────────────────────────────
+  const [showDeepRunModal, setShowDeepRunModal] = useState(false);
+  const [deepRunConfirmText, setDeepRunConfirmText] = useState("");
+
+  // ── Sync point state ──────────────────────────────────────────────
+  const [wikiState, setWikiState] = useState<WikiState | null>(null);
+
+  // Register the modal opener for slash command dispatch
+  useEffect(() => {
+    _deepRunModalOpener = () => setShowDeepRunModal(true);
+    return () => { _deepRunModalOpener = null; };
+  }, []);
+
+  // ── Fetch wiki state for sync badge ───────────────────────────────
+  useEffect(() => {
+    if (!activeProjectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/codascope/projects/${activeProjectId}/wiki-state`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setWikiState(data.state ?? data);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProjectId, build.buildLogs.length]);
 
   // ── Check all repos on mount ──────────────────────────────────────
   useEffect(() => {
@@ -193,6 +232,23 @@ export function ProjectDashboard() {
     });
   }, [activeProjectId, selectedModel, wikiEnabled, wikiMode, scope, build]);
 
+  // ── Deep Run action ───────────────────────────────────────────────
+
+  const handleStartDeepRun = useCallback(() => {
+    if (!activeProjectId || !selectedModel) return;
+    setShowDeepRunModal(false);
+    setDeepRunConfirmText("");
+    build.startBuildStream({
+      target: {
+        url: `/api/codascope/projects/${activeProjectId}/deep-run`,
+        method: "POST",
+        body: { modelId: selectedModel },
+      },
+      command: "deep-run",
+      showPipeline: true,
+    });
+  }, [activeProjectId, selectedModel, build]);
+
   // ── Quick action (for individual commands like do_explore) ────────
 
   const handleQuickAction = useCallback((command: string) => {
@@ -219,15 +275,40 @@ export function ProjectDashboard() {
     );
   }
 
-  /* ── Button label for Analyze ────────────────────────────────── */
+  /* ── Button labels ─────────────────────────────────────────────── */
 
-  const analyzeButtonLabel = build.isAnalyzing
+  const isDeepRunning = build.isDeepRunning;
+  const isRegularAnalyzing = build.isAnalyzing && !isDeepRunning;
+
+  const analyzeButtonLabel = isRegularAnalyzing
     ? `⟳ Analyzing… (${build.elapsed})`
-    : "Run ▶";
+    : isDeepRunning
+      ? "⟳ Deep Run in progress…"
+      : "Run ▶";
+
+  const deepRunButtonLabel = isDeepRunning
+    ? `⚡ Deep Run in progress… (${build.elapsed})`
+    : "Deep Run ⚡";
+
+  /* ── Sync badge computation ────────────────────────────────────── */
+
+  const syncBadge = (() => {
+    if (!wikiState?.lastSyncAt) return null;
+    const heads = wikiState.lastSyncGitHeads ?? {};
+    const firstHead = Object.values(heads)[0];
+    const shortHash = firstHead ? firstHead.slice(0, 7) : null;
+    const branch = project.repositories[0]?.branch ?? "main";
+    const ago = timeAgo(wikiState.lastSyncAt);
+    return { branch, shortHash, ago };
+  })();
 
   /* ── Repo status badge helper ────────────────────────────────── */
 
   const hasAnyBehind = project.repositories.some((r) => repoStatuses[r.id]?.status === "behind");
+
+  /* ── Topic count for modal estimate ────────────────────────────── */
+
+  const topicCount = wikiState?.topics ? Object.keys(wikiState.topics).length : null;
 
   return (
     <div className="codascope-page">
@@ -240,6 +321,15 @@ export function ProjectDashboard() {
         {/* Model picker — fetches from Cursor SDK */}
         <ModelPicker value={selectedModel} onChange={setSelectedModel} compact />
       </div>
+
+      {/* Sync point badge */}
+      {syncBadge && (
+        <div className="codascope-sync-badge">
+          <span className="codascope-sync-badge-icon">⚡</span>
+          Wiki synced to {syncBadge.branch}@{syncBadge.shortHash ?? "???"}
+          <span className="codascope-sync-badge-time"> — {syncBadge.ago}</span>
+        </div>
+      )}
 
       {/* Stat cards */}
       <div className="codascope-dashboard-grid">
@@ -389,26 +479,44 @@ export function ProjectDashboard() {
             <span className="codascope-analyze-title-icon"><IconSearch size={16} /></span>
             Analyze Codebase
           </div>
-          {agentRunning ? (
+          <div className="codascope-analyze-header-actions">
+            {/* Deep Run button */}
             <button
-              className="codascope-analyze-run-btn codascope-analyze-run-btn--stop"
-              onClick={build.cancelBuild}
+              className={`codascope-deep-run-btn ${isDeepRunning ? "codascope-deep-run-btn--running" : ""}`}
+              onClick={() => {
+                setDeepRunConfirmText("");
+                setShowDeepRunModal(true);
+              }}
+              disabled={agentRunning || !selectedModel}
+              title={agentRunning ? (isDeepRunning ? "Deep Run in progress" : "Build in progress") : "Full code-to-wiki deep sync"}
               type="button"
-              id="analyze-stop-btn"
+              id="deep-run-btn"
             >
-              ■ Stop
+              {deepRunButtonLabel}
             </button>
-          ) : (
-            <button
-              className={`codascope-analyze-run-btn ${build.isAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
-              onClick={handleAnalyze}
-              disabled={!selectedModel}
-              type="button"
-              id="analyze-run-btn"
-            >
-              {analyzeButtonLabel}
-            </button>
-          )}
+
+            {/* Regular Run / Stop button */}
+            {agentRunning ? (
+              <button
+                className="codascope-analyze-run-btn codascope-analyze-run-btn--stop"
+                onClick={build.cancelBuild}
+                type="button"
+                id="analyze-stop-btn"
+              >
+                ■ Stop
+              </button>
+            ) : (
+              <button
+                className={`codascope-analyze-run-btn ${isRegularAnalyzing ? "codascope-analyze-run-btn--running" : ""}`}
+                onClick={handleAnalyze}
+                disabled={!selectedModel || agentRunning}
+                type="button"
+                id="analyze-run-btn"
+              >
+                {analyzeButtonLabel}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="codascope-analyze-body">
@@ -490,10 +598,14 @@ export function ProjectDashboard() {
 
       {/* ── Pipeline Progress ────────────────────────────────────────── */}
       {build.showPipeline && build.pipelineSteps.length > 0 && (
-        <div className="codascope-pipeline-progress" id="pipeline-progress">
+        <div
+          className={`codascope-pipeline-progress ${isDeepRunning ? "codascope-pipeline-progress--deep-run" : ""}`}
+          id="pipeline-progress"
+        >
           <div className="codascope-pipeline-header">
             <div className="codascope-pipeline-title">
-              {build.isAnalyzing ? "⟳" : "✓"} Analysis Pipeline
+              {build.isAnalyzing ? (isDeepRunning ? "⚡" : "⟳") : "✓"}{" "}
+              {isDeepRunning ? "Deep Run Pipeline" : "Analysis Pipeline"}
             </div>
             {build.isAnalyzing && (
               <span className="codascope-pipeline-elapsed">{build.elapsed}</span>
@@ -591,7 +703,7 @@ export function ProjectDashboard() {
           <div className="codascope-build-log-header">
             <span>
               {agentRunning
-                ? `⟳ Agent Output — ${build.elapsed}`
+                ? `${isDeepRunning ? "⚡" : "⟳"} Agent Output — ${build.elapsed}`
                 : "✓ Complete"}
             </span>
             {!agentRunning && (
@@ -620,24 +732,128 @@ export function ProjectDashboard() {
             </div>
           </div>
           <div className="codascope-dashboard-build-history">
-            {build.buildLogs.map((log, i) => (
-              <div
-                key={log.runId}
-                className={`codascope-dashboard-build-history-row${i < build.buildLogs.length - 1 ? "" : " codascope-dashboard-build-history-row--last"}`}
-              >
-                <div className="codascope-dashboard-build-history-left">
-                  <span className={`codascope-dashboard-build-history-status codascope-dashboard-build-history-status--${log.status}`}>
-                    {log.status === "complete" ? "✓" : log.status === "error" ? "✕" : "●"}
+            {build.buildLogs.map((log, i) => {
+              const isDeepRunLog = log.buildType === "deep-run";
+              const rowClasses = [
+                "codascope-dashboard-build-history-row",
+                i < build.buildLogs.length - 1 ? "" : "codascope-dashboard-build-history-row--last",
+                isDeepRunLog ? "codascope-dashboard-build-history-row--deep-run" : "",
+              ].filter(Boolean).join(" ");
+
+              return (
+                <div key={log.runId} className={rowClasses}>
+                  <div className="codascope-dashboard-build-history-left">
+                    <span className={`codascope-dashboard-build-history-status ${
+                      isDeepRunLog
+                        ? "codascope-dashboard-build-history-status--deep-run"
+                        : `codascope-dashboard-build-history-status--${log.status}`
+                    }`}>
+                      {isDeepRunLog
+                        ? "⚡"
+                        : log.status === "complete" ? "✓" : log.status === "error" ? "✕" : "●"}
+                    </span>
+                    <span>
+                      {isDeepRunLog ? "⚡ " : ""}
+                      {log.summary ?? log.command}
+                    </span>
+                  </div>
+                  <span className="codascope-dashboard-build-history-time">
+                    {log.startedAt ? timeAgo(log.startedAt) : ""}
                   </span>
-                  <span>{log.summary ?? log.command}</span>
                 </div>
-                <span className="codascope-dashboard-build-history-time">
-                  {log.startedAt ? timeAgo(log.startedAt) : ""}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
+      )}
+
+      {/* ── Deep Run Confirmation Modal ────────────────────────────── */}
+      {showDeepRunModal && (
+        <div
+          className="codascope-modal-overlay"
+          onClick={() => {
+            setShowDeepRunModal(false);
+            setDeepRunConfirmText("");
+          }}
+        >
+          <div
+            className="codascope-modal codascope-deep-run-confirm-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="codascope-modal-header">
+              <div className="codascope-modal-title">
+                ⚡ Start Deep Run?
+              </div>
+              <button
+                className="codascope-modal-close"
+                onClick={() => {
+                  setShowDeepRunModal(false);
+                  setDeepRunConfirmText("");
+                }}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="codascope-modal-body">
+              <div className="codascope-deep-run-confirm-body-text">
+                <p>
+                  This will rebuild your entire wiki at maximum depth.
+                  Every topic will be individually analyzed with full source code reading.
+                </p>
+              </div>
+              <div className="codascope-deep-run-confirm-details">
+                <span>
+                  ⏱ Estimated: ~2–5 minutes per topic{topicCount != null ? ` (${topicCount} topics)` : ""}
+                </span>
+                <span>💰 Heavy token usage per topic</span>
+              </div>
+              <label
+                className="codascope-form-label"
+                htmlFor="deep-run-confirm-input"
+              >
+                Type <strong>YES</strong> to confirm
+              </label>
+              <input
+                className="codascope-form-input codascope-deep-run-confirm-input"
+                id="deep-run-confirm-input"
+                type="text"
+                autoFocus
+                placeholder="YES"
+                value={deepRunConfirmText}
+                onChange={(e) => setDeepRunConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && deepRunConfirmText === "YES") {
+                    handleStartDeepRun();
+                  }
+                }}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="codascope-modal-footer">
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                onClick={() => {
+                  setShowDeepRunModal(false);
+                  setDeepRunConfirmText("");
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="codascope-deep-run-start-btn"
+                disabled={deepRunConfirmText !== "YES"}
+                onClick={handleStartDeepRun}
+                type="button"
+                id="deep-run-confirm-btn"
+              >
+                ⚡ Start Deep Run
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
