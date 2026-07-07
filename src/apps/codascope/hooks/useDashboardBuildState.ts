@@ -65,7 +65,7 @@ function updatePipelineSteps(
       // Deep Run pipeline steps
       "deep-code-map": "Code Map (Deep)",
       "deep-outline": "Outline Build",
-      "deep-cross-ref": "Cross-References",
+      // deep-cross-ref-batch-* steps are resolved dynamically below
       "deep-index": "Index Regeneration",
       "deep-finalize": "Finalize Sync",
     };
@@ -77,6 +77,10 @@ function updatePipelineSteps(
       const topicSlug = stepId.slice("deep-topic-".length);
       resolvedLabel = topic || topicSlug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
       if (progress) resolvedLabel = `${resolvedLabel} — ${progress}`;
+    }
+    // Handle dynamic deep-cross-ref-batch-* steps
+    if (!resolvedLabel && stepId.startsWith("deep-cross-ref-batch-")) {
+      resolvedLabel = `Cross-References (${progress || stepId.slice("deep-cross-ref-".length)})`;
     }
     next.push({
       id: stepId,

@@ -549,6 +549,54 @@ export async function runEpicDeepenPipeline(
   }
 }
 
+// ── Wiki Link Index Builder ─────────────────────────────────────────
+
+/**
+ * Build a compact text index of all wiki topics and their current [[wiki links]].
+ * Used by the batched cross-reference pass so each batch knows the full link graph
+ * without reading every page.
+ *
+ * Output format (one line per topic):
+ *   - **topic-slug** (Title): links to → [[other-topic]], [[another-topic]]
+ *   - **orphan-topic** (Orphan Title): no wiki links
+ */
+async function buildWikiLinkIndex(
+  wikiSvc: CodaScopeWikiService,
+  projectId: string,
+  topics: Array<{ id: string; title: string }>,
+): Promise<string> {
+  const lines: string[] = [];
+
+  for (const topic of topics) {
+    const content = await wikiSvc.getTopicContent(projectId, topic.id);
+    if (!content) {
+      lines.push(`- **${topic.id}** (${topic.title}): no content`);
+      continue;
+    }
+
+    // Extract [[wiki links]] from the page content
+    const wikiLinks: string[] = [];
+    const regex = /\[\[([^\]]+)\]\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(content)) !== null) {
+      // Deduplicate
+      if (!wikiLinks.includes(match[1])) {
+        wikiLinks.push(match[1]);
+      }
+    }
+
+    if (wikiLinks.length > 0) {
+      lines.push(
+        `- **${topic.id}** (${topic.title}): links to → ${wikiLinks.map((l) => `[[${l}]]`).join(", ")}`,
+      );
+    } else {
+      lines.push(`- **${topic.id}** (${topic.title}): no wiki links`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 // ── Deep Run Pipeline ───────────────────────────────────────────────
 
 export interface DeepRunOptions {
@@ -776,39 +824,84 @@ export async function runDeepRunPipeline(
     }
   }
 
-  // ── Phase 4: Cross-reference consistency pass ──────────────────
+  // ── Phase 4: Cross-reference consistency pass (BATCHED) ─────────
+  //
+  // Instead of one mega agent call that must read ALL wiki pages,
+  // split topics into batches of ~6. Each batch agent reads only its
+  // assigned pages + a compact link index of all topics' current links.
+  // The link index is rebuilt between batches so later batches see
+  // links added by earlier ones.
+  //
   if (!isAborted()) {
-    sendEvent("pipeline-step", { step: "deep-cross-ref", status: "running" });
+    const allTopics = await wikiSvc.listTopics(projectId);
+    const crossRefTopics = allTopics.filter(
+      (t) => t.id !== "_index" && !t.id.startsWith("_") && t.id !== "index",
+    );
 
-    const vars = buildBaseVars({
-      projectName: project.name,
-      projectDir,
-      repositories: repos,
-    });
+    const CROSS_REF_BATCH_SIZE = 6;
+    const batches: typeof crossRefTopics[] = [];
+    for (let i = 0; i < crossRefTopics.length; i += CROSS_REF_BATCH_SIZE) {
+      batches.push(crossRefTopics.slice(i, i + CROSS_REF_BATCH_SIZE));
+    }
 
-    const prompt = loadCommandOrSkill("do_wiki_cross_reference", projectDir, vars);
-    if (prompt) {
-      await agentSvc.send({
-        projectId,
-        message: prompt,
-        modelId,
-        systemPrompt:
-          "You are CodaScope, a documentation quality specialist. " +
-          "Review the entire wiki for cross-reference consistency. " +
-          "Ensure all [[wiki links]] are bidirectional and complete. " +
-          "Do NOT modify files in the source repositories.",
-        purpose: "wiki-build",
-        onMessage: sendMessage,
-        onDone: async (result) => {
-          const tokenUsage = extractTokenUsage(result as { usage?: Record<string, number> });
-          sendEvent("pipeline-step", { step: "deep-cross-ref", status: "complete", tokenUsage });
-        },
-        onError: (err) => {
-          sendEvent("pipeline-step", { step: "deep-cross-ref", status: "error", error: err.message });
-        },
+    // Build initial link index (compact: topic → outgoing [[wiki links]])
+    let linkIndex = await buildWikiLinkIndex(wikiSvc, projectId, crossRefTopics);
+
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      if (isAborted()) break;
+
+      const batch = batches[batchIdx];
+      const stepId = `deep-cross-ref-batch-${batchIdx + 1}`;
+      const batchLabel = batch.map((t) => t.title || t.id).slice(0, 3).join(", ");
+      const batchSuffix = batch.length > 3 ? ` +${batch.length - 3} more` : "";
+
+      sendEvent("pipeline-step", {
+        step: stepId,
+        status: "running",
+        progress: `Batch ${batchIdx + 1}/${batches.length}`,
+        topic: `${batchLabel}${batchSuffix}`,
       });
-    } else {
-      sendEvent("pipeline-step", { step: "deep-cross-ref", status: "error", error: "Cross-reference command not found" });
+
+      const vars = buildBaseVars({
+        projectName: project.name,
+        projectDir,
+        repositories: repos,
+      });
+      vars.BATCH_TOPICS = batch
+        .map((t) => `- **${t.id}** — ${t.title || t.id} (file: wiki/${t.id}.md)`)
+        .join("\n");
+      vars.WIKI_LINK_INDEX = linkIndex;
+
+      const prompt = loadCommandOrSkill("do_wiki_cross_reference", projectDir, vars);
+      if (prompt) {
+        await agentSvc.send({
+          projectId,
+          message: prompt,
+          modelId,
+          systemPrompt:
+            "You are CodaScope, a documentation quality specialist. " +
+            `Review the following ${batch.length} wiki pages for cross-reference consistency. ` +
+            "ONLY modify pages in your assigned batch. " +
+            "Ensure [[wiki links]] are bidirectional and complete. " +
+            "Do NOT modify files in the source repositories.",
+          purpose: "wiki-build",
+          onMessage: sendMessage,
+          onDone: async (result) => {
+            const tokenUsage = extractTokenUsage(result as { usage?: Record<string, number> });
+            sendEvent("pipeline-step", { step: stepId, status: "complete", tokenUsage });
+          },
+          onError: (err) => {
+            sendEvent("pipeline-step", { step: stepId, status: "error", error: err.message });
+          },
+        });
+
+        // Rebuild link index after each batch so later batches see newly added links
+        if (batchIdx < batches.length - 1) {
+          linkIndex = await buildWikiLinkIndex(wikiSvc, projectId, crossRefTopics);
+        }
+      } else {
+        sendEvent("pipeline-step", { step: stepId, status: "error", error: "Cross-reference command not found" });
+      }
     }
   }
 

@@ -336,7 +336,7 @@ export class CodaScopeBuildStateService {
       // Deep Run pipeline steps
       "deep-code-map": "⚡ Code Maps (Force Refresh)",
       "deep-outline": "⚡ Wiki Outline",
-      "deep-cross-ref": "⚡ Cross-Reference Pass",
+      // deep-cross-ref-batch-* steps are resolved dynamically below
       "deep-index": "⚡ Regenerate Index",
       "deep-finalize": "⚡ Finalize Sync Point",
     };
@@ -351,6 +351,12 @@ export class CodaScopeBuildStateService {
 
     const now = new Date().toISOString();
     const existing = state.pipelineSteps.findIndex((s) => s.id === step.step);
+
+    // Resolve dynamic step labels
+    let resolvedLabel = labelMap[step.step];
+    if (!resolvedLabel && step.step.startsWith("deep-cross-ref-batch-")) {
+      resolvedLabel = `⚡ Cross-References (${step.progress || step.step.slice("deep-cross-ref-".length)})`;
+    }
 
     // Preserve startedAt from existing record, or set it now if step is starting
     let startedAt = now;
@@ -374,7 +380,7 @@ export class CodaScopeBuildStateService {
 
     const record: PipelineStepRecord = {
       id: step.step,
-      label: labelMap[step.step] ?? step.step,
+      label: resolvedLabel ?? step.step,
       status: step.status,
       detail: detail || undefined,
       startedAt,
