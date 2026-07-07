@@ -7,8 +7,9 @@
 import { useState, useCallback, useRef, type DragEvent } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconFolder, IconArchive } from "../components/CodaScopeIcons";
+import { IconFolder, IconArchive, IconFolderOpen, IconSettings, IconWarning } from "../components/CodaScopeIcons";
 import { CodaScopeRepoRemapModal } from "../components/CodaScopeRepoRemapModal";
+import { FolderPicker } from "../../../shared/folder-picker";
 
 interface ImportState {
   status: "idle" | "dragging" | "uploading" | "success" | "error";
@@ -36,6 +37,14 @@ export function ProjectList() {
   const [setupPath, setSetupPath] = useState("");
   const [error, setError] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [showSetupFolderPicker, setShowSetupFolderPicker] = useState(false);
+
+  // ── Change root directory state ───────────────────────────────────
+  const [showChangeRootModal, setShowChangeRootModal] = useState(false);
+  const [changeRootConfirmText, setChangeRootConfirmText] = useState("");
+  const [showChangeRootPicker, setShowChangeRootPicker] = useState(false);
+  const [changeRootSaving, setChangeRootSaving] = useState(false);
+  const [changeRootError, setChangeRootError] = useState("");
 
   // ── Import state ──────────────────────────────────────────────────
   const [importState, setImportState] = useState<ImportState>({ status: "idle" });
@@ -73,6 +82,45 @@ export function ProjectList() {
       setError("Network error. Is the server running?");
     }
   }, [setupPath, setProjectsRoot, setConfigured]);
+
+  // ── Change root directory handler ─────────────────────────────────
+
+  const handleChangeRootConfirm = useCallback(() => {
+    setShowChangeRootModal(false);
+    setChangeRootConfirmText("");
+    setShowChangeRootPicker(true);
+  }, []);
+
+  const handleChangeRootSelect = useCallback(async (selectedPath: string) => {
+    setShowChangeRootPicker(false);
+    setChangeRootSaving(true);
+    setChangeRootError("");
+    try {
+      const res = await fetch("/api/codascope/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectsRoot: selectedPath }),
+      });
+      if (res.ok) {
+        setProjectsRoot(selectedPath);
+        // Refresh projects list from new root
+        const listRes = await fetch("/api/codascope/projects");
+        if (listRes.ok) {
+          const data = await listRes.json();
+          setProjects(data.projects ?? []);
+        } else {
+          setProjects([]);
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setChangeRootError(data.error ?? "Failed to update root directory.");
+      }
+    } catch {
+      setChangeRootError("Network error. Is the server running?");
+    } finally {
+      setChangeRootSaving(false);
+    }
+  }, [setProjectsRoot, setProjects]);
 
   // ── Create project ────────────────────────────────────────────────
 
@@ -232,15 +280,25 @@ export function ProjectList() {
             <label className="codascope-form-label" htmlFor="codascope-root-path">
               Projects Root Directory
             </label>
-            <input
-              className="codascope-form-input"
-              id="codascope-root-path"
-              type="text"
-              placeholder="/path/to/codascope_projects"
-              value={setupPath}
-              onChange={(e) => setSetupPath(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSetup()}
-            />
+            <div className="codascope-settings-repo-path-input-row">
+              <input
+                className="codascope-form-input codascope-settings-flex-1"
+                id="codascope-root-path"
+                type="text"
+                placeholder="/path/to/codascope_projects"
+                value={setupPath}
+                onChange={(e) => setSetupPath(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSetup()}
+              />
+              <button
+                className="codascope-btn codascope-btn-secondary codascope-settings-browse-btn"
+                onClick={() => setShowSetupFolderPicker(true)}
+                type="button"
+                title="Browse filesystem to select a directory"
+              >
+                <IconFolderOpen size={12} /> Browse
+              </button>
+            </div>
             <div className="codascope-form-hint">
               CodaScope will create a <code>codascope_projects</code> folder here for all project data (wiki pages, build logs, etc).
             </div>
@@ -257,6 +315,18 @@ export function ProjectList() {
               Set Up CodaScope
             </button>
           </div>
+
+          <FolderPicker
+            open={showSetupFolderPicker}
+            onClose={() => setShowSetupFolderPicker(false)}
+            onSelect={(selectedPath: string) => {
+              setSetupPath(selectedPath);
+              setShowSetupFolderPicker(false);
+            }}
+            mode="directory"
+            title="Select Projects Root Directory"
+            initialPath={setupPath || undefined}
+          />
         </div>
       </div>
     );
@@ -271,7 +341,25 @@ export function ProjectList() {
           <div className="codascope-page-title">Projects</div>
           <div className="codascope-page-subtitle">
             {activeProjects.length} active{archivedProjects.length > 0 ? ` • ${archivedProjects.length} archived` : ""} • {projectsRoot}
+            <button
+              className="codascope-change-root-btn"
+              onClick={() => { setShowChangeRootModal(true); setChangeRootConfirmText(""); setChangeRootError(""); }}
+              type="button"
+              title="Change projects root directory"
+            >
+              <IconSettings size={11} />
+            </button>
           </div>
+          {changeRootError && (
+            <div style={{ color: "var(--color-danger)", fontSize: "var(--text-xs)", marginTop: "var(--space-1)" }}>
+              {changeRootError}
+            </div>
+          )}
+          {changeRootSaving && (
+            <div style={{ color: "var(--color-text-tertiary)", fontSize: "var(--text-xs)", marginTop: "var(--space-1)" }}>
+              Switching root directory…
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
           {archivedProjects.length > 0 && (
@@ -502,6 +590,96 @@ export function ProjectList() {
           unmappedRepos={importResult.unmappedRepos}
         />
       )}
+
+      {/* ── Change root directory confirmation modal ──────────────────── */}
+      {showChangeRootModal && (
+        <div
+          className="codascope-modal-overlay"
+          onClick={() => setShowChangeRootModal(false)}
+        >
+          <div
+            className="codascope-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="codascope-modal-header">
+              <div className="codascope-modal-title" style={{ color: "hsl(40, 90%, 64%)" }}>
+                <IconWarning size={16} /> Change Projects Root
+              </div>
+              <button
+                className="codascope-modal-close"
+                onClick={() => setShowChangeRootModal(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="codascope-modal-body">
+              <div className="codascope-change-root-warning">
+                <IconWarning size={14} />
+                <div>
+                  <strong>Existing projects will not be migrated.</strong>
+                  <br />
+                  Changing the root directory will make all current projects
+                  invisible. They will remain on disk at the old location, but CodaScope
+                  will only look in the new directory.
+                </div>
+              </div>
+              <p className="codascope-settings-remove-modal-text">
+                Current root: <strong>{projectsRoot}</strong>
+              </p>
+              <label
+                className="codascope-form-label"
+                htmlFor="change-root-confirm"
+              >
+                Type <strong>CHANGE</strong> to confirm
+              </label>
+              <input
+                className="codascope-form-input codascope-settings-remove-confirm-input"
+                id="change-root-confirm"
+                type="text"
+                autoFocus
+                placeholder="CHANGE"
+                value={changeRootConfirmText}
+                onChange={(e) => setChangeRootConfirmText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && changeRootConfirmText === "CHANGE") {
+                    handleChangeRootConfirm();
+                  }
+                }}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="codascope-modal-footer">
+              <button
+                className="codascope-btn codascope-btn-ghost"
+                onClick={() => setShowChangeRootModal(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="codascope-btn codascope-btn-danger"
+                disabled={changeRootConfirmText !== "CHANGE"}
+                onClick={handleChangeRootConfirm}
+                type="button"
+              >
+                Change Root Directory
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Folder picker for changing root */}
+      <FolderPicker
+        open={showChangeRootPicker}
+        onClose={() => setShowChangeRootPicker(false)}
+        onSelect={handleChangeRootSelect}
+        mode="directory"
+        title="Select New Projects Root Directory"
+        initialPath={projectsRoot || undefined}
+      />
     </div>
   );
 }

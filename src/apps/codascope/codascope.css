@@ -7349,6 +7349,56 @@
   font-weight: var(--weight-semibold);
 }
 
+/* ── Change root button (inline gear in subtitle) ────────────────── */
+
+.codascope-change-root-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all var(--transition-fast);
+}
+
+.codascope-change-root-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-primary);
+}
+
+/* ── Change root warning callout ─────────────────────────────────── */
+
+.codascope-change-root-warning {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-md);
+  background: hsla(40, 80%, 50%, 0.08);
+  border: 1px solid hsla(40, 80%, 50%, 0.25);
+  color: hsl(40, 90%, 74%);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.codascope-change-root-warning strong {
+  color: hsl(40, 90%, 80%);
+}
+
+.codascope-change-root-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: hsl(40, 90%, 64%);
+}
+
 .codascope-settings-add-repo-form {
   display: flex;
   gap: var(--space-3);
