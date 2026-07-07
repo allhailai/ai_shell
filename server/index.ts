@@ -20,6 +20,7 @@ import { createAuthService } from "./services/authService.js";
 import { createAuthMiddleware } from "./middleware/auth.js";
 import { registerAuthRoutes } from "./routes/authRoutes.js";
 import { createKeychainBackend } from "./services/keychainBackend.js";
+import { createEncryptedFileBackend } from "./services/encryptedFileBackend.js";
 import { createSecretService } from "./services/secretService.js";
 import { registerSecretRoutes } from "./routes/secretRoutes.js";
 import { registerDbHelperRoutes } from "./routes/dbHelperRoutes.js";
@@ -186,8 +187,15 @@ const keychainBackend = createKeychainBackend({
   osUsername: platformInfo.osUsername,
 });
 
+// Fall back to encrypted file backend when no OS keychain is available
+const secretBackend = keychainBackend.supported
+  ? keychainBackend
+  : createEncryptedFileBackend({ dataDir: platformInfo.dataDir });
+
+console.log(`[aishell] Secret backend: ${secretBackend.name}`);
+
 const secretService = createSecretService({
-  backend: keychainBackend,
+  backend: secretBackend,
 });
 
 registerSecretRoutes(app, { secretService, authMiddleware, httpError, mode: SHELL_MODE });
