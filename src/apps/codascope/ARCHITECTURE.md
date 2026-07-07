@@ -6,9 +6,9 @@
 
 ## Level 0 — What Is This?
 
-CodaScope is an **AI-powered codebase exploration, documentation, and analysis** application within AIShell. It uses AI agents (via the Cursor SDK) to automatically generate wiki documentation, quality scans, and concept maps from source code repositories. Users can chat with their codebase, manage analysis pipelines, and maintain coding standards through "Golden Rules."
+CodaScope is an **AI-powered codebase exploration, documentation, and analysis** application within AIShell. It uses AI agents (via the Cursor SDK) to automatically generate wiki documentation from source code repositories. Users can chat with their codebase, manage analysis pipelines, plan epics, and create design documents.
 
-**Key capabilities**: Code mapping, wiki generation, quality scanning, concept extraction, persistent codebase chat with agent intelligence, skills/command framework, wiki depth tracking & delta detection
+**Key capabilities**: Code mapping, wiki generation, persistent codebase chat with agent intelligence, skills/command framework, wiki depth tracking & delta detection, epic design system, visual artifacts
 
 ---
 
@@ -16,7 +16,7 @@ CodaScope is an **AI-powered codebase exploration, documentation, and analysis**
 
 These principles govern all CodaScope development. Violating them creates architectural debt.
 
-1. **Chat is a contextual sidekick, not a command center.** The user's primary workflow is browsing wiki, dashboards, and quality reports. The chat assistant *enhances* that workflow — it is always available in the right panel alongside whatever view the user has open, not a separate destination.
+1. **Chat is a contextual sidekick, not a command center.** The user's primary workflow is browsing wiki, dashboards, and epics. The chat assistant *enhances* that workflow — it is always available in the right panel alongside whatever view the user has open, not a separate destination.
 
 2. **The agent proposes, the user confirms.** The agent suggests actions via interactive cards in chat. The user clicks to dispatch. No autonomous execution — the agent is advisory, not autonomous.
 
@@ -24,30 +24,32 @@ These principles govern all CodaScope development. Violating them creates archit
 
 4. **Manifest + tools, not content dumping.** The agent receives a lightweight project manifest (~500 tokens) describing what exists and how fresh it is. When it needs full content, it uses tools to retrieve it on demand. This avoids wasting tokens on irrelevant context and lets the agent manage its own context budget.
 
-5. **Intelligence before infrastructure.** Making the agent smarter with context and tools matters more than action dispatch mechanics. Read-only tool access lets the agent discover and cross-reference wiki, quality, concepts, and code before answering.
+5. **Intelligence before infrastructure.** Making the agent smarter with context and tools matters more than action dispatch mechanics. Read-only tool access lets the agent discover and cross-reference wiki, epics, and code before answering.
 
 ## Level 1 — File Map
 
 ```
 src/apps/codascope/
 ├── ARCHITECTURE.md             # ← You are here
-├── manifest.tsx                # AppManifest — wires CodaScope into the shell (65 lines)
-├── codascope.css               # All CodaScope-specific styles (7545 lines)
-├── CodaScopeAssistant.css      # Styles for the assistant panel (2286 lines)
-├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend) (597 lines)
+├── manifest.tsx                # AppManifest — wires CodaScope into the shell (67 lines)
+├── codascope.css               # All CodaScope-specific styles (8032 lines)
+├── CodaScopeAssistant.css      # Styles for the assistant panel (2289 lines)
+├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend) (606 lines)
 ├── useCodaScopeStore.ts        # Zustand store — projects, topics, agent state (95 lines)
 ├── contextAssembler.ts         # Builds lightweight context for the assistant (124 lines)
 ├── codaScopeSseClient.ts       # Shared SSE streaming utilities (173 lines)
-├── commandRegistry.ts          # Slash command palette registry (403 lines)
-├── CodaScopeContent.tsx        # Root content router (view switching) (186 lines)
-├── CodaScopeNav.tsx            # Left nav — project picker + view navigation (202 lines)
-├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant (1118 lines)
+├── commandRegistry.ts          # Slash command palette registry (413 lines)
+├── CodaScopeContent.tsx        # Root content router (view switching) (208 lines)
+├── CodaScopeNav.tsx            # Left nav — project picker + view navigation (185 lines)
+├── CodaScopeHeaderItems.tsx    # Header bar items for shell manifest (28 lines)
+├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant (1111 lines)
 ├── components/
 │   ├── ActionCard.tsx          # Interactive action cards from agent suggestions (552 lines)
 │   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs (212 lines)
 │   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input (393 lines)
 │   ├── BlockedDownloadItem.tsx # Blocked download resolution UI (199 lines)
 │   ├── CodaScopeGuideModal.tsx # Tabbed help/guide modal (624 lines)
+│   ├── CodaScopeRepoRemapModal.tsx # Repository path remapping modal (210 lines)
 │   ├── CodaScopeIcons.tsx      # Centralized SVG icon components (648 lines)
 │   ├── ConversationHeader.tsx  # Chat header with history popover & search (148 lines)
 │   ├── CurateButton.tsx        # Curation trigger button with status (52 lines)
@@ -90,11 +92,11 @@ src/apps/codascope/
 │   ├── useEditorResize.ts      # Mermaid/image resize handlers + API persistence (129 lines)
 │   └── useEpicContext.ts       # Epic context for tabs/sidebar (204 lines)
 ├── views/
-│   ├── ProjectList.tsx         # Project cards + first-launch setup wizard (239 lines)
-│   ├── ProjectDashboard.tsx    # Project overview, analyze pipeline, build state (665 lines)
+│   ├── ProjectList.tsx         # Project cards + first-launch setup wizard (686 lines)
+│   ├── ProjectDashboard.tsx    # Project overview, analyze pipeline, build state (861 lines)
 │   ├── WikiBrowser.tsx         # Wiki topic tree + markdown editor (444 lines)
 │   ├── SkillsManager.tsx       # Framework + project skills display and runner (345 lines)
-│   ├── Settings.tsx            # API key, repositories, project configuration (633 lines)
+│   ├── Settings.tsx            # API key, repositories, project configuration (650 lines)
 │   ├── EpicList.tsx            # Epic cards list with status/health badges (373 lines)
 │   ├── EpicDetail.tsx          # Epic detail shell with tab routing (647 lines)
 │   ├── EpicDefine.tsx          # Epic definition editor tab (388 lines)
@@ -113,7 +115,9 @@ src/apps/codascope/
     ├── do_process_source.md    # Research source processing prompt (64 lines)
     ├── do_research_epic.md     # Web research pipeline prompt (85 lines)
     ├── do_build_artifact.md    # Artifact HTML generation prompt (96 lines)
-    └── do_regen_sections.md    # Section regeneration prompt (64 lines)
+    ├── do_regen_sections.md    # Section regeneration prompt (64 lines)
+    ├── do_deep_wiki_page.md    # Deep wiki page generation (163 lines)
+    └── do_wiki_cross_reference.md # Wiki cross-reference pass (101 lines)
 ```
 
 **Backend** (under `server/`):
@@ -137,8 +141,8 @@ server/
     ├── codaScopeAgentService.ts        # Cursor SDK agent lifecycle (pool, cancel, send) (375 lines)
     ├── codaScopeToolDefinitions.ts     # Tool facade — purpose-based composition (90 lines)
     ├── codaScopeToolServiceFactory.ts  # Tool service instantiation factory (51 lines)
-    ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk) (575 lines)
-    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration (550 lines)
+    ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk) (614 lines)
+    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration (1021 lines)
     ├── codaScopeChatService.ts         # Conversation CRUD, auto-title, streaming detection (585 lines)
     ├── codaScopeChatOrchestrator.ts    # Chat prompt assembly + streaming dispatch (188 lines)
     ├── codaScopeChatPromptHelpers.ts   # System prompt assembly & context formatting (471 lines)
@@ -306,10 +310,10 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 
 ### Context Strategy: Manifest + Tool Use
 
-The agent does **not** receive full wiki/quality/code content upfront. Instead:
+The agent does **not** receive full wiki/code content upfront. Instead:
 
-1. **Lightweight manifest** (~500 tokens) is always injected — project name, repo list, wiki topic titles, golden rule names, concept names, quality score, build status, freshness timestamps
-2. **Read-only tools** let the agent fetch full content on demand — wiki pages, quality reports, code maps, concepts, golden rules, build status
+1. **Lightweight manifest** (~500 tokens) is always injected — project name, repo list, wiki topic titles, build status, freshness timestamps
+2. **Read-only tools** let the agent fetch full content on demand — wiki pages, code maps, build status, skills
 3. **The agent decides** what to read based on the user's question and the manifest overview
 
 This hybrid approach avoids token waste (no guessing at relevance) and gives the agent agency over its own context.
@@ -368,7 +372,7 @@ The agent can propose structured actions via XML tags embedded in responses:
 
 `codaScopeChatPromptHelpers.ts` assembles agent system prompts at request time:
 
-- `buildProjectManifest()` — lightweight project overview (~500 tokens): name, repos, wiki topics, golden rules, concepts, quality score, build status, freshness timestamps
+- `buildProjectManifest()` — lightweight project overview (~500 tokens): name, repos, wiki topics, build status, freshness timestamps
 - `formatHistoryMessage()` — role-prefixed, truncated for assistant messages (~300 chars)
 - `formatViewContext()` — human-readable description of user's current view
 
@@ -385,9 +389,9 @@ The manifest includes timestamps for all data sources. The agent is instructed t
 
 Each user message stores a lightweight context snapshot:
 ```json
-{ "view": "quality", "topicId": null, "projectName": "...", "recentViews": [...] }
+{ "view": "dashboard", "topicId": null, "projectName": "...", "recentViews": [...] }
 ```
-This enables the agent to reference prior context ("Earlier when you were looking at the quality report...") and allows debugging agent behavior.
+This enables the agent to reference prior context ("Earlier when you were on the dashboard...") and allows debugging agent behavior.
 
 ---
 
@@ -474,8 +478,7 @@ Commands are markdown prompt templates in `commands/`. They use `{{VARIABLE}}` p
 | `{{TOPIC_NAME}}` | Per-run parameter | Wiki commands |
 | `{{TOPIC_SLUG}}` | Derived from topic name | Wiki commands |
 | `{{CODE_MAP}}` | Code map content | `buildBaseVars()` |
-| `{{GOLDEN_RULES}}` | Active coding standards | `buildBaseVars()` |
-| `{{CONCEPTS_JSON}}` | Domain concepts | `buildBaseVars()` |
+
 | `{{WIKI_INDEX}}` | Wiki topic listing | `buildBaseVars()` |
 | `{{EPIC_TITLE}}`, `{{EPIC_DEFINITION}}`, `{{EPIC_SCOPE}}` | Epic context | Research/curation |
 | `{{ARTIFACT_TITLE}}`, `{{ARTIFACT_SPEC_BODY}}`, `{{EPIC_CONTEXT}}` | Artifact context | Artifact build/regen |
@@ -490,7 +493,6 @@ There are 47 unique template variables across all commands. The table above is a
 
 The loader also injects context from:
 - **Code Map Service** — repository structure and file inventory
-- **Golden Rule Service** — active coding standards for quality-aware prompts
 
 Unresolved variables are left as-is (the agent can still see them as placeholders).
 
@@ -537,7 +539,7 @@ Projects are stored as directories under the configured root:
 │   ├── project.json                        # Project metadata (id, name, repos)
 │   ├── wiki/                               # Generated wiki pages (markdown)
 │   ├── wiki-state.json                     # Depth tracking + file deps + study entries
-│   ├── quality/                            # Quality scan results (JSON)
+
 │   ├── build-logs/                         # Build history (JSON + log pairs)
 │   ├── conversations/                      # Persistent chat conversations
 │   │   ├── conversations.json              # Conversation index

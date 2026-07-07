@@ -18,23 +18,25 @@ The review covers the entire CodaScope application:
 src/apps/codascope/
 ├── ARCHITECTURE.md                   # App architecture (progressive disclosure, 15 levels)
 ├── AGENTS.md                         # App-specific agent development guidelines
-├── manifest.tsx                      # AppManifest — wires CodaScope into the shell (65 lines)
-├── codascope.css                     # Primary CodaScope styles (7545 lines)
-├── CodaScopeAssistant.css            # Assistant panel styles (2286 lines)
+├── manifest.tsx                      # AppManifest — wires CodaScope into the shell (67 lines)
+├── codascope.css                     # Primary CodaScope styles (8032 lines)
+├── CodaScopeAssistant.css            # Assistant panel styles (2289 lines)
 ├── useCodaScopeStore.ts              # Zustand store (95 lines)
 ├── contextAssembler.ts               # Lightweight context for assistant (124 lines)
 ├── codaScopeSseClient.ts             # Shared SSE streaming utilities (173 lines)
-├── codaScopeTypes.ts                 # Shared API type definitions (597 lines)
-├── commandRegistry.ts               # Slash command palette registry (403 lines)
-├── CodaScopeContent.tsx              # Root content router (186 lines)
-├── CodaScopeNav.tsx                  # Left nav — project picker + view nav (202 lines)
-├── CodaScopeAssistant.tsx            # Right panel — persistent AI chat (1118 lines)
+├── codaScopeTypes.ts                 # Shared API type definitions (606 lines)
+├── commandRegistry.ts               # Slash command palette registry (413 lines)
+├── CodaScopeContent.tsx              # Root content router (208 lines)
+├── CodaScopeNav.tsx                  # Left nav — project picker + view nav (185 lines)
+├── CodaScopeHeaderItems.tsx          # Header bar items for shell manifest (28 lines)
+├── CodaScopeAssistant.tsx            # Right panel — persistent AI chat (1111 lines)
 ├── components/
 │   ├── ActionCard.tsx                # Interactive action cards (552 lines)
 │   ├── AnnotationThread.tsx          # Threaded annotation comments (212 lines)
 │   ├── AtMentionPicker.tsx           # @-mention autocomplete (393 lines)
 │   ├── BlockedDownloadItem.tsx       # Blocked download resolution (199 lines)
 │   ├── CodaScopeGuideModal.tsx       # Tabbed help/guide modal (624 lines)
+│   ├── CodaScopeRepoRemapModal.tsx   # Repository path remapping modal (210 lines)
 │   ├── CodaScopeIcons.tsx            # Centralized SVG icons (648 lines)
 │   ├── ConversationHeader.tsx        # Chat header with history popover (148 lines)
 │   ├── CurateButton.tsx              # Curation trigger button (52 lines)
@@ -63,8 +65,6 @@ src/apps/codascope/
 │       ├── ArtifactSectionPanel.tsx   # Section/annotation/version panel (667 lines)
 │       ├── ArtifactAnnotationCard.tsx # Individual annotation card (186 lines)
 │       ├── artifactApi.ts             # Typed API wrappers (365 lines)
-│       ├── useArtifactAnnotations.ts  # Artifact annotation state hook (205 lines)
-│       ├── useArtifactBuild.ts        # Artifact build state hook (179 lines)
 │       └── hooks/                     # Dedicated artifact hooks
 │           ├── useArtifactAnnotations.ts # Annotation lifecycle hook (261 lines)
 │           └── useArtifactBuild.ts     # Build lifecycle hook (159 lines)
@@ -77,11 +77,11 @@ src/apps/codascope/
 │   ├── useEditorResize.ts            # Mermaid/image resize handlers (129 lines)
 │   └── useEpicContext.ts             # Epic context for tabs/sidebar (204 lines)
 ├── views/
-│   ├── ProjectList.tsx               # Project cards + first-launch wizard (239 lines)
-│   ├── ProjectDashboard.tsx          # Project overview + analyze pipeline (665 lines)
+│   ├── ProjectList.tsx               # Project cards + first-launch wizard (686 lines)
+│   ├── ProjectDashboard.tsx          # Project overview + analyze pipeline (861 lines)
 │   ├── WikiBrowser.tsx               # Wiki topic tree + markdown editor (444 lines)
 │   ├── SkillsManager.tsx             # Framework + project skills (345 lines)
-│   ├── Settings.tsx                  # API key, repos, project config (633 lines)
+│   ├── Settings.tsx                  # API key, repos, project config (650 lines)
 │   ├── EpicList.tsx                  # Epic cards list with badges (373 lines)
 │   ├── EpicDetail.tsx                # Epic detail shell with tab routing (647 lines)
 │   ├── EpicDefine.tsx                # Epic definition editor tab (388 lines)
@@ -89,7 +89,7 @@ src/apps/codascope/
 │   ├── EpicKnowledge.tsx             # Epic knowledge + research tab (714 lines)
 │   ├── EpicDesignDocs.tsx            # Design document list + editor tab (318 lines)
 │   └── EpicHistory.tsx               # Version history + diff viewer tab (501 lines)
-└── commands/                         # Agent prompt templates (11 files, 931 lines total)
+└── commands/                         # Agent prompt templates (13 files, 1095 lines total)
     ├── do_build_code_map.md          # Generates repo structure map (84 lines)
     ├── do_build_full_wiki.md         # Builds complete wiki from code map (84 lines)
     ├── do_build_wiki_page.md         # Builds/rebuilds a single wiki page (44 lines)
@@ -100,7 +100,9 @@ src/apps/codascope/
     ├── do_process_source.md          # Research source processing prompt (64 lines)
     ├── do_research_epic.md           # Web research pipeline prompt (85 lines)
     ├── do_build_artifact.md          # Artifact HTML generation prompt (96 lines)
-    └── do_regen_sections.md          # Section regeneration prompt (64 lines)
+    ├── do_regen_sections.md          # Section regeneration prompt (64 lines)
+    ├── do_deep_wiki_page.md          # Deep wiki page generation (163 lines)
+    └── do_wiki_cross_reference.md    # Wiki cross-reference pass (101 lines)
 ```
 
 **Backend** (under `server/`):
@@ -124,8 +126,8 @@ server/
     ├── codaScopeToolDefinitions.ts    # Tool facade — purpose-based composition (90 lines)
     ├── codaScopeToolServiceFactory.ts # Tool service instantiation factory (51 lines)
     ├── codaScopeCodeMapService.ts     # Progressive code map builder (606 lines)
-    ├── codaScopeBuildStateService.ts  # Build state tracking (575 lines)
-    ├── codaScopeBuildOrchestrator.ts  # Multi-step build pipeline (550 lines)
+    ├── codaScopeBuildStateService.ts  # Build state tracking (614 lines)
+    ├── codaScopeBuildOrchestrator.ts  # Multi-step build pipeline (1021 lines)
     ├── codaScopeChatService.ts        # Conversation CRUD + streaming detection (585 lines)
     ├── codaScopeChatOrchestrator.ts   # Chat prompt assembly + dispatch (188 lines)
     ├── codaScopeChatPromptHelpers.ts  # System prompt assembly (471 lines)
@@ -283,15 +285,15 @@ For each CSS file:
 
 These are the largest files in CodaScope. Each needs targeted analysis:
 
-**`codaScopeToolDefinitions.ts` — 1589 lines (LARGEST BACKEND FILE)**
+**`codaScopeBuildOrchestrator.ts` — 1021 lines (LARGEST BACKEND FILE)**
 
-The centralized tool definitions file. Analyze:
-- Are all three builder functions (`buildReadOnlyTools`, `buildEpicTools`, `buildWriteTools`) well-organized?
-- Is `getToolsForPurpose()` returning the correct tool sets for each purpose?
-- Could tool definitions be split further by domain (wiki tools, epic tools, etc.)?
-- Are there duplicated patterns across tool definitions?
+The multi-step build pipeline orchestrator. Analyze:
+- It handles 3 distinct pipelines: standard analyze, deep run, and shared helpers
+- Could the deep run pipeline be extracted into its own file?
+- Are the SSE event emissions consistent across pipelines?
+- Are there duplicated agent-call patterns across the different pipeline steps?
 
-**`CodaScopeAssistant.tsx` — 992 lines (LARGEST FRONTEND FILE)**
+**`CodaScopeAssistant.tsx` — 1111 lines (LARGEST FRONTEND FILE)**
 
 The persistent chat panel. Analyze:
 - Does it handle too many concerns? (rendering, streaming, action parsing, wikilink conversion, scroll management)
@@ -365,8 +367,8 @@ Look for duplicated logic across CodaScope files:
 
 - **SSE streaming**: The shared `codaScopeSseClient.ts` should be used for all frontend SSE streams. Verify no components still inline `getReader()` + `TextDecoder` parsing instead of using `connectToSseStream()`.
 - **API call patterns**: Do views duplicate similar fetch/error-handling patterns? Could there be a shared `codaScopeApi.ts` transport layer?
-- **List views**: `GoldenRules.tsx`, `ConceptExplorer.tsx`, `SkillsManager.tsx` are all CRUD list views. Do they share a common pattern that could be abstracted?
-- **CSS patterns**: Between `codascope.css` (5668 lines), `CodaScopeAssistant.css` (1067 lines), and `AtMentionPicker.css` (163 lines), are there duplicated card, list, or panel patterns?
+- **List views**: `SkillsManager.tsx`, `EpicList.tsx` are CRUD list views. Do they share a common pattern that could be abstracted?
+- **CSS patterns**: Between `codascope.css` (8032 lines) and `CodaScopeAssistant.css` (2289 lines), are there duplicated card, list, or panel patterns?
 - **Empty state rendering**: Multiple views should show empty states with an icon, title, and description. Is the pattern consistent or duplicated?
 
 ### 3.4 Over-Abstraction
@@ -379,10 +381,9 @@ Identify abstractions that add indirection without benefit:
 
 ### 3.5 CSS Consolidation
 
-With **6898 total CSS lines** across three files:
+With **10,321 total CSS lines** across two files:
 - Should `CodaScopeAssistant.css` be merged into `codascope.css`?
 - Or is the separation justified by the assistant being a distinct UI region?
-- Should `AtMentionPicker.css` be merged into one of the other files?
 - Are there CSS custom properties defined in one file but needed in both?
 - Could some styles be replaced by shell utility classes from `02-utilities.css`?
 
