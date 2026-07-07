@@ -21,7 +21,7 @@ const { ZipArchive } = require("archiver") as {
 };
 import * as unzipper from "unzipper";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { rename, rm, readdir } from "node:fs/promises";
+import { rename, rm, readdir, cp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -284,7 +284,17 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
       }
 
       // Move extracted content to the target directory
-      await rename(extractedDir, targetDir);
+      // rename() fails with EXDEV across filesystem boundaries (e.g., /tmp → /opt on Linux)
+      try {
+        await rename(extractedDir, targetDir);
+      } catch (moveErr: unknown) {
+        if ((moveErr as NodeJS.ErrnoException).code === "EXDEV") {
+          await cp(extractedDir, targetDir, { recursive: true });
+          await rm(extractedDir, { recursive: true, force: true });
+        } else {
+          throw moveErr;
+        }
+      }
 
       // Rewrite project.json with new UUID, keeping everything else
       const now = new Date().toISOString();
