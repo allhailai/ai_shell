@@ -267,15 +267,7 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     }
   }, [projectId, epicId, artifactId, loadSections, loadAnnotations, loadVersions, flash]);
 
-  // ── Download handler ─────────────────────────────────────────────
 
-  const handleDownloadHtml = useCallback(() => {
-    const url = api.previewUrl(projectId, epicId, artifactId);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${artifact?.title ?? artifactId}.html`;
-    a.click();
-  }, [projectId, epicId, artifactId, artifact?.title]);
 
   // ── Preview URL ──────────────────────────────────────────────────
 
