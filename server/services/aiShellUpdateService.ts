@@ -209,9 +209,11 @@ export function createAiShellUpdateService({
 
     try {
       pullOutput = truncateOutput(await git(["pull", "--ff-only"]));
-    } catch {
+    } catch (pullErr: unknown) {
+      const detail =
+        pullErr instanceof Error ? pullErr.message : String(pullErr);
       throw httpError(
-        "Could not get the latest ai_shell files. Check the Git repository connection.",
+        `Could not pull the latest ai_shell files: ${detail}`,
         500,
         "aishell_update_failed",
       );
