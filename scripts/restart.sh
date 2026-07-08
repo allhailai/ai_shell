@@ -88,6 +88,17 @@ if [ -n "$(git status --porcelain -- package-lock.json 2>/dev/null)" ]; then
   git checkout -- package-lock.json
 fi
 
+# ── 3c. Rebuild frontend bundle ─────────────────────────────────────────────
+# In server mode, Express serves the SPA from dist/. After pulling new code,
+# the dist/ bundle is stale — rebuild it so the frontend matches the backend.
+echo "[restart] Rebuilding frontend (npm run build)..."
+cd "$REPO_ROOT"
+if npm run build 2>&1; then
+  echo "[restart] Frontend build succeeded"
+else
+  echo "[restart] WARNING: Frontend build failed (exit code $?), dist/ may be stale"
+fi
+
 # ── 4. Start npm run dev ────────────────────────────────────────────────────
 echo "[restart] Starting npm run dev..."
 cd "$REPO_ROOT"

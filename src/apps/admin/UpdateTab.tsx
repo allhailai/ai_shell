@@ -157,11 +157,11 @@ export function UpdateTab() {
                 Updating and restarting AIShell…
               </p>
               <p className="admin-update-restarting-hint">
-                Installing dependencies and restarting the server. This page
-                will reload automatically when the new version is ready.
+                Installing dependencies, rebuilding the frontend, and restarting
+                the server. This page will reload automatically when the new version is ready.
               </p>
               <p className="admin-update-restarting-timing">
-                This usually takes 15–30 seconds. Do not close this tab.
+                This usually takes 30–60 seconds. Do not close this tab.
               </p>
             </div>
           </div>
