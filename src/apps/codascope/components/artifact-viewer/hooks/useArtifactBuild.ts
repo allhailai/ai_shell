@@ -71,7 +71,6 @@ export function useArtifactBuild({
         projectId,
         epicId,
         artifactId,
-        artifact.modelId ?? undefined,
       );
 
       // Subscribe to SSE build status

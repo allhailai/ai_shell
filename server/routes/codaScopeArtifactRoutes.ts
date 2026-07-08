@@ -43,17 +43,13 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ artifacts });
   }));
 
-  // Create artifact spec
+  // Create artifact
   app.post("/api/codascope/projects/:id/epics/:epicId/artifacts", wrap(async (req, res) => {
     const { artifactSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { title, body, modelId, sources, autoDiscoverContext, createdBy } = req.body as {
+    const { title, createdBy } = req.body as {
       title?: string;
-      body?: string;
-      modelId?: string | null;
-      sources?: string[];
-      autoDiscoverContext?: boolean;
       createdBy?: string;
     };
     if (!title || typeof title !== "string" || !title.trim()) {
@@ -61,10 +57,6 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     }
     const artifact = await artifactSvc.createArtifact(id, epicId, {
       title: title.trim(),
-      body,
-      modelId,
-      sources,
-      autoDiscoverContext,
       createdBy,
     });
     res.status(201).json({ artifact });
@@ -81,25 +73,17 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ artifact });
   }));
 
-  // Update artifact spec
+  // Update artifact
   app.put("/api/codascope/projects/:id/epics/:epicId/artifacts/:artId", wrap(async (req, res) => {
     const { artifactSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const artId = param(req, "artId");
-    const { title, body, modelId, sources, autoDiscoverContext } = req.body as {
+    const { title } = req.body as {
       title?: string;
-      body?: string;
-      modelId?: string | null;
-      sources?: string[];
-      autoDiscoverContext?: boolean;
     };
     const artifact = await artifactSvc.updateArtifact(id, epicId, artId, {
       title,
-      body,
-      modelId,
-      sources,
-      autoDiscoverContext,
     });
     if (!artifact) throw httpError("Artifact not found.", 404, "not_found");
     res.json({ artifact });
@@ -188,7 +172,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
         agentSvc.send({
           projectId: id,
           message: assembledPrompt,
-          modelId: modelId ?? spec.modelId ?? "default",
+          modelId: modelId ?? "default",
           purpose: "artifact-build",
           onMessage: () => {
             // Update build progress for SSE polling

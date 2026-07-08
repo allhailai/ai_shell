@@ -1,8 +1,8 @@
 /* ── CodaScope: Artifact Service Tests ───────────────────────────────
    Unit tests for CodaScopeArtifactService.
    Exercises CRUD, section extraction from HTML with data-section-id
-   markers, section hide/unhide/reorder + recompose, spec hash
-   staleness detection, and preview HTML injection.
+   markers, section hide/unhide/reorder + recompose, and preview
+   HTML injection.
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -94,37 +94,26 @@ describe("CodaScopeArtifactService", () => {
 
       const artifact = await svc.createArtifact("proj1", "epic1", {
         title: "API Architecture",
-        body: "Visualize the REST API structure.",
       });
 
       expect(artifact.id).toMatch(/^art_/);
       expect(artifact.epicId).toBe("epic1");
       expect(artifact.title).toBe("API Architecture");
-      expect(artifact.body).toBe("Visualize the REST API structure.");
       expect(artifact.status).toBe("draft");
-      expect(artifact.modelId).toBeNull();
-      expect(artifact.sources).toEqual([]);
-      expect(artifact.autoDiscoverContext).toBe(true);
       expect(artifact.lastBuilt).toBeNull();
-      expect(artifact.buildSpecHash).toBeNull();
-      expect(artifact.currentSpecHash).toBeTruthy();
       expect(artifact.createdBy).toBe("user");
     });
 
-    it("creates artifact directory and spec.md file", async () => {
+    it("creates artifact directory", async () => {
       const projDir = scaffoldProject(root, "proj2", "epic2");
 
       const artifact = await svc.createArtifact("proj2", "epic2", {
         title: "Test Artifact",
-        body: "Test body.",
         createdBy: "agent",
       });
 
-      const specPath = path.join(projDir, "epics", "epic2", "artifacts", artifact.id, "spec.md");
-      expect(existsSync(specPath)).toBe(true);
-      const specContent = readFileSync(specPath, "utf-8");
-      expect(specContent).toContain("title: \"Test Artifact\"");
-      expect(specContent).toContain("Test body.");
+      const artDir = path.join(projDir, "epics", "epic2", "artifacts", artifact.id);
+      expect(existsSync(artDir)).toBe(true);
     });
 
     it("updates artifacts.json index", async () => {
@@ -153,13 +142,11 @@ describe("CodaScopeArtifactService", () => {
       scaffoldProject(root, "proj-get", "epic-get");
       const created = await svc.createArtifact("proj-get", "epic-get", {
         title: "My Art",
-        body: "Description here.",
       });
 
       const result = await svc.getArtifact("proj-get", "epic-get", created.id);
       expect(result).not.toBeNull();
       expect(result!.title).toBe("My Art");
-      expect(result!.body).toBe("Description here.");
     });
 
     it("returns null for nonexistent artifact", async () => {
@@ -198,23 +185,18 @@ describe("CodaScopeArtifactService", () => {
   // ── updateArtifact ────────────────────────────────────────────
 
   describe("updateArtifact", () => {
-    it("updates artifact fields", async () => {
+    it("updates artifact title", async () => {
       scaffoldProject(root, "proj-upd", "epic-upd");
       const created = await svc.createArtifact("proj-upd", "epic-upd", {
         title: "Original",
-        body: "Original body.",
       });
 
       const updated = await svc.updateArtifact("proj-upd", "epic-upd", created.id, {
         title: "Updated Title",
-        body: "Updated body.",
-        modelId: "claude-sonnet",
       });
 
       expect(updated).not.toBeNull();
       expect(updated!.title).toBe("Updated Title");
-      expect(updated!.body).toBe("Updated body.");
-      expect(updated!.modelId).toBe("claude-sonnet");
     });
 
     it("returns null for nonexistent artifact", async () => {
@@ -374,51 +356,7 @@ describe("CodaScopeArtifactService", () => {
     });
   });
 
-  // ── Spec hash staleness ──────────────────────────────────────
 
-  describe("spec hash staleness", () => {
-    it("detects staleness when spec body changes after build hash set", async () => {
-      scaffoldProject(root, "proj-stale", "epic-stale");
-      const artifact = await svc.createArtifact("proj-stale", "epic-stale", {
-        title: "Stale Test",
-        body: "Original body.",
-      });
-
-      expect(svc.isStale(artifact)).toBe(false); // no build hash yet
-
-      // Simulate a build by setting buildSpecHash
-      const afterBuild = { ...artifact, buildSpecHash: artifact.currentSpecHash };
-      expect(svc.isStale(afterBuild)).toBe(false); // hashes match
-
-      // Simulate spec change
-      const afterEdit = { ...afterBuild, currentSpecHash: "different_hash" };
-      expect(svc.isStale(afterEdit)).toBe(true);
-    });
-
-    it("marks artifact as stale when body is updated after build", async () => {
-      scaffoldProject(root, "proj-stale2", "epic-stale2");
-      const artifact = await svc.createArtifact("proj-stale2", "epic-stale2", {
-        title: "Staleness",
-        body: "v1 body.",
-      });
-
-      // Simulate build hash being set
-      const projDir = path.join(root, `project-proj-stale2`);
-      const indexPath = path.join(projDir, "epics", "epic-stale2", "artifacts", "artifacts.json");
-      const index = JSON.parse(readFileSync(indexPath, "utf-8"));
-      index.artifacts[0].buildSpecHash = index.artifacts[0].currentSpecHash;
-      index.artifacts[0].status = "built";
-      writeFileSync(indexPath, JSON.stringify(index, null, 2), "utf-8");
-
-      // Update the spec body
-      const updated = await svc.updateArtifact("proj-stale2", "epic-stale2", artifact.id, {
-        body: "v2 body — changed!",
-      });
-
-      expect(updated!.status).toBe("stale");
-      expect(updated!.currentSpecHash).not.toBe(updated!.buildSpecHash);
-    });
-  });
 
   // ── Preview HTML ─────────────────────────────────────────────
 

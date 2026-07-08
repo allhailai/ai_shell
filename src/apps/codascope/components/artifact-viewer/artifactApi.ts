@@ -51,10 +51,6 @@ export async function createArtifact(
   epicId: string,
   spec: {
     title: string;
-    body?: string;
-    modelId?: string | null;
-    sources?: string[];
-    autoDiscoverContext?: boolean;
     createdBy?: string;
   },
 ): Promise<ArtifactSpec> {
@@ -82,10 +78,6 @@ export async function updateArtifact(
   artifactId: string,
   updates: {
     title?: string;
-    body?: string;
-    modelId?: string | null;
-    sources?: string[];
-    autoDiscoverContext?: boolean;
   },
 ): Promise<ArtifactSpec> {
   const data = await request<{ artifact: ArtifactSpec }>(

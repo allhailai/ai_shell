@@ -164,11 +164,7 @@ export class CodaScopeArtifactService {
     writeFileSync(this.sectionsManifestPath(projectDir, epicId, artifactId), JSON.stringify(manifest, null, 2), "utf-8");
   }
 
-  /* ── Hash helpers ──────────────────────────────────────────────── */
 
-  private computeHash(text: string): string {
-    return crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
-  }
 
   /* ── Build progress key ────────────────────────────────────────── */
 
@@ -178,13 +174,9 @@ export class CodaScopeArtifactService {
 
   /* ── CRUD ─────────────────────────────────────────────────────────── */
 
-  /** Create a new artifact spec. */
+  /** Create a new artifact. */
   async createArtifact(projectId: string, epicId: string, data: {
     title: string;
-    body?: string;
-    modelId?: string | null;
-    sources?: string[];
-    autoDiscoverContext?: boolean;
     createdBy?: string;
   }): Promise<ArtifactSpec> {
     const projectDir = this.projectDir(projectId);
@@ -192,29 +184,21 @@ export class CodaScopeArtifactService {
 
     const now = new Date().toISOString();
     const id = `art_${crypto.randomBytes(6).toString("hex")}`;
-    const body = data.body ?? "";
 
     const spec: ArtifactSpec = {
       id,
       epicId,
       title: data.title,
-      body,
-      modelId: data.modelId ?? null,
-      sources: data.sources ?? [],
-      autoDiscoverContext: data.autoDiscoverContext ?? true,
       lastBuilt: null,
       status: "draft",
-      buildSpecHash: null,
-      currentSpecHash: this.computeHash(body),
       createdAt: now,
       updatedAt: now,
       createdBy: data.createdBy ?? "user",
     };
 
-    // Write spec.md with YAML frontmatter
+    // Ensure artifact directory exists
     const artDir = this.artifactDir(projectDir, epicId, id);
     mkdirSync(artDir, { recursive: true });
-    this.writeSpecFile(artDir, spec);
 
     // Update index
     const index = this.readIndex(projectDir, epicId);
@@ -239,20 +223,12 @@ export class CodaScopeArtifactService {
     if (!projectDir) return [];
 
     const index = this.readIndex(projectDir, epicId);
-    // Refresh currentSpecHash for staleness detection
-    for (const spec of index.artifacts) {
-      spec.currentSpecHash = this.computeHash(spec.body);
-    }
     return index.artifacts;
   }
 
-  /** Update an artifact spec. */
+  /** Update an artifact. */
   async updateArtifact(projectId: string, epicId: string, artifactId: string, updates: {
     title?: string;
-    body?: string;
-    modelId?: string | null;
-    sources?: string[];
-    autoDiscoverContext?: boolean;
   }): Promise<ArtifactSpec | null> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
@@ -262,24 +238,8 @@ export class CodaScopeArtifactService {
     if (!spec) return null;
 
     if (updates.title !== undefined) spec.title = updates.title;
-    if (updates.body !== undefined) spec.body = updates.body;
-    if (updates.modelId !== undefined) spec.modelId = updates.modelId;
-    if (updates.sources !== undefined) spec.sources = updates.sources;
-    if (updates.autoDiscoverContext !== undefined) spec.autoDiscoverContext = updates.autoDiscoverContext;
 
     spec.updatedAt = new Date().toISOString();
-    spec.currentSpecHash = this.computeHash(spec.body);
-
-    // Update staleness: if spec changed since last build, mark as stale
-    if (spec.buildSpecHash && spec.currentSpecHash !== spec.buildSpecHash) {
-      spec.status = "stale";
-    }
-
-    // Persist spec.md
-    const artDir = this.artifactDir(projectDir, epicId, artifactId);
-    if (existsSync(artDir)) {
-      this.writeSpecFile(artDir, spec);
-    }
 
     this.writeIndex(projectDir, epicId, index);
     return spec;
@@ -365,20 +325,7 @@ export class CodaScopeArtifactService {
 
   /* ── Spec file I/O ─────────────────────────────────────────────── */
 
-  private writeSpecFile(artDir: string, spec: ArtifactSpec): void {
-    const frontmatter = [
-      "---",
-      `title: "${spec.title.replace(/"/g, '\\"')}"`,
-      `modelId: ${spec.modelId ? `"${spec.modelId}"` : "null"}`,
-      `sources: ${JSON.stringify(spec.sources)}`,
-      `autoDiscoverContext: ${spec.autoDiscoverContext}`,
-      `createdAt: "${spec.createdAt}"`,
-      `updatedAt: "${spec.updatedAt}"`,
-      `createdBy: "${spec.createdBy}"`,
-      "---",
-    ].join("\n");
-    writeFileSync(path.join(artDir, "spec.md"), `${frontmatter}\n\n${spec.body}`, "utf-8");
-  }
+
 
   /* ── Build pipeline ────────────────────────────────────────────── */
 
@@ -426,11 +373,9 @@ export class CodaScopeArtifactService {
       // Extract sections
       this.extractAndPersistSections(projectDir, epicId, artifactId, html);
 
-      // Update spec status
+      // Update artifact status
       spec.lastBuilt = new Date().toISOString();
       spec.status = "built";
-      spec.buildSpecHash = this.computeHash(spec.body);
-      spec.currentSpecHash = spec.buildSpecHash;
       spec.updatedAt = spec.lastBuilt;
       this.writeIndex(projectDir, epicId, index);
 
@@ -808,11 +753,4 @@ export class CodaScopeArtifactService {
     return this.indexHtmlPath(projectDir, epicId, artifactId);
   }
 
-  /* ── Spec hash helpers ─────────────────────────────────────────── */
-
-  /** Check if an artifact's spec has changed since last build. */
-  isStale(spec: ArtifactSpec): boolean {
-    if (!spec.buildSpecHash) return false;
-    return spec.currentSpecHash !== spec.buildSpecHash;
-  }
 }

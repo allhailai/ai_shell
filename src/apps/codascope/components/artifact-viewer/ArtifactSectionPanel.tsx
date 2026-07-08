@@ -100,6 +100,7 @@ export function ArtifactSectionPanel({
   const [showVersions, setShowVersions] = useState(false);
   const [sectionsCollapsed, setSectionsCollapsed] = useState(false);
   const [annotationsCollapsed, setAnnotationsCollapsed] = useState(false);
+  const [appliedCollapsed, setAppliedCollapsed] = useState(true);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const quickAddRef = useRef<HTMLTextAreaElement>(null);
 
@@ -545,10 +546,18 @@ export function ArtifactSectionPanel({
             {/* Applied */}
             {appliedAnnotations.length > 0 && (
               <div className="codascope-artifact-annotation-group">
-                <span className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-applied">
+                <button
+                  className="codascope-artifact-annotation-group-label codascope-artifact-annotation-group-applied codascope-artifact-annotation-group-toggle"
+                  onClick={() => setAppliedCollapsed(!appliedCollapsed)}
+                  title={appliedCollapsed ? "Expand applied annotations" : "Collapse applied annotations"}
+                  type="button"
+                >
+                  <span className="codascope-artifact-section-collapse-chevron">
+                    {appliedCollapsed ? "▸" : "▾"}
+                  </span>
                   Applied ({appliedAnnotations.length})
-                </span>
-                {appliedAnnotations.map((a) => (
+                </button>
+                {!appliedCollapsed && appliedAnnotations.map((a) => (
                   <ArtifactAnnotationCard
                     key={a.id}
                     annotation={a}

@@ -519,14 +519,8 @@ export interface ArtifactSpec {
   id: string;
   epicId?: string;           // null for project-level artifacts
   title: string;
-  body: string;              // free-form markdown spec (goals, content guidance)
-  modelId: string | null;
-  sources: string[];          // manual source hints (wiki topic IDs, file paths)
-  autoDiscoverContext: boolean; // true = auto-include epic knowledge
   lastBuilt: string | null;
-  status: "draft" | "building" | "built" | "stale";
-  buildSpecHash: string | null;
-  currentSpecHash: string | null;
+  status: "draft" | "building" | "built";
   createdAt: string;
   updatedAt: string;
   createdBy: string;

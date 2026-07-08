@@ -301,21 +301,11 @@ export async function loadArtifactBuildPrompt(
 
   if (!artifact) return null;
 
-  // Assemble manual sources if the spec has attached source hints
-  let manualSources = "(No additional sources specified)";
-  if (artifact.sources && artifact.sources.length > 0) {
-    manualSources = artifact.sources
-      .map((s) => `- ${s}`)
-      .join("\n");
-  }
-
   const vars: Record<string, string> = {
     PROJECT_NAME: project?.name ?? projectId,
     EPIC_TITLE: epic?.title ?? epicId,
     ARTIFACT_TITLE: artifact.title,
-    ARTIFACT_SPEC_BODY: artifact.body,
     EPIC_CONTEXT: epicContext,
-    MANUAL_SOURCES: manualSources,
   };
 
   return substituteVars(template, vars);

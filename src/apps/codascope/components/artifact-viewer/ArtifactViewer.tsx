@@ -1,8 +1,7 @@
 /* ── CodaScope: ArtifactViewer ────────────────────────────────────────
    Main orchestrator component for visual HTML artifacts.
-   Wires together ArtifactSpecEditor, ArtifactPreview, and
-   ArtifactSectionPanel with tab switching, build lifecycle,
-   annotation flow, and version management.
+   Wires together ArtifactPreview and ArtifactSectionPanel with
+   build lifecycle, annotation flow, and version management.
 
    Build lifecycle → useArtifactBuild hook
    Annotation flow → useArtifactAnnotations hook
@@ -15,7 +14,6 @@ import type {
   ArtifactBuildVersion,
 } from "../../codaScopeTypes.js";
 import * as api from "./artifactApi";
-import { ArtifactSpecEditor } from "./ArtifactSpecEditor";
 import { ArtifactPreview, type ArtifactPreviewHandle } from "./ArtifactPreview";
 import { ArtifactSectionPanel } from "./ArtifactSectionPanel";
 import { useArtifactBuild } from "./hooks/useArtifactBuild";
@@ -29,14 +27,11 @@ interface ArtifactViewerProps {
   artifactId: string;
 }
 
-type Tab = "spec" | "preview";
-
 /* ── Component ─────────────────────────────────────────────────────── */
 
 export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewerProps) {
   // Core state
   const [artifact, setArtifact] = useState<ArtifactSpec | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("spec");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,7 +40,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
   const [sections, setSections] = useState<ArtifactSection[]>([]);
   const [versions, setVersions] = useState<ArtifactBuildVersion[]>([]);
   const [hiddenSectionIds, setHiddenSectionIds] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
 
   // Section panel collapse
   const [sectionPanelCollapsed, setSectionPanelCollapsed] = useState(false);
@@ -75,12 +69,8 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
 
   useEffect(() => {
     setLoading(true);
-    loadArtifact().then((a) => {
+    loadArtifact().then(() => {
       setLoading(false);
-      // Default to preview tab if already built
-      if (a?.status === "built") {
-        setActiveTab("preview");
-      }
     });
   }, [loadArtifact]);
 
@@ -137,7 +127,7 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     projectId,
     epicId,
     artifactId,
-    activeTab,
+    activeTab: "preview",
     isBuilt: isBuilt ?? false,
     sections,
     previewRef,
@@ -157,43 +147,14 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     }
   }, [projectId, epicId, artifactId]);
 
-  // Load sections/annotations/versions when switching to preview
+  // Load sections/annotations/versions when built
   useEffect(() => {
-    if (activeTab === "preview" && isBuilt) {
+    if (isBuilt) {
       void loadSections();
       void loadAnnotations();
       void loadVersions();
     }
-  }, [activeTab, isBuilt, loadSections, loadAnnotations, loadVersions, previewKey]);
-
-  // ── Save spec ────────────────────────────────────────────────────
-
-  const handleSave = useCallback(
-    async (updates: {
-      title?: string;
-      body?: string;
-      modelId?: string | null;
-      sources?: string[];
-      autoDiscoverContext?: boolean;
-    }) => {
-      setSaving(true);
-      try {
-        const updated = await api.updateArtifact(
-          projectId,
-          epicId,
-          artifactId,
-          updates,
-        );
-        setArtifact(updated);
-        flash("Saved");
-      } catch (err) {
-        flash(err instanceof Error ? err.message : "Save failed");
-      } finally {
-        setSaving(false);
-      }
-    },
-    [projectId, epicId, artifactId, flash],
-  );
+  }, [isBuilt, loadSections, loadAnnotations, loadVersions, previewKey]);
 
   // ── Section handlers ─────────────────────────────────────────────
 
@@ -306,7 +267,7 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     }
   }, [projectId, epicId, artifactId, loadSections, loadAnnotations, loadVersions, flash]);
 
-  // ── Download handlers ────────────────────────────────────────────
+  // ── Download handler ─────────────────────────────────────────────
 
   const handleDownloadHtml = useCallback(() => {
     const url = api.previewUrl(projectId, epicId, artifactId);
@@ -315,20 +276,6 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
     a.download = `${artifact?.title ?? artifactId}.html`;
     a.click();
   }, [projectId, epicId, artifactId, artifact?.title]);
-
-  const handleDownloadSpec = useCallback(() => {
-    if (!artifact) return;
-    const blob = new Blob(
-      [`# ${artifact.title}\n\n${artifact.body}`],
-      { type: "text/markdown" },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${artifact.title}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [artifact]);
 
   // ── Preview URL ──────────────────────────────────────────────────
 
@@ -357,24 +304,9 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
 
   return (
     <div className="codascope-artifact-viewer">
-      {/* Tab bar */}
-      <div className="codascope-artifact-tabs">
-        <button
-          className={`codascope-artifact-tab ${activeTab === "spec" ? "codascope-artifact-tab-active" : ""}`}
-          onClick={() => setActiveTab("spec")}
-          type="button"
-        >
-          Spec
-        </button>
-        <button
-          className={`codascope-artifact-tab ${activeTab === "preview" ? "codascope-artifact-tab-active" : ""}`}
-          onClick={() => setActiveTab("preview")}
-          disabled={!isBuilt && !building}
-          title={!isBuilt && !building ? "Build the artifact first" : undefined}
-          type="button"
-        >
-          Preview
-        </button>
+      {/* Header bar */}
+      <div className="codascope-artifact-header">
+        <span className="codascope-artifact-header-title">{artifact.title}</span>
         {notice && (
           <span className="codascope-artifact-notice">{notice}</span>
         )}
@@ -393,18 +325,18 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
             <p className="codascope-artifact-modal-body">
               This artifact has section modifications (hidden sections, applied
               annotations, or version changes). A full rebuild will regenerate
-              all content from the spec, replacing all current modifications.
+              all content, replacing all current modifications.
             </p>
             <div className="codascope-artifact-modal-actions">
               <button
-                className="codascope-artifact-spec-btn codascope-artifact-spec-btn-secondary"
+                className="codascope-artifact-btn codascope-artifact-btn-secondary"
                 onClick={() => setShowRebuildWarning(false)}
                 type="button"
               >
                 Cancel
               </button>
               <button
-                className="codascope-artifact-spec-btn codascope-artifact-spec-btn-primary"
+                className="codascope-artifact-btn codascope-artifact-btn-primary"
                 onClick={() => void handleBuild()}
                 type="button"
               >
@@ -417,85 +349,71 @@ export function ArtifactViewer({ projectId, epicId, artifactId }: ArtifactViewer
 
       {/* Content area */}
       <div className="codascope-artifact-content">
-        {activeTab === "spec" && (
-          <ArtifactSpecEditor
-            artifact={artifact}
-            onSave={handleSave}
-            onBuild={handleBuild}
-            onDownloadHtml={handleDownloadHtml}
-            onDownloadSpec={handleDownloadSpec}
-            building={building}
-            saving={saving}
-          />
-        )}
-
-        {activeTab === "preview" && (
-          <div className="codascope-artifact-preview-layout">
-            {/* Preview iframe */}
-            <div className="codascope-artifact-preview-main">
-              {isBuilt ? (
-                <ArtifactPreview
-                  ref={previewRef}
-                  previewSrc={previewSrc}
-                  reloadKey={previewKey}
-                  onAnnotationSelected={handleAnnotationSelected}
-                />
-              ) : building ? (
-                <div className="codascope-artifact-preview-building">
-                  <div className="codascope-artifact-preview-spinner" />
-                  <p>{buildProgress?.progress ?? "Agent is generating HTML…"}</p>
-                </div>
-              ) : (
-                <div className="codascope-artifact-preview-empty">
-                  <p>No preview available. Build the artifact from the Spec tab.</p>
-                </div>
-              )}
-
-              {/* Expand button shown when panel is collapsed */}
-              {isBuilt && sectionPanelCollapsed && (
-                <button
-                  className="codascope-artifact-panel-expand-btn"
-                  onClick={() => setSectionPanelCollapsed(false)}
-                  title="Expand Sections & Annotations"
-                  type="button"
-                >
-                  ◀
-                </button>
-              )}
-            </div>
-
-            {/* Section panel (right side) */}
-            {isBuilt && !sectionPanelCollapsed && (
-              <ArtifactSectionPanel
-                sections={sections}
-                annotations={annotations}
-                versions={versions}
-                hiddenSectionIds={hiddenSectionIds}
-                inspectionMode={inspectionMode}
-                pendingElementContext={pendingElementContext}
-                onToggleInspectionMode={toggleInspectionMode}
-                onScrollToSection={handleScrollToSection}
-                onHighlightAnnotation={handleHighlightAnnotation}
-                onHideSection={handleHideSection}
-                onUnhideSection={handleUnhideSection}
-                onReorderSections={handleReorderSections}
-                onAddAnnotation={handleAddAnnotation}
-                onUpdateAnnotation={handleUpdateAnnotation}
-                onDeleteAnnotation={handleDeleteAnnotation}
-                onToggleAnnotation={handleToggleAnnotation}
-                onBatchApply={handleBatchApply}
-                onRetryFailed={handleRetryFailed}
-                onAddSection={handleAddSection}
-                onRevertVersion={handleRevertVersion}
-                onRevertToLatest={handleRevertToLatest}
-                onPauseHover={() => previewRef.current?.pauseHover()}
-                onResumeHover={() => previewRef.current?.resumeHover()}
-                onCollapse={() => setSectionPanelCollapsed(true)}
-                building={building}
+        <div className="codascope-artifact-preview-layout">
+          {/* Preview iframe */}
+          <div className="codascope-artifact-preview-main">
+            {isBuilt ? (
+              <ArtifactPreview
+                ref={previewRef}
+                previewSrc={previewSrc}
+                reloadKey={previewKey}
+                onAnnotationSelected={handleAnnotationSelected}
               />
+            ) : building ? (
+              <div className="codascope-artifact-preview-building">
+                <div className="codascope-artifact-preview-spinner" />
+                <p>{buildProgress?.progress ?? "Agent is generating HTML…"}</p>
+              </div>
+            ) : (
+              <div className="codascope-artifact-preview-empty">
+                <p>This artifact hasn't been built yet. Use the chat agent to generate it.</p>
+              </div>
+            )}
+
+            {/* Expand button shown when panel is collapsed */}
+            {isBuilt && sectionPanelCollapsed && (
+              <button
+                className="codascope-artifact-panel-expand-btn"
+                onClick={() => setSectionPanelCollapsed(false)}
+                title="Expand Sections & Annotations"
+                type="button"
+              >
+                ◀
+              </button>
             )}
           </div>
-        )}
+
+          {/* Section panel (right side) */}
+          {isBuilt && !sectionPanelCollapsed && (
+            <ArtifactSectionPanel
+              sections={sections}
+              annotations={annotations}
+              versions={versions}
+              hiddenSectionIds={hiddenSectionIds}
+              inspectionMode={inspectionMode}
+              pendingElementContext={pendingElementContext}
+              onToggleInspectionMode={toggleInspectionMode}
+              onScrollToSection={handleScrollToSection}
+              onHighlightAnnotation={handleHighlightAnnotation}
+              onHideSection={handleHideSection}
+              onUnhideSection={handleUnhideSection}
+              onReorderSections={handleReorderSections}
+              onAddAnnotation={handleAddAnnotation}
+              onUpdateAnnotation={handleUpdateAnnotation}
+              onDeleteAnnotation={handleDeleteAnnotation}
+              onToggleAnnotation={handleToggleAnnotation}
+              onBatchApply={handleBatchApply}
+              onRetryFailed={handleRetryFailed}
+              onAddSection={handleAddSection}
+              onRevertVersion={handleRevertVersion}
+              onRevertToLatest={handleRevertToLatest}
+              onPauseHover={() => previewRef.current?.pauseHover()}
+              onResumeHover={() => previewRef.current?.resumeHover()}
+              onCollapse={() => setSectionPanelCollapsed(true)}
+              building={building}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
