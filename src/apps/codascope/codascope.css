@@ -5191,6 +5191,187 @@
   flex: 1;
 }
 
+/* ── Research Query Log ─────────────────────────────────────────────── */
+
+.codascope-research-log {
+  margin-top: var(--space-4);
+}
+
+.codascope-research-log-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.codascope-research-log-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.codascope-research-log-count {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-full);
+  line-height: 1.6;
+}
+
+.codascope-research-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-research-log-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-research-log-entry:hover {
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-research-log-entry-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.codascope-research-log-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.codascope-research-log-topic-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codascope-research-log-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.codascope-research-log-status-completed {
+  color: var(--color-success);
+  background: var(--color-success-muted);
+}
+
+.codascope-research-log-status-error {
+  color: var(--color-danger);
+  background: var(--color-danger-muted);
+}
+
+.codascope-research-log-status-cancelled {
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-research-log-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  flex-wrap: wrap;
+}
+
+.codascope-research-log-lineage {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.codascope-research-log-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.codascope-research-log-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-research-log-btn:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-secondary);
+  color: var(--color-text-primary);
+}
+
+.codascope-research-log-btn-deeper {
+  color: var(--color-accent);
+  border-color: var(--color-accent-muted);
+}
+
+.codascope-research-log-btn-deeper:hover {
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent);
+}
+
+.codascope-research-log-btn-danger:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger-muted);
+  background: var(--color-danger-muted);
+}
+
+.codascope-research-log-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.codascope-research-log-empty {
+  text-align: center;
+  padding: var(--space-4) var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
 /* ── Section layout ──────────────────────────────────────────────────── */
 
 .codascope-knowledge-section {

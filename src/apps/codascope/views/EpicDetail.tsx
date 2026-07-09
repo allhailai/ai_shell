@@ -18,6 +18,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
+import { useCommandBus } from "../../../shell/hooks";
 import { EpicDefine } from "./EpicDefine";
 import { EpicScope } from "./EpicScope";
 import {
@@ -37,6 +38,7 @@ import type {
   EpicKnowledgeSource,
   BlockedDownload,
   ArtifactSpec,
+  ResearchQueryLogEntry,
 } from "../codaScopeTypes";
 import { listArtifacts } from "../components/artifact-viewer/artifactApi";
 
@@ -116,6 +118,7 @@ export function EpicDetail() {
   const [sources, setSources] = useState<EpicKnowledgeSource[]>([]);
   const [blockedItems, setBlockedItems] = useState<BlockedDownload[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactSpec[]>([]);
+  const [researchLog, setResearchLog] = useState<ResearchQueryLogEntry[]>([]);
 
   // Split sources into good (non-error) and error
   const goodSources = useMemo(() => sources.filter((s) => s.status !== "error"), [sources]);
@@ -256,12 +259,45 @@ export function EpicDetail() {
     }
   }, [activeProjectId, epicId]);
 
+  const fetchResearchLog = useCallback(async () => {
+    if (!activeProjectId || !epicId) return;
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/knowledge/research-log`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setResearchLog(data.entries ?? []);
+      }
+    } catch {
+      /* silent */
+    }
+  }, [activeProjectId, epicId]);
+
   useEffect(() => {
     void fetchWikiPages();
     void fetchSources();
     void fetchBlocked();
     void fetchArtifacts();
-  }, [fetchWikiPages, fetchSources, fetchBlocked, fetchArtifacts]);
+    void fetchResearchLog();
+  }, [fetchWikiPages, fetchSources, fetchBlocked, fetchArtifacts, fetchResearchLog]);
+
+  // ── Listen for knowledge-changed events from ActionCard ──────────────
+  const commandBus = useCommandBus();
+  useEffect(() => {
+    const unsub = commandBus.on(
+      "codascope:knowledge-changed",
+      (payload: unknown) => {
+        const p = payload as { epicId?: string } | undefined;
+        if (p?.epicId === epicId) {
+          void fetchWikiPages();
+          void fetchSources();
+          void fetchResearchLog();
+        }
+      },
+    );
+    return unsub;
+  }, [commandBus, epicId, fetchWikiPages, fetchSources, fetchResearchLog]);
 
   // ── Navigation handlers ──────────────────────────────────────────────
   const handleBack = useCallback(() => {
@@ -547,6 +583,12 @@ export function EpicDetail() {
               pageId={activeSubItemId}
               wikiPages={wikiPages}
               sources={sources}
+              researchLog={researchLog}
+              onResearchLogChanged={() => {
+                void fetchResearchLog();
+                void fetchWikiPages();
+                void fetchSources();
+              }}
             />
           );
           break;

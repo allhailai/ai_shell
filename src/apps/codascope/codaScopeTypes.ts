@@ -455,6 +455,22 @@ export interface ResearchUrl {
   status: "pending" | "downloaded" | "blocked" | "error";
 }
 
+// ── Research Query Log ──────────────────────────────────────────────
+
+export interface ResearchQueryLogEntry {
+  id: string;                    // unique ID
+  parentId?: string;             // if this is a "go deeper" follow-up, links to the original query
+  topics: string[];              // the topics the user requested
+  createdAt: string;             // ISO timestamp
+  status: "completed" | "error" | "cancelled";
+  sourcesDownloaded: number;     // how many sources were downloaded
+  wikiPagesCreated: number;      // how many wiki pages were created
+}
+
+export interface ResearchQueryLog {
+  entries: ResearchQueryLogEntry[];
+}
+
 // ── Curation ────────────────────────────────────────────────────────
 
 export type CurationReasonType =

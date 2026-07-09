@@ -27,12 +27,16 @@ import {
   IconChat,
   IconDownload,
   IconExternalLink,
+  IconSearch,
+  IconRefresh,
+  IconDelete,
 } from "../components/CodaScopeIcons";
 import type {
   EpicDesignDetail,
   EpicKnowledgeSource,
   EpicWikiPage,
   BlockedDownload,
+  ResearchQueryLogEntry,
 } from "../codaScopeTypes";
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
@@ -71,6 +75,8 @@ interface EpicKnowledgeWikiViewProps {
   pageId: string | null; // null = overview/empty state
   wikiPages: EpicWikiPage[];
   sources: EpicKnowledgeSource[];
+  researchLog: ResearchQueryLogEntry[];
+  onResearchLogChanged: () => void;
 }
 
 export function EpicKnowledgeWikiView({
@@ -78,6 +84,8 @@ export function EpicKnowledgeWikiView({
   pageId,
   wikiPages,
   sources,
+  researchLog,
+  onResearchLogChanged,
 }: EpicKnowledgeWikiViewProps) {
   const { activeProjectId } = useCodaScopeStore();
   const { navigate } = useAppSubRoute("codascope");
@@ -128,7 +136,13 @@ export function EpicKnowledgeWikiView({
   // No page selected → show overview
   if (!pageId) {
     return (
-      <EpicKnowledgeOverview epic={epic} wikiPages={wikiPages} sources={sources} />
+      <EpicKnowledgeOverview
+        epic={epic}
+        wikiPages={wikiPages}
+        sources={sources}
+        researchLog={researchLog}
+        onResearchLogChanged={onResearchLogChanged}
+      />
     );
   }
 
@@ -541,6 +555,8 @@ interface EpicKnowledgeOverviewProps {
   epic: EpicDesignDetail;
   wikiPages: EpicWikiPage[];
   sources: EpicKnowledgeSource[];
+  researchLog: ResearchQueryLogEntry[];
+  onResearchLogChanged: () => void;
 }
 
 interface GuideStepData {
@@ -551,7 +567,7 @@ interface GuideStepData {
   hint: string;
 }
 
-function EpicKnowledgeOverview({ epic, wikiPages, sources }: EpicKnowledgeOverviewProps) {
+function EpicKnowledgeOverview({ epic, wikiPages, sources, researchLog, onResearchLogChanged }: EpicKnowledgeOverviewProps) {
   const [guideExpanded, setGuideExpanded] = useState(true);
 
   const hasDefinition = epic.definition.trim().length > 0;
@@ -709,6 +725,209 @@ function EpicKnowledgeOverview({ epic, wikiPages, sources }: EpicKnowledgeOvervi
           </div>
         </div>
       </div>
+
+      {/* Research Query Log */}
+      <ResearchQueryLogSection
+        epic={epic}
+        entries={researchLog}
+        onChanged={onResearchLogChanged}
+      />
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Research Query Log Section
+   ══════════════════════════════════════════════════════════════════════ */
+
+const MODEL_STORAGE_KEY = "codascope:lastModel";
+
+function getStoredModelId(): string | null {
+  try {
+    return localStorage.getItem(MODEL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function timeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+interface ResearchQueryLogSectionProps {
+  epic: EpicDesignDetail;
+  entries: ResearchQueryLogEntry[];
+  onChanged: () => void;
+}
+
+function ResearchQueryLogSection({ epic, entries, onChanged }: ResearchQueryLogSectionProps) {
+  const { activeProjectId } = useCodaScopeStore();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deepeningId, setDeepeningId] = useState<string | null>(null);
+
+  const handleDelete = useCallback(async (entryId: string) => {
+    if (!activeProjectId) return;
+    setDeletingId(entryId);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/knowledge/research-log/${entryId}`,
+        { method: "DELETE" },
+      );
+      if (res.ok) {
+        onChanged();
+      }
+    } catch {
+      /* silent */
+    }
+    setDeletingId(null);
+  }, [activeProjectId, epic.id, onChanged]);
+
+  const handleGoDeeper = useCallback(async (entry: ResearchQueryLogEntry) => {
+    if (!activeProjectId) return;
+    const modelId = getStoredModelId();
+    if (!modelId) {
+      alert("Please select a model in the chat assistant first (use the model picker).");
+      return;
+    }
+    setDeepeningId(entry.id);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/knowledge/research`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            modelId,
+            topics: entry.topics,
+            parentQueryId: entry.id,
+          }),
+        },
+      );
+
+      if (res.ok && res.body) {
+        // Consume the SSE stream to completion
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let done = false;
+        while (!done) {
+          const { value, done: streamDone } = await reader.read();
+          done = streamDone;
+          if (value) {
+            // We just consume — we don't need to parse SSE events here
+            decoder.decode(value, { stream: !done });
+          }
+        }
+      }
+      onChanged();
+    } catch {
+      /* silent */
+    }
+    setDeepeningId(null);
+  }, [activeProjectId, epic.id, onChanged]);
+
+  // Find parent topics for lineage display
+  const getParentTopics = useCallback((parentId: string | undefined): string[] | null => {
+    if (!parentId) return null;
+    const parent = entries.find((e) => e.id === parentId);
+    return parent?.topics ?? null;
+  }, [entries]);
+
+  return (
+    <div className="codascope-research-log">
+      <div className="codascope-research-log-header">
+        <IconSearch size={14} />
+        <h3 className="codascope-research-log-title">Research Queries</h3>
+        {entries.length > 0 && (
+          <span className="codascope-research-log-count">{entries.length}</span>
+        )}
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="codascope-research-log-empty">
+          No research queries yet. Use the chat assistant to start researching topics.
+        </div>
+      ) : (
+        <div className="codascope-research-log-list">
+          {entries.map((entry) => {
+            const parentTopics = getParentTopics(entry.parentId);
+            const isDeleting = deletingId === entry.id;
+            const isDeepening = deepeningId === entry.id;
+            const anyRunning = deepeningId !== null;
+
+            return (
+              <div key={entry.id} className="codascope-research-log-entry">
+                <div className="codascope-research-log-entry-top">
+                  <div className="codascope-research-log-topics">
+                    {entry.topics.map((topic, i) => (
+                      <span key={i} className="codascope-research-log-topic-pill">
+                        {topic}
+                      </span>
+                    ))}
+                  </div>
+                  <span
+                    className={`codascope-research-log-status codascope-research-log-status-${entry.status}`}
+                  >
+                    {entry.status === "completed" && <><IconCheck size={10} /> Completed</>}
+                    {entry.status === "error" && <><IconWarning size={10} /> Error</>}
+                    {entry.status === "cancelled" && <>Cancelled</>}
+                  </span>
+                </div>
+
+                <div className="codascope-research-log-meta">
+                  <span>{timeAgo(entry.createdAt)}</span>
+                  <span>
+                    {pluralize(entry.sourcesDownloaded, "source")} downloaded
+                  </span>
+                  <span>
+                    {pluralize(entry.wikiPagesCreated, "wiki page")} created
+                  </span>
+                </div>
+
+                {parentTopics && (
+                  <div className="codascope-research-log-lineage">
+                    Expanded from: {parentTopics.join(", ")}
+                  </div>
+                )}
+
+                <div className="codascope-research-log-actions">
+                  {entry.status === "completed" && (
+                    <button
+                      type="button"
+                      className="codascope-research-log-btn codascope-research-log-btn-deeper"
+                      onClick={() => void handleGoDeeper(entry)}
+                      disabled={anyRunning}
+                      title="Run another research pass on these topics to find additional sources"
+                    >
+                      {isDeepening ? (
+                        <>Researching…</>
+                      ) : (
+                        <><IconRefresh size={11} /> Go Deeper</>
+                      )}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="codascope-research-log-btn codascope-research-log-btn-danger"
+                    onClick={() => void handleDelete(entry.id)}
+                    disabled={isDeleting || isDeepening}
+                    title="Remove this entry from the log"
+                  >
+                    <IconDelete size={11} />
+                    {isDeleting ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

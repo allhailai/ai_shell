@@ -355,6 +355,230 @@ export class CodaScopeContentService {
     return cleaned;
   }
 
+  /* ── Research Content Summarization ────────────────────────────────── */
+
+  /**
+   * Produce a cleaned, research-ready summary of markdown content.
+   *
+   * This is a deterministic (no LLM) pre-processing step that:
+   * 1. Strips common API documentation boilerplate sections
+   * 2. Extracts only sections matching topic keywords (if headings exist)
+   * 3. Collapses repeated schema/attribute patterns
+   * 4. Caps output at `maxChars` (default 4000) with smart truncation
+   * 5. Returns empty string for trivial content (< 200 chars after cleaning)
+   */
+  summarizeForResearch(
+    markdown: string,
+    topicKeywords: string[] = [],
+    maxChars = 4000,
+  ): string {
+    if (!markdown || markdown.trim().length < 200) return "";
+
+    let cleaned = markdown;
+
+    // ── 1. Strip boilerplate sections ──────────────────────────────────
+    // Remove common API doc sections that rarely contain useful research content
+    const boilerplateHeadings = [
+      "authentication", "auth", "authorization",
+      "pagination", "paginating",
+      "error codes", "errors", "error handling", "error responses",
+      "rate limiting", "rate limits", "throttling",
+      "getting started", "quick start", "quickstart",
+      "sdks", "sdk", "client libraries",
+      "changelog", "change log", "release notes",
+      "versioning", "api versioning",
+      "terms of service", "terms of use",
+      "support", "contact us", "help",
+    ];
+
+    // Match sections from a heading to the next heading of same or higher level
+    // e.g. ## Authentication ... (everything until next ## or #)
+    cleaned = this.stripSectionsByHeading(cleaned, boilerplateHeadings);
+
+    // ── 2. Extract topic-relevant sections ────────────────────────────
+    if (topicKeywords.length > 0) {
+      const extracted = this.extractRelevantSections(cleaned, topicKeywords);
+      // Only use extracted content if we actually found matching sections
+      // (don't accidentally strip everything if no headings match)
+      if (extracted.length > 200) {
+        cleaned = extracted;
+      }
+    }
+
+    // ── 3. Collapse repeated schema/attribute patterns ────────────────
+    cleaned = this.collapseRepeatedPatterns(cleaned);
+
+    // ── 4. Final cleanup ──────────────────────────────────────────────
+    // Remove excessive blank lines
+    cleaned = cleaned.replace(/\n{4,}/g, "\n\n\n");
+    cleaned = cleaned.trim();
+
+    // Skip trivial content
+    if (cleaned.length < 200) return "";
+
+    // ── 5. Smart truncation ───────────────────────────────────────────
+    if (cleaned.length > maxChars) {
+      cleaned = this.smartTruncate(cleaned, maxChars);
+    }
+
+    return cleaned;
+  }
+
+  /**
+   * Remove markdown sections whose headings match boilerplate terms.
+   * A "section" runs from a heading line to the next heading of same or higher level.
+   */
+  private stripSectionsByHeading(markdown: string, boilerplateTerms: string[]): string {
+    const lines = markdown.split("\n");
+    const result: string[] = [];
+    let skipping = false;
+    let skipLevel = 0;
+
+    for (const line of lines) {
+      const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        const title = headingMatch[2].toLowerCase().trim();
+
+        if (skipping) {
+          // Stop skipping if we hit a heading of same or higher level
+          if (level <= skipLevel) {
+            skipping = false;
+          }
+        }
+
+        if (!skipping) {
+          // Check if this heading matches a boilerplate term
+          const isBoilerplate = boilerplateTerms.some((term) =>
+            title.includes(term),
+          );
+          if (isBoilerplate) {
+            skipping = true;
+            skipLevel = level;
+            continue;
+          }
+        }
+      }
+
+      if (!skipping) {
+        result.push(line);
+      }
+    }
+
+    return result.join("\n");
+  }
+
+  /**
+   * Extract only sections whose headings match topic keywords.
+   * Returns the matched sections concatenated.
+   */
+  private extractRelevantSections(markdown: string, keywords: string[]): string {
+    const lowerKeywords = keywords.map((k) => k.toLowerCase());
+    const lines = markdown.split("\n");
+
+    // First, identify section boundaries
+    const sections: { heading: string; startIdx: number; level: number }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^(#{1,6})\s+(.+)/);
+      if (match) {
+        sections.push({ heading: match[2].toLowerCase().trim(), startIdx: i, level: match[1].length });
+      }
+    }
+
+    if (sections.length === 0) {
+      // No headings — return as-is (can't do section extraction)
+      return markdown;
+    }
+
+    // Collect matching sections
+    const matchedLines: string[] = [];
+    // Always include content before the first heading (intro/preamble)
+    if (sections[0].startIdx > 0) {
+      const preamble = lines.slice(0, sections[0].startIdx).join("\n").trim();
+      if (preamble.length > 50) {
+        matchedLines.push(preamble);
+      }
+    }
+
+    for (let si = 0; si < sections.length; si++) {
+      const sec = sections[si];
+      const nextIdx = si + 1 < sections.length ? sections[si + 1].startIdx : lines.length;
+
+      // Check if heading matches any keyword
+      const matches = lowerKeywords.some((kw) => sec.heading.includes(kw));
+      if (matches) {
+        matchedLines.push(lines.slice(sec.startIdx, nextIdx).join("\n"));
+      }
+    }
+
+    return matchedLines.join("\n\n");
+  }
+
+  /**
+   * Collapse repeated patterns common in API documentation:
+   * - Multiple consecutive "Click to view child attributes" blocks
+   * - Repeated JSON schema snippets
+   * - Duplicate attribute listings
+   */
+  private collapseRepeatedPatterns(markdown: string): string {
+    let cleaned = markdown;
+
+    // Collapse "Click to view" / "Show child attributes" style blocks
+    cleaned = cleaned.replace(
+      /((?:\*.*(?:click to view|show child|view child|child attributes|expand).*\*\s*\n?){2,})/gi,
+      "*[Repeated child attribute blocks collapsed]*\n",
+    );
+
+    // Collapse repeated JSON schema blocks (more than 2 consecutive fenced code blocks)
+    cleaned = cleaned.replace(
+      /(```(?:json)?\s*\n\{[\s\S]*?\}\s*\n```\s*\n){3,}/gi,
+      (match) => {
+        const blocks = match.match(/```(?:json)?\s*\n\{[\s\S]*?\}\s*\n```/g);
+        if (blocks && blocks.length > 2) {
+          return blocks[0] + "\n\n*[" + (blocks.length - 1) + " similar schema blocks collapsed]*\n\n";
+        }
+        return match;
+      },
+    );
+
+    // Collapse repeated table rows that look identical (common in attribute listings)
+    cleaned = cleaned.replace(
+      /(\|[^|\n]+\|[^|\n]+\|[^|\n]+\|\s*\n)\1{3,}/g,
+      (match, row) => {
+        const count = match.split("\n").filter((l: string) => l.trim()).length;
+        return row + `| *[${count - 1} similar rows collapsed]* | | |\n`;
+      },
+    );
+
+    return cleaned;
+  }
+
+  /**
+   * Smart truncation: prefer keeping the first paragraph of each section
+   * rather than raw character slicing.
+   */
+  private smartTruncate(markdown: string, maxChars: number): string {
+    const lines = markdown.split("\n");
+    const result: string[] = [];
+    let charCount = 0;
+
+    for (const line of lines) {
+      if (charCount + line.length + 1 > maxChars) {
+        // If we're mid-section, try to finish the current paragraph
+        if (line.trim() === "" || line.startsWith("#")) {
+          break;
+        }
+        // Allow one more line to finish a sentence
+        result.push(line);
+        break;
+      }
+      result.push(line);
+      charCount += line.length + 1;
+    }
+
+    return result.join("\n") + "\n\n_[Content truncated for research synthesis]_";
+  }
+
   /* ── Utilities ────────────────────────────────────────────────────── */
 
   /**

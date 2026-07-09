@@ -27,6 +27,8 @@ import type {
   BlockedDownloadList,
   EpicWikiPage,
   ResearchPlan,
+  ResearchQueryLog,
+  ResearchQueryLogEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
@@ -108,6 +110,10 @@ export class CodaScopeEpicKnowledgeService {
 
   private researchPlanPath(epicDir: string): string {
     return path.join(this.knowledgeDir(epicDir), "research_plan.json");
+  }
+
+  private researchLogPath(epicDir: string): string {
+    return path.join(this.knowledgeDir(epicDir), "research_log.json");
   }
 
   private sourceDir(epicDir: string, sourceId: string): string {
@@ -511,6 +517,69 @@ export class CodaScopeEpicKnowledgeService {
 
     plan.updatedAt = nowIso();
     await atomicWrite(this.researchPlanPath(epicDir), JSON.stringify(plan, null, 2));
+  }
+
+  /* ── Research Query Log ────────────────────────────────────────────── */
+
+  /** Read the research query log. */
+  private readResearchLog(epicDir: string): ResearchQueryLog {
+    const p = this.researchLogPath(epicDir);
+    if (!existsSync(p)) return { entries: [] };
+    try {
+      return JSON.parse(readFileSync(p, "utf-8"));
+    } catch {
+      return { entries: [] };
+    }
+  }
+
+  /** Write the research query log atomically. */
+  private async writeResearchLog(epicDir: string, log: ResearchQueryLog): Promise<void> {
+    await atomicWrite(this.researchLogPath(epicDir), JSON.stringify(log, null, 2));
+  }
+
+  /** Append a new entry to the research query log. */
+  async addResearchLogEntry(
+    projectId: string,
+    epicId: string,
+    entry: Omit<ResearchQueryLogEntry, "id">,
+  ): Promise<ResearchQueryLogEntry> {
+    const epicDir = this.resolveEpicDir(projectId, epicId);
+    if (!epicDir) throw new Error("Epic not found");
+
+    // Ensure knowledge dir exists
+    const kDir = this.knowledgeDir(epicDir);
+    mkdirSync(kDir, { recursive: true });
+
+    const id = generateId();
+    const fullEntry: ResearchQueryLogEntry = { ...entry, id };
+
+    const log = this.readResearchLog(epicDir);
+    log.entries.push(fullEntry);
+    await this.writeResearchLog(epicDir, log);
+
+    return fullEntry;
+  }
+
+  /** List all research query log entries (newest first). */
+  async listResearchLogEntries(projectId: string, epicId: string): Promise<ResearchQueryLogEntry[]> {
+    const epicDir = this.resolveEpicDir(projectId, epicId);
+    if (!epicDir) return [];
+    const log = this.readResearchLog(epicDir);
+    return [...log.entries].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /** Delete a single research query log entry. */
+  async deleteResearchLogEntry(projectId: string, epicId: string, entryId: string): Promise<boolean> {
+    const epicDir = this.resolveEpicDir(projectId, epicId);
+    if (!epicDir) return false;
+
+    const log = this.readResearchLog(epicDir);
+    const before = log.entries.length;
+    log.entries = log.entries.filter((e) => e.id !== entryId);
+    if (log.entries.length === before) return false;
+
+    await this.writeResearchLog(epicDir, log);
+    return true;
   }
 
   /* ── Utility ───────────────────────────────────────────────────────── */

@@ -12,6 +12,7 @@ import type { CodaScopeAction } from "../codaScopeTypes";
 import { IconInsertContent, IconRewrite, IconExpand } from "./CodaScopeIcons";
 import { connectToSseStream, parseSseChunk } from "../codaScopeSseClient";
 import { useBuildState } from "../hooks/useBuildState";
+import { useCommandBus } from "../../../shell/hooks";
 
 // Re-export for existing consumers
 export type { CodaScopeAction };
@@ -143,6 +144,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const { navigate } = useAppSubRoute("codascope");
   const { activeProjectId, selectedModel } = useCodaScopeStore();
+  const commandBus = useCommandBus();
 
   // Determine if this action has a server-tracked build scope
   const buildScope = getBuildScope(type, attributes);
@@ -335,6 +337,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           );
           setLocalStatus("success");
           setProgressMsg(null);
+          commandBus.emit("codascope:knowledge-changed", { epicId: attributes.epicId });
           return;
         }
 
@@ -532,6 +535,33 @@ function runResearchStream(
                 case "error":
                   reject(new Error(parsed.error ?? "Unknown error"));
                   return;
+                case "research-download-progress": {
+                  const cur = parsed.current ?? 0;
+                  const tot = parsed.total ?? 0;
+                  onProgress(`Phase 2/3 — Downloading ${cur}/${tot}`);
+                  break;
+                }
+                case "research-processing": {
+                  const prog = parsed.progress ?? "";
+                  const title = parsed.sourceTitle ?? "";
+                  const shortTitle = title.length > 50 ? title.slice(0, 47) + "…" : title;
+                  onProgress(`Phase 3/3 — Source ${prog}: ${shortTitle}`);
+                  break;
+                }
+                case "research-synthesis-batch": {
+                  const idx = parsed.batchIndex ?? 0;
+                  const cnt = parsed.batchCount ?? 0;
+                  const label = parsed.topicLabel ?? "";
+                  onProgress(`Phase 3/3 — Synthesizing batch ${idx + 1}/${cnt}${label ? ` (${label})` : ""}…`);
+                  break;
+                }
+                case "research-page-written": {
+                  const pi = parsed.pageIndex ?? 0;
+                  const pc = parsed.pageCount ?? 0;
+                  const ptitle = parsed.title ?? "";
+                  onProgress(`Phase 3/3 — ✓ Created: ${ptitle} (${pi + 1}/${pc})`);
+                  break;
+                }
                 default:
                   // Ignore other events (e.g. message)
                   break;

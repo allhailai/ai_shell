@@ -2,7 +2,10 @@
    Orchestrates the full research workflow autonomously:
      Phase 1: Agent generates research plan (URLs to fetch)
      Phase 2: Deterministic downloads of all URLs (no user approval)
-     Phase 3: Agent processes downloaded content into epic wiki pages
+     Phase 3: Batched LLM synthesis of sources into epic wiki pages
+
+   Phase 3 uses the codaScopeResearchSynthesizer for 1-3 tool-free LLM
+   calls instead of 20 sequential agent calls with 100 tools each.
 
    Follows the codaScopeCurationOrchestrator.ts SSE streaming pattern.
    ──────────────────────────────────────────────────────────────────── */
@@ -16,6 +19,8 @@ import type { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeServ
 import type { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeContentService, type DownloadResult } from "./codaScopeContentService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
+import { synthesizeAll, type CleanedSource, type SynthesisContext } from "./codaScopeResearchSynthesizer.js";
+import type { SecretService } from "./secretService.js";
 import type {
   ResearchPlan,
   ResearchUrl,
@@ -30,6 +35,7 @@ export interface ResearchOptions {
   epicId: string;
   modelId: string;
   topics: string[];
+  parentQueryId?: string;        // if this is a "go deeper" follow-up
 }
 
 export interface ResearchSseCallbacks {
@@ -45,6 +51,7 @@ export interface ResearchServices {
   epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
   curationSvc: CodaScopeCurationService;
   contentSvc: CodaScopeContentService;
+  secretSvc: SecretService;
 }
 
 export interface ResearchReport {
@@ -75,9 +82,9 @@ export async function runResearchPipeline(
   callbacks: ResearchSseCallbacks,
   services: ResearchServices,
 ): Promise<ResearchReport> {
-  const { projectId, epicId, modelId, topics } = options;
+  const { projectId, epicId, modelId, topics, parentQueryId } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
-  const { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc, curationSvc, contentSvc } = services;
+  const { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc, curationSvc, contentSvc, secretSvc } = services;
 
   const report: ResearchReport = {
     plan: null,
@@ -109,6 +116,7 @@ export async function runResearchPipeline(
 
     if (isAborted()) {
       sendEvent("research-cancelled", {});
+      await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
 
@@ -121,6 +129,7 @@ export async function runResearchPipeline(
 
     if (!plan || plan.queries.length === 0) {
       sendEvent("research-complete", { ...report, message: "No research plan generated." });
+      await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "completed", report, parentQueryId);
       return report;
     }
 
@@ -146,6 +155,7 @@ export async function runResearchPipeline(
 
     if (isAborted()) {
       sendEvent("research-cancelled", {});
+      await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
 
@@ -192,9 +202,9 @@ export async function runResearchPipeline(
 
       const sourceIds = downloadReport.succeeded.map((s) => s.sourceId);
       const processed = await processSources(
-        { projectId, epicId, modelId, sourceIds },
+        { projectId, epicId, modelId, sourceIds, topics },
         { sendEvent, sendMessage, isAborted },
-        { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc },
+        { projectSvc, epicSvc, epicKnowledgeSvc, contentSvc, secretSvc },
       );
 
       report.sourcesProcessed = processed.processedCount;
@@ -203,8 +213,12 @@ export async function runResearchPipeline(
 
     if (isAborted()) {
       sendEvent("research-cancelled", {});
+      await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
+
+    // Write research query log entry on success
+    await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "completed", report, parentQueryId);
 
     sendEvent("research-complete", report);
     return report;
@@ -212,6 +226,7 @@ export async function runResearchPipeline(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     sendEvent("research-error", { error: errorMsg });
+    await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "error", report, parentQueryId).catch(() => {});
     return report;
   }
 }
@@ -463,7 +478,7 @@ async function executeDownloads(
   return report;
 }
 
-// ── Phase 3: Process Sources ────────────────────────────────────────
+// ── Phase 3: Batched Source Synthesis ────────────────────────────────
 
 async function processSources(
   options: {
@@ -471,44 +486,28 @@ async function processSources(
     epicId: string;
     modelId: string;
     sourceIds: string[];
+    topics: string[];
   },
   callbacks: Pick<ResearchSseCallbacks, "sendEvent" | "sendMessage" | "isAborted">,
   services: {
-    agentSvc: CodaScopeAgentService;
     projectSvc: CodaScopeProjectService;
     epicSvc: CodaScopeEpicService;
     epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
+    contentSvc: CodaScopeContentService;
+    secretSvc: SecretService;
   },
 ): Promise<{ processedCount: number; pagesCreated: string[] }> {
-  const { projectId, epicId, modelId, sourceIds } = options;
-  const { sendEvent, sendMessage, isAborted } = callbacks;
-  const { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc } = services;
-
-  const project = await projectSvc.getProject(projectId);
-  if (!project) throw new Error("Project not found.");
-
-  const projectDir = projectSvc.getProjectDir(projectId);
-  if (!projectDir) throw new Error("Project directory not found.");
+  const { projectId, epicId, modelId, sourceIds, topics } = options;
+  const { sendEvent, isAborted } = callbacks;
+  const { projectSvc, epicSvc, epicKnowledgeSvc, contentSvc, secretSvc } = services;
 
   const epicDetail = await epicSvc.getEpic(projectId, epicId);
   if (!epicDetail) throw new Error(`Epic "${epicId}" not found.`);
 
-  // Scope
-  const scope = epicDetail.scope;
-  const scopeText = scope && scope.entries.length > 0
-    ? scope.entries.map((e) => `- ${e.topicTitle} (${e.type})`).join("\n")
-    : "_No scope entries yet._";
+  // ── a. Load and clean all source contents ────────────────────────
 
-  // Epic wiki pages
-  const epicWikiPages = await epicKnowledgeSvc.listEpicWikiPages(projectId, epicId);
-  const epicWikiIndex = epicWikiPages.length > 0
-    ? epicWikiPages.map((p) => `- ${p.title} (id: ${p.id}, words: ${p.wordCount})`).join("\n")
-    : "_No epic wiki pages yet._";
+  const cleanedSources: CleanedSource[] = [];
 
-  let processedCount = 0;
-  const pagesCreated: string[] = [];
-
-  // Process each source individually
   for (const sourceId of sourceIds) {
     if (isAborted()) break;
 
@@ -518,82 +517,121 @@ async function processSources(
     const content = await epicKnowledgeSvc.getSourceContent(projectId, epicId, sourceId);
     if (!content.markdown) continue;
 
-    sendEvent("research-processing", {
-      sourceId,
-      sourceTitle: source.title,
-      progress: `${processedCount + 1}/${sourceIds.length}`,
+    // Deterministic cleaning — ~1ms per source
+    const cleaned = contentSvc.summarizeForResearch(content.markdown, topics, 4000);
+    if (!cleaned) continue; // trivial source, skip
+
+    cleanedSources.push({
+      sourceId: source.id,
+      title: source.title,
+      url: source.url ?? "",
+      topicAssociations: source.topicAssociations,
+      content: cleaned,
     });
+  }
 
-    // Build prompt for this source
-    const repos = project.repositories ?? [];
-    const vars = buildBaseVars({
-      projectName: project.name,
-      projectDir,
-      repositories: repos,
-    });
-    vars.EPIC_TITLE = epicDetail.title;
-    vars.EPIC_ID = epicId;
-    vars.SOURCE_ID = sourceId;
-    vars.SOURCE_TITLE = source.title;
-    vars.SOURCE_TYPE = `${source.type}/${source.origin}`;
-    vars.TOPIC_ASSOCIATIONS = source.topicAssociations.join(", ") || "none specified";
-    vars.SOURCE_CONTENT = truncateContent(content.markdown, 15_000); // ~15k chars max
-    vars.EPIC_WIKI_INDEX = epicWikiIndex;
-    vars.EPIC_SCOPE = scopeText;
+  if (cleanedSources.length === 0 || isAborted()) {
+    return { processedCount: 0, pagesCreated: [] };
+  }
 
-    const prompt = loadCommandOrSkill("do_process_source", projectDir, vars);
-    if (!prompt) {
-      console.error("Process source command template (do_process_source.md) not found.");
-      continue;
-    }
+  sendEvent("research-processing", {
+    sourceId: "",
+    sourceTitle: `Cleaned ${cleanedSources.length} sources for synthesis`,
+    progress: `${cleanedSources.length}/${sourceIds.length} sources ready`,
+  });
 
-    // Send to agent
-    let responseText = "";
+  // ── b. Build synthesis context ───────────────────────────────────
+
+  const scope = epicDetail.scope;
+  const scopeText = scope && scope.entries.length > 0
+    ? scope.entries.map((e) => `- ${e.topicTitle} (${e.type})`).join("\n")
+    : "_No scope entries yet._";
+
+  // Load existing wiki pages with their content for enrichment
+  const existingPages = await epicKnowledgeSvc.listEpicWikiPages(projectId, epicId);
+  const existingPagesWithContent = await Promise.all(
+    existingPages.map(async (p) => {
+      const pageContent = await epicKnowledgeSvc.readEpicWikiPage(projectId, epicId, p.id);
+      return {
+        id: p.id,
+        title: p.title,
+        wordCount: p.wordCount,
+        content: pageContent ?? "",
+      };
+    }),
+  );
+
+  const synthesisContext: SynthesisContext = {
+    epicTitle: epicDetail.title,
+    epicDefinition: epicDetail.definition || "",
+    scopeText,
+    existingPages: existingPagesWithContent,
+  };
+
+  // ── c. Get API key for direct LLM calls ──────────────────────────
+
+  const apiKey = await secretSvc.getAppSecret("codascope", "cursor_api_key");
+  if (!apiKey) {
+    throw new Error("Cursor API key not configured. Set it in CodaScope settings.");
+  }
+
+  // ── d. Batched synthesis via LLM ─────────────────────────────────
+
+  const drafts = await synthesizeAll(
+    cleanedSources,
+    synthesisContext,
+    modelId,
+    apiKey,
+    (event) => {
+      sendEvent("research-synthesis-batch", {
+        batchIndex: event.batchIndex,
+        batchCount: event.batchCount,
+        topicLabel: event.topicLabel,
+      });
+    },
+  );
+
+  if (isAborted()) {
+    return { processedCount: cleanedSources.length, pagesCreated: [] };
+  }
+
+  // ── e. Write all pages deterministically ─────────────────────────
+
+  const pagesCreated: string[] = [];
+  const pagesBefore = new Set(existingPages.map((p) => p.id));
+
+  for (let i = 0; i < drafts.length; i++) {
+    if (isAborted()) break;
+
+    const draft = drafts[i];
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        agentSvc.send({
-          projectId,
-          message: prompt,
-          modelId,
-          systemPrompt:
-            "You are CodaScope, an AI agent synthesizing research content. " +
-            "Read the source content and create/update epic wiki pages. " +
-            "Use the provided tools. Do NOT modify source code files.",
-          purpose: "research",
-          onMessage: (msg) => {
-            if (isAborted()) return;
-            if (msg.type === "assistant" && msg.message?.content) {
-              for (const block of msg.message.content) {
-                if (block.type === "text") responseText += block.text;
-              }
-            }
-            sendMessage(msg);
-          },
-          onDone: () => resolve(),
-          onError: (err) => reject(err),
-        });
-      });
+      await epicKnowledgeSvc.writeEpicWikiPage(
+        projectId,
+        epicId,
+        draft.pageId,
+        draft.title,
+        draft.content,
+        draft.sourceRefs,
+      );
 
-      processedCount++;
-
-      // Check for newly created pages
-      const updatedPages = await epicKnowledgeSvc.listEpicWikiPages(projectId, epicId);
-      for (const page of updatedPages) {
-        if (!epicWikiPages.find((p) => p.id === page.id) && !pagesCreated.includes(page.id)) {
-          pagesCreated.push(page.id);
-        }
+      if (!pagesBefore.has(draft.pageId)) {
+        pagesCreated.push(draft.pageId);
       }
 
-      // Update the index for the next iteration
-      epicWikiPages.push(...updatedPages.filter((p) => !epicWikiPages.find((ep) => ep.id === p.id)));
+      sendEvent("research-page-written", {
+        pageId: draft.pageId,
+        title: draft.title,
+        pageIndex: i,
+        pageCount: drafts.length,
+      });
     } catch (err) {
-      console.error(`Error processing source ${sourceId}:`, err);
-      // Continue with next source
+      console.error(`Error writing wiki page ${draft.pageId}:`, err);
+      // Continue with next page
     }
   }
 
-  return { processedCount, pagesCreated };
+  return { processedCount: cleanedSources.length, pagesCreated };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -672,10 +710,26 @@ async function getSourceDir(
   return tmpDir;
 }
 
+// truncateContent() removed — replaced by contentService.summarizeForResearch()
+
 /**
- * Truncate content to a maximum character length, adding an ellipsis note.
+ * Write a research query log entry to capture the outcome of a pipeline run.
  */
-function truncateContent(content: string, maxLength: number): string {
-  if (content.length <= maxLength) return content;
-  return content.slice(0, maxLength) + "\n\n_[Content truncated — use read_research_source for full content]_";
+async function writeLogEntry(
+  epicKnowledgeSvc: CodaScopeEpicKnowledgeService,
+  projectId: string,
+  epicId: string,
+  topics: string[],
+  status: "completed" | "error" | "cancelled",
+  report: ResearchReport,
+  parentQueryId?: string,
+): Promise<void> {
+  await epicKnowledgeSvc.addResearchLogEntry(projectId, epicId, {
+    parentId: parentQueryId,
+    topics,
+    createdAt: new Date().toISOString(),
+    status,
+    sourcesDownloaded: report.downloads.succeeded,
+    wikiPagesCreated: report.epicWikiPagesCreated.length,
+  });
 }

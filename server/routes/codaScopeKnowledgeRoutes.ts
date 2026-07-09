@@ -19,7 +19,7 @@ import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.j
 import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
 
 export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
+  const { app, httpError, ensureServices, wrap, param, upload, secretService } = ctx;
 
   // ── Knowledge Sources ─────────────────────────────────────────────
 
@@ -370,6 +370,28 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ saved: true });
   }));
 
+  // ── Research Query Log ────────────────────────────────────────────
+
+  // List research query log entries
+  app.get("/api/codascope/projects/:id/epics/:epicId/knowledge/research-log", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const entries = await epicKnowledgeSvc.listResearchLogEntries(id, epicId);
+    res.json({ entries });
+  }));
+
+  // Delete a research query log entry
+  app.delete("/api/codascope/projects/:id/epics/:epicId/knowledge/research-log/:entryId", wrap(async (req, res) => {
+    const { epicKnowledgeSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const entryId = param(req, "entryId");
+    const deleted = await epicKnowledgeSvc.deleteResearchLogEntry(id, epicId, entryId);
+    if (!deleted) throw httpError("Research log entry not found.", 404, "not_found");
+    res.json({ deleted: true });
+  }));
+
   // ── Research Pipeline (SSE streaming with BuildState tracking) ─────
 
   app.post("/api/codascope/projects/:id/epics/:epicId/knowledge/research", async (req, res) => {
@@ -378,7 +400,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
       const epicId = param(req, "epicId");
-      const { modelId, topics } = req.body as { modelId?: string; topics?: string[] };
+      const { modelId, topics, parentQueryId } = req.body as { modelId?: string; topics?: string[]; parentQueryId?: string };
 
       if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
       if (!topics || topics.length === 0) throw httpError("topics array is required.", 400, "invalid_input");
@@ -414,7 +436,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await runResearchPipeline(
-          { projectId: id, epicId, modelId, topics },
+          { projectId: id, epicId, modelId, topics, parentQueryId },
           { sendEvent, sendMessage: callbacks.sendMessage, isAborted },
           {
             agentSvc: svcs.agentSvc,
@@ -423,6 +445,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
             epicKnowledgeSvc: svcs.epicKnowledgeSvc,
             curationSvc: svcs.curationSvc,
             contentSvc: svcs.contentSvc,
+            secretSvc: secretService,
           },
         );
 
