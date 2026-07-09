@@ -5,7 +5,7 @@
    existing CodaScope APIs when the user clicks to confirm.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { CodaScopeAction } from "../codaScopeTypes";
@@ -157,16 +157,72 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
     enabled: tracked,
   });
 
+  // ── Research completion check via query log ──────────────────────
+  // When build state returns "idle" (no build log for this scope),
+  // check the research query log for a completed entry whose topics
+  // match THIS card's specific topics. This avoids false positives
+  // when multiple research cards exist for the same epic.
+  const [researchLogDone, setResearchLogDone] = useState(false);
+  const researchCheckRef = useRef(false);
+
+  useEffect(() => {
+    if (type !== "trigger_research") return;
+    if (!activeProjectId || !attributes.epicId) return;
+    // Only check once, and only if build state didn't find a log
+    if (researchCheckRef.current || hydrated.status !== "idle") return;
+    researchCheckRef.current = true;
+
+    // Parse the card's topics to build keyword set for matching
+    const cardTopics = (attributes.topics ?? "")
+      .split(",")
+      .map((t: string) => t.trim().toLowerCase())
+      .filter(Boolean);
+    if (cardTopics.length === 0) return;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/codascope/projects/${activeProjectId}/epics/${attributes.epicId}/knowledge/research-log`,
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const entries = data.entries ?? [];
+
+        // Check if any completed entry's topics overlap with this card's topics.
+        // Use direct substring containment — a match means one topic string
+        // contains the other (e.g., card="Elation EMR scheduling templates"
+        // matches log="Elation EMR scheduling templates and availability API").
+        const hasMatch = entries.some((entry: { topics?: string[]; status?: string }) => {
+          if (entry.status !== "completed") return false;
+          const logTopics = (entry.topics ?? []).map((t: string) => t.toLowerCase());
+          return cardTopics.some((ct: string) =>
+            logTopics.some((lt: string) => lt.includes(ct) || ct.includes(lt)),
+          );
+        });
+
+        if (hasMatch) {
+          setResearchLogDone(true);
+        }
+      } catch {
+        // Silently ignore — stay idle
+      }
+    })();
+  }, [type, activeProjectId, attributes.epicId, attributes.topics, hydrated.status]);
+
   // Merge hydrated state with local state.
   // Local state takes priority while the user is actively dispatching.
   // Once idle, the hydrated state takes over.
-  const effectiveStatus: ActionStatus = localStatus !== "idle" ? localStatus : hydrated.status;
+  // Research log fallback: if build state is idle but a matching log entry exists, treat as success.
+  const baseStatus: ActionStatus = localStatus !== "idle" ? localStatus : hydrated.status;
+  const effectiveStatus: ActionStatus =
+    baseStatus === "idle" && researchLogDone ? "success" : baseStatus;
   const effectiveProgress = localStatus === "running" ? progressMsg : hydrated.progressMsg;
   const effectiveError = localStatus === "error" ? errorMsg : hydrated.error;
 
   const handleRebuild = useCallback(() => {
     hydrated.rebuild();
     setLocalStatus("idle");
+    setResearchLogDone(false);
     setErrorMsg(null);
     setProgressMsg(null);
   }, [hydrated.rebuild]);
@@ -361,6 +417,13 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
         {attributes.topic && (
           <span className="codascope-action-card-attr">{attributes.topic}</span>
         )}
+        {/* Status badge — prominent success/error indicator */}
+        {effectiveStatus === "success" && (
+          <span className="codascope-action-card-badge codascope-action-card-badge-success">✓ Completed</span>
+        )}
+        {effectiveStatus === "error" && (
+          <span className="codascope-action-card-badge codascope-action-card-badge-error">✗ Failed</span>
+        )}
       </div>
       <p className="codascope-action-card-desc">{description}</p>
       {/* Progress indicator for running pipelines */}
@@ -377,9 +440,9 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
         <p className="codascope-action-card-summary">{hydrated.summary}</p>
       )}
       <div className="codascope-action-card-footer">
-        {/* Primary action button */}
+        {/* Primary action button (or secondary rebuild/retry for completed cards) */}
         <button
-          className={`codascope-action-card-btn codascope-action-card-btn-${effectiveStatus}`}
+          className={`codascope-action-card-btn codascope-action-card-btn-${effectiveStatus}${isTerminal && tracked ? " codascope-action-card-btn-ghost" : ""}`}
           onClick={isTerminal && tracked ? handleRebuild : dispatchAction}
           disabled={effectiveStatus === "running"}
           type="button"
