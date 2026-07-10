@@ -6,6 +6,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { EditorView } from "@codemirror/view";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
@@ -14,6 +15,7 @@ import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
 import { useEditorResize } from "../hooks/useEditorResize";
+import { MarkdownEditor } from "../../../shared/markdown/MarkdownEditor";
 import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, EpicWikiPage } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -335,6 +337,45 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
     lastActivityRef.current = Date.now();
     setLockWarning(false);
   }, []);
+
+  // ── Design Doc Image Paste Handler ──────────────────────────────
+
+  const handleImagePaste = useCallback(async (file: File, view: EditorView) => {
+    if (!activeProjectId) return;
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}/images`,
+        { method: "POST", body: formData },
+      );
+      if (!res.ok) throw new Error("Upload failed");
+
+      const { relativePath } = await res.json();
+
+      // Insert markdown image at cursor position
+      const pos = view.state.selection.main.head;
+      const imageTag = `![](${relativePath})`;
+      view.dispatch({
+        changes: { from: pos, insert: imageTag },
+        selection: { anchor: pos + imageTag.length },
+      });
+    } catch (error) {
+      console.error("Failed to upload image:", error);
+    }
+  }, [activeProjectId, epicId, doc.id]);
+
+  const resolveDesignDocImageUrl = useCallback((src: string) => {
+    if (!activeProjectId) return src;
+    // Resolve relative paths (images/xxx.png) to the API route
+    if (src.startsWith("images/")) {
+      const filename = src.replace("images/", "");
+      return `/api/codascope/projects/${activeProjectId}/epics/${epicId}/designs/${doc.id}/images/${filename}`;
+    }
+    return src;
+  }, [activeProjectId, epicId, doc.id]);
 
   // Phase 4: Batch execute all pending directives
   const [batchExecuting, setBatchExecuting] = useState(false);
@@ -754,12 +795,13 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
               </button>
             </div>
           </div>
-          <textarea
-            className="codascope-document-editor-textarea"
+          <MarkdownEditor
             value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            onInput={handleTextareaInput}
-            spellCheck
+            onChange={(val) => { setEditContent(val); handleTextareaInput(); }}
+            editable={true}
+            onImagePaste={handleImagePaste}
+            resolveImageUrl={resolveDesignDocImageUrl}
+            showImagePreview={true}
           />
         </div>
       ) : (

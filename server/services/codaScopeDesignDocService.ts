@@ -730,4 +730,52 @@ export class CodaScopeDesignDocService {
 
     return { content: target.content, revertVersion };
   }
+
+  /* ── Design Doc Images ──────────────────────────────────────────── */
+
+  /**
+   * Upload an image file to a design doc's images/ directory.
+   * Returns the relative path usable in markdown (images/<filename>).
+   */
+  async uploadDocImage(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<{ relativePath: string; filename: string }> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) throw new Error("Project not found");
+
+    const docDirectory = this.docDir(projectDir, epicId, docId);
+    const imagesDir = path.join(docDirectory, "images");
+    if (!existsSync(imagesDir)) mkdirSync(imagesDir, { recursive: true });
+
+    // Generate unique filename: <timestamp>_<hash>.<ext>
+    const ext = mimeType.split("/")[1]?.replace("jpeg", "jpg") ?? "png";
+    const hash = crypto.createHash("md5").update(buffer).digest("hex").slice(0, 8);
+    const filename = `${Date.now()}_${hash}.${ext}`;
+
+    writeFileSync(path.join(imagesDir, filename), buffer);
+
+    return {
+      relativePath: `images/${filename}`,
+      filename,
+    };
+  }
+
+  /**
+   * Get the filesystem path for a design doc image.
+   * Returns null if the file doesn't exist.
+   */
+  getDocImagePath(projectId: string, epicId: string, docId: string, filename: string): string | null {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    // Sanitize filename to prevent directory traversal
+    const safeName = path.basename(filename);
+    const imagePath = path.join(this.docDir(projectDir, epicId, docId), "images", safeName);
+    return existsSync(imagePath) ? imagePath : null;
+  }
 }
+

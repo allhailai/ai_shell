@@ -1,0 +1,106 @@
+/* ── Image Preview Extension Styles ───────────────────────────────────
+   Styles for inline image preview rendering in the markdown editor.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Image container ─────────────────────────────────────────────── */
+
+.shared-md-image-preview-wrapper {
+  margin: var(--space-2) 0;
+  text-align: center;
+}
+
+.shared-md-image-preview-container {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.shared-md-image-preview-container:hover {
+  border-color: var(--color-border-secondary);
+}
+
+/* ── Image element ───────────────────────────────────────────────── */
+
+.shared-md-image-preview-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  cursor: default;
+}
+
+/* ── Resize handle — bottom-right corner grip ────────────────────── */
+
+.shared-md-image-preview-resize-handle {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 2;
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    var(--color-text-tertiary) 40%,
+    var(--color-text-tertiary) 45%,
+    transparent 45%,
+    transparent 55%,
+    var(--color-text-tertiary) 55%,
+    var(--color-text-tertiary) 60%,
+    transparent 60%,
+    transparent 70%,
+    var(--color-text-tertiary) 70%,
+    var(--color-text-tertiary) 75%,
+    transparent 75%
+  );
+  border-radius: 0 0 var(--radius-sm) 0;
+}
+
+.shared-md-image-preview-container:hover .shared-md-image-preview-resize-handle {
+  opacity: 0.5;
+}
+
+.shared-md-image-preview-resize-handle:hover {
+  opacity: 0.9 !important;
+}
+
+.shared-md-image-preview-container.shared-md-image-preview-resizing .shared-md-image-preview-resize-handle {
+  opacity: 1 !important;
+}
+
+.shared-md-image-preview-container.shared-md-image-preview-resizing {
+  user-select: none;
+}
+
+/* ── Error state ─────────────────────────────────────────────────── */
+
+.shared-md-image-preview-container.shared-md-image-preview-error {
+  padding: var(--space-3) var(--space-4);
+  border-color: var(--color-border-primary);
+  background: var(--color-bg-tertiary);
+}
+
+.shared-md-image-preview-error-msg {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+/* ── Hidden source line (same pattern as mermaid) ────────────────── */
+
+.shared-md-image-preview-hidden-line {
+  height: 0;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.shared-md-image-preview-hidden-source {
+  display: none;
+}

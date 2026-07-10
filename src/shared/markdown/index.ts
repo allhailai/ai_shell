@@ -10,9 +10,16 @@ export { buildLivePreviewExtension } from "./extensions/livePreviewExtension";
 export { buildMermaidExtension, parseMermaidBlock, type MermaidBlock } from "./extensions/mermaidExtension";
 export { buildMarkdownTableExtension, parseMarkdownTableBlock, type TableBlock } from "./extensions/markdownTableExtension";
 export { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensions/wikiLinkExtension";
+export { buildClipboardImageExtension, type ClipboardImageConfig } from "./extensions/clipboardImageExtension";
+export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConfig, type ImageRef } from "./extensions/imagePreviewExtension";
+export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
 
 // CSS must be imported by the consuming app's styles.css:
 //   @import "./shared/markdown/MarkdownEditor.css";
 //   @import "./shared/markdown/extensions/livePreviewExtension.css";
 //   @import "./shared/markdown/extensions/mermaidExtension.css";
 //   @import "./shared/markdown/extensions/markdownTableExtension.css";
+//   @import "./shared/markdown/extensions/clipboardImageExtension.css";
+//   @import "./shared/markdown/extensions/imagePreviewExtension.css";
+//   @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
+

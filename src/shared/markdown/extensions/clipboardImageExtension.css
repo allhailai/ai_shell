@@ -1,0 +1,31 @@
+/* ── Clipboard Image Extension Styles ─────────────────────────────────
+   Drop zone indicator when dragging an image over the editor.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Drop zone overlay */
+.shared-md-editor-shell.shared-md-image-drop-active {
+  position: relative;
+}
+
+.shared-md-editor-shell.shared-md-image-drop-active::after {
+  content: "Drop image here";
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsla(var(--color-accent-hsl, 220 90% 56%), 0.08);
+  border: 2px dashed var(--color-accent);
+  border-radius: var(--radius-lg);
+  color: var(--color-accent);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  pointer-events: none;
+  animation: shared-md-drop-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes shared-md-drop-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}

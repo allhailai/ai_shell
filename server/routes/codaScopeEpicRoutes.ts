@@ -13,7 +13,7 @@ import {
 } from "./utils/ssePipelineHelper.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param } = ctx;
+  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
 
   // ── Epics — CRUD ──────────────────────────────────────────────────
 
@@ -501,6 +501,42 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const result = await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);
     if (!result) throw httpError("Design doc not found or target not found.", 404, "not_found");
     res.json({ doc: result.doc, content: result.content, contentHash: result.contentHash });
+  }));
+
+  // ── Design Doc Images ─────────────────────────────────────────────
+
+  // Upload image to a design doc
+  app.post("/api/codascope/projects/:id/epics/:epicId/designs/:docId/images",
+    upload.single("image"),
+    wrap(async (req, res) => {
+      const { designDocSvc } = await ensureServices();
+      const id = param(req, "id");
+      const epicId = param(req, "epicId");
+      const docId = param(req, "docId");
+
+      const file = (req as any).file;
+      if (!file) throw httpError("No image file provided.", 400, "invalid_input");
+      if (!file.mimetype.startsWith("image/")) {
+        throw httpError("File must be an image.", 400, "invalid_input");
+      }
+
+      const result = await designDocSvc.uploadDocImage(id, epicId, docId, file.buffer, file.mimetype);
+      res.status(201).json(result);
+    }),
+  );
+
+  // Serve a design doc image
+  app.get("/api/codascope/projects/:id/epics/:epicId/designs/:docId/images/:filename", wrap(async (req, res) => {
+    const { designDocSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const filename = param(req, "filename");
+
+    const imagePath = designDocSvc.getDocImagePath(id, epicId, docId, filename);
+    if (!imagePath) throw httpError("Image not found.", 404, "not_found");
+
+    res.sendFile(imagePath);
   }));
 
   // Archive design doc (soft delete)

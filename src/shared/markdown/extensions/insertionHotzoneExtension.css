@@ -1,0 +1,83 @@
+/* ── Insertion Hotzone Extension Styles ───────────────────────────────
+   "+" button between heading sections, visible on hover.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Hotzone container ───────────────────────────────────────────── */
+
+.shared-md-insertion-hotzone {
+  position: relative;
+  height: 0;
+  overflow: visible;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1;
+}
+
+/* ── "+" button ──────────────────────────────────────────────────── */
+
+.shared-md-insertion-hotzone-btn {
+  position: relative;
+  top: -1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+/* Show on hover of the editor content */
+.cm-content:hover .shared-md-insertion-hotzone-btn {
+  opacity: 0.4;
+  transform: scale(1);
+}
+
+/* Full opacity when hovering the button itself */
+.shared-md-insertion-hotzone-btn:hover {
+  opacity: 1 !important;
+  transform: scale(1.1);
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.shared-md-insertion-hotzone-btn:active {
+  transform: scale(0.95);
+}
+
+/* ── Divider line ────────────────────────────────────────────────── */
+
+.shared-md-insertion-hotzone::before {
+  content: "";
+  position: absolute;
+  left: var(--space-5);
+  right: var(--space-5);
+  top: 50%;
+  height: 1px;
+  background: var(--color-border-primary);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.cm-content:hover .shared-md-insertion-hotzone::before {
+  opacity: 0.3;
+}
+
+.shared-md-insertion-hotzone:hover::before {
+  opacity: 0.6;
+}

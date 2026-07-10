@@ -1,6 +1,7 @@
 /* ── Shared: MarkdownEditor ───────────────────────────────────────────
    Full CodeMirror 6 markdown editor with live preview, mermaid
-   rendering, table support, and wiki links.
+   rendering, table support, wiki links, image preview, clipboard
+   image paste, and insertion hotzones.
 
    Adapted from kiss_ai's editor for AI Shell's dark-mode design system.
    ──────────────────────────────────────────────────────────────────── */
@@ -14,6 +15,9 @@ import { buildLivePreviewExtension } from "./extensions/livePreviewExtension";
 import { buildMermaidExtension } from "./extensions/mermaidExtension";
 import { buildMarkdownTableExtension } from "./extensions/markdownTableExtension";
 import { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensions/wikiLinkExtension";
+import { buildClipboardImageExtension } from "./extensions/clipboardImageExtension";
+import { buildImagePreviewExtension } from "./extensions/imagePreviewExtension";
+import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExtension";
 
 /** File reference for wiki link resolution. */
 export interface MarkdownFileRef {
@@ -38,6 +42,17 @@ interface MarkdownEditorProps {
   onOpenFile?: (path: string) => void;
   /** Use dark theme (default: true for AI Shell). */
   darkTheme?: boolean;
+
+  /** Callback when an image is pasted or dropped. Enables clipboard image extension. */
+  onImagePaste?: (file: File, view: EditorView) => Promise<void>;
+  /** URL resolver for relative image paths in preview. */
+  resolveImageUrl?: (src: string) => string;
+  /** Enable inline image preview with resize handles. */
+  showImagePreview?: boolean;
+  /** Enable "+" insertion hotzones between heading sections. */
+  showInsertionHotzones?: boolean;
+  /** Callback when an insertion hotzone "+" button is clicked. */
+  onInsertionRequest?: (afterLine: number, view: EditorView) => void;
 }
 
 const darkEditorTheme = EditorView.theme({
@@ -100,6 +115,11 @@ export function MarkdownEditor({
   files = [],
   onOpenFile,
   darkTheme = true,
+  onImagePaste,
+  resolveImageUrl,
+  showImagePreview = false,
+  showInsertionHotzones = false,
+  onInsertionRequest,
 }: MarkdownEditorProps) {
   // Refs for volatile data so extensions read latest values without rebuilding
   const onOpenFileRef = useRef(onOpenFile);
@@ -111,11 +131,35 @@ export function MarkdownEditor({
   const getFiles = useCallback(() => filesRef.current, []);
   const getOnOpenFile = useCallback(() => onOpenFileRef.current, []);
 
+  // Stable refs for image/insertion callbacks (prevents extension rebuilds)
+  const onImagePasteRef = useRef(onImagePaste);
+  useEffect(() => { onImagePasteRef.current = onImagePaste; }, [onImagePaste]);
+
+  const resolveImageUrlRef = useRef(resolveImageUrl);
+  useEffect(() => { resolveImageUrlRef.current = resolveImageUrl; }, [resolveImageUrl]);
+
+  const onInsertionRequestRef = useRef(onInsertionRequest);
+  useEffect(() => { onInsertionRequestRef.current = onInsertionRequest; }, [onInsertionRequest]);
+
+  // Stable wrappers that always call latest ref
+  const stableOnImagePaste = useCallback(
+    (file: File, view: EditorView) => onImagePasteRef.current?.(file, view) ?? Promise.resolve(),
+    [],
+  );
+  const stableResolveImageUrl = useCallback(
+    (src: string) => resolveImageUrlRef.current?.(src) ?? src,
+    [],
+  );
+  const stableOnInsertionRequest = useCallback(
+    (afterLine: number, view: EditorView) => onInsertionRequestRef.current?.(afterLine, view),
+    [],
+  );
+
   const extensions = useMemo(
     () => {
       const wikiLinkConfig = { getFiles, selectedPath, getOnOpenFile };
       const renderCellDisplay = buildTableCellDisplayRenderer(wikiLinkConfig);
-      return [
+      const exts = [
         markdown(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         EditorView.lineWrapping,
@@ -125,8 +169,33 @@ export function MarkdownEditor({
         buildMarkdownTableExtension({ editable, renderCellDisplay }),
         buildWikiLinkExtension(wikiLinkConfig),
       ];
+
+      // Conditionally add clipboard image extension
+      if (onImagePaste) {
+        exts.push(buildClipboardImageExtension({ onImagePaste: stableOnImagePaste }));
+      }
+
+      // Conditionally add image preview extension
+      if (showImagePreview) {
+        exts.push(buildImagePreviewExtension({
+          editable,
+          resolveImageUrl: stableResolveImageUrl,
+        }));
+      }
+
+      // Conditionally add insertion hotzone extension
+      if (showInsertionHotzones && onInsertionRequest) {
+        exts.push(buildInsertionHotzoneExtension({
+          editable,
+          onInsertionRequest: stableOnInsertionRequest,
+        }));
+      }
+
+      return exts;
     },
-    [editable, darkTheme, getFiles, selectedPath, getOnOpenFile],
+    [editable, darkTheme, getFiles, selectedPath, getOnOpenFile,
+     onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
+     showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest],
   );
 
   return (
