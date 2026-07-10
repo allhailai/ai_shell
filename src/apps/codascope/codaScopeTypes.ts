@@ -51,6 +51,9 @@ export interface MessageContext {
   projectName?: string;
   projectId?: string;
   recentViews?: Array<{ view: string; label: string }>;
+  /** Note context (when viewing a note) */
+  noteLevel?: NoteLevel;
+  notePath?: string;
 }
 
 export type MessageStatus = "complete" | "streaming" | "error";
@@ -613,4 +616,33 @@ export interface WikiState {
 /** Response shape for `GET /api/codascope/projects/:id/epics/:epicId/brief` */
 export interface EpicBriefResponse {
   brief: string;
+}
+
+// ── Notes ────────────────────────────────────────────────────────────
+
+export type NoteLevel = "personal" | "public" | "project" | "epic";
+
+export interface NoteFrontmatter {
+  title: string;
+  tags: string[];
+  created: string;
+  updated: string;
+}
+
+export interface NoteEntry {
+  path: string;
+  title: string;
+  tags: string[];
+  created: string;
+  updated: string;
+  wordCount: number;
+  isFolder?: boolean;
+  childCount?: number;
+}
+
+export interface NoteFolderEntry {
+  name: string;
+  path: string;
+  noteCount: number;
+  subfolders: NoteFolderEntry[];
 }

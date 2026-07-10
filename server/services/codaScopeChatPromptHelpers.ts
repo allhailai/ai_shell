@@ -49,6 +49,9 @@ export interface ViewContext {
   epicTitle?: string | null;
   /** Current epic tab (define/scope/knowledge/design/history) */
   epicTab?: string | null;
+  /** Note context (when viewing a note) */
+  noteLevel?: string | null;
+  notePath?: string | null;
 }
 
 /* ── Constants ──────────────────────────────────────────────────────── */
@@ -223,6 +226,22 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
     case "skills":
       lines.push(`The user is viewing the skills manager${project}. Use list_project_skills to see available skills.`);
       break;
+
+    case "notes":
+    case "note": {
+      const noteLevel = ctx.noteLevel ?? "unknown";
+      const notePath = ctx.notePath;
+      if (notePath) {
+        lines.push(
+          `The user is viewing a note at the "${noteLevel}" level: "${notePath}"${project}.`,
+          `Use read_note(level="${noteLevel}", path="${notePath}") to see the full content.`,
+          `The user may ask you to help edit, expand, or reorganize this note.`,
+        );
+      } else {
+        lines.push(`The user is browsing notes at the "${noteLevel}" level${project}. Use list_notes to see available notes.`);
+      }
+      break;
+    }
 
     case "epics":
       lines.push(`The user is viewing the epic designs list${project}. They can see all epics with status and health indicators.`);

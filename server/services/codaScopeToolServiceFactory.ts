@@ -15,6 +15,7 @@ import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeArtifactService } from "./codaScopeArtifactService.js";
+import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 
 /** All service instances used across tool tiers. */
 export interface ToolServices {
@@ -28,6 +29,7 @@ export interface ToolServices {
   epicKnowledge: CodaScopeEpicKnowledgeService;
   curation: CodaScopeCurationService;
   artifact: CodaScopeArtifactService;
+  note: CodaScopeNoteService;
 }
 
 /**
@@ -47,5 +49,6 @@ export function createToolServices(projectsRoot: string): ToolServices {
     epicKnowledge: new CodaScopeEpicKnowledgeService(projectsRoot),
     curation: new CodaScopeCurationService(projectsRoot),
     artifact: new CodaScopeArtifactService(projectsRoot),
+    note: new CodaScopeNoteService(projectsRoot),
   };
 }

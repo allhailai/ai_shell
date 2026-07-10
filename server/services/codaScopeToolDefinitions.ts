@@ -6,6 +6,7 @@
      - codaScopeEpicTools.ts      — 21 epic read/write tools
      - codaScopeWriteTools.ts     — 1 code map write tool
      - codaScopeArtifactTools.ts  — 3 artifact tools
+     - codaScopeNoteTools.ts      — 6 note read/write tools
 
    Service instances are created once per call via the shared factory
    in `codaScopeToolServiceFactory.ts`.
@@ -17,6 +18,7 @@ import { buildReadOnlyTools } from "./tools/codaScopeReadOnlyTools.js";
 import { buildEpicTools } from "./tools/codaScopeEpicTools.js";
 import { buildWriteTools } from "./tools/codaScopeWriteTools.js";
 import { buildArtifactTools } from "./tools/codaScopeArtifactTools.js";
+import { buildNoteReadTools, buildNoteWriteTools } from "./tools/codaScopeNoteTools.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -68,6 +70,7 @@ export { buildReadOnlyTools } from "./tools/codaScopeReadOnlyTools.js";
 export { buildEpicTools } from "./tools/codaScopeEpicTools.js";
 export { buildWriteTools } from "./tools/codaScopeWriteTools.js";
 export { buildArtifactTools } from "./tools/codaScopeArtifactTools.js";
+export { buildNoteReadTools, buildNoteWriteTools } from "./tools/codaScopeNoteTools.js";
 
 // ── Assembly ────────────────────────────────────────────────────────
 
@@ -92,26 +95,28 @@ export function getToolsForPurpose(
   const services = createToolServices(projectsRoot);
 
   const readOnly = buildReadOnlyTools(projectId, services);
+  const noteRead = buildNoteReadTools(projectId, services);
 
   if (purpose === "wiki-build") {
     const write = buildWriteTools(projectId, services);
-    return { ...readOnly, ...write };
+    return { ...readOnly, ...noteRead, ...write };
   }
 
   if (purpose === "curation" || purpose === "research") {
     const epicTools = buildEpicTools(projectId, services, collectorHolder);
-    return { ...readOnly, ...epicTools };
+    return { ...readOnly, ...noteRead, ...epicTools };
   }
 
   // Artifact purposes: read-only project context + artifact-specific tools
   if (purpose === "artifact-build" || purpose === "artifact-section-regen") {
     const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-    return { ...readOnly, ...artifactTools };
+    return { ...readOnly, ...noteRead, ...artifactTools };
   }
 
   // assistant and chat get ALL tools — full agent autonomy
   const epicTools = buildEpicTools(projectId, services, collectorHolder);
   const write = buildWriteTools(projectId, services);
   const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-  return { ...readOnly, ...epicTools, ...write, ...artifactTools };
+  const noteWrite = buildNoteWriteTools(projectId, services);
+  return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
 }
