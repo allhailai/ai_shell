@@ -6,7 +6,7 @@
 
 .shared-md-image-preview-wrapper {
   margin: var(--space-2) 0;
-  text-align: center;
+  text-align: left;
 }
 
 .shared-md-image-preview-container {

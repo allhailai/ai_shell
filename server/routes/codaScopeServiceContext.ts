@@ -30,6 +30,7 @@ import { CodaScopeLockService } from "../services/codaScopeLockService.js";
 import { CodaScopeDirectiveService } from "../services/codaScopeDirectiveService.js";
 import { ProjectDirResolver } from "../services/codaScopeProjectDirResolver.js";
 import { CodaScopeNoteService } from "../services/codaScopeNoteService.js";
+import { CodaScopeNoteAnnotationService } from "../services/codaScopeNoteAnnotationService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ export interface CodaScopeServices {
   lockSvc: CodaScopeLockService;
   directiveSvc: CodaScopeDirectiveService;
   noteSvc: CodaScopeNoteService;
+  noteAnnotationSvc: CodaScopeNoteAnnotationService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -112,6 +114,7 @@ let artifactVersionService: CodaScopeArtifactVersionService | null = null;
 let lockService: CodaScopeLockService | null = null;
 let directiveService: CodaScopeDirectiveService | null = null;
 let noteService: CodaScopeNoteService | null = null;
+let noteAnnotationService: CodaScopeNoteAnnotationService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -220,6 +223,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteService) noteService = new CodaScopeNoteService(root, dirResolver);
   else { noteService.setRoot(root); noteService.setDirResolver(dirResolver); }
 
+  if (!noteAnnotationService) noteAnnotationService = new CodaScopeNoteAnnotationService(noteService);
+  else noteAnnotationService.setNoteService(noteService);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -245,6 +251,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     lockSvc: lockService,
     directiveSvc: directiveService,
     noteSvc: noteService,
+    noteAnnotationSvc: noteAnnotationService,
   };
 }
 

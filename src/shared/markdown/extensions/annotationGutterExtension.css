@@ -1,0 +1,59 @@
+/* ── Annotation Gutter Extension Styles ───────────────────────────────
+   CM6 left gutter badges showing annotation counts per heading section.
+   Namespaced shared-md-ann-* to avoid collisions.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* The gutter column itself — sits alongside line numbers */
+.shared-md-ann-gutter {
+  width: 24px;
+  min-width: 24px;
+  cursor: default;
+}
+
+/* Badge pill */
+.shared-md-ann-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, transform 0.1s ease;
+  margin: 2px 0;
+}
+
+.shared-md-ann-badge:hover {
+  transform: scale(1.15);
+}
+
+.shared-md-ann-badge:active {
+  transform: scale(0.95);
+}
+
+/* Open annotations — accent color */
+.shared-md-ann-badge--open {
+  background: hsla(220, 90%, 56%, 0.25);
+  color: hsl(220, 90%, 70%);
+  border: 1px solid hsla(220, 90%, 56%, 0.3);
+}
+
+.shared-md-ann-badge--open:hover {
+  background: hsla(220, 90%, 56%, 0.4);
+}
+
+/* All resolved — muted */
+.shared-md-ann-badge--resolved {
+  background: hsla(220, 10%, 50%, 0.12);
+  color: var(--color-text-tertiary, hsl(220, 10%, 60%));
+  border: 1px solid hsla(220, 10%, 50%, 0.15);
+}
+
+.shared-md-ann-badge--resolved:hover {
+  background: hsla(220, 10%, 50%, 0.25);
+}

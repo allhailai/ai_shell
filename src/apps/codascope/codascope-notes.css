@@ -322,6 +322,23 @@
   position: relative;
 }
 
+/* Split layout when annotation panel is open */
+.codascope-notes-editor-body--split {
+  display: flex;
+}
+
+.codascope-notes-editor-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.codascope-notes-editor-body--split .codascope-notes-editor-pane {
+  flex: 1;
+  border-right: 1px solid var(--color-border-primary);
+}
+
 .codascope-notes-editor-footer {
   display: flex;
   align-items: center;
@@ -350,6 +367,35 @@
 
 .codascope-notes-editor-save-status--error {
   color: var(--color-danger);
+}
+
+/* ── Annotation toggle in header ─────────────────────────────────────── */
+
+.codascope-notes-editor-ann-toggle {
+  position: relative;
+}
+
+.codascope-notes-editor-ann-toggle--active {
+  color: var(--color-accent);
+  background: hsla(220, 90%, 56%, 0.08);
+}
+
+.codascope-notes-editor-ann-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 /* ── Conflict Banner ─────────────────────────────────────────────────── */
@@ -469,4 +515,597 @@
 
 .codascope-notes-selection-toolbar-btn--primary:hover {
   background: hsla(220, 90%, 56%, 0.08);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ANNOTATION PANEL
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-ann-panel {
+  width: 320px;
+  min-width: 280px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+.codascope-notes-ann-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  flex-shrink: 0;
+}
+
+.codascope-notes-ann-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-ann-panel-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.codascope-notes-ann-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.codascope-notes-ann-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.codascope-notes-ann-empty-hint {
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+}
+
+/* ── Annotation Thread ───────────────────────────────────────────────── */
+
+.codascope-notes-ann-section + .codascope-notes-ann-section {
+  margin-top: var(--space-2);
+}
+
+.codascope-notes-ann-thread {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+}
+
+.codascope-notes-ann-thread--resolved {
+  opacity: 0.6;
+}
+
+.codascope-notes-ann-thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-ann-thread-count {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.codascope-notes-ann-thread-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.codascope-notes-ann-section-label {
+  padding: var(--space-1) var(--space-2);
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  color: var(--color-accent);
+  background: hsla(220, 90%, 56%, 0.04);
+  border-bottom: 1px solid var(--color-border-primary);
+  text-transform: capitalize;
+}
+
+/* ── Annotation Entry ────────────────────────────────────────────────── */
+
+.codascope-notes-ann-entry {
+  padding: var(--space-2);
+  border-bottom: 1px solid hsla(220, 10%, 50%, 0.06);
+}
+
+.codascope-notes-ann-entry:last-child {
+  border-bottom: none;
+}
+
+.codascope-notes-ann-entry--reply {
+  padding-left: var(--space-4);
+  background: hsla(220, 10%, 50%, 0.02);
+}
+
+.codascope-notes-ann-entry-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.codascope-notes-ann-entry-author {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.codascope-notes-ann-entry-time {
+  font-size: 9px;
+  color: var(--color-text-quaternary);
+  flex: 1;
+}
+
+.codascope-notes-ann-entry-delete {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.codascope-notes-ann-entry:hover .codascope-notes-ann-entry-delete {
+  opacity: 1;
+}
+
+.codascope-notes-ann-entry-body {
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.codascope-notes-ann-entry-body p {
+  margin: 0;
+}
+
+.codascope-notes-ann-entry-body blockquote {
+  margin: 0 0 var(--space-1) 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+}
+
+/* ── Reply Composer ──────────────────────────────────────────────────── */
+
+.codascope-notes-ann-reply-trigger {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-ann-reply-trigger:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-ann-reply-composer {
+  padding: var(--space-2);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-ann-reply-input {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  min-height: 32px;
+  max-height: 100px;
+}
+
+.codascope-notes-ann-reply-input:focus {
+  border-color: var(--color-accent);
+}
+
+.codascope-notes-ann-reply-input::placeholder {
+  color: var(--color-text-quaternary);
+}
+
+.codascope-notes-ann-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   TEMPLATE PICKER
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-create-wrapper {
+  position: relative;
+}
+
+.codascope-notes-template-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: var(--space-1);
+  min-width: 200px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.codascope-notes-template-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-template-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-template-item-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-template-item-desc {
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  text-transform: capitalize;
+}
+
+.codascope-notes-template-divider {
+  height: 1px;
+  background: var(--color-border-primary);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SEARCH RESULTS
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-search-result .codascope-notes-item-content {
+  gap: var(--space-1);
+}
+
+.codascope-notes-search-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  overflow: hidden;
+}
+
+.codascope-notes-search-level {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: hsla(220, 90%, 56%, 0.08);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.codascope-notes-search-line {
+  color: var(--color-text-quaternary);
+  white-space: nowrap;
+}
+
+.codascope-notes-search-match {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-notes-search-highlight {
+  background: hsla(45, 100%, 50%, 0.2);
+  color: var(--color-text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   MOVE DIALOG
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-move-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: hsla(0, 0%, 0%, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codascope-notes-move-dialog {
+  width: 400px;
+  max-height: 80vh;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-notes-move-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-move-dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.codascope-notes-move-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-move-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.codascope-notes-move-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.codascope-notes-move-level-picker {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.codascope-notes-move-level-btn {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-move-level-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-move-level-btn--active {
+  background: hsla(220, 90%, 56%, 0.1);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.codascope-notes-move-folder-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-notes-move-folder-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-move-folder-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-move-folder-item--selected {
+  background: hsla(220, 90%, 56%, 0.08);
+  color: var(--color-accent);
+}
+
+.codascope-notes-move-folder-count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+}
+
+.codascope-notes-move-loading {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-quaternary);
+}
+
+.codascope-notes-move-destination {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-size: var(--text-xs);
+  font-family: monospace;
+  color: var(--color-text-secondary);
+}
+
+.codascope-notes-move-error {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   VERSION HISTORY
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-version-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.codascope-notes-version-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-version-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.codascope-notes-version-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+
+.codascope-notes-version-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-version-item:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-version-name {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  min-width: 40px;
+}
+
+.codascope-notes-version-time {
+  flex: 1;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-notes-version-size {
+  color: var(--color-text-quaternary);
+}
+
+.codascope-notes-version-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.codascope-notes-version-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  background: hsla(220, 90%, 56%, 0.04);
+}
+
+.codascope-notes-version-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-notes-version-viewer-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }

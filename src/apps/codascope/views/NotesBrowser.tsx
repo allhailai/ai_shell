@@ -1,9 +1,11 @@
 /* ── CodaScope: NotesBrowser View ────────────────────────────────────
    List + folder browser for notes at any level (personal, public,
    project, epic). URL-driven with breadcrumb navigation.
+   Full-text search with highlighted match context.
+   Template picker for creating notes from templates.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { IconNotes, IconFolder, IconFile } from "../components/CodaScopeIcons";
@@ -43,11 +45,6 @@ interface NotesBrowserContext {
 
 /**
  * Parse the URL segments and props to determine the notes context.
- *
- * URL patterns matched:
- *   /codascope/notes/<level>/<...folderPath>
- *   /codascope/project/:projectId/notes/<...folderPath>
- *   /codascope/project/:projectId/epic/:epicId/notes/<...folderPath>
  */
 function parseNotesContext(
   segments: string[],
@@ -92,6 +89,24 @@ function parseNotesContext(
   return null;
 }
 
+/* ── Template type ───────────────────────────────────────────────────── */
+
+interface NoteTemplate {
+  id: string;
+  title: string;
+  content: string;
+}
+
+/* ── Search result type ──────────────────────────────────────────────── */
+
+interface SearchResult {
+  level: NoteLevel;
+  path: string;
+  title: string;
+  matchLine: string;
+  lineNumber: number;
+}
+
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NotesBrowserProps {
@@ -109,10 +124,8 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const { segments, navigate } = useAppSubRoute("codascope");
   const { activeProjectId } = useCodaScopeStore();
 
-  // Resolve effective project/epic from props or URL
   const effectiveProjectId = propProjectId ?? activeProjectId;
 
-  // Parse context from URL or props
   const urlContext = useMemo(
     () => parseNotesContext(segments, effectiveProjectId ?? null, propEpicId),
     [segments, effectiveProjectId, propEpicId],
@@ -121,18 +134,33 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const level: NoteLevel = propLevel ?? urlContext?.level ?? "personal";
   const folderParts = urlContext?.folderParts ?? [];
   const currentFolder = folderParts.length > 0 ? folderParts.join("/") : undefined;
-  const queryParams: Record<string, string> = useMemo(() => {
-    const base = urlContext?.queryParams ?? {};
-    if (propProjectId) base.projectId = propProjectId;
-    if (propEpicId) base.epicId = propEpicId;
-    return base;
-  }, [urlContext?.queryParams, propProjectId, propEpicId]);
+
+  // Build a STABLE query string from primitives — avoids infinite re-render
+  // loops caused by object-identity changes in urlContext.queryParams.
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (propProjectId) params.set("projectId", propProjectId);
+    else if (urlContext?.queryParams?.projectId) params.set("projectId", urlContext.queryParams.projectId);
+    if (propEpicId) params.set("epicId", propEpicId);
+    else if (urlContext?.queryParams?.epicId) params.set("epicId", urlContext.queryParams.epicId);
+    return params.toString();
+  }, [propProjectId, propEpicId, urlContext?.queryParams?.projectId, urlContext?.queryParams?.epicId]);
 
   // ── State ──────────────────────────────────────────────────────────
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Template state
+  const [templates, setTemplates] = useState<NoteTemplate[]>([]);
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const templateMenuRef = useRef<HTMLDivElement>(null);
+
+  // Search state
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Level tabs for codascope-level notes (personal/public)
   const showLevelTabs = !propLevel && level !== "project" && level !== "epic";
@@ -141,7 +169,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const fetchNotes = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams(queryParams);
+      const params = new URLSearchParams(queryString);
       if (currentFolder) params.set("folder", currentFolder);
       const res = await fetch(`/api/codascope/notes/${level}?${params.toString()}`);
       if (res.ok) {
@@ -152,15 +180,69 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
       // Silently fail
     }
     setLoading(false);
-  }, [level, queryParams, currentFolder]);
+  }, [level, queryString, currentFolder]);
 
   useEffect(() => {
     void fetchNotes();
   }, [fetchNotes]);
 
-  // ── Filtered notes ─────────────────────────────────────────────────
+  // ── Fetch templates ────────────────────────────────────────────────
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/codascope/notes/templates");
+        if (res.ok) {
+          const data = await res.json();
+          setTemplates(data.templates ?? []);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  // ── Close template menu on outside click ──────────────────────────
+  useEffect(() => {
+    if (!showTemplateMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (templateMenuRef.current && !templateMenuRef.current.contains(e.target as Node)) {
+        setShowTemplateMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showTemplateMenu]);
+
+  // ── Full-text search (debounced) ──────────────────────────────────
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+
+    if (search.trim().length < 3) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams(queryString);
+        params.set("q", search.trim());
+        const res = await fetch(`/api/codascope/notes/search?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.results ?? []);
+        }
+      } catch { /* ignore */ }
+      setIsSearching(false);
+    }, 400);
+
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [search, queryString]);
+
+  // ── Filtered notes (local filter for short queries) ─────────────────
   const filteredNotes = useMemo(() => {
-    if (!search.trim()) return notes;
+    if (!search.trim() || search.trim().length >= 3) return notes;
     const q = search.toLowerCase();
     return notes.filter(
       (n) =>
@@ -169,9 +251,11 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     );
   }, [notes, search]);
 
+  // Are we showing search results?
+  const showSearchResults = search.trim().length >= 3;
+
   // ── Navigation helpers ─────────────────────────────────────────────
 
-  /** Build the URL prefix for notes at the current level. */
   const getNotesUrlPrefix = useCallback((): string => {
     if (level === "personal" || level === "public") {
       return `notes/${level}`;
@@ -196,7 +280,6 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const handleNoteClick = useCallback(
     (notePath: string) => {
       const prefix = getNotesUrlPrefix();
-      // Strip .md extension for cleaner URLs
       const cleanPath = notePath.replace(/\.md$/, "");
       navigate(`${prefix}/${cleanPath}`);
     },
@@ -224,24 +307,31 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   );
 
   // ── Create note ────────────────────────────────────────────────────
-  const handleCreateNote = useCallback(async () => {
+  const handleCreateNote = useCallback(async (templateContent?: string) => {
     setCreating(true);
+    setShowTemplateMenu(false);
     try {
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10);
       const filename = `Untitled ${dateStr}.md`;
       const fullPath = currentFolder ? `${currentFolder}/${filename}` : filename;
 
-      const params = new URLSearchParams(queryParams);
+      const params = new URLSearchParams(queryString);
+
+      // If template content provided, replace {{DATE}} placeholders
+      let content: string | undefined;
+      if (templateContent) {
+        content = templateContent.replace(/\{\{DATE\}\}/g, dateStr);
+      }
+
       const res = await fetch(`/api/codascope/notes/${level}/note/${fullPath}?${params.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ content }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        // Navigate to the newly created note
         const notePath = data.path ?? fullPath;
         handleNoteClick(notePath);
       }
@@ -249,7 +339,21 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
       // Silently fail
     }
     setCreating(false);
-  }, [level, queryParams, currentFolder, handleNoteClick]);
+  }, [level, queryString, currentFolder, handleNoteClick]);
+
+  // ── Highlight match in text ────────────────────────────────────────
+  const highlightMatch = useCallback((text: string, query: string): React.ReactNode => {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx < 0) return text;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="codascope-notes-search-highlight">{text.slice(idx, idx + query.length)}</mark>
+        {text.slice(idx + query.length)}
+      </>
+    );
+  }, []);
 
   // ── Render ─────────────────────────────────────────────────────────
 
@@ -286,16 +390,50 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
           </div>
         </div>
 
-        {/* Create note button */}
-        <button
-          className="codascope-btn codascope-btn-primary"
-          style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
-          onClick={handleCreateNote}
-          disabled={creating}
-          type="button"
-        >
-          {creating ? "Creating…" : "+ Note"}
-        </button>
+        {/* Create note button with template dropdown */}
+        <div className="codascope-notes-create-wrapper" ref={templateMenuRef}>
+          <button
+            className="codascope-btn codascope-btn-primary"
+            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+            onClick={() => {
+              if (templates.length > 0) {
+                setShowTemplateMenu((s) => !s);
+              } else {
+                void handleCreateNote();
+              }
+            }}
+            disabled={creating}
+            type="button"
+          >
+            {creating ? "Creating…" : "+ Note"}
+          </button>
+
+          {/* Template dropdown menu */}
+          {showTemplateMenu && (
+            <div className="codascope-notes-template-menu">
+              <button
+                className="codascope-notes-template-item"
+                onClick={() => handleCreateNote()}
+                type="button"
+              >
+                <span className="codascope-notes-template-item-title">Blank Note</span>
+                <span className="codascope-notes-template-item-desc">Start from scratch</span>
+              </button>
+              <div className="codascope-notes-template-divider" />
+              {templates.map((template) => (
+                <button
+                  key={template.id}
+                  className="codascope-notes-template-item"
+                  onClick={() => handleCreateNote(template.content)}
+                  type="button"
+                >
+                  <span className="codascope-notes-template-item-title">{template.title}</span>
+                  <span className="codascope-notes-template-item-desc">{template.id.replace(/-/g, " ")}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Level tabs for codascope-level notes */}
@@ -323,15 +461,51 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
         <input
           className="codascope-notes-search-input"
           type="text"
-          placeholder="Search notes…"
+          placeholder="Search notes… (3+ chars for full-text search)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
-      {/* Notes list */}
+      {/* Notes list / Search results */}
       <div className="codascope-notes-list">
-        {loading ? (
+        {showSearchResults ? (
+          /* Full-text search results */
+          isSearching ? (
+            <div className="codascope-notes-list-empty">
+              <span>Searching…</span>
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="codascope-notes-list-empty">
+              <span>No results found for "{search}"</span>
+            </div>
+          ) : (
+            searchResults.map((result, i) => (
+              <button
+                key={`${result.level}:${result.path}:${i}`}
+                className="codascope-notes-item codascope-notes-search-result"
+                onClick={() => handleNoteClick(result.path)}
+                type="button"
+              >
+                <div className="codascope-notes-item-icon">
+                  <IconFile size={14} />
+                </div>
+                <div className="codascope-notes-item-content">
+                  <div className="codascope-notes-item-title">
+                    {highlightMatch(result.title, search)}
+                  </div>
+                  <div className="codascope-notes-search-context">
+                    <span className="codascope-notes-search-level">{result.level}</span>
+                    <span className="codascope-notes-search-line">L{result.lineNumber}</span>
+                    <span className="codascope-notes-search-match">
+                      {highlightMatch(result.matchLine, search)}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))
+          )
+        ) : loading ? (
           <div className="codascope-notes-list-empty">
             <span>Loading…</span>
           </div>

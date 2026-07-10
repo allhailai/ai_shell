@@ -18,6 +18,7 @@ import { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensi
 import { buildClipboardImageExtension } from "./extensions/clipboardImageExtension";
 import { buildImagePreviewExtension } from "./extensions/imagePreviewExtension";
 import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExtension";
+import { buildAnnotationGutterExtension, type AnnotationSummaryItem } from "./extensions/annotationGutterExtension";
 
 /** File reference for wiki link resolution. */
 export interface MarkdownFileRef {
@@ -53,6 +54,12 @@ interface MarkdownEditorProps {
   showInsertionHotzones?: boolean;
   /** Callback when an insertion hotzone "+" button is clicked. */
   onInsertionRequest?: (afterLine: number, view: EditorView) => void;
+  /** Annotation summary data — when provided, enables the annotation gutter. */
+  annotationSummary?: AnnotationSummaryItem[];
+  /** Callback when an annotation gutter badge is clicked. */
+  onAnnotationClick?: (blockId: string) => void;
+  /** Called when the CM6 EditorView is created — enables external overlays. */
+  onEditorView?: (view: EditorView) => void;
 }
 
 const darkEditorTheme = EditorView.theme({
@@ -120,6 +127,9 @@ export function MarkdownEditor({
   showImagePreview = false,
   showInsertionHotzones = false,
   onInsertionRequest,
+  annotationSummary,
+  onAnnotationClick,
+  onEditorView,
 }: MarkdownEditorProps) {
   // Refs for volatile data so extensions read latest values without rebuilding
   const onOpenFileRef = useRef(onOpenFile);
@@ -152,6 +162,14 @@ export function MarkdownEditor({
   );
   const stableOnInsertionRequest = useCallback(
     (afterLine: number, view: EditorView) => onInsertionRequestRef.current?.(afterLine, view),
+    [],
+  );
+
+  // Stable ref for annotation click callback
+  const onAnnotationClickRef = useRef(onAnnotationClick);
+  useEffect(() => { onAnnotationClickRef.current = onAnnotationClick; }, [onAnnotationClick]);
+  const stableOnAnnotationClick = useCallback(
+    (blockId: string) => onAnnotationClickRef.current?.(blockId),
     [],
   );
 
@@ -191,11 +209,20 @@ export function MarkdownEditor({
         }));
       }
 
+      // Conditionally add annotation gutter extension
+      if (annotationSummary) {
+        exts.push(buildAnnotationGutterExtension({
+          onAnnotationClick: stableOnAnnotationClick,
+          summary: annotationSummary,
+        }));
+      }
+
       return exts;
     },
     [editable, darkTheme, getFiles, selectedPath, getOnOpenFile,
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
-     showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest],
+     showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
+     annotationSummary, stableOnAnnotationClick],
   );
 
   return (
@@ -212,6 +239,7 @@ export function MarkdownEditor({
         height="100%"
         key={selectedPath}
         onChange={onChange}
+        onCreateEditor={onEditorView}
         readOnly={!editable}
         theme={darkTheme ? "dark" : "light"}
         value={value}

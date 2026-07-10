@@ -646,3 +646,13 @@ export interface NoteFolderEntry {
   noteCount: number;
   subfolders: NoteFolderEntry[];
 }
+
+/**
+ * A note annotation — the frontend-facing type.
+ * Mirrors the server's NoteAnnotation (codaScopeNoteAnnotationService.ts)
+ * but defined here to avoid cross-boundary imports that trigger node:fs errors.
+ */
+export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion"> {
+  noteLevel: NoteLevel;
+  notePath: string;
+}

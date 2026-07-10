@@ -13,6 +13,7 @@ export { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensi
 export { buildClipboardImageExtension, type ClipboardImageConfig } from "./extensions/clipboardImageExtension";
 export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConfig, type ImageRef } from "./extensions/imagePreviewExtension";
 export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
+export { buildAnnotationGutterExtension, setAnnotationSummary, type AnnotationSummaryItem, type AnnotationGutterConfig } from "./extensions/annotationGutterExtension";
 
 // CSS must be imported by the consuming app's styles.css:
 //   @import "./shared/markdown/MarkdownEditor.css";
@@ -22,4 +23,5 @@ export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./e
 //   @import "./shared/markdown/extensions/clipboardImageExtension.css";
 //   @import "./shared/markdown/extensions/imagePreviewExtension.css";
 //   @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
+//   @import "./shared/markdown/extensions/annotationGutterExtension.css";
 

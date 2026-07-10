@@ -3,16 +3,20 @@
    - Image paste + preview
    - Insertion hotzones
    - Wiki links, mermaid, tables
+   - Annotation gutter + side panel
    Auto-saves on every change with debounce (~1.5s).
    Optimistic concurrency via contentHash (409 conflict handling).
+   Version history viewing.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MarkdownEditor } from "../../../shared/markdown";
+import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import { IconClose, IconWarning } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
-import type { NoteLevel } from "../codaScopeTypes";
+import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
+import { NoteMoveDialog } from "../components/NoteMoveDialog";
+import type { NoteLevel, NoteAnnotation } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
 /* ── Frontmatter helpers ─────────────────────────────────────────────── */
@@ -41,10 +45,17 @@ function updateFrontmatterTitle(content: string, newTitle: string): string {
 }
 
 function countWords(content: string): number {
-  // Strip frontmatter, then count words
   const body = content.replace(FRONTMATTER_RE, "").trim();
   if (!body) return 0;
   return body.split(/\s+/).length;
+}
+
+/* ── Version types ───────────────────────────────────────────────────── */
+
+interface VersionEntry {
+  version: string;
+  savedAt: string;
+  sizeBytes: number;
 }
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -86,11 +97,25 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     left: number;
   } | null>(null);
 
+  // Annotation state
+  const [annotations, setAnnotations] = useState<NoteAnnotation[]>([]);
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+
+  // Move dialog state
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+
+  // Version history state
+  const [showVersions, setShowVersions] = useState(false);
+  const [versions, setVersions] = useState<VersionEntry[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<{ version: string; content: string } | null>(null);
+
   // Refs
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
   const hashRef = useRef(contentHash);
   const editorViewRef = useRef<EditorView | null>(null);
+  const annotationFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep refs in sync
   useEffect(() => { contentRef.current = content; }, [content]);
@@ -101,9 +126,11 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     return notePath.endsWith(".md") ? notePath : `${notePath}.md`;
   }, [notePath]);
 
+  // Compute stable query string from primitive values inside queryParams,
+  // NOT from the queryParams object reference (which may change identity).
   const queryString = useMemo(() => {
     return new URLSearchParams(queryParams).toString();
-  }, [queryParams]);
+  }, [queryParams.projectId, queryParams.epicId, queryParams.username]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load note ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -132,6 +159,71 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     return () => { cancelled = true; };
   }, [level, apiPath, queryString]);
 
+  // ── Fetch annotations ─────────────────────────────────────────────
+  const fetchAnnotations = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/codascope/notes/${level}/note/${apiPath}/annotations?${queryString}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAnnotations(data.annotations ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [level, apiPath, queryString]);
+
+  // Fetch annotations on mount and when content changes (debounced)
+  useEffect(() => {
+    void fetchAnnotations();
+  }, [fetchAnnotations]);
+
+  useEffect(() => {
+    if (annotationFetchTimerRef.current) clearTimeout(annotationFetchTimerRef.current);
+    annotationFetchTimerRef.current = setTimeout(() => {
+      void fetchAnnotations();
+    }, 3000);
+    return () => {
+      if (annotationFetchTimerRef.current) clearTimeout(annotationFetchTimerRef.current);
+    };
+  }, [content, fetchAnnotations]);
+
+  // ── Compute annotation summary for gutter ─────────────────────────
+  const annotationSummary = useMemo((): AnnotationSummaryItem[] => {
+    if (annotations.length === 0) return [];
+
+    // Group root annotations by blockId
+    const roots = annotations.filter((a) => !a.parentId);
+    const blockMap = new Map<string, { count: number; hasOpen: boolean }>();
+
+    for (const ann of roots) {
+      const blockId = ann.anchor.blockId;
+      const existing = blockMap.get(blockId);
+      const replies = annotations.filter((a) => a.parentId === ann.id);
+      const totalCount = 1 + replies.length;
+
+      if (existing) {
+        existing.count += totalCount;
+        if (ann.status === "open") existing.hasOpen = true;
+      } else {
+        blockMap.set(blockId, {
+          count: totalCount,
+          hasOpen: ann.status === "open",
+        });
+      }
+    }
+
+    return Array.from(blockMap.entries()).map(([blockId, { count, hasOpen }]) => ({
+      blockId,
+      count,
+      hasOpen,
+    }));
+  }, [annotations]);
+
+  // ── Open annotation count for header badge ────────────────────────
+  const openAnnotationCount = useMemo(() => {
+    return annotations.filter((a) => a.status === "open" && !a.parentId).length;
+  }, [annotations]);
+
   // ── Auto-save (debounced) ──────────────────────────────────────────
   const saveNote = useCallback(async (newContent: string, expectedHash: string | null) => {
     setSaveStatus("saving");
@@ -159,7 +251,6 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
         const data = await res.json();
         setContentHash(data.contentHash);
         setSaveStatus("saved");
-        // Reset to idle after a moment
         setTimeout(() => setSaveStatus((s) => s === "saved" ? "idle" : s), 2000);
       } else {
         setSaveStatus("error");
@@ -173,10 +264,8 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     setContent(newContent);
     setTitle(extractTitle(newContent));
 
-    // Clear any pending save
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
-    // Debounce save
     saveTimerRef.current = setTimeout(() => {
       void saveNote(newContent, hashRef.current);
     }, 1500);
@@ -195,7 +284,6 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     const updated = updateFrontmatterTitle(contentRef.current, title.trim());
     if (updated !== contentRef.current) {
       setContent(updated);
-      // Trigger save immediately for title changes
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       void saveNote(updated, hashRef.current);
     }
@@ -231,7 +319,6 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
   const handleConflictForce = useCallback(async () => {
     if (!conflictData) return;
     setConflictData(null);
-    // Force save without expectedHash
     setSaveStatus("saving");
     try {
       const res = await fetch(`/api/codascope/notes/${level}/note/${apiPath}?${queryString}`, {
@@ -266,7 +353,6 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
       if (res.ok) {
         const data = await res.json();
         const relativePath = data.relativePath ?? data.filename;
-        // Insert image markdown at cursor position
         const pos = view.state.selection.main.head;
         const insert = `![](${relativePath})`;
         view.dispatch({ changes: { from: pos, insert } });
@@ -278,18 +364,23 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
 
   // ── Image URL resolver ─────────────────────────────────────────────
   const resolveImageUrl = useCallback((src: string) => {
-    // If it's already an absolute URL or data URI, return as-is
     if (src.startsWith("http") || src.startsWith("data:") || src.startsWith("/")) {
       return src;
     }
-    // Convert relative path to API URL
-    return `/api/codascope/notes/${level}/note/${apiPath}/images/${encodeURIComponent(src)}?${queryString}`;
+    // Markdown stores relative paths like "Note.assets/image.png".
+    // Extract the bare filename for the API, and pass the original
+    // assets dir name as a hint for when the note has been renamed.
+    const parts = src.split("/");
+    const filename = parts.length > 1 ? parts.pop()! : src;
+    const assetDir = parts.length > 0 ? parts[0] : undefined;
+    const sep = queryString ? "&" : "";
+    const hint = assetDir ? `${sep}assetDir=${encodeURIComponent(assetDir)}` : "";
+    return `/api/codascope/notes/${level}/note/${apiPath}/images/${encodeURIComponent(filename)}?${queryString}${hint}`;
   }, [level, apiPath, queryString]);
 
   // ── Insertion hotzone handler ──────────────────────────────────────
   const handleInsertionRequest = useCallback((afterLine: number, view: EditorView) => {
     editorViewRef.current = view;
-    // Get coordinates for the line to position the floating prompt
     const lineInfo = view.state.doc.line(Math.min(afterLine + 1, view.state.doc.lines));
     const coords = view.coordsAtPos(lineInfo.from);
     if (coords) {
@@ -301,9 +392,54 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     }
   }, []);
 
-  // ── Selection toolbar ──────────────────────────────────────────────
-  // We'll detect selection changes via a CM event handler approach.
-  // For now, the NoteSelectionToolbar listens to mouseup on the editor.
+  // ── Annotation gutter click ────────────────────────────────────────
+  const handleAnnotationClick = useCallback((blockId: string) => {
+    setActiveBlockId(blockId);
+    setShowAnnotations(true);
+  }, []);
+
+  // ── Comment from selection toolbar (future) ─────────────────────────
+  // NOTE: handleCommentFromSelection will be wired when
+  // NoteSelectionToolbar is rendered within this component.
+
+  // ── Version history ────────────────────────────────────────────────
+  const fetchVersions = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/codascope/notes/${level}/note/${apiPath}/versions?${queryString}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setVersions(data.versions ?? []);
+      }
+    } catch { /* ignore */ }
+  }, [level, apiPath, queryString]);
+
+  const handleShowVersions = useCallback(() => {
+    setShowVersions(true);
+    void fetchVersions();
+  }, [fetchVersions]);
+
+  const handleViewVersion = useCallback(async (version: string) => {
+    try {
+      const res = await fetch(
+        `/api/codascope/notes/${level}/note/${apiPath}/versions/${version}?${queryString}`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedVersion({ version: data.version, content: data.content });
+      }
+    } catch { /* ignore */ }
+  }, [level, apiPath, queryString]);
+
+  const handleRestoreVersion = useCallback((versionContent: string) => {
+    setContent(versionContent);
+    setSelectedVersion(null);
+    setShowVersions(false);
+    // Trigger save
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    void saveNote(versionContent, hashRef.current);
+  }, [saveNote]);
 
   // ── Word count ─────────────────────────────────────────────────────
   const wordCount = useMemo(() => countWords(content), [content]);
@@ -372,6 +508,39 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
             {saveStatus === "error" && "⚠ Error"}
           </span>
 
+          {/* Annotations toggle */}
+          <button
+            className={`codascope-btn codascope-btn-ghost codascope-btn-sm codascope-notes-editor-ann-toggle${showAnnotations ? " codascope-notes-editor-ann-toggle--active" : ""}`}
+            onClick={() => setShowAnnotations((s) => !s)}
+            type="button"
+            title="Toggle annotations"
+          >
+            💬{openAnnotationCount > 0 && (
+              <span className="codascope-notes-editor-ann-badge">{openAnnotationCount}</span>
+            )}
+          </button>
+
+          {/* History */}
+          <button
+            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+            onClick={handleShowVersions}
+            type="button"
+            title="Version history"
+          >
+            🕒
+          </button>
+
+          {/* Move */}
+          <button
+            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+            onClick={() => setShowMoveDialog(true)}
+            type="button"
+            title="Move note"
+          >
+            📦
+          </button>
+
+          {/* Delete */}
           <button
             className="codascope-btn codascope-btn-ghost codascope-btn-sm"
             onClick={() => setShowDeleteConfirm(true)}
@@ -411,30 +580,122 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
         </div>
       )}
 
-      {/* Editor body */}
-      <div className="codascope-notes-editor-body">
-        <MarkdownEditor
-          value={content}
-          onChange={handleContentChange}
-          editable
-          selectedPath={apiPath}
-          onImagePaste={handleImagePaste}
-          resolveImageUrl={resolveImageUrl}
-          showImagePreview
-          showInsertionHotzones
-          onInsertionRequest={handleInsertionRequest}
-        />
+      {/* Editor body — split layout when annotation panel is open */}
+      <div className={`codascope-notes-editor-body${showAnnotations ? " codascope-notes-editor-body--split" : ""}`}>
+        {/* Editor pane */}
+        <div className="codascope-notes-editor-pane">
+          {showVersions && selectedVersion ? (
+            /* Version viewer */
+            <div className="codascope-notes-version-viewer">
+              <div className="codascope-notes-version-viewer-header">
+                <span>Viewing: {selectedVersion.version}</span>
+                <div className="codascope-notes-version-viewer-actions">
+                  <button
+                    className="codascope-btn codascope-btn-primary codascope-btn-xs"
+                    onClick={() => handleRestoreVersion(selectedVersion.content)}
+                    type="button"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+                    onClick={() => setSelectedVersion(null)}
+                    type="button"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              <div className="codascope-notes-version-viewer-content">
+                <MarkdownEditor
+                  value={selectedVersion.content}
+                  onChange={() => {}}
+                  editable={false}
+                />
+              </div>
+            </div>
+          ) : showVersions ? (
+            /* Version list */
+            <div className="codascope-notes-version-list">
+              <div className="codascope-notes-version-list-header">
+                <span>Version History</span>
+                <button
+                  className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+                  onClick={() => setShowVersions(false)}
+                  type="button"
+                >
+                  <IconClose size={12} />
+                </button>
+              </div>
+              {versions.length === 0 ? (
+                <div className="codascope-notes-version-empty">
+                  No versions yet. Versions are created when you save changes.
+                </div>
+              ) : (
+                <div className="codascope-notes-version-items">
+                  {versions.map((v) => (
+                    <button
+                      key={v.version}
+                      className="codascope-notes-version-item"
+                      onClick={() => handleViewVersion(v.version)}
+                      type="button"
+                    >
+                      <span className="codascope-notes-version-name">{v.version}</span>
+                      <span className="codascope-notes-version-time">
+                        {new Date(v.savedAt).toLocaleDateString("en-US", {
+                          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="codascope-notes-version-size">
+                        {Math.round(v.sizeBytes / 1024)}KB
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Normal editor */
+            <MarkdownEditor
+              value={content}
+              onChange={handleContentChange}
+              editable
+              selectedPath={apiPath}
+              onImagePaste={handleImagePaste}
+              resolveImageUrl={resolveImageUrl}
+              showImagePreview
+              showInsertionHotzones
+              onInsertionRequest={handleInsertionRequest}
+              annotationSummary={annotationSummary.length > 0 ? annotationSummary : undefined}
+              onAnnotationClick={handleAnnotationClick}
+              onEditorView={(view) => { editorViewRef.current = view; }}
+            />
+          )}
 
-        {/* Floating insertion prompt */}
-        {insertionPoint && (
-          <NoteInsertionPrompt
-            afterLine={insertionPoint.afterLine}
-            top={insertionPoint.top}
-            left={insertionPoint.left}
+          {/* Floating insertion prompt */}
+          {insertionPoint && (
+            <NoteInsertionPrompt
+              afterLine={insertionPoint.afterLine}
+              top={insertionPoint.top}
+              left={insertionPoint.left}
+              level={level}
+              notePath={apiPath}
+              editorView={editorViewRef.current}
+              onClose={() => setInsertionPoint(null)}
+            />
+          )}
+        </div>
+
+        {/* Annotation panel (right split) */}
+        {showAnnotations && (
+          <NoteAnnotationPanel
             level={level}
             notePath={apiPath}
-            editorView={editorViewRef.current}
-            onClose={() => setInsertionPoint(null)}
+            queryParams={queryParams}
+            annotations={annotations}
+            onAnnotationsChange={fetchAnnotations}
+            activeBlockId={activeBlockId}
+            onClose={() => setShowAnnotations(false)}
           />
         )}
       </div>
@@ -458,6 +719,17 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />
+
+      {/* Move dialog */}
+      <NoteMoveDialog
+        open={showMoveDialog}
+        fromLevel={level}
+        fromPath={apiPath}
+        fromOpts={queryParams}
+        onMoved={onBack}
+        onClose={() => setShowMoveDialog(false)}
+      />
     </div>
   );
 }
+

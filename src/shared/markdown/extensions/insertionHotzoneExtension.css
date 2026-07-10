@@ -9,8 +9,9 @@
   height: 0;
   overflow: visible;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   align-items: center;
+  padding-right: var(--space-3);
   z-index: 1;
 }
 

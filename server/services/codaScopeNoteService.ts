@@ -96,6 +96,18 @@ export interface NoteMoveOpts {
   toPath: string;
 }
 
+export interface NoteVersionEntry {
+  version: string;    // "v001", "v002", etc.
+  savedAt: string;    // ISO timestamp
+  sizeBytes: number;
+}
+
+export interface NoteVersionContent {
+  version: string;
+  content: string;
+  savedAt: string;
+}
+
 /* ── Index schema ─────────────────────────────────────────────────── */
 
 interface NotesIndex {
@@ -367,6 +379,9 @@ export class CodaScopeNoteService {
     const finalContent = this.serializeFrontmatter(frontmatter) + body;
 
     writeFileSync(filePath, finalContent, "utf-8");
+
+    // Snapshot version before this update
+    this.snapshotVersion(filePath);
 
     // Refresh index
     const parentDir = path.dirname(filePath);
@@ -751,6 +766,7 @@ export class CodaScopeNoteService {
       for (const item of items) {
         if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
         if (item.name.endsWith(".assets")) continue;
+        if (item.name.endsWith(".versions")) continue;
 
         const fullPath = path.join(dir, item.name);
 
@@ -782,5 +798,118 @@ export class CodaScopeNoteService {
         if (results.length >= 50) return;
       }
     } catch { /* best effort */ }
+  }
+
+  /* ── Version History ──────────────────────────────────────────────── */
+
+  /** Max number of version snapshots to keep per note. */
+  private static readonly MAX_VERSIONS = 10;
+
+  /** Get the versions directory for a note file. */
+  private versionsDir(noteFilePath: string): string {
+    const basename = path.basename(noteFilePath, ".md");
+    return path.join(path.dirname(noteFilePath), `${basename}.versions`);
+  }
+
+  /**
+   * Snapshot the current content as a version.
+   * Called automatically on updateNote.
+   * Versions are named v001.md, v002.md, etc.
+   * When MAX_VERSIONS is exceeded, the oldest is deleted.
+   */
+  private snapshotVersion(noteFilePath: string): void {
+    try {
+      if (!existsSync(noteFilePath)) return;
+
+      const content = readFileSync(noteFilePath, "utf-8");
+      const vDir = this.versionsDir(noteFilePath);
+      if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true });
+
+      // Find existing versions
+      const existing = this.listVersionFiles(vDir);
+
+      // Determine next version number
+      let nextNum = 1;
+      if (existing.length > 0) {
+        const lastVersion = existing[existing.length - 1];
+        const match = lastVersion.match(/v(\d+)\.md$/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+
+      const versionName = `v${String(nextNum).padStart(3, "0")}.md`;
+      writeFileSync(path.join(vDir, versionName), content, "utf-8");
+
+      // Prune old versions
+      const allVersions = this.listVersionFiles(vDir);
+      if (allVersions.length > CodaScopeNoteService.MAX_VERSIONS) {
+        const toDelete = allVersions.slice(0, allVersions.length - CodaScopeNoteService.MAX_VERSIONS);
+        for (const old of toDelete) {
+          try { unlinkSync(path.join(vDir, old)); } catch { /* best effort */ }
+        }
+      }
+    } catch { /* best effort — don't break saves */ }
+  }
+
+  /** List version files in sorted order. */
+  private listVersionFiles(vDir: string): string[] {
+    if (!existsSync(vDir)) return [];
+    try {
+      return readdirSync(vDir)
+        .filter((f: string) => f.match(/^v\d+\.md$/))
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /** List available versions for a note. */
+  async listVersions(
+    level: NoteLevel,
+    opts: NoteResolveOpts,
+    notePath: string,
+  ): Promise<NoteVersionEntry[]> {
+    const notesDir = this.resolveNotesDir(level, opts);
+    if (!notesDir) return [];
+
+    const filePath = this.resolveNotePath(notesDir, notePath);
+    const vDir = this.versionsDir(filePath);
+    const files = this.listVersionFiles(vDir);
+
+    return files.map((f) => {
+      const fullPath = path.join(vDir, f);
+      const stat = statSync(fullPath);
+      const version = f.replace(".md", "");
+      return {
+        version,
+        savedAt: stat.mtime.toISOString(),
+        sizeBytes: stat.size,
+      };
+    });
+  }
+
+  /** Get a specific version's content. */
+  async getVersion(
+    level: NoteLevel,
+    opts: NoteResolveOpts,
+    notePath: string,
+    version: string,
+  ): Promise<NoteVersionContent | null> {
+    const notesDir = this.resolveNotesDir(level, opts);
+    if (!notesDir) return null;
+
+    const filePath = this.resolveNotePath(notesDir, notePath);
+    const vDir = this.versionsDir(filePath);
+    const vPath = path.join(vDir, `${version}.md`);
+
+    if (!existsSync(vPath)) return null;
+
+    const content = readFileSync(vPath, "utf-8");
+    const stat = statSync(vPath);
+
+    return {
+      version,
+      content,
+      savedAt: stat.mtime.toISOString(),
+    };
   }
 }

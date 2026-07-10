@@ -31,6 +31,8 @@ interface NoteSelectionToolbarProps {
   notePath: string;
   noteLevel: string;
   onDismiss: () => void;
+  /** Called when user clicks "Comment" — creates an annotation at the selection's block */
+  onComment?: (selectionInfo: NoteSelectionInfo) => void;
 }
 
 /* ── Constants ───────────────────────────────────────────────────────── */
@@ -45,6 +47,7 @@ export function NoteSelectionToolbar({
   notePath,
   noteLevel,
   onDismiss,
+  onComment,
 }: NoteSelectionToolbarProps) {
   const commandBus = useCommandBus();
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -88,10 +91,12 @@ export function NoteSelectionToolbar({
   }, [selectionInfo, commandBus, notePath, noteLevel, onDismiss]);
 
   const handleComment = useCallback(() => {
-    // Placeholder for Window 4 annotations
+    if (onComment) {
+      onComment(selectionInfo);
+    }
     onDismiss();
     window.getSelection()?.removeAllRanges();
-  }, [onDismiss]);
+  }, [selectionInfo, onComment, onDismiss]);
 
   return (
     <div

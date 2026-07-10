@@ -64,12 +64,19 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
   const level = propLevel ?? routeInfo?.level ?? "personal";
   const rest = routeInfo?.rest ?? [];
   const urlPrefix = routeInfo?.urlPrefix ?? "notes/personal";
+  // Build STABLE queryParams from primitives — not from routeInfo.queryParams
+  // which is a new object every render due to segments array identity changes.
+  const effectiveProjectId = propProjectId ?? routeInfo?.queryParams?.projectId;
+  const effectiveEpicId = propEpicId ?? routeInfo?.queryParams?.epicId;
   const queryParams = useMemo(() => {
-    const params = routeInfo?.queryParams ?? {};
-    if (propProjectId) params.projectId = propProjectId;
-    if (propEpicId) params.epicId = propEpicId;
+    const params: Record<string, string> = {};
+    if (effectiveProjectId) params.projectId = effectiveProjectId;
+    if (effectiveEpicId) params.epicId = effectiveEpicId;
     return params;
-  }, [routeInfo?.queryParams, propProjectId, propEpicId]);
+  }, [effectiveProjectId, effectiveEpicId]);
+
+  // Stable string for effect dependencies
+  const queryString = useMemo(() => new URLSearchParams(queryParams).toString(), [queryParams]);
 
   // ── Determine view mode: browser vs editor ─────────────────────────
   // We check if the last path segment looks like a note (ends in .md or
@@ -89,11 +96,10 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
     setViewMode("checking");
 
     const notePath = pathString.endsWith(".md") ? pathString : `${pathString}.md`;
-    const params = new URLSearchParams(queryParams);
     
     void (async () => {
       try {
-        const res = await fetch(`/api/codascope/notes/${level}/note/${notePath}?${params.toString()}`, {
+        const res = await fetch(`/api/codascope/notes/${level}/note/${notePath}?${queryString}`, {
           method: "HEAD",
         });
         if (cancelled) return;
@@ -109,7 +115,7 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
     })();
 
     return () => { cancelled = true; };
-  }, [pathString, rest.length, level, queryParams]);
+  }, [pathString, rest.length, level, queryString]);
 
   // ── Navigation callbacks ───────────────────────────────────────────
 
