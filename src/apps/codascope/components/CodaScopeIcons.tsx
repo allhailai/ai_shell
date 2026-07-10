@@ -75,6 +75,16 @@ export function IconSettings({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Document with lines — Notes */
+export function IconNotes({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="3" y="2" width="10" height="12" rx="1.5" />
+      <path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" />
+    </svg>
+  );
+}
+
 /** Folder outline — Projects */
 export function IconFolder({ size = 16, style, className }: IconProps) {
   return (

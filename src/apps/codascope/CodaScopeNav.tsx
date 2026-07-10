@@ -16,14 +16,16 @@ import {
   IconFolder,
   IconLaunch,
   IconEpic,
+  IconNotes,
 } from "./components/CodaScopeIcons";
 
-type CodaScopeView = "dashboard" | "epics" | "wiki" | "skills" | "settings";
+type CodaScopeView = "dashboard" | "epics" | "wiki" | "notes" | "skills" | "settings";
 
 const NAV_ITEMS: { view: CodaScopeView; icon: ComponentType<{ size?: number }>; label: string }[] = [
   { view: "dashboard", icon: IconDashboard, label: "Dashboard" },
   { view: "epics", icon: IconEpic, label: "Epics" },
   { view: "wiki", icon: IconWiki, label: "Wiki" },
+  { view: "notes", icon: IconNotes, label: "Notes" },
   { view: "skills", icon: IconSkills, label: "Skills" },
   { view: "settings", icon: IconSettings, label: "Settings" },
 ];
@@ -138,6 +140,18 @@ export function CodaScopeNav() {
           <span className="codascope-nav-icon"><IconFolder size={14} /></span>
           Projects
         </button>
+
+        {/* Notes — always available (personal/public when no project selected) */}
+        {!urlProjectId && (
+          <button
+            className={`codascope-nav-item ${section === "notes" ? "codascope-nav-item--active" : ""}`}
+            onClick={() => navigate("notes/personal")}
+            type="button"
+          >
+            <span className="codascope-nav-icon"><IconNotes size={14} /></span>
+            Notes
+          </button>
+        )}
 
         {urlProjectId && (
           <>

@@ -4,11 +4,14 @@
    URL scheme:
      /codascope                                      → redirects to /codascope/projects
      /codascope/projects                             → project list / setup
+     /codascope/notes/personal/<path>                → personal notes
+     /codascope/notes/public/<path>                  → public notes
      /codascope/project/:id                          → redirects to /project/:id/dashboard
      /codascope/project/:id/dashboard                → project dashboard
      /codascope/project/:id/wiki                     → wiki browser (no topic)
      /codascope/project/:id/wiki/:topicId            → wiki browser (specific topic)
      /codascope/project/:id/chat                     → redirects to dashboard (chat is in right panel)
+     /codascope/project/:id/notes/<path>             → project notes
      /codascope/project/:id/skills                   → skills manager
      /codascope/project/:id/settings                 → project settings
      /codascope/project/:id/epics                    → epic list
@@ -22,6 +25,7 @@
      /codascope/project/:id/epic/:epicId/knowledge/sources/:sourceId → source viewer
      /codascope/project/:id/epic/:epicId/knowledge/failed           → failed sources
      /codascope/project/:id/epic/:epicId/design      → epic design docs
+     /codascope/project/:id/epic/:epicId/notes/<path> → epic notes
      /codascope/project/:id/epic/:epicId/history     → epic history
    ──────────────────────────────────────────────────────────────────── */
 
@@ -37,6 +41,7 @@ import { Settings } from "./views/Settings";
 import { SetupBanners } from "./components/SetupBanners";
 import { EpicList } from "./views/EpicList";
 import { EpicDetail } from "./views/EpicDetail";
+import { NotesRouter } from "./views/NotesRouter";
 import { CodaScopeGuideModal } from "./components/CodaScopeGuideModal";
 import { useCommandBus } from "../../shell/hooks";
 
@@ -152,6 +157,9 @@ export function CodaScopeContent() {
 
   if (section === "" || section === "projects") {
     pageContent = <ProjectList />;
+  } else if (section === "notes") {
+    // Codascope-level notes: /codascope/notes/personal/... or /codascope/notes/public/...
+    pageContent = <NotesRouter />;
   } else if (section === "project") {
     const view = segments[2] ?? "dashboard";
 
@@ -170,6 +178,9 @@ export function CodaScopeContent() {
         // Chat is now handled by the right-panel assistant.
         // Redirect any stale /chat URLs to dashboard.
         content = <ProjectDashboard />;
+        break;
+      case "notes":
+        content = <NotesRouter />;
         break;
       case "skills":
         content = <SkillsManager />;

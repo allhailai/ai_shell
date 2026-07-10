@@ -23,6 +23,7 @@ import {
   IconArtifact,
   IconPin,
   IconArchive,
+  IconNotes,
 } from "./CodaScopeIcons";
 import { CurateButton } from "./CurateButton";
 import type {
@@ -129,6 +130,7 @@ const SECTIONS: SectionItem[] = [
   { id: "scope", label: "Scope", icon: IconSearch },
   { id: "knowledge", label: "Knowledge", icon: IconKnowledge, hasChildren: true },
   { id: "design", label: "Design", icon: IconPaintbrush },
+  { id: "notes", label: "Notes", icon: IconNotes },
   { id: "history", label: "History", icon: IconClock },
 ];
 

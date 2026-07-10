@@ -28,6 +28,7 @@ import {
 } from "./EpicKnowledge";
 import { EpicDesignDocs } from "./EpicDesignDocs";
 import { EpicHistory } from "./EpicHistory";
+import { NotesRouter } from "./NotesRouter";
 import { EpicSidebar } from "../components/EpicSidebar";
 import { CurationReasonsModal } from "../components/CurationReasonsModal";
 import { CurationProgressBanner } from "../components/CurationProgressBanner";
@@ -622,6 +623,9 @@ export function EpicDetail() {
       break;
     case "design":
       content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} wikiPages={wikiPages} artifacts={artifacts} onArtifactsChange={setArtifacts} />;
+      break;
+    case "notes":
+      content = <NotesRouter level="epic" projectId={activeProjectId ?? undefined} epicId={epicId} />;
       break;
     case "history":
       content = <EpicHistory epic={epic} setEpic={setEpic} />;
