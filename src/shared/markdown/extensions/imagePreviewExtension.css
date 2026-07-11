@@ -93,13 +93,7 @@
   font-style: italic;
 }
 
-/* ── Hidden source line (same pattern as mermaid) ────────────────── */
-
-.shared-md-image-preview-hidden-line {
-  height: 0;
-  line-height: 0;
-  overflow: hidden;
-}
+/* ── Hidden source content ────────────────────────────────────────── */
 
 .shared-md-image-preview-hidden-source {
   display: none;

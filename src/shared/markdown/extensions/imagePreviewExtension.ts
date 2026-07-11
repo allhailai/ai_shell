@@ -275,8 +275,7 @@ function buildImageDecorations(state: EditorState, config: ImagePreviewConfig): 
         widget: new ImageWidget(ref, resolvedUrl, config.editable),
       }));
 
-      // Hide the raw markdown line
-      builder.add(line.from, line.from, Decoration.line({ class: "shared-md-image-preview-hidden-line" }));
+      // Hide the raw markdown text (but keep the line navigable for cursor movement)
       builder.add(ref.from, ref.to, Decoration.replace({ widget: new EmptyImageWidget() }));
     } else {
       // Inline image — replace just the image tag with a widget
