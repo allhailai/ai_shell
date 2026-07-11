@@ -15,6 +15,9 @@ export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConf
 export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
 export { buildAnnotationGutterExtension, setAnnotationSummary, type AnnotationSummaryItem, type AnnotationGutterConfig } from "./extensions/annotationGutterExtension";
 export { buildHighlightExtension } from "./extensions/highlightExtension";
+export { buildFocusModeExtension, toggleFocusMode, isFocusModeOn } from "./extensions/focusModeExtension";
+export { buildMathExtension } from "./extensions/mathExtension";
+export { buildFootnoteExtension } from "./extensions/footnoteExtension";
 export {
   toggleBold,
   toggleItalic,
@@ -36,4 +39,5 @@ export {
 //   @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
 //   @import "./shared/markdown/extensions/annotationGutterExtension.css";
 //   @import "./shared/markdown/extensions/highlightExtension.css";
-
+//   @import "./shared/markdown/extensions/mathExtension.css";
+//   @import "./shared/markdown/extensions/footnoteExtension.css";

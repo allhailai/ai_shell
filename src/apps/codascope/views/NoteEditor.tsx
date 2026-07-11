@@ -674,6 +674,9 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
               showInsertionHotzones
               showSlashCommands
               autoContinueLists
+              showFocusMode
+              showMath
+              showFootnotes
               onInsertionRequest={handleInsertionRequest}
               annotationSummary={annotationSummary.length > 0 ? annotationSummary : undefined}
               onAnnotationClick={handleAnnotationClick}

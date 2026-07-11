@@ -10,6 +10,9 @@
    - [x] → checked checkbox
    - [/] → in-progress indicator
 
+   Auto-links bare URLs (https://...) that are NOT inside [text](url)
+   markdown links — renders as clickable blue links when cursor is away.
+
    Adapted from kiss_ai for AI Shell's shared component library.
    ──────────────────────────────────────────────────────────────────── */
 
@@ -102,6 +105,45 @@ const TASK_RE = /^(\s*[-*+]\s)\[([ x/])\]\s/;
 // Matches <span style="color:VALUE">text</span>
 // VALUE can be: named color, #hex, rgb(...), hsl(...)
 const TEXT_COLOR_RE = /<span\s+style="color:\s*([^"]+)">([\s\S]*?)<\/span>/g;
+
+// ── Bare URL regex ──────────────────────────────────────────────────
+// Matches https:// or http:// URLs that are NOT already inside [text](url)
+const BARE_URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
+
+// ── Link widget for bare URLs ───────────────────────────────────────
+
+class BareURLWidget extends WidgetType {
+  constructor(private readonly url: string) {
+    super();
+  }
+
+  eq(other: BareURLWidget) {
+    return this.url === other.url;
+  }
+
+  toDOM() {
+    const link = document.createElement("a");
+    link.className = "cm-live-bare-url";
+    link.href = this.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    // Show a shortened display: remove protocol and truncate if long
+    let display = this.url.replace(/^https?:\/\//, "");
+    if (display.length > 50) {
+      display = display.substring(0, 47) + "…";
+    }
+    link.textContent = display;
+    link.title = this.url;
+    link.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(this.url, "_blank", "noopener,noreferrer");
+    });
+    return link;
+  }
+
+  ignoreEvent() { return false; }
+}
 
 // Cache for inline-color mark decorations
 const colorMarkCache = new Map<string, Decoration>();
@@ -250,6 +292,57 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
 
       // Hide the closing </span> tag
       entries.push({ from: closeTagStart, to: matchTo, decoration: replaceDecoration });
+    }
+  }
+
+  // ── Bare URL auto-linking ──────────────────────────────────────────
+  for (const { from, to } of view.visibleRanges) {
+    const text = state.doc.sliceString(from, to);
+    let match: RegExpExecArray | null;
+    BARE_URL_RE.lastIndex = 0;
+
+    while ((match = BARE_URL_RE.exec(text)) !== null) {
+      const url = match[0];
+      const matchFrom = from + match.index;
+      const matchTo = matchFrom + url.length;
+
+      // Check if cursor is on this line
+      const line = state.doc.lineAt(matchFrom);
+      if (cursorLines.has(line.number)) continue;
+
+      // Skip if inside a markdown link: [text](url)
+      // Check if preceded by ]( — indicating this URL is inside a link's href
+      const lineText = line.text;
+      const lineOffset = matchFrom - line.from;
+      const textBefore = lineText.substring(0, lineOffset);
+
+      // Check for markdown link syntax: ](url) or ]( url)
+      if (/\]\(\s*$/.test(textBefore)) continue;
+
+      // Also skip if this is already inside an autolink <https://...>
+      if (lineOffset > 0 && lineText[lineOffset - 1] === "<") continue;
+
+      // Skip if inside a wiki link or other bracket context
+      if (/\[\[[^\]]*$/.test(textBefore)) continue;
+
+      // Strip trailing punctuation that's likely not part of the URL
+      let cleanUrl = url;
+      let cleanTo = matchTo;
+      const trailingPunct = /[.,;:!?)]+$/.exec(cleanUrl);
+      if (trailingPunct) {
+        cleanUrl = cleanUrl.substring(0, cleanUrl.length - trailingPunct[0].length);
+        cleanTo = matchFrom + cleanUrl.length;
+      }
+
+      if (cleanUrl.length < 8) continue; // Too short to be a real URL
+
+      entries.push({
+        from: matchFrom,
+        to: cleanTo,
+        decoration: Decoration.replace({
+          widget: new BareURLWidget(cleanUrl),
+        }),
+      });
     }
   }
 

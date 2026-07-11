@@ -807,3 +807,16 @@ export function IconPlus({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Focus mode — crosshair/target icon */
+export function IconFocusMode({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="5.5" />
+      <circle cx="8" cy="8" r="2" />
+      <line x1="8" y1="1" x2="8" y2="3.5" />
+      <line x1="8" y1="12.5" x2="8" y2="15" />
+      <line x1="1" y1="8" x2="3.5" y2="8" />
+      <line x1="12.5" y1="8" x2="15" y2="8" />
+    </svg>
+  );
+}

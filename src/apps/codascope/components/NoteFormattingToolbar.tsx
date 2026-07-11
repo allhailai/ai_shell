@@ -26,6 +26,7 @@ import {
   IconChevronDown,
   IconPalette,
   IconTextColor,
+  IconFocusMode,
 } from "./CodaScopeIcons";
 import {
   toggleBold,
@@ -38,6 +39,7 @@ import {
   toggleChecklist,
 } from "../../../shared/markdown/extensions/formattingCommands";
 import { detectHighlightColors } from "../../../shared/markdown/extensions/highlightExtension";
+import { toggleFocusMode, isFocusModeOn } from "../../../shared/markdown/extensions/focusModeExtension";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -596,6 +598,25 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
           title="Checklist"
         >
           <IconChecklist size={14} />
+        </button>
+      </div>
+
+      <div className="codascope-notes-formatting-divider" />
+
+      {/* Focus mode toggle */}
+      <div className="codascope-notes-formatting-group">
+        <button
+          className={`codascope-notes-formatting-btn${editorView && isFocusModeOn(editorView) ? " codascope-notes-formatting-btn-active" : ""}`}
+          onClick={() => {
+            if (!editorView || disabled) return;
+            toggleFocusMode(editorView);
+            editorView.focus();
+          }}
+          disabled={disabled}
+          type="button"
+          title="Focus mode (⌘⇧F)"
+        >
+          <IconFocusMode size={14} />
         </button>
       </div>
     </div>

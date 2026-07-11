@@ -115,3 +115,31 @@
   opacity: 0.8;
 }
 
+/* ── Bare URL auto-links ─────────────────────────────────────────── */
+
+.cm-live-bare-url {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color var(--transition-fast), text-decoration-color var(--transition-fast);
+}
+
+.cm-live-bare-url:hover {
+  color: var(--color-accent-text);
+  text-decoration-color: var(--color-accent-text);
+}
+
+/* ── Focus Mode ──────────────────────────────────────────────────── */
+
+.shared-md-focus-dimmed {
+  opacity: 0.3;
+  transition: opacity 0.25s ease;
+}
+
+/* Lines NOT dimmed get full opacity (provides smooth transition both ways) */
+.cm-line:not(.shared-md-focus-dimmed) {
+  transition: opacity 0.25s ease;
+}
+

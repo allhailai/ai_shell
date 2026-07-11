@@ -23,6 +23,9 @@ import { buildHighlightExtension } from "./extensions/highlightExtension";
 import { buildSlashCommandExtension } from "./extensions/slashCommandExtension";
 import { buildCalloutExtension } from "./extensions/calloutExtension";
 import { buildTagPillExtension } from "./extensions/tagPillExtension";
+import { buildFocusModeExtension, toggleFocusMode } from "./extensions/focusModeExtension";
+import { buildMathExtension } from "./extensions/mathExtension";
+import { buildFootnoteExtension } from "./extensions/footnoteExtension";
 import {
   toggleBold,
   toggleItalic,
@@ -75,6 +78,12 @@ interface MarkdownEditorProps {
   showTagPills?: boolean;
   /** Enable auto-continue lists on Enter key. */
   autoContinueLists?: boolean;
+  /** Enable focus mode (dim non-active blocks). Default: false. */
+  showFocusMode?: boolean;
+  /** Enable math block rendering ($$...$$ and $...$). Default: false. */
+  showMath?: boolean;
+  /** Enable footnote rendering ([^1] and [^1]: text). Default: false. */
+  showFootnotes?: boolean;
   /** Annotation summary data — when provided, enables the annotation gutter. */
   annotationSummary?: AnnotationSummaryItem[];
   /** Callback when an annotation gutter badge is clicked. */
@@ -152,6 +161,9 @@ export function MarkdownEditor({
   showCallouts = true,
   showTagPills = true,
   autoContinueLists = false,
+  showFocusMode = false,
+  showMath = false,
+  showFootnotes = false,
   annotationSummary,
   onAnnotationClick,
   onEditorView,
@@ -209,6 +221,7 @@ export function MarkdownEditor({
         { key: "Mod-e", run: toggleInlineCode },
         { key: "Mod-Shift-h", run: toggleHighlight },
         { key: "Mod-k", run: insertLink },
+        ...(showFocusMode ? [{ key: "Mod-Shift-f", run: toggleFocusMode }] : []),
       ]);
 
       const exts = [
@@ -239,6 +252,21 @@ export function MarkdownEditor({
         exts.push(keymap.of([
           { key: "Enter", run: autoContinueList },
         ]));
+      }
+
+      // Focus mode extension (opt-in)
+      if (showFocusMode) {
+        exts.push(buildFocusModeExtension());
+      }
+
+      // Math extension with lazy KaTeX loading (opt-in)
+      if (showMath) {
+        exts.push(buildMathExtension({ editable }));
+      }
+
+      // Footnote extension (opt-in)
+      if (showFootnotes) {
+        exts.push(buildFootnoteExtension({ editable }));
       }
 
       // Conditionally add clipboard image extension
@@ -281,6 +309,7 @@ export function MarkdownEditor({
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
      showSlashCommands, showCallouts, showTagPills, autoContinueLists,
+     showFocusMode, showMath, showFootnotes,
      annotationSummary, stableOnAnnotationClick],
   );
 
