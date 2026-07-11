@@ -1,15 +1,17 @@
-/* ── Highlight Extension (==text==) ────────────────────────────────────
-   Regex-based ViewPlugin that finds ==...== patterns and renders them
-   as highlighted text in live preview.
+/* ── Highlight Extension (==text== and ==text=={.color}) ──────────────
+   Regex-based ViewPlugin that finds ==...== and ==...=={.colorname}
+   patterns and renders them as highlighted text in live preview.
 
    Intentional: using regex scanner for ==highlight== rather than Lezer
    grammar extension. If this approach hits limitations (e.g., nesting,
    edge cases), migrate to a proper Lezer grammar extension.
 
    Behavior:
-   - When cursor is NOT on the line: hide == markers, apply
-     .cm-live-highlight class (yellow background)
-   - When cursor IS on the line: reveal raw ==text==
+   - When cursor is NOT on the line: hide == markers (and {.color}
+     suffix if present), apply highlight class
+   - When cursor IS on the line: reveal raw ==text== or ==text=={.red}
+   - Default (no color suffix) → .cm-live-highlight (yellow)
+   - With color suffix → .cm-live-highlight-{colorname} (e.g., red, green)
    - Follows the same pattern as bold/italic in livePreviewExtension.ts
    ──────────────────────────────────────────────────────────────────── */
 
@@ -21,9 +23,37 @@ import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate
 const highlightMarkDecoration = Decoration.mark({ class: "cm-live-highlight" });
 const replaceDecoration = Decoration.replace({});
 
-// ── Regex for ==text== ──────────────────────────────────────────────
+// Cache for color-specific mark decorations
+const colorDecorationCache = new Map<string, Decoration>();
 
-const HIGHLIGHT_RE = /==((?:[^=]|=[^=])+)==/g;
+function getColorDecoration(colorName: string): Decoration {
+  let dec = colorDecorationCache.get(colorName);
+  if (!dec) {
+    dec = Decoration.mark({ class: `cm-live-highlight-${colorName}` });
+    colorDecorationCache.set(colorName, dec);
+  }
+  return dec;
+}
+
+// ── Regex for ==text== and ==text=={.colorname} ─────────────────────
+
+const HIGHLIGHT_RE = /==((?:[^=]|=[^=])+)==(?:\{\.(\w+)\})?/g;
+
+// ── Document color detection ────────────────────────────────────────
+
+/**
+ * Scans the entire document content and returns a set of color names
+ * used in highlight syntax (e.g., "red", "green" from `{.red}`, `{.green}`).
+ */
+export function detectHighlightColors(docContent: string): Set<string> {
+  const colors = new Set<string>();
+  const re = /==(?:[^=]|=[^=])+=={\.(\w+)}/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(docContent)) !== null) {
+    colors.add(match[1]);
+  }
+  return colors;
+}
 
 // ── Cursor-line detection ───────────────────────────────────────────
 
@@ -55,23 +85,38 @@ function buildHighlightDecorations(view: EditorView, editable: boolean): Decorat
     HIGHLIGHT_RE.lastIndex = 0;
 
     while ((match = HIGHLIGHT_RE.exec(text)) !== null) {
+      const fullMatch = match[0]; // e.g., "==text=={.red}" or "==text=="
+      const innerText = match[1]; // e.g., "text"
+      const colorName = match[2]; // e.g., "red" or undefined
+
       const matchFrom = from + match.index;
-      const matchTo = matchFrom + match[0].length;
+      const matchTo = matchFrom + fullMatch.length;
       const innerFrom = matchFrom + 2; // after ==
-      const innerTo = matchTo - 2; // before ==
+      const innerTo = innerFrom + innerText.length; // before ==
+      const closingMarkerEnd = innerTo + 2; // after closing ==
 
       // Check if cursor is on this line
       const line = state.doc.lineAt(matchFrom);
       if (cursorLines.has(line.number)) continue;
 
+      // Determine which highlight decoration to use
+      const markDec = colorName ? getColorDecoration(colorName) : highlightMarkDecoration;
+
       // Apply highlight mark to the inner text
       if (innerFrom < innerTo) {
-        entries.push({ from: innerFrom, to: innerTo, decoration: highlightMarkDecoration });
+        entries.push({ from: innerFrom, to: innerTo, decoration: markDec });
       }
 
-      // Hide the == markers
+      // Hide the opening == markers
       entries.push({ from: matchFrom, to: innerFrom, decoration: replaceDecoration });
-      entries.push({ from: innerTo, to: matchTo, decoration: replaceDecoration });
+
+      // Hide the closing == markers
+      entries.push({ from: innerTo, to: closingMarkerEnd, decoration: replaceDecoration });
+
+      // Hide the {.colorname} suffix if present
+      if (colorName && closingMarkerEnd < matchTo) {
+        entries.push({ from: closingMarkerEnd, to: matchTo, decoration: replaceDecoration });
+      }
     }
   }
 

@@ -20,6 +20,7 @@ import { buildImagePreviewExtension } from "./extensions/imagePreviewExtension";
 import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExtension";
 import { buildAnnotationGutterExtension, type AnnotationSummaryItem } from "./extensions/annotationGutterExtension";
 import { buildHighlightExtension } from "./extensions/highlightExtension";
+import { buildSlashCommandExtension } from "./extensions/slashCommandExtension";
 import {
   toggleBold,
   toggleItalic,
@@ -63,6 +64,8 @@ interface MarkdownEditorProps {
   showInsertionHotzones?: boolean;
   /** Callback when an insertion hotzone "+" button is clicked. */
   onInsertionRequest?: (afterLine: number, view: EditorView) => void;
+  /** Enable slash command autocomplete (/ menu). */
+  showSlashCommands?: boolean;
   /** Annotation summary data — when provided, enables the annotation gutter. */
   annotationSummary?: AnnotationSummaryItem[];
   /** Callback when an annotation gutter badge is clicked. */
@@ -136,6 +139,7 @@ export function MarkdownEditor({
   showImagePreview = false,
   showInsertionHotzones = false,
   onInsertionRequest,
+  showSlashCommands = false,
   annotationSummary,
   onAnnotationClick,
   onEditorView,
@@ -237,12 +241,17 @@ export function MarkdownEditor({
         }));
       }
 
+      // Conditionally add slash command extension
+      if (showSlashCommands) {
+        exts.push(buildSlashCommandExtension());
+      }
+
       return exts;
     },
     [editable, darkTheme, getFiles, selectedPath, getOnOpenFile,
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
-     annotationSummary, stableOnAnnotationClick],
+     showSlashCommands, annotationSummary, stableOnAnnotationClick],
   );
 
   return (

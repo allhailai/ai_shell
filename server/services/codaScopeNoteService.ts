@@ -378,10 +378,10 @@ export class CodaScopeNoteService {
     const { body } = this.parseFrontmatter(content);
     const finalContent = this.serializeFrontmatter(frontmatter) + body;
 
-    writeFileSync(filePath, finalContent, "utf-8");
-
-    // Snapshot version before this update
+    // Snapshot the current content BEFORE overwriting with the update
     this.snapshotVersion(filePath);
+
+    writeFileSync(filePath, finalContent, "utf-8");
 
     // Refresh index
     const parentDir = path.dirname(filePath);

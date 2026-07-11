@@ -33,8 +33,9 @@ src/apps/codascope/
 ├── ARCHITECTURE.md             # ← You are here
 ├── manifest.tsx                # AppManifest — wires CodaScope into the shell (67 lines)
 ├── codascope.css               # All CodaScope-specific styles (8032 lines)
+├── codascope-notes.css          # Notes feature styles (1112 lines)
 ├── CodaScopeAssistant.css      # Styles for the assistant panel (2289 lines)
-├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend) (606 lines)
+├── codaScopeTypes.ts           # Shared API type definitions (frontend ↔ backend) (659 lines)
 ├── useCodaScopeStore.ts        # Zustand store — projects, topics, agent state (95 lines)
 ├── contextAssembler.ts         # Builds lightweight context for the assistant (124 lines)
 ├── codaScopeSseClient.ts       # Shared SSE streaming utilities (173 lines)
@@ -71,6 +72,10 @@ src/apps/codascope/
 │   ├── SlashCommandPalette.tsx # Slash command autocomplete palette (213 lines)
 │   ├── SourceUpload.tsx        # File upload for knowledge sources (138 lines)
 │   ├── SourceViewer.tsx        # Research source content viewer (188 lines)
+│   ├── NoteAnnotationPanel.tsx # Annotation threads for notes (483 lines)
+│   ├── NoteInsertionPrompt.tsx # AI-powered insertion prompt for notes (260 lines)
+│   ├── NoteMoveDialog.tsx      # Move note across levels/folders dialog (318 lines)
+│   ├── NoteSelectionToolbar.tsx # Floating toolbar on text selection in notes (120 lines)
 │   └── artifact-viewer/        # Visual HTML artifact subsystem
 │       ├── ArtifactViewer.tsx   # Main orchestrator (spec/preview tabs) (502 lines)
 │       ├── ArtifactSpecEditor.tsx # Spec editing with model picker (195 lines)
@@ -103,7 +108,10 @@ src/apps/codascope/
 │   ├── EpicScope.tsx           # Epic scope management tab (589 lines)
 │   ├── EpicKnowledge.tsx       # Epic knowledge directory + research tab (714 lines)
 │   ├── EpicDesignDocs.tsx      # Design document list + editor tab (318 lines)
-│   └── EpicHistory.tsx         # Version history + diff viewer tab (501 lines)
+│   ├── EpicHistory.tsx         # Version history + diff viewer tab (501 lines)
+│   ├── NotesBrowser.tsx        # Note listing, search, templates, breadcrumbs (579 lines)
+│   ├── NoteEditor.tsx          # Rich markdown note editor with auto-save (736 lines)
+│   └── NotesRouter.tsx         # Notes view coordinator (browser vs editor) (168 lines)
 └── commands/                   # Agent prompt templates (markdown files)
     ├── do_build_code_map.md    # Generates repository structure map (84 lines)
     ├── do_build_full_wiki.md   # Builds complete wiki from code map (84 lines)
@@ -133,7 +141,8 @@ server/
 │   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief (779 lines)
 │   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution (284 lines)
 │   ├── codaScopeKnowledgeRoutes.ts     # Knowledge sources, blocked sources, research, curation (519 lines)
-│   └── codaScopeArtifactRoutes.ts      # Artifact CRUD, build, preview, sections, annotations, versions (562 lines)
+│   ├── codaScopeArtifactRoutes.ts      # Artifact CRUD, build, preview, sections, annotations, versions (562 lines)
+│   └── codaScopeNoteRoutes.ts          # Note CRUD, images, annotations, versions, templates, search, move (459 lines)
 └── services/
     ├── codaScopeProjectService.ts      # Project CRUD, repository management (394 lines)
     ├── codaScopeProjectDirResolver.ts  # Project directory resolution cache (134 lines)
@@ -169,11 +178,14 @@ server/
     ├── codaScopeArtifactAnnotationService.ts # Artifact annotation lifecycle (320 lines)
     ├── codaScopeArtifactVersionService.ts   # Artifact build version snapshots (249 lines)
     ├── codaScopeArtifactAnnotationScript.ts # DOM inspection overlay script (228 lines)
+    ├── codaScopeNoteService.ts         # Note CRUD, frontmatter, versioning, search, images (916 lines)
+    ├── codaScopeNoteAnnotationService.ts # Block-level annotations for notes (409 lines)
     └── tools/                          # Agent tool implementations (split by domain)
         ├── codaScopeReadOnlyTools.ts   # 14 read-only discovery tools (545 lines)
         ├── codaScopeEpicTools.ts       # 21 epic read/write tools (702 lines)
         ├── codaScopeWriteTools.ts      # 1 code map write tool (65 lines)
-        └── codaScopeArtifactTools.ts   # 3 artifact tools (223 lines)
+        ├── codaScopeArtifactTools.ts   # 3 artifact tools (223 lines)
+        └── codaScopeNoteTools.ts       # 6 note read/write tools (334 lines)
 ```
 
 ---
@@ -198,6 +210,10 @@ server/
 /codascope/project/:id/settings  → Settings
 /codascope/project/:id/epics     → EpicList
 /codascope/project/:id/epic/:eid → EpicDetail (with tab sub-routing)
+/codascope/notes/personal/<path> → NotesRouter (personal notes)
+/codascope/notes/public/<path>   → NotesRouter (public notes)
+/codascope/project/:id/notes/<path> → NotesRouter (project notes)
+/codascope/project/:id/epic/:eid/notes/<path> → NotesRouter (epic notes)
 ```
 
 Chat is **not** a routed view — it lives in `CodaScopeAssistant.tsx` as a persistent right panel visible across all project views.
@@ -215,6 +231,7 @@ Backend API routes are split into domain-specific sub-modules under `server/rout
 - `codaScopeAnnotationRoutes.ts` — annotations, directives, blocks, batch
 - `codaScopeKnowledgeRoutes.ts` — knowledge sources, research, curation
 - `codaScopeArtifactRoutes.ts` — artifact CRUD, build, preview, sections, annotations, versions
+- `codaScopeNoteRoutes.ts` — note CRUD, images, annotations, versions, templates, search, move
 
 New endpoints should be added to the appropriate domain route file, not to the hub.
 
@@ -325,12 +342,14 @@ Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinition
 - `buildEpicTools()` — epic CRUD, scope, design docs, research, wiki write (21 tools in `tools/codaScopeEpicTools.ts`)
 - `buildWriteTools()` — code map write (1 tool in `tools/codaScopeWriteTools.ts`)
 - `buildArtifactTools()` — artifact HTML read/write, epic context assembly (3 tools in `tools/codaScopeArtifactTools.ts`)
+- `buildNoteReadTools()` — note listing, reading, searching, folder listing (4 tools in `tools/codaScopeNoteTools.ts`)
+- `buildNoteWriteTools()` — note creation and editing (2 tools in `tools/codaScopeNoteTools.ts`)
 
 Purpose-based filtering:
-- **Assistant/chat** → ALL tools (read + write + epic + artifact) — full agent autonomy
-- **Wiki-build** → read-only + write tools
-- **Curation/research** → read-only + epic tools
-- **Artifact-build/regen** → read-only + artifact tools
+- **Assistant/chat** → ALL tools (read + write + epic + artifact + note read/write) — full agent autonomy
+- **Wiki-build** → read-only + note read + write tools
+- **Curation/research** → read-only + note read + epic tools
+- **Artifact-build/regen** → read-only + note read + artifact tools
 
 The table below is a representative subset of read-only tools:
 

@@ -672,6 +672,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
               resolveImageUrl={resolveImageUrl}
               showImagePreview
               showInsertionHotzones
+              showSlashCommands
               onInsertionRequest={handleInsertionRequest}
               annotationSummary={annotationSummary.length > 0 ? annotationSummary : undefined}
               onAnnotationClick={handleAnnotationClick}

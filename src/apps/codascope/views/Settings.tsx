@@ -2,10 +2,10 @@
    Project settings, repository management, and version management.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { FolderPicker } from "../../../shared/folder-picker";
-import { IconSettings, IconKey, IconPackage, IconFolderOpen } from "../components/CodaScopeIcons";
+import { IconSettings, IconKey, IconPackage, IconFolderOpen, IconPalette, IconPlus } from "../components/CodaScopeIcons";
 
 export function Settings() {
   const {
@@ -33,6 +33,89 @@ export function Settings() {
   const [rootSaving, setRootSaving] = useState(false);
   const [rootError, setRootError] = useState<string | null>(null);
   const [showRootFolderPicker, setShowRootFolderPicker] = useState(false);
+
+  // ── Highlight Colors state ──────────────────────────────────────────
+
+  interface HighlightColor {
+    name: string;
+    label: string;
+    cssColor: string;
+  }
+
+  const DEFAULT_HIGHLIGHT_PALETTE: HighlightColor[] = [
+    { name: "yellow", label: "Yellow", cssColor: "hsla(45, 90%, 55%, 0.5)" },
+    { name: "red", label: "Red", cssColor: "hsla(0, 80%, 55%, 0.5)" },
+    { name: "green", label: "Green", cssColor: "hsla(140, 70%, 45%, 0.5)" },
+  ];
+
+  const [highlightColors, setHighlightColors] = useState<HighlightColor[]>([]);
+  const [highlightLoaded, setHighlightLoaded] = useState(false);
+  const [highlightSaving, setHighlightSaving] = useState(false);
+  const colorInputRef = useRef<HTMLInputElement>(null);
+
+  // Load highlight colors from secrets API
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/secrets/app/codascope/highlight_colors");
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.value) {
+            try {
+              const parsed = JSON.parse(data.value);
+              if (Array.isArray(parsed)) {
+                setHighlightColors(parsed);
+              }
+            } catch {
+              // Invalid JSON
+            }
+          }
+        }
+      } catch {
+        // Network error
+      } finally {
+        if (!cancelled) setHighlightLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveHighlightColors = useCallback(async (colors: HighlightColor[]) => {
+    setHighlightSaving(true);
+    try {
+      await fetch("/api/secrets/app/codascope/highlight_colors", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: JSON.stringify(colors) }),
+      });
+    } catch {
+      // Silently fail
+    } finally {
+      setHighlightSaving(false);
+    }
+  }, []);
+
+  const handleAddHighlightColor = useCallback((hexColor: string) => {
+    // Convert hex to a name (use the hex itself as name, sanitized)
+    const name = hexColor.replace("#", "").toLowerCase();
+    const label = hexColor.toUpperCase();
+    const newColor: HighlightColor = {
+      name,
+      label,
+      cssColor: hexColor,
+    };
+    const updated = [...highlightColors, newColor];
+    setHighlightColors(updated);
+    saveHighlightColors(updated);
+  }, [highlightColors, saveHighlightColors]);
+
+  const handleRemoveHighlightColor = useCallback((index: number) => {
+    const updated = highlightColors.filter((_, i) => i !== index);
+    setHighlightColors(updated);
+    saveHighlightColors(updated);
+  }, [highlightColors, saveHighlightColors]);
 
   // ── API Key state ───────────────────────────────────────────────────
 
@@ -471,6 +554,72 @@ export function Settings() {
           >
             ↓ Export Project
           </button>
+        </div>
+      </div>
+
+      {/* Note Highlight Colors */}
+      <div className="codascope-settings-section">
+        <div className="codascope-settings-section-title">
+          <IconPalette size={14} /> Note Highlight Colors
+          {highlightSaving && (
+            <span className="codascope-api-key-badge codascope-api-key-badge--validating">
+              Saving…
+            </span>
+          )}
+        </div>
+        <div className="codascope-settings-section-desc">
+          Default highlight colors available in the formatting toolbar color picker.
+          These colors can be used with the syntax <code>==text=={'{.colorname}'}</code>.
+        </div>
+
+        <div className="codascope-settings-highlight-colors">
+          {/* Default palette (non-removable) */}
+          {DEFAULT_HIGHLIGHT_PALETTE.map((color) => (
+            <div
+              key={color.name}
+              className="codascope-settings-highlight-swatch"
+              style={{ backgroundColor: color.cssColor }}
+              title={`${color.label} (default)`}
+            >
+              <span className="codascope-settings-highlight-swatch-label">{color.label.slice(0, 3)}</span>
+            </div>
+          ))}
+
+          {/* Custom colors (removable) */}
+          {highlightLoaded && highlightColors.map((color, index) => (
+            <div
+              key={`custom-${color.name}`}
+              className="codascope-settings-highlight-swatch"
+              style={{ backgroundColor: color.cssColor }}
+              title={color.label}
+            >
+              <button
+                className="codascope-settings-highlight-swatch-remove"
+                onClick={() => handleRemoveHighlightColor(index)}
+                type="button"
+                title="Remove color"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {/* Add color button */}
+          <button
+            className="codascope-settings-highlight-add-btn"
+            onClick={() => colorInputRef.current?.click()}
+            type="button"
+            title="Add custom highlight color"
+          >
+            <IconPlus size={14} />
+          </button>
+          <input
+            ref={colorInputRef}
+            className="codascope-settings-highlight-color-input"
+            type="color"
+            value="#ff9900"
+            onChange={(e) => handleAddHighlightColor(e.target.value)}
+          />
         </div>
       </div>
 

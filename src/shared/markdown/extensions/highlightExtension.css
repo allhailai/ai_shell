@@ -1,9 +1,51 @@
 /* ── Highlight Extension Styles ───────────────────────────────────────
-   Styles for ==highlight== live preview in the shared markdown editor.
-   Uses AI Shell design tokens.
+   Styles for ==highlight== and ==highlight=={.color} live preview
+   in the shared markdown editor. Uses AI Shell design tokens.
    ──────────────────────────────────────────────────────────────────── */
 
+/* Default highlight (yellow) */
 .cm-live-highlight {
   background: hsla(45, 90%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+/* Named color highlights */
+.cm-live-highlight-yellow {
+  background: hsla(45, 90%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-red {
+  background: hsla(0, 80%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-green {
+  background: hsla(140, 70%, 45%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-blue {
+  background: hsla(220, 80%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-purple {
+  background: hsla(270, 70%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-orange {
+  background: hsla(30, 90%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-pink {
+  background: hsla(330, 80%, 55%, 0.3);
+  border-radius: 2px;
+}
+
+.cm-live-highlight-cyan {
+  background: hsla(180, 70%, 45%, 0.3);
   border-radius: 2px;
 }

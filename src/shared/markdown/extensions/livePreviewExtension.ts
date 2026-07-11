@@ -98,6 +98,26 @@ class CheckboxWidget extends WidgetType {
 
 const TASK_RE = /^(\s*[-*+]\s)\[([ x/])\]\s/;
 
+// ── Text color regex ────────────────────────────────────────────────
+// Matches <span style="color:VALUE">text</span>
+// VALUE can be: named color, #hex, rgb(...), hsl(...)
+const TEXT_COLOR_RE = /<span\s+style="color:\s*([^"]+)">([\s\S]*?)<\/span>/g;
+
+// Cache for inline-color mark decorations
+const colorMarkCache = new Map<string, Decoration>();
+
+function getInlineColorDecoration(color: string): Decoration {
+  let dec = colorMarkCache.get(color);
+  if (!dec) {
+    dec = Decoration.mark({
+      attributes: { style: `color: ${color}` },
+      class: "cm-live-text-color",
+    });
+    colorMarkCache.set(color, dec);
+  }
+  return dec;
+}
+
 // ── Decoration cache ────────────────────────────────────────────────
 
 const headingMarkDecorations = [
@@ -189,6 +209,47 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
       }
       if (line.to >= state.doc.length) break;
       pos = line.to + 1;
+    }
+  }
+  // ── Text color span decorations (regex-based scan) ─────────────────
+  for (const { from, to } of view.visibleRanges) {
+    const text = state.doc.sliceString(from, to);
+    let match: RegExpExecArray | null;
+    TEXT_COLOR_RE.lastIndex = 0;
+
+    while ((match = TEXT_COLOR_RE.exec(text)) !== null) {
+      const fullMatch = match[0]; // <span style="color:red">text</span>
+      const colorValue = match[1]; // e.g., "red", "#ff0000"
+      const innerText = match[2]; // e.g., "text"
+
+      const matchFrom = from + match.index;
+      const matchTo = matchFrom + fullMatch.length;
+
+      // Check if cursor is on this line
+      const line = state.doc.lineAt(matchFrom);
+      if (cursorLines.has(line.number)) continue;
+
+      // Find boundaries of the opening and closing tags
+      const openTagEnd = matchFrom + fullMatch.indexOf(">") + 1;
+      const closeTagStart = matchTo - "</span>".length;
+
+      // Validate boundaries
+      if (openTagEnd <= matchFrom || closeTagStart <= openTagEnd) continue;
+
+      // Hide the opening <span style="color:..."> tag
+      entries.push({ from: matchFrom, to: openTagEnd, decoration: replaceDecoration });
+
+      // Apply inline color to the inner text
+      if (openTagEnd < closeTagStart) {
+        entries.push({
+          from: openTagEnd,
+          to: closeTagStart,
+          decoration: getInlineColorDecoration(colorValue.trim()),
+        });
+      }
+
+      // Hide the closing </span> tag
+      entries.push({ from: closeTagStart, to: matchTo, decoration: replaceDecoration });
     }
   }
 

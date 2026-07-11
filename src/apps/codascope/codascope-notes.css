@@ -1235,3 +1235,141 @@
   color: var(--color-accent-text);
 }
 
+/* ── Color Picker Dropdown ───────────────────────────────────────────── */
+
+.codascope-notes-formatting-color-picker {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: var(--z-overlay);
+  min-width: 180px;
+  padding: var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-notes-formatting-color-picker-label {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.codascope-notes-formatting-color-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-1);
+}
+
+.codascope-notes-formatting-color-swatch {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.codascope-notes-formatting-color-swatch:hover {
+  border-color: var(--color-text-primary);
+  transform: scale(1.1);
+}
+
+/* ── Settings: Highlight Colors Section ──────────────────────────────── */
+
+.codascope-settings-highlight-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.codascope-settings-highlight-swatch {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border: 2px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition-fast);
+}
+
+.codascope-settings-highlight-swatch:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.codascope-settings-highlight-swatch-label {
+  font-size: 8px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-inverse);
+  text-shadow: 0 0 3px hsla(0, 0%, 0%, 0.5);
+  text-transform: uppercase;
+  pointer-events: none;
+  user-select: none;
+}
+
+.codascope-settings-highlight-swatch-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-settings-highlight-swatch:hover .codascope-settings-highlight-swatch-remove {
+  opacity: 1;
+}
+
+.codascope-settings-highlight-swatch-remove:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.codascope-settings-highlight-add-btn {
+  width: 36px;
+  height: 36px;
+  border: 2px dashed var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.codascope-settings-highlight-add-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.codascope-settings-highlight-color-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+

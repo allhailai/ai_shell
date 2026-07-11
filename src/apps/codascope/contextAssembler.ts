@@ -19,6 +19,9 @@ export interface MessageContext {
   epicTitle?: string | null;
   /** Current epic tab (define/scope/knowledge/design/history) */
   epicTab?: string | null;
+  /** Note context (when viewing a note) */
+  noteLevel?: string | null;
+  notePath?: string | null;
 }
 
 /* ── Recent Views Ring Buffer ──────────────────────────────────────── */
@@ -63,6 +66,7 @@ function viewLabel(view: string, topicId?: string | null, topicTitle?: string | 
     case "wiki":
       if (topicId) return topicTitle ?? topicId;
       return "Wiki";
+    case "notes": return "Notes";
     case "settings": return "Settings";
     case "skills": return "Skills";
     case "epics": return "Epics";
@@ -106,11 +110,28 @@ export function assembleContext(
   // Epic tab: /project/:id/epic/:epicId/:tab
   const epicTab = view === "epic" ? (urlSegments[4] ?? options?.epicTab ?? "define") : null;
 
+  // Note context: /project/:id/notes/<path> or /project/:id/epic/:epicId/notes/<path>
+  let noteLevel: string | null = null;
+  let notePath: string | null = null;
+
+  if (view === "notes") {
+    // Project-level notes: /project/:id/notes/<path>
+    noteLevel = "project";
+    const pathParts = urlSegments.slice(3);
+    notePath = pathParts.length > 0 ? pathParts.join("/") : null;
+  } else if (view === "epic" && urlSegments[4] === "notes") {
+    // Epic-level notes: /project/:id/epic/:epicId/notes/<path>
+    noteLevel = "epic";
+    const pathParts = urlSegments.slice(5);
+    notePath = pathParts.length > 0 ? pathParts.join("/") : null;
+  }
+
   // Record this view visit
-  recordViewVisit(view, viewLabel(view, topicId, topicTitle, epicTitle));
+  const effectiveView = noteLevel ? "notes" : view;
+  recordViewVisit(effectiveView, viewLabel(effectiveView, topicId, topicTitle, epicTitle));
 
   return {
-    view,
+    view: effectiveView,
     topicId,
     topicTitle,
     filePath: options?.filePath ?? null,
@@ -120,5 +141,8 @@ export function assembleContext(
     epicId,
     epicTitle,
     epicTab,
+    noteLevel,
+    notePath,
   };
 }
+

@@ -772,3 +772,38 @@ export function IconChevronDown({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Color palette — Highlight color picker */
+export function IconPalette({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6" />
+      <circle cx="6" cy="6" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="6" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="6" cy="10" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Text color — "A" with color underline */
+export function IconTextColor({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M5 12L8 3l3 9" />
+      <line x1="6" y1="9.5" x2="10" y2="9.5" />
+      <line x1="3" y1="14" x2="13" y2="14" strokeWidth="2" />
+    </svg>
+  );
+}
+
+/** Plus circle — Add button */
+export function IconPlus({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6" />
+      <line x1="8" y1="5" x2="8" y2="11" />
+      <line x1="5" y1="8" x2="11" y2="8" />
+    </svg>
+  );
+}
+

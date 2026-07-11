@@ -6,10 +6,13 @@
    markdown node (uses syntaxTree inspection).
 
    Accepts `disabled` prop to gray out in read-only mode (version history).
+
+   Window 2: Added highlight color picker and text color picker dropdowns.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { syntaxTree } from "@codemirror/language";
+import { EditorSelection } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import {
   IconBold,
@@ -21,6 +24,8 @@ import {
   IconHeading,
   IconChecklist,
   IconChevronDown,
+  IconPalette,
+  IconTextColor,
 } from "./CodaScopeIcons";
 import {
   toggleBold,
@@ -32,6 +37,7 @@ import {
   setHeadingLevel,
   toggleChecklist,
 } from "../../../shared/markdown/extensions/formattingCommands";
+import { detectHighlightColors } from "../../../shared/markdown/extensions/highlightExtension";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -116,7 +122,7 @@ function detectActiveStates(view: EditorView): ActiveStates {
   }
 
   // Highlight detection via regex (since == isn't in the Lezer grammar)
-  const HIGHLIGHT_RE = /==((?:[^=]|=[^=])+)==/g;
+  const HIGHLIGHT_RE = /==((?:[^=]|=[^=])+)==(?:\{\.\w+\})?/g;
   const cursorCol = pos - line.from;
   let match: RegExpExecArray | null;
   while ((match = HIGHLIGHT_RE.exec(lineText)) !== null) {
@@ -147,12 +153,178 @@ const HEADING_OPTIONS = [
   { level: 6, label: "Heading 6" },
 ];
 
+/* ── Default highlight colors ────────────────────────────────────────── */
+
+interface ColorSwatch {
+  name: string;
+  label: string;
+  cssColor: string;
+}
+
+const DEFAULT_HIGHLIGHT_COLORS: ColorSwatch[] = [
+  { name: "", label: "Yellow (default)", cssColor: "hsla(45, 90%, 55%, 0.5)" },
+  { name: "red", label: "Red", cssColor: "hsla(0, 80%, 55%, 0.5)" },
+  { name: "green", label: "Green", cssColor: "hsla(140, 70%, 45%, 0.5)" },
+  { name: "blue", label: "Blue", cssColor: "hsla(220, 80%, 55%, 0.5)" },
+  { name: "purple", label: "Purple", cssColor: "hsla(270, 70%, 55%, 0.5)" },
+  { name: "orange", label: "Orange", cssColor: "hsla(30, 90%, 55%, 0.5)" },
+  { name: "pink", label: "Pink", cssColor: "hsla(330, 80%, 55%, 0.5)" },
+  { name: "cyan", label: "Cyan", cssColor: "hsla(180, 70%, 45%, 0.5)" },
+];
+
+const DEFAULT_TEXT_COLORS: ColorSwatch[] = [
+  { name: "red", label: "Red", cssColor: "#ef4444" },
+  { name: "orange", label: "Orange", cssColor: "#f97316" },
+  { name: "yellow", label: "Yellow", cssColor: "#eab308" },
+  { name: "green", label: "Green", cssColor: "#22c55e" },
+  { name: "cyan", label: "Cyan", cssColor: "#06b6d4" },
+  { name: "blue", label: "Blue", cssColor: "#3b82f6" },
+  { name: "purple", label: "Purple", cssColor: "#a855f7" },
+  { name: "pink", label: "Pink", cssColor: "#ec4899" },
+];
+
+/* ── Highlight color wrapping ────────────────────────────────────────── */
+
+function wrapWithHighlightColor(view: EditorView, colorName: string): void {
+  const { state } = view;
+  const range = state.selection.main;
+  const selectedText = state.doc.sliceString(range.from, range.to);
+  const suffix = colorName ? `{.${colorName}}` : "";
+
+  if (selectedText) {
+    const wrapped = `==${selectedText}==${suffix}`;
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: wrapped },
+      selection: EditorSelection.range(
+        range.from + 2,
+        range.from + 2 + selectedText.length,
+      ),
+    });
+  } else {
+    const wrapped = `==${suffix === "" ? "" : "text"}==${suffix}`;
+    if (suffix) {
+      view.dispatch({
+        changes: { from: range.from, insert: wrapped },
+        selection: EditorSelection.range(range.from + 2, range.from + 6),
+      });
+    } else {
+      view.dispatch({
+        changes: { from: range.from, insert: "====" },
+        selection: EditorSelection.cursor(range.from + 2),
+      });
+    }
+  }
+}
+
+function wrapWithTextColor(view: EditorView, cssColor: string): void {
+  const { state } = view;
+  const range = state.selection.main;
+  const selectedText = state.doc.sliceString(range.from, range.to);
+
+  if (selectedText) {
+    const wrapped = `<span style="color:${cssColor}">${selectedText}</span>`;
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: wrapped },
+      selection: EditorSelection.range(
+        range.from + `<span style="color:${cssColor}">`.length,
+        range.from + `<span style="color:${cssColor}">`.length + selectedText.length,
+      ),
+    });
+  } else {
+    const wrapped = `<span style="color:${cssColor}">text</span>`;
+    const openTagLen = `<span style="color:${cssColor}">`.length;
+    view.dispatch({
+      changes: { from: range.from, insert: wrapped },
+      selection: EditorSelection.range(range.from + openTagLen, range.from + openTagLen + 4),
+    });
+  }
+}
+
+/* ── Custom highlight colors from settings ───────────────────────────── */
+
+function useSettingsHighlightColors(): ColorSwatch[] {
+  const [customColors, setCustomColors] = useState<ColorSwatch[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/secrets/app/codascope/highlight_colors");
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data.value && !cancelled) {
+          try {
+            const parsed = JSON.parse(data.value);
+            if (Array.isArray(parsed)) {
+              setCustomColors(
+                parsed.map((c: { name: string; label: string; cssColor: string }) => ({
+                  name: c.name,
+                  label: c.label,
+                  cssColor: c.cssColor,
+                })),
+              );
+            }
+          } catch {
+            // Invalid JSON — ignore
+          }
+        }
+      } catch {
+        // Network error — ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return customColors;
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function NoteFormattingToolbar({ editorView, disabled = false }: NoteFormattingToolbarProps) {
   const [active, setActive] = useState<ActiveStates>(defaultActive);
   const [headingOpen, setHeadingOpen] = useState(false);
+  const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
+  const [textColorPickerOpen, setTextColorPickerOpen] = useState(false);
   const headingDropdownRef = useRef<HTMLDivElement>(null);
+  const highlightDropdownRef = useRef<HTMLDivElement>(null);
+  const textColorDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Custom colors from settings
+  const settingsColors = useSettingsHighlightColors();
+
+  // Document-detected colors
+  const [docColors, setDocColors] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!editorView) return;
+    const update = () => {
+      const content = editorView.state.doc.toString();
+      setDocColors(detectHighlightColors(content));
+    };
+    update();
+    // Re-detect when doc changes via interval (lightweight)
+    const interval = setInterval(update, 2000);
+    return () => clearInterval(interval);
+  }, [editorView]);
+
+  // Combined highlight colors: defaults + settings + document-detected
+  const allHighlightColors = useMemo(() => {
+    const known = new Set(DEFAULT_HIGHLIGHT_COLORS.map((c) => c.name));
+    settingsColors.forEach((c) => known.add(c.name));
+
+    const extras: ColorSwatch[] = [];
+    for (const colorName of docColors) {
+      if (!known.has(colorName)) {
+        extras.push({
+          name: colorName,
+          label: colorName.charAt(0).toUpperCase() + colorName.slice(1),
+          cssColor: `var(--color-highlight-${colorName}, hsla(0, 0%, 50%, 0.3))`,
+        });
+      }
+    }
+
+    return [...DEFAULT_HIGHLIGHT_COLORS, ...settingsColors, ...extras];
+  }, [settingsColors, docColors]);
 
   // Track active states when selection or doc changes
   useEffect(() => {
@@ -183,17 +355,23 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
     };
   }, [editorView, disabled]);
 
-  // Close heading dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
-    if (!headingOpen) return;
+    if (!headingOpen && !highlightPickerOpen && !textColorPickerOpen) return;
     const handleClick = (e: MouseEvent) => {
-      if (headingDropdownRef.current && !headingDropdownRef.current.contains(e.target as Node)) {
+      if (headingOpen && headingDropdownRef.current && !headingDropdownRef.current.contains(e.target as Node)) {
         setHeadingOpen(false);
+      }
+      if (highlightPickerOpen && highlightDropdownRef.current && !highlightDropdownRef.current.contains(e.target as Node)) {
+        setHighlightPickerOpen(false);
+      }
+      if (textColorPickerOpen && textColorDropdownRef.current && !textColorDropdownRef.current.contains(e.target as Node)) {
+        setTextColorPickerOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [headingOpen]);
+  }, [headingOpen, highlightPickerOpen, textColorPickerOpen]);
 
   // ── Button handlers ────────────────────────────────────────────────
 
@@ -216,6 +394,20 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
     setHeadingLevel(editorView, level);
     editorView.focus();
     setHeadingOpen(false);
+  }, [editorView, disabled]);
+
+  const handleHighlightColor = useCallback((colorName: string) => {
+    if (!editorView || disabled) return;
+    wrapWithHighlightColor(editorView, colorName);
+    editorView.focus();
+    setHighlightPickerOpen(false);
+  }, [editorView, disabled]);
+
+  const handleTextColor = useCallback((cssColor: string) => {
+    if (!editorView || disabled) return;
+    wrapWithTextColor(editorView, cssColor);
+    editorView.focus();
+    setTextColorPickerOpen(false);
   }, [editorView, disabled]);
 
   // ── Current heading label ──────────────────────────────────────────
@@ -309,6 +501,77 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         >
           <IconHighlight size={14} />
         </button>
+      </div>
+
+      <div className="codascope-notes-formatting-divider" />
+
+      {/* Color pickers group */}
+      <div className="codascope-notes-formatting-group" ref={highlightDropdownRef}>
+        <button
+          className={`codascope-notes-formatting-btn${highlightPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
+          onClick={() => {
+            setHighlightPickerOpen((o) => !o);
+            setTextColorPickerOpen(false);
+          }}
+          disabled={disabled}
+          type="button"
+          title="Highlight color"
+        >
+          <IconPalette size={14} />
+          <IconChevronDown size={8} />
+        </button>
+
+        {highlightPickerOpen && (
+          <div className="codascope-notes-formatting-color-picker">
+            <div className="codascope-notes-formatting-color-picker-label">Highlight Color</div>
+            <div className="codascope-notes-formatting-color-grid">
+              {allHighlightColors.map((color) => (
+                <button
+                  key={color.name || "default"}
+                  className="codascope-notes-formatting-color-swatch"
+                  style={{ backgroundColor: color.cssColor }}
+                  onClick={() => handleHighlightColor(color.name)}
+                  title={color.label}
+                  type="button"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="codascope-notes-formatting-group" ref={textColorDropdownRef}>
+        <button
+          className={`codascope-notes-formatting-btn${textColorPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
+          onClick={() => {
+            setTextColorPickerOpen((o) => !o);
+            setHighlightPickerOpen(false);
+          }}
+          disabled={disabled}
+          type="button"
+          title="Text color"
+        >
+          <IconTextColor size={14} />
+          <IconChevronDown size={8} />
+        </button>
+
+        {textColorPickerOpen && (
+          <div className="codascope-notes-formatting-color-picker">
+            <div className="codascope-notes-formatting-color-picker-label">Text Color</div>
+            <div className="codascope-notes-formatting-color-grid">
+              {DEFAULT_TEXT_COLORS.map((color) => (
+                <button
+                  key={color.name}
+                  className="codascope-notes-formatting-color-swatch"
+                  style={{ backgroundColor: color.cssColor }}
+                  onClick={() => handleTextColor(color.cssColor)}
+                  title={color.label}
+                  type="button"
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="codascope-notes-formatting-divider" />
