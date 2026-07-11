@@ -8,7 +8,7 @@
 
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { buildLivePreviewExtension } from "./extensions/livePreviewExtension";
@@ -19,6 +19,15 @@ import { buildClipboardImageExtension } from "./extensions/clipboardImageExtensi
 import { buildImagePreviewExtension } from "./extensions/imagePreviewExtension";
 import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExtension";
 import { buildAnnotationGutterExtension, type AnnotationSummaryItem } from "./extensions/annotationGutterExtension";
+import { buildHighlightExtension } from "./extensions/highlightExtension";
+import {
+  toggleBold,
+  toggleItalic,
+  toggleStrikethrough,
+  toggleInlineCode,
+  toggleHighlight,
+  insertLink,
+} from "./extensions/formattingCommands";
 
 /** File reference for wiki link resolution. */
 export interface MarkdownFileRef {
@@ -177,12 +186,23 @@ export function MarkdownEditor({
     () => {
       const wikiLinkConfig = { getFiles, selectedPath, getOnOpenFile };
       const renderCellDisplay = buildTableCellDisplayRenderer(wikiLinkConfig);
+      const formattingKeymap = keymap.of([
+        { key: "Mod-b", run: toggleBold },
+        { key: "Mod-i", run: toggleItalic },
+        { key: "Mod-Shift-x", run: toggleStrikethrough },
+        { key: "Mod-e", run: toggleInlineCode },
+        { key: "Mod-Shift-h", run: toggleHighlight },
+        { key: "Mod-k", run: insertLink },
+      ]);
+
       const exts = [
         markdown(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         EditorView.lineWrapping,
         darkTheme ? darkEditorTheme : lightEditorTheme,
+        formattingKeymap,
         buildLivePreviewExtension({ editable }),
+        buildHighlightExtension({ editable }),
         buildMermaidExtension({ editable }),
         buildMarkdownTableExtension({ editable, renderCellDisplay }),
         buildWikiLinkExtension(wikiLinkConfig),

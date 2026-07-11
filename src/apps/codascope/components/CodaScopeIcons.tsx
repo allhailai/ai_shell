@@ -656,3 +656,119 @@ export function IconGitPull({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Speech bubble — Comments / Annotations */
+export function IconComment({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M3 3h10a1 1 0 011 1v6a1 1 0 01-1 1H6l-3 2.5V11H3a1 1 0 01-1-1V4a1 1 0 011-1z" />
+      <line x1="5" y1="6" x2="11" y2="6" />
+      <line x1="5" y1="8.5" x2="9" y2="8.5" />
+    </svg>
+  );
+}
+
+/** Arrow into box — Move */
+export function IconMove({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="2" y="5" width="12" height="8" rx="1.5" />
+      <path d="M8 2v6" />
+      <polyline points="5.5,5.5 8,8 10.5,5.5" />
+    </svg>
+  );
+}
+
+/** Bold B — Formatting toolbar */
+export function IconBold({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M5 3h4a2.5 2.5 0 010 5H5V3z" />
+      <path d="M5 8h5a2.5 2.5 0 010 5H5V8z" />
+    </svg>
+  );
+}
+
+/** Italic I — Formatting toolbar */
+export function IconItalic({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="9.5" y1="3" x2="6.5" y2="13" />
+      <line x1="7" y1="3" x2="11" y2="3" />
+      <line x1="5" y1="13" x2="9" y2="13" />
+    </svg>
+  );
+}
+
+/** Strikethrough S — Formatting toolbar */
+export function IconStrikethrough({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M5.5 4.5C5.5 3.67 6.62 3 8 3c1.38 0 2.5.67 2.5 1.5 0 .5-.3.96-.8 1.25" />
+      <line x1="3" y1="8" x2="13" y2="8" />
+      <path d="M10.5 11.5c0 .83-1.12 1.5-2.5 1.5s-2.5-.67-2.5-1.5c0-.5.3-.96.8-1.25" />
+    </svg>
+  );
+}
+
+/** Code brackets — Inline code formatting */
+export function IconInlineCode({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="5.5,4 2.5,8 5.5,12" />
+      <polyline points="10.5,4 13.5,8 10.5,12" />
+    </svg>
+  );
+}
+
+/** Highlight marker — Highlight formatting */
+export function IconHighlight({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M10 2L4 10h3l-1 4 6-8H9l1-4z" />
+    </svg>
+  );
+}
+
+/** Chain link — Link formatting */
+export function IconLink({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M7 9a3 3 0 004.24 0l2-2a3 3 0 00-4.24-4.24L7.76 3.88" />
+      <path d="M9 7a3 3 0 00-4.24 0l-2 2a3 3 0 004.24 4.24l1.24-1.12" />
+    </svg>
+  );
+}
+
+/** H with level — Heading formatting */
+export function IconHeading({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <line x1="3" y1="3" x2="3" y2="13" />
+      <line x1="10" y1="3" x2="10" y2="13" />
+      <line x1="3" y1="8" x2="10" y2="8" />
+    </svg>
+  );
+}
+
+/** Checkbox square — Checklist formatting */
+export function IconChecklist({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="2" y="2" width="5" height="5" rx="1" />
+      <polyline points="3.5,4.5 4.5,5.5 6,3.5" />
+      <rect x="2" y="9" width="5" height="5" rx="1" />
+      <line x1="9" y1="4.5" x2="14" y2="4.5" />
+      <line x1="9" y1="11.5" x2="14" y2="11.5" />
+    </svg>
+  );
+}
+
+/** Chevron down — Dropdown indicator */
+export function IconChevronDown({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="4,6 8,10 12,6" />
+    </svg>
+  );
+}
+

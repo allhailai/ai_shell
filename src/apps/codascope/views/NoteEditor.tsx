@@ -12,9 +12,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
-import { IconClose, IconWarning } from "../components/CodaScopeIcons";
+import { IconClose, IconWarning, IconComment, IconClock, IconMove } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
+import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import type { NoteLevel, NoteAnnotation } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
@@ -515,7 +516,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
             type="button"
             title="Toggle annotations"
           >
-            💬{openAnnotationCount > 0 && (
+            <IconComment size={14} />{openAnnotationCount > 0 && (
               <span className="codascope-notes-editor-ann-badge">{openAnnotationCount}</span>
             )}
           </button>
@@ -527,7 +528,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
             type="button"
             title="Version history"
           >
-            🕒
+            <IconClock size={14} />
           </button>
 
           {/* Move */}
@@ -537,7 +538,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
             type="button"
             title="Move note"
           >
-            📦
+            <IconMove size={14} />
           </button>
 
           {/* Delete */}
@@ -579,6 +580,12 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
           </div>
         </div>
       )}
+
+      {/* Formatting toolbar */}
+      <NoteFormattingToolbar
+        editorView={editorViewRef.current}
+        disabled={showVersions && !!selectedVersion}
+      />
 
       {/* Editor body — split layout when annotation panel is open */}
       <div className={`codascope-notes-editor-body${showAnnotations ? " codascope-notes-editor-body--split" : ""}`}>

@@ -14,6 +14,17 @@ export { buildClipboardImageExtension, type ClipboardImageConfig } from "./exten
 export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConfig, type ImageRef } from "./extensions/imagePreviewExtension";
 export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
 export { buildAnnotationGutterExtension, setAnnotationSummary, type AnnotationSummaryItem, type AnnotationGutterConfig } from "./extensions/annotationGutterExtension";
+export { buildHighlightExtension } from "./extensions/highlightExtension";
+export {
+  toggleBold,
+  toggleItalic,
+  toggleStrikethrough,
+  toggleInlineCode,
+  toggleHighlight,
+  insertLink,
+  setHeadingLevel,
+  toggleChecklist,
+} from "./extensions/formattingCommands";
 
 // CSS must be imported by the consuming app's styles.css:
 //   @import "./shared/markdown/MarkdownEditor.css";
@@ -24,4 +35,5 @@ export { buildAnnotationGutterExtension, setAnnotationSummary, type AnnotationSu
 //   @import "./shared/markdown/extensions/imagePreviewExtension.css";
 //   @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
 //   @import "./shared/markdown/extensions/annotationGutterExtension.css";
+//   @import "./shared/markdown/extensions/highlightExtension.css";
 

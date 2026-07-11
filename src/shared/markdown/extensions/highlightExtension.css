@@ -1,0 +1,9 @@
+/* ── Highlight Extension Styles ───────────────────────────────────────
+   Styles for ==highlight== live preview in the shared markdown editor.
+   Uses AI Shell design tokens.
+   ──────────────────────────────────────────────────────────────────── */
+
+.cm-live-highlight {
+  background: hsla(45, 90%, 55%, 0.3);
+  border-radius: 2px;
+}

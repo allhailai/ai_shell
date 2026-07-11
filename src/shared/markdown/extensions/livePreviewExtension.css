@@ -45,3 +45,73 @@
   padding-bottom: var(--space-4);
   margin-bottom: var(--space-2);
 }
+
+/* Interactive checkboxes (task list items) */
+.cm-live-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--color-text-tertiary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-right: 4px;
+  position: relative;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.cm-live-checkbox:hover {
+  border-color: var(--color-accent);
+}
+
+.cm-live-checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.cm-live-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.5px;
+  width: 5px;
+  height: 8px;
+  border: solid var(--color-text-inverse);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* In-progress indicator (- [/]) */
+.cm-live-checkbox-progress {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  margin-right: 4px;
+  position: relative;
+}
+
+.cm-live-checkbox-progress::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--color-warning);
+  opacity: 0.5;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.cm-live-checkbox-progress:hover {
+  border-color: var(--color-warning);
+  opacity: 0.8;
+}
+

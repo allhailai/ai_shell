@@ -5,12 +5,17 @@
    cursor is NOT on that line, and reveals raw markdown when the cursor
    moves to that line.
 
+   Also renders interactive checkboxes for task list items:
+   - [ ] → unchecked checkbox
+   - [x] → checked checkbox
+   - [/] → in-progress indicator
+
    Adapted from kiss_ai for AI Shell's shared component library.
    ──────────────────────────────────────────────────────────────────── */
 
 import { syntaxTree } from "@codemirror/language";
 import { type EditorState, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { parseMarkdownTableBlock } from "./markdownTableExtension";
 
 // ── Heading level → node name mapping ───────────────────────────────
@@ -31,6 +36,67 @@ function headingLevel(nodeName: string): number {
     default: return 0;
   }
 }
+
+// ── Checkbox Widget ─────────────────────────────────────────────────
+
+class CheckboxWidget extends WidgetType {
+  constructor(
+    readonly state: " " | "x" | "/",
+    readonly pos: number,
+  ) {
+    super();
+  }
+
+  eq(other: CheckboxWidget) {
+    return this.state === other.state && this.pos === other.pos;
+  }
+
+  toDOM(view: EditorView) {
+    if (this.state === "/") {
+      // In-progress indicator — styled span instead of checkbox
+      const span = document.createElement("span");
+      span.className = "cm-live-checkbox cm-live-checkbox-progress";
+      span.setAttribute("aria-label", "In progress");
+      span.title = "In progress";
+      span.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Toggle: [/] → [x]
+        this.toggleState(view, "x");
+      });
+      return span;
+    }
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "cm-live-checkbox";
+    checkbox.checked = this.state === "x";
+    checkbox.setAttribute("aria-label", this.state === "x" ? "Completed" : "Uncompleted");
+
+    checkbox.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const newState = this.state === "x" ? " " : "x";
+      this.toggleState(view, newState);
+    });
+
+    return checkbox;
+  }
+
+  private toggleState(view: EditorView, newState: string) {
+    // The pos points to the `[` in `[ ]` / `[x]` / `[/]`
+    // We need to replace the character between `[` and `]`
+    view.dispatch({
+      changes: { from: this.pos + 1, to: this.pos + 2, insert: newState },
+    });
+  }
+
+  ignoreEvent() { return false; }
+}
+
+// ── Task list regex ─────────────────────────────────────────────────
+
+const TASK_RE = /^(\s*[-*+]\s)\[([ x/])\]\s/;
 
 // ── Decoration cache ────────────────────────────────────────────────
 
@@ -99,6 +165,34 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
   const tableLines = tableLineNumbers(state);
   const entries: DecorationEntry[] = [];
 
+  // ── Task list checkbox decorations (line-based scan) ──────────────
+  for (const { from, to } of view.visibleRanges) {
+    let pos = from;
+    while (pos <= to) {
+      const line = state.doc.lineAt(pos);
+      if (!cursorLines.has(line.number) && !tableLines.has(line.number)) {
+        const match = TASK_RE.exec(line.text);
+        if (match) {
+          const checkState = match[2] as " " | "x" | "/";
+          const bulletPrefix = match[1]; // e.g. "- "
+          const bracketStart = line.from + bulletPrefix.length; // position of `[`
+
+          // Replace `[x] ` (or `[ ] ` / `[/] `) with checkbox widget
+          entries.push({
+            from: bracketStart,
+            to: bracketStart + 4, // `[x] ` = 4 chars (bracket + state + bracket + space)
+            decoration: Decoration.replace({
+              widget: new CheckboxWidget(checkState, bracketStart),
+            }),
+          });
+        }
+      }
+      if (line.to >= state.doc.length) break;
+      pos = line.to + 1;
+    }
+  }
+
+  // ── Syntax tree decorations ───────────────────────────────────────
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(state).iterate({
       from, to,
