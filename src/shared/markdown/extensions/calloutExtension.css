@@ -1,0 +1,119 @@
+/* ── Callout Extension Styles ────────────────────────────────────────
+   Styles for > [!type] callout/admonition blocks in live preview.
+   Uses AI Shell design tokens. All colors via CSS custom properties.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Callout line container ──────────────────────────────────────────
+   Applied to every line in the callout block. Each type overrides
+   the --callout-color and --callout-bg custom properties.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-callout-line {
+  border-left: 3px solid var(--callout-color, var(--color-accent));
+  background: var(--callout-bg, hsla(220, 50%, 50%, 0.06));
+  padding-left: var(--space-4);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* ── Type-specific colors ────────────────────────────────────────────
+   Each type sets --callout-color (border + icon) and --callout-bg (tint).
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Note / Info — Blue */
+.shared-md-callout-line-note {
+  --callout-color: var(--color-accent);
+  --callout-bg: hsla(220, 50%, 50%, 0.06);
+}
+
+/* Tip / Hint / Important — Cyan/Teal */
+.shared-md-callout-line-tip {
+  --callout-color: hsl(180, 60%, 45%);
+  --callout-bg: hsla(180, 50%, 45%, 0.06);
+}
+
+/* Warning / Caution / Attention — Orange/Amber */
+.shared-md-callout-line-warning {
+  --callout-color: var(--color-warning);
+  --callout-bg: hsla(38, 50%, 50%, 0.06);
+}
+
+/* Success / Check / Done — Green */
+.shared-md-callout-line-success {
+  --callout-color: var(--color-success);
+  --callout-bg: hsla(142, 40%, 45%, 0.06);
+}
+
+/* Danger / Error — Red */
+.shared-md-callout-line-danger {
+  --callout-color: var(--color-danger);
+  --callout-bg: hsla(0, 50%, 50%, 0.06);
+}
+
+/* Question / Help / FAQ — Yellow */
+.shared-md-callout-line-question {
+  --callout-color: hsl(45, 80%, 50%);
+  --callout-bg: hsla(45, 50%, 50%, 0.06);
+}
+
+/* Bug — Red-Orange */
+.shared-md-callout-line-bug {
+  --callout-color: hsl(15, 75%, 50%);
+  --callout-bg: hsla(15, 50%, 50%, 0.06);
+}
+
+/* Example — Purple */
+.shared-md-callout-line-example {
+  --callout-color: hsl(270, 60%, 55%);
+  --callout-bg: hsla(270, 40%, 50%, 0.06);
+}
+
+/* Quote / Cite — Gray */
+.shared-md-callout-line-quote {
+  --callout-color: var(--color-text-tertiary);
+  --callout-bg: hsla(220, 10%, 50%, 0.04);
+}
+
+/* ── Title row ───────────────────────────────────────────────────────
+   Widget rendered in place of the `> [!type] Title` first line.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-callout-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+  color: var(--callout-color, var(--color-accent));
+  padding: var(--space-1) 0;
+  user-select: none;
+}
+
+/* Type-specific title colors */
+.shared-md-callout-title-note     { color: var(--color-accent); }
+.shared-md-callout-title-tip      { color: hsl(180, 60%, 55%); }
+.shared-md-callout-title-warning  { color: var(--color-warning); }
+.shared-md-callout-title-success  { color: var(--color-success); }
+.shared-md-callout-title-danger   { color: var(--color-danger); }
+.shared-md-callout-title-question { color: hsl(45, 80%, 55%); }
+.shared-md-callout-title-bug      { color: hsl(15, 75%, 55%); }
+.shared-md-callout-title-example  { color: hsl(270, 60%, 60%); }
+.shared-md-callout-title-quote    { color: var(--color-text-secondary); }
+
+/* ── Icon ────────────────────────────────────────────────────────── */
+
+.shared-md-callout-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.shared-md-callout-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ── Title text ──────────────────────────────────────────────────── */
+
+.shared-md-callout-title-text {
+  line-height: var(--leading-snug);
+}

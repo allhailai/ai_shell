@@ -61,6 +61,7 @@ class WikiLinkWidget extends WidgetType {
     private readonly targetPath: string,
     private readonly resolution: Resolution,
     private readonly getOnOpenFile: () => ((path: string) => void) | undefined,
+    private readonly rawTarget: string,
   ) {
     super();
   }
@@ -72,10 +73,27 @@ class WikiLinkWidget extends WidgetType {
   toDOM() {
     const link = document.createElement("span");
     link.className = `shared-md-wiki-link shared-md-wiki-link-${this.resolution}`;
-    link.textContent = this.display;
     link.role = "link";
     link.tabIndex = 0;
-    link.title = this.resolution === "resolved" ? this.targetPath : `Not found: ${this.targetPath}`;
+
+    // Breadcrumb support: if rawTarget contains `/`, show folder icon and
+    // full path in tooltip, but display only the page name.
+    const hasPath = this.rawTarget.includes("/");
+
+    if (hasPath) {
+      // Add subtle folder icon before link text
+      const icon = document.createElement("span");
+      icon.className = "shared-md-wiki-link-folder-icon";
+      icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3.5A1 1 0 0 0 5.8 3H3a1 1 0 0 0-1 1z"/></svg>';
+      link.appendChild(icon);
+      // Tooltip shows the full path
+      link.title = this.resolution === "resolved" ? this.rawTarget : `Not found: ${this.rawTarget}`;
+    } else {
+      link.title = this.resolution === "resolved" ? this.targetPath : `Not found: ${this.targetPath}`;
+    }
+
+    const textNode = document.createTextNode(this.display);
+    link.appendChild(textNode);
 
     if (this.resolution === "resolved") {
       link.style.cursor = "pointer";
@@ -108,10 +126,18 @@ class WikiLinkWidget extends WidgetType {
 
 const WIKI_LINK_RE = /\[\[([^\]\n]+)\]\]/g;
 
-/** Extract display label from a raw wiki link target (handles aliases like `target|alias`). */
+/** Extract display label from a raw wiki link target.
+ *  Handles:
+ *  - Aliases: `target|alias` → alias
+ *  - Breadcrumb paths: `folder/subfolder/page` → page (just the final segment)
+ */
 function wikiLinkLabel(rawTarget: string): string {
   const [target, alias] = rawTarget.split("|").map((s) => s.trim());
-  return alias || target || "";
+  if (alias) return alias;
+  if (!target) return "";
+  // For paths with `/`, show only the last segment (page name)
+  const lastSegment = target.split("/").pop();
+  return lastSegment || target;
 }
 
 // ── Decoration builder ──────────────────────────────────────────────
@@ -131,7 +157,7 @@ function buildWikiLinkDecorations(view: import("@codemirror/view").EditorView, c
     }
   }
 
-  const allLinks: Array<{ from: number; to: number; display: string; targetPath: string; resolution: Resolution }> = [];
+  const allLinks: Array<{ from: number; to: number; display: string; targetPath: string; resolution: Resolution; rawTarget: string }> = [];
 
   for (const { from, to } of view.visibleRanges) {
     let position = from;
@@ -170,6 +196,7 @@ function buildWikiLinkDecorations(view: import("@codemirror/view").EditorView, c
           display: wikiLinkLabel(rawTarget),
           targetPath: resolved.path,
           resolution: resolved.resolution,
+          rawTarget: rawTarget.split("|")[0]?.trim() ?? rawTarget,
         });
       }
 
@@ -190,7 +217,7 @@ function buildWikiLinkDecorations(view: import("@codemirror/view").EditorView, c
       link.from,
       link.to,
       Decoration.replace({
-        widget: new WikiLinkWidget(link.display, link.targetPath, link.resolution, config.getOnOpenFile),
+        widget: new WikiLinkWidget(link.display, link.targetPath, link.resolution, config.getOnOpenFile, link.rawTarget),
       }),
     );
   }
@@ -301,13 +328,26 @@ function createLinkElement(
   label: string,
   resolved: { path: string; resolution: Resolution },
   onOpenFile: ((path: string) => void) | undefined,
+  rawTarget?: string,
 ): HTMLElement {
   const link = document.createElement("span");
   link.className = `shared-md-wiki-link shared-md-wiki-link-${resolved.resolution}`;
-  link.textContent = label;
   link.role = "link";
   link.tabIndex = 0;
-  link.title = resolved.resolution === "resolved" ? resolved.path : `Not found: ${resolved.path}`;
+
+  // Breadcrumb: if the raw target has `/`, add folder icon and full-path tooltip
+  const hasPath = rawTarget?.includes("/");
+  if (hasPath) {
+    const icon = document.createElement("span");
+    icon.className = "shared-md-wiki-link-folder-icon";
+    icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3.5A1 1 0 0 0 5.8 3H3a1 1 0 0 0-1 1z"/></svg>';
+    link.appendChild(icon);
+    link.title = resolved.resolution === "resolved" ? rawTarget : `Not found: ${rawTarget}`;
+  } else {
+    link.title = resolved.resolution === "resolved" ? resolved.path : `Not found: ${resolved.path}`;
+  }
+
+  link.appendChild(document.createTextNode(label));
 
   if (resolved.resolution === "resolved") {
     link.style.cursor = "pointer";

@@ -21,6 +21,8 @@
 @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
 @import "./shared/markdown/extensions/annotationGutterExtension.css";
 @import "./shared/markdown/extensions/highlightExtension.css";
+@import "./shared/markdown/extensions/calloutExtension.css";
+@import "./shared/markdown/extensions/tagPillExtension.css";
 @import "./shared/folder-picker/FolderPicker.css";
 @import "./shared/confirm-dialog/ConfirmDialog.css";
 @import "./shared/rich-chat-input/RichChatInput.css";

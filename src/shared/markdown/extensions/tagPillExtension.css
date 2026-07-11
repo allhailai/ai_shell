@@ -1,0 +1,22 @@
+/* ── Tag Pill Extension Styles ────────────────────────────────────────
+   Styles for #tag pill rendering in the shared markdown editor.
+   Uses AI Shell design tokens.
+   ──────────────────────────────────────────────────────────────────── */
+
+.shared-md-tag-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent-muted);
+  color: var(--color-accent-text);
+  font-size: 0.88em;
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  vertical-align: baseline;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.shared-md-tag-pill:hover {
+  background: hsla(220, 50%, 20%, 0.6);
+}

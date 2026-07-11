@@ -290,3 +290,99 @@ export function toggleChecklist(view: EditorView): boolean {
 
   return false;
 }
+
+// ── Auto-continue lists ──────────────────────────────────────────────
+
+/**
+ * Enter key handler that auto-continues list items.
+ * - End of `- item` → insert `\n- ` (continue bullet)
+ * - End of `1. item` → insert `\n2. ` (auto-increment number)
+ * - End of `- [ ] item` → insert `\n- [ ] ` (continue checklist)
+ * - Empty list item (`- ` with no content) → remove prefix (exit list)
+ */
+export function autoContinueList(view: EditorView): boolean {
+  const { state } = view;
+  const { head } = state.selection.main;
+  const line = state.doc.lineAt(head);
+  const text = line.text;
+
+  // Detect indent
+  const indentMatch = /^(\s*)/.exec(text);
+  const indent = indentMatch?.[1] ?? "";
+  const trimmed = text.substring(indent.length);
+
+  // ── Checklist: `- [ ] text` or `- [x] text` or `- [/] text`
+  const checklistMatch = /^([-*+])\s\[([ x/])\]\s(.*)$/.exec(trimmed);
+  if (checklistMatch) {
+    const bullet = checklistMatch[1];
+    const content = checklistMatch[3];
+
+    if (content.length === 0) {
+      // Empty checklist item → remove prefix (exit list)
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: indent },
+        selection: EditorSelection.cursor(line.from + indent.length),
+      });
+      return true;
+    }
+
+    // Continue checklist
+    const insert = `\n${indent}${bullet} [ ] `;
+    view.dispatch({
+      changes: { from: head, insert },
+      selection: EditorSelection.cursor(head + insert.length),
+    });
+    return true;
+  }
+
+  // ── Numbered list: `1. text`, `2. text`, etc.
+  const numberedMatch = /^(\d+)\.\s(.*)$/.exec(trimmed);
+  if (numberedMatch) {
+    const num = parseInt(numberedMatch[1], 10);
+    const content = numberedMatch[2];
+
+    if (content.length === 0) {
+      // Empty numbered item → remove prefix (exit list)
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: indent },
+        selection: EditorSelection.cursor(line.from + indent.length),
+      });
+      return true;
+    }
+
+    // Continue with next number
+    const nextNum = num + 1;
+    const insert = `\n${indent}${nextNum}. `;
+    view.dispatch({
+      changes: { from: head, insert },
+      selection: EditorSelection.cursor(head + insert.length),
+    });
+    return true;
+  }
+
+  // ── Bullet list: `- text`, `* text`, `+ text`
+  const bulletMatch = /^([-*+])\s(.*)$/.exec(trimmed);
+  if (bulletMatch) {
+    const bullet = bulletMatch[1];
+    const content = bulletMatch[2];
+
+    if (content.length === 0) {
+      // Empty bullet item → remove prefix (exit list)
+      view.dispatch({
+        changes: { from: line.from, to: line.to, insert: indent },
+        selection: EditorSelection.cursor(line.from + indent.length),
+      });
+      return true;
+    }
+
+    // Continue bullet list
+    const insert = `\n${indent}${bullet} `;
+    view.dispatch({
+      changes: { from: head, insert },
+      selection: EditorSelection.cursor(head + insert.length),
+    });
+    return true;
+  }
+
+  return false; // Not a list line — let default Enter behavior handle it
+}

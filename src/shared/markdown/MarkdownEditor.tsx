@@ -21,6 +21,8 @@ import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExt
 import { buildAnnotationGutterExtension, type AnnotationSummaryItem } from "./extensions/annotationGutterExtension";
 import { buildHighlightExtension } from "./extensions/highlightExtension";
 import { buildSlashCommandExtension } from "./extensions/slashCommandExtension";
+import { buildCalloutExtension } from "./extensions/calloutExtension";
+import { buildTagPillExtension } from "./extensions/tagPillExtension";
 import {
   toggleBold,
   toggleItalic,
@@ -28,6 +30,7 @@ import {
   toggleInlineCode,
   toggleHighlight,
   insertLink,
+  autoContinueList,
 } from "./extensions/formattingCommands";
 
 /** File reference for wiki link resolution. */
@@ -66,6 +69,12 @@ interface MarkdownEditorProps {
   onInsertionRequest?: (afterLine: number, view: EditorView) => void;
   /** Enable slash command autocomplete (/ menu). */
   showSlashCommands?: boolean;
+  /** Enable callout/admonition rendering (> [!type] blocks). Default: true. */
+  showCallouts?: boolean;
+  /** Enable #tag pill rendering. Default: true. */
+  showTagPills?: boolean;
+  /** Enable auto-continue lists on Enter key. */
+  autoContinueLists?: boolean;
   /** Annotation summary data — when provided, enables the annotation gutter. */
   annotationSummary?: AnnotationSummaryItem[];
   /** Callback when an annotation gutter badge is clicked. */
@@ -140,6 +149,9 @@ export function MarkdownEditor({
   showInsertionHotzones = false,
   onInsertionRequest,
   showSlashCommands = false,
+  showCallouts = true,
+  showTagPills = true,
+  autoContinueLists = false,
   annotationSummary,
   onAnnotationClick,
   onEditorView,
@@ -212,6 +224,23 @@ export function MarkdownEditor({
         buildWikiLinkExtension(wikiLinkConfig),
       ];
 
+      // Callout extension (on by default)
+      if (showCallouts) {
+        exts.push(buildCalloutExtension({ editable }));
+      }
+
+      // Tag pill extension (on by default)
+      if (showTagPills) {
+        exts.push(buildTagPillExtension({ editable }));
+      }
+
+      // Auto-continue lists keymap (opt-in)
+      if (autoContinueLists) {
+        exts.push(keymap.of([
+          { key: "Enter", run: autoContinueList },
+        ]));
+      }
+
       // Conditionally add clipboard image extension
       if (onImagePaste) {
         exts.push(buildClipboardImageExtension({ onImagePaste: stableOnImagePaste }));
@@ -251,7 +280,8 @@ export function MarkdownEditor({
     [editable, darkTheme, getFiles, selectedPath, getOnOpenFile,
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
-     showSlashCommands, annotationSummary, stableOnAnnotationClick],
+     showSlashCommands, showCallouts, showTagPills, autoContinueLists,
+     annotationSummary, stableOnAnnotationClick],
   );
 
   return (
