@@ -11,12 +11,12 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
-import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive } from "../components/CodaScopeIcons";
+import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
-import type { NoteScope, NoteVisibility, NoteAnnotation } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
 /* ── Frontmatter helpers ─────────────────────────────────────────────── */
@@ -120,6 +120,10 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<VersionEntry[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<{ version: string; content: string } | null>(null);
+
+  // Backlinks state
+  const [backlinks, setBacklinks] = useState<NoteBacklink[]>([]);
+  const [showBacklinks, setShowBacklinks] = useState(false);
 
   // Refs
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -463,6 +467,33 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // ── Word count ─────────────────────────────────────────────────────
   const wordCount = useMemo(() => countWords(content), [content]);
 
+  // ── Fetch backlinks ─────────────────────────────────────────────
+  const fetchBacklinks = useCallback(async (noteId: string) => {
+    try {
+      const params = new URLSearchParams(queryParams);
+      params.set("scope", scope);
+      params.set("visibility", visibility);
+      const res = await fetch(`/api/codascope/notes/backlinks/${noteId}?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBacklinks(data.backlinks ?? []);
+      }
+    } catch { /* best effort */ }
+  }, [scope, visibility, queryParams]);
+
+  // Fetch backlinks when the note loads
+  useEffect(() => {
+    if (!content) return;
+    // Extract noteId from frontmatter
+    const match = FRONTMATTER_RE.exec(content);
+    if (match) {
+      const idMatch = /^id:\s*(.+)$/m.exec(match[1]);
+      if (idMatch) {
+        void fetchBacklinks(idMatch[1].trim());
+      }
+    }
+  }, [content, fetchBacklinks]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Render ─────────────────────────────────────────────────────────
 
   if (loading) {
@@ -740,10 +771,48 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       {/* Footer */}
       <div className="codascope-notes-editor-footer">
         <span>{wordCount} word{wordCount !== 1 ? "s" : ""}</span>
+        {backlinks.length > 0 && (
+          <button
+            className={`codascope-notes-backlinks-toggle${showBacklinks ? " codascope-notes-backlinks-toggle-active" : ""}`}
+            onClick={() => setShowBacklinks((v) => !v)}
+            type="button"
+          >
+            <IconLink size={12} />
+            <span>{backlinks.length} backlink{backlinks.length !== 1 ? "s" : ""}</span>
+          </button>
+        )}
         <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-quaternary)" }}>
           Auto-save enabled
         </span>
       </div>
+
+      {/* Backlinks panel */}
+      {showBacklinks && backlinks.length > 0 && (
+        <div className="codascope-notes-backlinks">
+          <div className="codascope-notes-backlinks-header">
+            <IconLink size={13} />
+            <span>Linked from</span>
+          </div>
+          <div className="codascope-notes-backlinks-list">
+            {backlinks.map((bl) => (
+              <button
+                key={bl.noteId}
+                className={`codascope-notes-backlink-item${bl.isArchived ? " codascope-notes-backlink-item-archived" : ""}`}
+                onClick={() => {
+                  if (!bl.isArchived && bl.path) {
+                    onBack();
+                  }
+                }}
+                type="button"
+                disabled={bl.isArchived || !bl.path}
+              >
+                <span className="codascope-notes-backlink-title">{bl.title}</span>
+                {bl.isArchived && <span className="codascope-notes-backlink-badge">(archived)</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Archive confirmation dialog */}
       {showArchiveConfirm && (

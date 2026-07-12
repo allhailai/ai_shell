@@ -1845,3 +1845,232 @@
 .codascope-notes-item--inbox .codascope-notes-item-icon {
   color: var(--color-accent);
 }
+
+/* ── Tag Browser Bar ─────────────────────────────────────────────────── */
+
+.codascope-notes-tag-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4);
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+  color: var(--color-text-tertiary);
+}
+
+.codascope-notes-tag-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.codascope-notes-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-tag-pill:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.codascope-notes-tag-pill-active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-notes-tag-pill-count {
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  min-width: 14px;
+  text-align: center;
+}
+
+.codascope-notes-tag-pill-active .codascope-notes-tag-pill-count {
+  color: var(--color-accent);
+}
+
+/* ── Select Button ───────────────────────────────────────────────────── */
+
+.codascope-notes-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-select-btn:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-secondary);
+}
+
+.codascope-notes-select-btn-active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+/* ── Selection Checkbox ──────────────────────────────────────────────── */
+
+.codascope-notes-item-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast);
+}
+
+.codascope-notes-item-selected .codascope-notes-item-checkbox {
+  color: var(--color-accent);
+}
+
+.codascope-notes-item-selected {
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent) !important;
+}
+
+/* ── Bulk Action Bar ─────────────────────────────────────────────────── */
+
+.codascope-notes-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.codascope-notes-bulk-bar-count {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-accent);
+}
+
+.codascope-notes-bulk-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-notes-bulk-bar-actions .codascope-btn {
+  font-size: var(--text-xs);
+}
+
+.codascope-notes-bulk-bar-actions .codascope-btn svg {
+  margin-right: var(--space-1);
+}
+
+/* ── Backlinks ───────────────────────────────────────────────────────── */
+
+.codascope-notes-backlinks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-backlinks-toggle:hover {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.codascope-notes-backlinks-toggle-active {
+  color: var(--color-accent);
+}
+
+.codascope-notes-backlinks {
+  border-top: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  padding: var(--space-2) var(--space-4);
+  flex-shrink: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.codascope-notes-backlinks-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.codascope-notes-backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.codascope-notes-backlink-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-backlink-item:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-backlink-item:disabled {
+  cursor: default;
+}
+
+.codascope-notes-backlink-item-archived {
+  color: var(--color-text-quaternary);
+  font-style: italic;
+}
+
+.codascope-notes-backlink-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-notes-backlink-badge {
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  flex-shrink: 0;
+}

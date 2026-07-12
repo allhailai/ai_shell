@@ -45,6 +45,7 @@ import type {
   NoteEntry,
   NoteFolderEntry,
   NoteArchiveMeta,
+  NoteTagIndexEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
@@ -122,6 +123,11 @@ export interface NoteVersionContent {
 interface NotesIndex {
   generatedAt: string;
   notes: NoteEntry[];
+}
+
+interface TagIndex {
+  generatedAt: string;
+  tags: NoteTagIndexEntry[];
 }
 
 /* ── Service ──────────────────────────────────────────────────────── */
@@ -811,6 +817,170 @@ export class CodaScopeNoteService {
       JSON.stringify(index, null, 2),
       "utf-8",
     );
+  }
+
+  /* ── Tag Index ──────────────────────────────────────────────────── */
+
+  /**
+   * Build (or return cached) tag index for a scope/visibility.
+   * Scans all notes, extracts tags from frontmatter.
+   * Cached in _notes/_tag-index.json with 60s TTL.
+   */
+  async buildTagIndex(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+  ): Promise<NoteTagIndexEntry[]> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir || !existsSync(notesDir)) return [];
+
+    // Check cache
+    const cachePath = path.join(notesDir, "_tag-index.json");
+    if (existsSync(cachePath)) {
+      try {
+        const data: TagIndex = JSON.parse(readFileSync(cachePath, "utf-8"));
+        const age = Date.now() - new Date(data.generatedAt).getTime();
+        if (age < 60_000) return data.tags;
+      } catch { /* regenerate */ }
+    }
+
+    // Scan all notes recursively
+    const tagCounts = new Map<string, number>();
+    this.scanTagsRecursive(notesDir, tagCounts);
+
+    const tags: NoteTagIndexEntry[] = Array.from(tagCounts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Write cache
+    try {
+      const index: TagIndex = { generatedAt: new Date().toISOString(), tags };
+      writeFileSync(cachePath, JSON.stringify(index, null, 2), "utf-8");
+    } catch { /* best effort */ }
+
+    return tags;
+  }
+
+  /** Recursively scan notes and collect tag counts. */
+  private scanTagsRecursive(dir: string, tagCounts: Map<string, number>): void {
+    if (!existsSync(dir)) return;
+    try {
+      const items = readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        if (item.name.startsWith(".")) continue;
+        if (item.name.startsWith("_") && item.name !== "_inbox") continue;
+        if (item.name.endsWith(".assets") || item.name.endsWith(".versions")) continue;
+
+        const fullPath = path.join(dir, item.name);
+        if (item.isDirectory()) {
+          this.scanTagsRecursive(fullPath, tagCounts);
+        } else if (item.name.endsWith(".md")) {
+          try {
+            const content = readFileSync(fullPath, "utf-8");
+            const { frontmatter } = this.parseFrontmatter(content);
+            for (const tag of frontmatter.tags) {
+              tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+            }
+          } catch { /* skip unreadable */ }
+        }
+      }
+    } catch { /* best effort */ }
+  }
+
+  /* ── Find Note by ID ────────────────────────────────────────────── */
+
+  /**
+   * Find a note by its frontmatter UUID within a scope/visibility.
+   * Returns { title, path } or null if not found.
+   */
+  async findNoteById(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    noteId: string,
+  ): Promise<{ title: string; path: string } | null> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir || !existsSync(notesDir)) return null;
+    return this.findNoteByIdInDir(notesDir, notesDir, noteId);
+  }
+
+  /** Recursively search for a note by its frontmatter id. */
+  private findNoteByIdInDir(
+    dir: string,
+    rootDir: string,
+    noteId: string,
+  ): { title: string; path: string } | null {
+    if (!existsSync(dir)) return null;
+    try {
+      const items = readdirSync(dir, { withFileTypes: true });
+      for (const item of items) {
+        if (item.name.startsWith(".")) continue;
+        if (item.name.startsWith("_") && item.name !== "_inbox") continue;
+        if (item.name.endsWith(".assets") || item.name.endsWith(".versions")) continue;
+
+        const fullPath = path.join(dir, item.name);
+        if (item.isDirectory()) {
+          const found = this.findNoteByIdInDir(fullPath, rootDir, noteId);
+          if (found) return found;
+        } else if (item.name.endsWith(".md")) {
+          try {
+            const content = readFileSync(fullPath, "utf-8");
+            const { frontmatter } = this.parseFrontmatter(content);
+            if (frontmatter.id === noteId || frontmatter.id.toLowerCase() === noteId.toLowerCase()) {
+              return {
+                title: frontmatter.title,
+                path: path.relative(rootDir, fullPath),
+              };
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch { /* best effort */ }
+    return null;
+  }
+
+  /* ── Bulk Archive ───────────────────────────────────────────────── */
+
+  /**
+   * Archive multiple notes at once.
+   * Returns { archived: number, failed: string[] }.
+   */
+  async bulkArchive(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    noteIds: string[],
+    reason?: string,
+  ): Promise<{ archived: number; failed: string[]; archivedPaths: { noteId: string; path: string }[] }> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return { archived: 0, failed: noteIds, archivedPaths: [] };
+
+    let archived = 0;
+    const failed: string[] = [];
+    const archivedPaths: { noteId: string; path: string }[] = [];
+
+    for (const noteId of noteIds) {
+      // Find the note by its frontmatter id
+      const found = await this.findNoteById(scope, visibility, opts, noteId);
+      if (!found) {
+        failed.push(noteId);
+        continue;
+      }
+
+      try {
+        const meta = await this.archiveNote(scope, visibility, opts, found.path, reason);
+        if (meta) {
+          archived++;
+          archivedPaths.push({ noteId, path: found.path });
+        } else {
+          failed.push(noteId);
+        }
+      } catch {
+        failed.push(noteId);
+      }
+    }
+
+    return { archived, failed, archivedPaths };
   }
 
   /* ── Private Helpers ─────────────────────────────────────────────── */

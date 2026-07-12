@@ -33,6 +33,7 @@ import { CodaScopeNoteService } from "../services/codaScopeNoteService.js";
 import { CodaScopeNoteAnnotationService } from "../services/codaScopeNoteAnnotationService.js";
 import { CodaScopeNoteAuditService } from "../services/codaScopeNoteAuditService.js";
 import { CodaScopeNoteUserPrefsService } from "../services/codaScopeNoteUserPrefsService.js";
+import { CodaScopeNoteLinkIndexService } from "../services/codaScopeNoteLinkIndexService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ export interface CodaScopeServices {
   noteAnnotationSvc: CodaScopeNoteAnnotationService;
   noteAuditSvc: CodaScopeNoteAuditService;
   noteUserPrefsSvc: CodaScopeNoteUserPrefsService;
+  noteLinkIndexSvc: CodaScopeNoteLinkIndexService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -121,6 +123,7 @@ let noteService: CodaScopeNoteService | null = null;
 let noteAnnotationService: CodaScopeNoteAnnotationService | null = null;
 let noteAuditService: CodaScopeNoteAuditService | null = null;
 let noteUserPrefsService: CodaScopeNoteUserPrefsService | null = null;
+let noteLinkIndexService: CodaScopeNoteLinkIndexService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -238,6 +241,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteUserPrefsService) noteUserPrefsService = new CodaScopeNoteUserPrefsService(root);
   else noteUserPrefsService.setRoot(root);
 
+  if (!noteLinkIndexService) noteLinkIndexService = new CodaScopeNoteLinkIndexService(noteService);
+  else noteLinkIndexService.setNoteService(noteService);
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -266,6 +272,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     noteAnnotationSvc: noteAnnotationService,
     noteAuditSvc: noteAuditService,
     noteUserPrefsSvc: noteUserPrefsService,
+    noteLinkIndexSvc: noteLinkIndexService,
   };
 }
 

@@ -663,6 +663,54 @@ export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId"
   notePath: string;
 }
 
+/** Tag index entry returned by the tag browser endpoint. */
+export interface NoteTagIndexEntry {
+  tag: string;
+  count: number;
+}
+
+/** Link index stored on disk (_link-index/notes-links.json). */
+export interface NoteLinkIndex {
+  generatedAt: string;
+  /** Map of targetNoteId → array of sourceNoteIds that link to it */
+  links: Record<string, string[]>;
+}
+
+/** Backlink entry returned to the frontend. */
+export interface NoteBacklink {
+  noteId: string;
+  title: string;
+  path: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  isArchived?: boolean;
+}
+
+/** Bulk archive request body. */
+export interface BulkArchiveRequest {
+  noteIds: string[];
+  reason?: string;
+}
+
+/** Bulk archive response. */
+export interface BulkArchiveResponse {
+  archived: number;
+  failed: string[];
+  correlationId: string;
+}
+
+/** Bulk move request body. */
+export interface BulkMoveRequest {
+  noteIds: string[];
+  fromScope: NoteScope;
+  fromVisibility: NoteVisibility;
+  fromOpts: { userId?: string; projectId?: string; epicId?: string };
+  toScope: NoteScope;
+  toVisibility: NoteVisibility;
+  toOpts: { userId?: string; projectId?: string; epicId?: string };
+  toFolder: string;
+}
+
 /** Metadata stored in _archive-meta.json inside each archive envelope */
 export interface NoteArchiveMeta {
   noteId: string;

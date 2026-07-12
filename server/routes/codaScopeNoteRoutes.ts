@@ -97,6 +97,38 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     res.json({ results });
   }));
 
+  // ── Backlinks ───────────────────────────────────────────────────────
+  // Placed BEFORE :scope/:visibility so /api/codascope/notes/backlinks/:noteId doesn't collide
+
+  app.get("/api/codascope/notes/backlinks/:noteId", wrap(async (req, res) => {
+    const { noteLinkIndexSvc } = await ensureServices();
+    const noteId = param(req, "noteId");
+
+    const scopeParam = (req.query.scope as string) ?? "codascope";
+    if (!VALID_SCOPES.includes(scopeParam as NoteScope)) {
+      throw httpError(`Invalid scope: "${scopeParam}"`, 400, "invalid_scope");
+    }
+    const visibilityParam = (req.query.visibility as string) ?? "shared";
+    if (!VALID_VISIBILITIES.includes(visibilityParam as NoteVisibility)) {
+      throw httpError(`Invalid visibility: "${visibilityParam}"`, 400, "invalid_visibility");
+    }
+
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const opts: NoteResolveOpts = {
+      userId,
+      projectId: (req.query.projectId as string) ?? undefined,
+      epicId: (req.query.epicId as string) ?? undefined,
+    };
+
+    const backlinks = await noteLinkIndexSvc.getBacklinks(
+      scopeParam as NoteScope,
+      visibilityParam as NoteVisibility,
+      opts,
+      noteId,
+    );
+    res.json({ backlinks });
+  }));
+
   // ══════════════════════════════════════════════════════════════════════
   // ── STARRED / RECENTS / QUICK CAPTURE ROUTES ─────────────────────────
   // Placed BEFORE :scope/:visibility to avoid wildcard collision.
@@ -232,6 +264,15 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const folders = await noteSvc.listFolders(scope, visibility, opts);
     res.json({ folders });
+  }));
+
+  // ── Tag Index ───────────────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/:scope/:visibility/tags", wrap(async (req, res) => {
+    const { noteSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const tags = await noteSvc.buildTagIndex(scope, visibility, opts);
+    res.json({ tags });
   }));
 
   // ── Create Folder ───────────────────────────────────────────────────
@@ -555,6 +596,141 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   }));
 
   // ══════════════════════════════════════════════════════════════════════
+  // ── BULK OPERATION ROUTES ─────────────────────────────────────────────
+  // Must be registered BEFORE the generic wildcard CRUD routes.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── Bulk Archive ───────────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/bulk/archive", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc, noteLinkIndexSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+
+    const { noteIds, reason } = req.body as { noteIds?: string[]; reason?: string };
+    if (!noteIds || !Array.isArray(noteIds) || noteIds.length === 0) {
+      throw httpError("noteIds array is required.", 400, "invalid_input");
+    }
+    if (noteIds.length > 100) {
+      throw httpError("Cannot archive more than 100 notes at once.", 400, "too_many");
+    }
+
+    const correlationId = randomUUID();
+    const result = await noteSvc.bulkArchive(scope, visibility, opts, noteIds, reason);
+
+    // Audit log each archived note with the same correlationId
+    for (const ap of result.archivedPaths) {
+      noteAuditSvc.log({
+        event: "note.archived",
+        timestamp: new Date().toISOString(),
+        actor: opts.userId ?? "default",
+        noteId: ap.noteId,
+        scope,
+        visibility,
+        path: ap.path,
+        correlationId,
+        metadata: reason ? { reason, bulk: true } : { bulk: true },
+      });
+
+      // Remove from link index (fire-and-forget)
+      try { noteLinkIndexSvc.removeNote(scope, visibility, opts, ap.noteId); } catch { /* best effort */ }
+    }
+
+    res.json({
+      archived: result.archived,
+      failed: result.failed,
+      correlationId,
+    });
+  }));
+
+  // ── Bulk Move ──────────────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/bulk/move", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc } = await ensureServices();
+
+    const {
+      noteIds,
+      fromScope, fromVisibility, fromOpts,
+      toScope, toVisibility, toOpts,
+      toFolder,
+    } = req.body as {
+      noteIds?: string[];
+      fromScope?: string;
+      fromVisibility?: string;
+      fromOpts?: NoteResolveOpts;
+      toScope?: string;
+      toVisibility?: string;
+      toOpts?: NoteResolveOpts;
+      toFolder?: string;
+    };
+
+    if (!noteIds || !Array.isArray(noteIds) || noteIds.length === 0) {
+      throw httpError("noteIds array is required.", 400, "invalid_input");
+    }
+    if (!fromScope || !fromVisibility || !toScope || !toVisibility || toFolder === undefined) {
+      throw httpError("fromScope, fromVisibility, toScope, toVisibility, and toFolder are required.", 400, "invalid_input");
+    }
+    if (noteIds.length > 100) {
+      throw httpError("Cannot move more than 100 notes at once.", 400, "too_many");
+    }
+
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const correlationId = randomUUID();
+    let moved = 0;
+    const failed: string[] = [];
+
+    for (const noteId of noteIds) {
+      // Find the note by its frontmatter id
+      const found = await noteSvc.findNoteById(
+        fromScope as NoteScope,
+        fromVisibility as NoteVisibility,
+        { ...fromOpts, userId },
+        noteId,
+      );
+      if (!found) {
+        failed.push(noteId);
+        continue;
+      }
+
+      const destPath = toFolder ? `${toFolder}/${found.path.split("/").pop()}` : found.path.split("/").pop()!;
+
+      try {
+        const ok = await noteSvc.moveNote({
+          fromScope: fromScope as NoteScope,
+          fromVisibility: fromVisibility as NoteVisibility,
+          fromOpts: { ...fromOpts, userId },
+          fromPath: found.path,
+          toScope: toScope as NoteScope,
+          toVisibility: toVisibility as NoteVisibility,
+          toOpts: { ...toOpts, userId },
+          toPath: destPath,
+        });
+        if (ok) {
+          moved++;
+          try {
+            noteAuditSvc.log({
+              event: "note.moved",
+              timestamp: new Date().toISOString(),
+              actor: userId,
+              noteId,
+              scope: toScope as NoteScope,
+              visibility: toVisibility as NoteVisibility,
+              path: destPath,
+              correlationId,
+              metadata: { fromScope, fromVisibility, fromPath: found.path, bulk: true },
+            });
+          } catch { /* best effort */ }
+        } else {
+          failed.push(noteId);
+        }
+      } catch {
+        failed.push(noteId);
+      }
+    }
+
+    res.json({ moved, failed, correlationId });
+  }));
+
+  // ══════════════════════════════════════════════════════════════════════
   // ── GENERIC NOTE CRUD ROUTES ──────────────────────────────────────────
   // These MUST come LAST because `*path` would greedily match suffixes.
   // ══════════════════════════════════════════════════════════════════════
@@ -639,6 +815,15 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       });
       return;
     }
+
+    // Fire-and-forget: update link index for backlinks
+    try {
+      const { noteLinkIndexSvc } = await ensureServices();
+      const note = await noteSvc.readNote(scope, visibility, opts, notePath);
+      if (note) {
+        noteLinkIndexSvc.updateLinksForNote(scope, visibility, opts, note.frontmatter.id, content);
+      }
+    } catch { /* best effort */ }
 
     // Audit log (best effort — don't read back note for every auto-save,
     // use a lightweight approach: read frontmatter from the content we just saved)

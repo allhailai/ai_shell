@@ -858,3 +858,32 @@ export function IconCapture({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Tag / label */
+export function IconTag({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M1.5 2.5h5l7 7-5 5-7-7z" />
+      <circle cx="5" cy="5.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Empty checkbox */
+export function IconCheckbox({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+    </svg>
+  );
+}
+
+/** Checked checkbox */
+export function IconCheckboxChecked({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+      <polyline points="5.5 8 7.5 10 10.5 6" />
+    </svg>
+  );
+}

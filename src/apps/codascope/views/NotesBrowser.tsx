@@ -8,9 +8,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
-import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef } from "../codaScopeTypes";
+import { NoteMoveDialog } from "../components/NoteMoveDialog";
+import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef, NoteTagIndexEntry } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
 
@@ -180,6 +181,18 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [isSearching, setIsSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Tag browser state
+  const [tags, setTags] = useState<NoteTagIndexEntry[]>([]);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+
+  // Bulk selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Map<string, { path: string; title: string }>>(new Map());
+  const [bulkArchiving, setBulkArchiving] = useState(false);
+  const [showBulkArchiveConfirm, setShowBulkArchiveConfirm] = useState(false);
+  const [showBulkMove, setShowBulkMove] = useState(false);
+  const [bulkArchiveReason, setBulkArchiveReason] = useState("");
+
   // Visibility tabs for codascope-level notes (shared/private)
   const showVisibilityTabs = !propVisibility && scope === "codascope";
 
@@ -203,6 +216,22 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   useEffect(() => {
     void fetchNotes();
   }, [fetchNotes]);
+
+  // ── Fetch tags ──────────────────────────────────────────────────
+  const fetchTags = useCallback(async () => {
+    try {
+      const params = new URLSearchParams(queryString);
+      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/tags?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTags(data.tags ?? []);
+      }
+    } catch { /* best effort */ }
+  }, [scope, visibility, queryString]);
+
+  useEffect(() => {
+    void fetchTags();
+  }, [fetchTags]);
 
   // ── Fetch starred ──────────────────────────────────────────────────
   const fetchStarred = useCallback(async () => {
@@ -289,12 +318,26 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     // Apply starred filter
     if (showStarredOnly) {
       result = result.filter((n) => {
-        // For folders, never hide them in starred mode
         if (n.isFolder) return false;
-        // We need the noteId — notes in the list don't have it directly,
-        // so we check against the starredNotes by path match
         return starredNotes.some((s) => s.path === n.path && s.scope === scope && s.visibility === visibility);
       });
+    }
+
+    // Apply tag filter
+    if (activeTag) {
+      result = result.filter(
+        (n) => n.isFolder || n.tags.some((t) => t.toLowerCase() === activeTag.toLowerCase()),
+      );
+    }
+
+    // Apply tag: search modifier
+    const tagSearchMatch = search.trim().match(/^tag:(\S+)$/i);
+    if (tagSearchMatch) {
+      const tagQuery = tagSearchMatch[1].toLowerCase();
+      result = result.filter(
+        (n) => n.isFolder || n.tags.some((t) => t.toLowerCase().includes(tagQuery)),
+      );
+      return result;
     }
 
     if (!search.trim() || search.trim().length >= 3) return result;
@@ -304,7 +347,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         n.title.toLowerCase().includes(q) ||
         n.tags.some((t) => t.toLowerCase().includes(q)),
     );
-  }, [notes, search, showStarredOnly, starredNotes, scope, visibility]);
+  }, [notes, search, showStarredOnly, starredNotes, scope, visibility, activeTag]);
 
   // Are we showing search results?
   const showSearchResults = search.trim().length >= 3;
@@ -441,6 +484,70 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     setCreating(false);
   }, [scope, visibility, queryString, currentFolder, handleNoteClick]);
 
+  // ── Bulk selection handlers ─────────────────────────────────────
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedNoteIds(new Map());
+  }, []);
+
+  const toggleNoteSelection = useCallback(async (entry: NoteEntry) => {
+    // Need the noteId from the entry — fetch if not cached
+    const existingId = getStarredId(entry);
+    let noteId = existingId;
+
+    if (!noteId) {
+      try {
+        const params = new URLSearchParams(queryString);
+        const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${entry.path}?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          noteId = data.frontmatter?.id ?? null;
+        }
+      } catch { /* best effort */ }
+    }
+
+    if (!noteId) return;
+
+    setSelectedNoteIds((prev) => {
+      const next = new Map(prev);
+      if (next.has(noteId)) {
+        next.delete(noteId);
+      } else {
+        next.set(noteId, { path: entry.path, title: entry.title });
+      }
+      return next;
+    });
+  }, [getStarredId, queryString, scope, visibility]);
+
+  const handleBulkArchive = useCallback(async () => {
+    setBulkArchiving(true);
+    try {
+      const params = new URLSearchParams(queryString);
+      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/bulk/archive?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          noteIds: Array.from(selectedNoteIds.keys()),
+          reason: bulkArchiveReason.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        exitSelectionMode();
+        setShowBulkArchiveConfirm(false);
+        setBulkArchiveReason("");
+        void fetchNotes();
+        void fetchTags();
+      }
+    } catch { /* best effort */ }
+    setBulkArchiving(false);
+  }, [scope, visibility, queryString, selectedNoteIds, bulkArchiveReason, exitSelectionMode, fetchNotes, fetchTags]);
+
+  const handleBulkMoved = useCallback(() => {
+    exitSelectionMode();
+    setShowBulkMove(false);
+    void fetchNotes();
+  }, [exitSelectionMode, fetchNotes]);
+
   // ── Highlight match in text ────────────────────────────────────────
   const highlightMatch = useCallback((text: string, query: string): React.ReactNode => {
     if (!query) return text;
@@ -564,6 +671,17 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             {showStarredOnly ? <IconStarFilled size={14} /> : <IconStar size={14} />}
           </button>
 
+          {/* Bulk select toggle */}
+          <button
+            className={`codascope-notes-select-btn${selectionMode ? " codascope-notes-select-btn-active" : ""}`}
+            onClick={() => selectionMode ? exitSelectionMode() : setSelectionMode(true)}
+            title={selectionMode ? "Exit selection" : "Select notes"}
+            type="button"
+          >
+            {selectionMode ? <IconCheckboxChecked size={14} /> : <IconCheckbox size={14} />}
+            <span>{selectionMode ? "Done" : "Select"}</span>
+          </button>
+
           {/* Create note button */}
           <button
             className="codascope-btn codascope-btn-primary"
@@ -594,6 +712,24 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           >
             Private
           </button>
+        </div>
+      )}
+
+      {/* Tag browser bar */}
+      {tags.length > 0 && !showSearchResults && (
+        <div className="codascope-notes-tag-bar">
+          <IconTag size={12} />
+          {tags.map((t) => (
+            <button
+              key={t.tag}
+              className={`codascope-notes-tag-pill${activeTag === t.tag ? " codascope-notes-tag-pill-active" : ""}`}
+              onClick={() => setActiveTag((prev) => prev === t.tag ? null : t.tag)}
+              type="button"
+            >
+              <span>{t.tag}</span>
+              <span className="codascope-notes-tag-pill-count">{t.count}</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -725,10 +861,20 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             ) : (
               <button
                 key={entry.path}
-                className="codascope-notes-item"
-                onClick={() => handleNoteClick(entry.path)}
+                className={`codascope-notes-item${selectionMode && selectedNoteIds.has(getStarredId(entry) ?? "") ? " codascope-notes-item-selected" : ""}`}
+                onClick={() => selectionMode ? void toggleNoteSelection(entry) : handleNoteClick(entry.path)}
                 type="button"
               >
+                {/* Selection checkbox */}
+                {selectionMode && (
+                  <div className="codascope-notes-item-checkbox">
+                    {selectedNoteIds.has(getStarredId(entry) ?? "") ? (
+                      <IconCheckboxChecked size={14} />
+                    ) : (
+                      <IconCheckbox size={14} />
+                    )}
+                  </div>
+                )}
                 <div className="codascope-notes-item-icon">
                   <IconFile size={14} />
                 </div>
@@ -767,6 +913,39 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           )
         )}
       </div>
+
+      {/* Bulk action bar */}
+      {selectionMode && selectedNoteIds.size > 0 && (
+        <div className="codascope-notes-bulk-bar">
+          <span className="codascope-notes-bulk-bar-count">
+            {selectedNoteIds.size} selected
+          </span>
+          <div className="codascope-notes-bulk-bar-actions">
+            <button
+              className="codascope-btn codascope-btn-primary codascope-btn-sm"
+              onClick={() => setShowBulkArchiveConfirm(true)}
+              type="button"
+            >
+              <IconArchive size={12} />
+              Archive
+            </button>
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={() => setShowBulkMove(true)}
+              type="button"
+            >
+              Move
+            </button>
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={exitSelectionMode}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Archive section (collapsible) */}
       {!showSearchResults && (
@@ -832,6 +1011,64 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             </div>
           </div>
         </div>
+      )}
+
+      {/* Bulk Archive Confirmation Dialog */}
+      {showBulkArchiveConfirm && (
+        <div className="codascope-notes-archive-dialog-overlay" onClick={() => { setShowBulkArchiveConfirm(false); setBulkArchiveReason(""); }}>
+          <div className="codascope-notes-archive-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="codascope-notes-archive-dialog-header">
+              <IconArchive size={16} />
+              <span>Archive {selectedNoteIds.size} Note{selectedNoteIds.size !== 1 ? "s" : ""}?</span>
+            </div>
+            <p className="codascope-notes-archive-dialog-message">
+              {selectedNoteIds.size} note{selectedNoteIds.size !== 1 ? "s" : ""} will be moved to the archive. You can restore them at any time.
+            </p>
+            <div className="codascope-notes-archive-dialog-reason">
+              <label htmlFor="bulk-archive-reason">Reason (optional)</label>
+              <input
+                id="bulk-archive-reason"
+                type="text"
+                className="codascope-notes-archive-reason-input"
+                placeholder="e.g. No longer relevant"
+                value={bulkArchiveReason}
+                onChange={(e) => setBulkArchiveReason(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="codascope-notes-archive-dialog-actions">
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+                onClick={() => { setShowBulkArchiveConfirm(false); setBulkArchiveReason(""); }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="codascope-btn codascope-btn-primary codascope-btn-sm"
+                onClick={handleBulkArchive}
+                disabled={bulkArchiving}
+                type="button"
+              >
+                {bulkArchiving ? "Archiving…" : "Archive"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Move Dialog */}
+      {showBulkMove && (
+        <NoteMoveDialog
+          open={showBulkMove}
+          fromScope={scope}
+          fromVisibility={visibility}
+          fromPath=""
+          fromOpts={urlContext?.queryParams ?? {}}
+          onMoved={handleBulkMoved}
+          onClose={() => setShowBulkMove(false)}
+          bulkNoteIds={Array.from(selectedNoteIds.keys())}
+        />
       )}
     </div>
   );

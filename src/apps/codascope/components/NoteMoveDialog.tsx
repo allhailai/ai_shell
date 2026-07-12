@@ -26,6 +26,8 @@ interface NoteMoveDialogProps {
   onMoved: () => void;
   /** Called to close the dialog */
   onClose: () => void;
+  /** Optional: note IDs for bulk move. When provided, uses bulk/move API. */
+  bulkNoteIds?: string[];
 }
 
 /* ── Scope & visibility options ──────────────────────────────────────── */
@@ -51,6 +53,7 @@ export function NoteMoveDialog({
   fromOpts,
   onMoved,
   onClose,
+  bulkNoteIds,
 }: NoteMoveDialogProps) {
   const [targetScope, setTargetScope] = useState<NoteScope>(fromScope);
   const [targetVisibility, setTargetVisibility] = useState<NoteVisibility>(fromVisibility);
@@ -123,27 +126,54 @@ export function NoteMoveDialog({
     setMoving(true);
     setError(null);
     try {
-      const res = await fetch("/api/codascope/notes/move", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fromScope,
-          fromVisibility,
-          fromPath,
-          fromOpts,
-          toScope: targetScope,
-          toVisibility: targetVisibility,
-          toPath: destinationPath,
-          toOpts: targetOpts,
-        }),
-      });
+      if (bulkNoteIds && bulkNoteIds.length > 0) {
+        // Bulk move
+        const res = await fetch("/api/codascope/notes/bulk/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            noteIds: bulkNoteIds,
+            fromScope,
+            fromVisibility,
+            fromOpts,
+            toScope: targetScope,
+            toVisibility: targetVisibility,
+            toOpts: targetOpts,
+            toFolder: targetFolder,
+          }),
+        });
 
-      if (res.ok) {
-        onMoved();
-        onClose();
+        if (res.ok) {
+          onMoved();
+          onClose();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setError(data.message ?? "Bulk move failed.");
+        }
       } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.message ?? "Move failed.");
+        // Single note move
+        const res = await fetch("/api/codascope/notes/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fromScope,
+            fromVisibility,
+            fromPath,
+            fromOpts,
+            toScope: targetScope,
+            toVisibility: targetVisibility,
+            toPath: destinationPath,
+            toOpts: targetOpts,
+          }),
+        });
+
+        if (res.ok) {
+          onMoved();
+          onClose();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setError(data.message ?? "Move failed.");
+        }
       }
     } catch {
       setError("Network error.");
