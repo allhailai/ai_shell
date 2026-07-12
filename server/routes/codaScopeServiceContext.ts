@@ -34,6 +34,8 @@ import { CodaScopeNoteAnnotationService } from "../services/codaScopeNoteAnnotat
 import { CodaScopeNoteAuditService } from "../services/codaScopeNoteAuditService.js";
 import { CodaScopeNoteUserPrefsService } from "../services/codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteLinkIndexService } from "../services/codaScopeNoteLinkIndexService.js";
+import { CodaScopeNoteExportService } from "../services/codaScopeNoteExportService.js";
+import { CodaScopeNoteImportService } from "../services/codaScopeNoteImportService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -75,6 +77,8 @@ export interface CodaScopeServices {
   noteAuditSvc: CodaScopeNoteAuditService;
   noteUserPrefsSvc: CodaScopeNoteUserPrefsService;
   noteLinkIndexSvc: CodaScopeNoteLinkIndexService;
+  noteExportSvc: CodaScopeNoteExportService;
+  noteImportSvc: CodaScopeNoteImportService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -124,6 +128,8 @@ let noteAnnotationService: CodaScopeNoteAnnotationService | null = null;
 let noteAuditService: CodaScopeNoteAuditService | null = null;
 let noteUserPrefsService: CodaScopeNoteUserPrefsService | null = null;
 let noteLinkIndexService: CodaScopeNoteLinkIndexService | null = null;
+let noteExportService: CodaScopeNoteExportService | null = null;
+let noteImportService: CodaScopeNoteImportService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -244,6 +250,12 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteLinkIndexService) noteLinkIndexService = new CodaScopeNoteLinkIndexService(noteService);
   else noteLinkIndexService.setNoteService(noteService);
 
+  if (!noteExportService) noteExportService = new CodaScopeNoteExportService(root, noteService, noteAuditService, noteAnnotationService);
+  else { noteExportService.setRoot(root); noteExportService.setServices(noteService, noteAuditService, noteAnnotationService); }
+
+  if (!noteImportService) noteImportService = new CodaScopeNoteImportService(root, noteService, noteAuditService);
+  else { noteImportService.setRoot(root); noteImportService.setServices(noteService, noteAuditService); }
+
   return {
     projectSvc: projectService,
     wikiSvc: wikiService,
@@ -273,6 +285,8 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     noteAuditSvc: noteAuditService,
     noteUserPrefsSvc: noteUserPrefsService,
     noteLinkIndexSvc: noteLinkIndexService,
+    noteExportSvc: noteExportService,
+    noteImportSvc: noteImportService,
   };
 }
 

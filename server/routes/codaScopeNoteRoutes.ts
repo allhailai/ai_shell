@@ -11,6 +11,7 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
 import { randomUUID } from "node:crypto";
+import multer from "multer";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -67,6 +68,153 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
 
 
+  // ── Export / Import ────────────────────────────────────────────────
+  // Placed BEFORE :scope/:visibility so these fixed paths don't collide.
+
+  // Larger multer instance for import (500 MB)
+  const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+
+  /** POST /api/codascope/notes/export — start export */
+  app.post("/api/codascope/notes/export", wrap(async (req, res) => {
+    const { noteExportSvc, noteAuditSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+
+    const {
+      scope: scopeParam,
+      visibility: visibilityParam,
+      projectId,
+      epicId,
+      notePaths,
+      includeVersions,
+      includeAnnotations,
+    } = req.body as {
+      scope?: string;
+      visibility?: string;
+      projectId?: string;
+      epicId?: string;
+      notePaths?: string[];
+      includeVersions?: boolean;
+      includeAnnotations?: boolean;
+    };
+
+    if (!scopeParam || !VALID_SCOPES.includes(scopeParam as NoteScope)) {
+      throw httpError("Valid scope is required.", 400, "invalid_input");
+    }
+    if (!visibilityParam || !VALID_VISIBILITIES.includes(visibilityParam as NoteVisibility)) {
+      throw httpError("Valid visibility is required.", 400, "invalid_input");
+    }
+
+    const opts: NoteResolveOpts = { userId, projectId, epicId };
+    const exportId = await noteExportSvc.generateExport(
+      scopeParam as NoteScope,
+      visibilityParam as NoteVisibility,
+      opts,
+      { notePaths, includeVersions, includeAnnotations },
+    );
+
+    res.json({ exportId });
+  }));
+
+  /** GET /api/codascope/notes/export/:id — download ZIP */
+  app.get("/api/codascope/notes/export/:id", wrap(async (req, res) => {
+    const { noteExportSvc } = await ensureServices();
+    const exportId = param(req, "id");
+
+    const zipPath = noteExportSvc.getExportFile(exportId);
+    if (!zipPath) {
+      throw httpError("Export not found or expired.", 404, "not_found");
+    }
+
+    res.download(zipPath, `codascope-notes-export.zip`);
+  }));
+
+  /** POST /api/codascope/notes/import/preview — upload ZIP, get preview */
+  app.post("/api/codascope/notes/import/preview", importUpload.single("file"), wrap(async (req, res) => {
+    const { noteImportSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+
+    const file = (req as any).file as { buffer: Buffer } | undefined;
+    if (!file) {
+      throw httpError("ZIP file is required.", 400, "invalid_input");
+    }
+
+    const {
+      scope: scopeParam,
+      visibility: visibilityParam,
+      projectId,
+      epicId,
+    } = req.body as {
+      scope?: string;
+      visibility?: string;
+      projectId?: string;
+      epicId?: string;
+    };
+
+    if (!scopeParam || !VALID_SCOPES.includes(scopeParam as NoteScope)) {
+      throw httpError("Valid scope is required.", 400, "invalid_input");
+    }
+    if (!visibilityParam || !VALID_VISIBILITIES.includes(visibilityParam as NoteVisibility)) {
+      throw httpError("Valid visibility is required.", 400, "invalid_input");
+    }
+
+    const opts: NoteResolveOpts = { userId, projectId, epicId };
+    const preview = await noteImportSvc.previewImport(
+      file.buffer,
+      scopeParam as NoteScope,
+      visibilityParam as NoteVisibility,
+      opts,
+    );
+
+    res.json(preview);
+  }));
+
+  /** POST /api/codascope/notes/import/execute — execute import */
+  app.post("/api/codascope/notes/import/execute", importUpload.single("file"), wrap(async (req, res) => {
+    const { noteImportSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+
+    const file = (req as any).file as { buffer: Buffer } | undefined;
+    if (!file) {
+      throw httpError("ZIP file is required.", 400, "invalid_input");
+    }
+
+    const {
+      scope: scopeParam,
+      visibility: visibilityParam,
+      projectId,
+      epicId,
+      collisionStrategy,
+    } = req.body as {
+      scope?: string;
+      visibility?: string;
+      projectId?: string;
+      epicId?: string;
+      collisionStrategy?: string;
+    };
+
+    if (!scopeParam || !VALID_SCOPES.includes(scopeParam as NoteScope)) {
+      throw httpError("Valid scope is required.", 400, "invalid_input");
+    }
+    if (!visibilityParam || !VALID_VISIBILITIES.includes(visibilityParam as NoteVisibility)) {
+      throw httpError("Valid visibility is required.", 400, "invalid_input");
+    }
+
+    const validStrategies = ["skip", "rename", "import-as-copy"];
+    const strategy = validStrategies.includes(collisionStrategy ?? "")
+      ? (collisionStrategy as "skip" | "rename" | "import-as-copy")
+      : "skip";
+
+    const opts: NoteResolveOpts = { userId, projectId, epicId };
+    const report = await noteImportSvc.executeImport(
+      file.buffer,
+      scopeParam as NoteScope,
+      visibilityParam as NoteVisibility,
+      opts,
+      strategy,
+    );
+
+    res.json(report);
+  }));
 
   // ── Search ──────────────────────────────────────────────────────────
   // Placed BEFORE :scope/:visibility so /api/codascope/notes/search doesn't collide

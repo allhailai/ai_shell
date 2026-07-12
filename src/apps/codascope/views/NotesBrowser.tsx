@@ -8,9 +8,11 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
+import { NoteExportDialog } from "../components/NoteExportDialog";
+import { NoteImportDialog } from "../components/NoteImportDialog";
 import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef, NoteTagIndexEntry } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
@@ -192,6 +194,10 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [showBulkArchiveConfirm, setShowBulkArchiveConfirm] = useState(false);
   const [showBulkMove, setShowBulkMove] = useState(false);
   const [bulkArchiveReason, setBulkArchiveReason] = useState("");
+
+  // Export/Import dialog state
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   // Visibility tabs for codascope-level notes (shared/private)
   const showVisibilityTabs = !propVisibility && scope === "codascope";
@@ -682,6 +688,26 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             <span>{selectionMode ? "Done" : "Select"}</span>
           </button>
 
+          {/* Export button */}
+          <button
+            className="codascope-notes-export-btn"
+            onClick={() => setShowExport(true)}
+            title="Export notes as ZIP"
+            type="button"
+          >
+            <IconDownload size={14} />
+          </button>
+
+          {/* Import button */}
+          <button
+            className="codascope-notes-import-btn"
+            onClick={() => setShowImport(true)}
+            title="Import notes from ZIP"
+            type="button"
+          >
+            <IconUpload size={14} />
+          </button>
+
           {/* Create note button */}
           <button
             className="codascope-btn codascope-btn-primary"
@@ -1070,6 +1096,25 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           bulkNoteIds={Array.from(selectedNoteIds.keys())}
         />
       )}
+
+      {/* Export Dialog */}
+      <NoteExportDialog
+        open={showExport}
+        scope={scope}
+        visibility={visibility}
+        queryParams={urlContext?.queryParams ?? {}}
+        onClose={() => setShowExport(false)}
+      />
+
+      {/* Import Dialog */}
+      <NoteImportDialog
+        open={showImport}
+        scope={scope}
+        visibility={visibility}
+        queryParams={urlContext?.queryParams ?? {}}
+        onClose={() => setShowImport(false)}
+        onImported={() => void fetchNotes()}
+      />
     </div>
   );
 }

@@ -2074,3 +2074,359 @@
   color: var(--color-text-quaternary);
   flex-shrink: 0;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   EXPORT / IMPORT TOOLBAR BUTTONS
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-export-btn,
+.codascope-notes-import-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.codascope-notes-export-btn:hover,
+.codascope-notes-import-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EXPORT DIALOG
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-export-dialog {
+  width: 380px;
+  max-height: 80vh;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-notes-export-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.codascope-notes-export-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-xs);
+}
+
+.codascope-notes-export-info-value {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-notes-export-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-notes-export-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.codascope-notes-export-checkbox input[type="checkbox"] {
+  accent-color: var(--color-accent);
+}
+
+.codascope-notes-export-error {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: hsla(0, 70%, 50%, 0.1);
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+}
+
+.codascope-notes-export-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: hsla(140, 70%, 40%, 0.1);
+  color: var(--color-success);
+  font-size: var(--text-xs);
+}
+
+.codascope-notes-export-download-link {
+  margin-left: auto;
+  color: var(--color-accent);
+  text-decoration: underline;
+  font-size: var(--text-xs);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   IMPORT DIALOG
+   ══════════════════════════════════════════════════════════════════════ */
+
+.codascope-notes-import-dialog {
+  width: 480px;
+  max-height: 80vh;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+}
+
+.codascope-notes-import-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── Drop zone ───────────────────────────────────────────────────────── */
+
+.codascope-notes-import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  border: 2px dashed var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.codascope-notes-import-dropzone:hover {
+  border-color: var(--color-accent);
+  background: hsla(220, 90%, 56%, 0.04);
+}
+
+.codascope-notes-import-dropzone-active {
+  border-color: var(--color-accent);
+  background: hsla(220, 90%, 56%, 0.08);
+}
+
+.codascope-notes-import-filename {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Preview ─────────────────────────────────────────────────────────── */
+
+.codascope-notes-import-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.codascope-notes-import-summary {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.codascope-notes-import-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  padding: var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.codascope-notes-import-stat-value {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-import-stat-label {
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.codascope-notes-import-source {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Warnings ────────────────────────────────────────────────────────── */
+
+.codascope-notes-import-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.codascope-notes-import-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: hsla(40, 80%, 55%, 1);
+}
+
+/* ── Collisions ──────────────────────────────────────────────────────── */
+
+.codascope-notes-import-collisions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.codascope-notes-import-collision-list {
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-notes-import-collision-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-import-collision-item:last-child {
+  border-bottom: none;
+}
+
+.codascope-notes-import-collision-path {
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-notes-import-collision-existing {
+  color: var(--color-text-quaternary);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Strategy ────────────────────────────────────────────────────────── */
+
+.codascope-notes-import-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* ── Details / item list ─────────────────────────────────────────────── */
+
+.codascope-notes-import-details {
+  font-size: var(--text-xs);
+}
+
+.codascope-notes-import-details-summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: var(--space-1) 0;
+  user-select: none;
+}
+
+.codascope-notes-import-details-summary:hover {
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-import-item-list {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-top: var(--space-1);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-notes-import-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-import-item:last-child {
+  border-bottom: none;
+}
+
+.codascope-notes-import-item-path {
+  margin-left: auto;
+  color: var(--color-text-quaternary);
+  font-size: 10px;
+}
+
+/* ── Report ──────────────────────────────────────────────────────────── */
+
+.codascope-notes-import-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.codascope-notes-import-report-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-success);
+}
+
+.codascope-notes-import-failures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.codascope-notes-import-failure-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  background: hsla(0, 70%, 50%, 0.05);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-notes-import-failure-error {
+  color: var(--color-danger);
+  font-size: 10px;
+}
