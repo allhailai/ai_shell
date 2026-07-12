@@ -10,7 +10,7 @@ import { EditorView } from "@codemirror/view";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentBlockRenderer } from "./DocumentBlockRenderer";
 import { EditorSelectionToolbar, type SelectionInfo } from "./EditorSelectionToolbar";
-import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation, IconSparkle, IconInsert, IconClose } from "./CodaScopeIcons";
+import { IconBolt, IconRefresh, IconWarning, IconDownload, IconAnnotation, IconSparkle, IconInsert, IconClose, IconRewrite, IconArrowRight, IconCheckCircle, IconChevronDown } from "./CodaScopeIcons";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
@@ -604,8 +604,8 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                   · <IconAnnotation size={12} />{" "}
                   {openRootCount > 0 && <span className="codascope-annotation-count-open">{openRootCount} open</span>}
                   {openRootCount > 0 && resolvedRootCount > 0 && <span style={{ opacity: 0.4 }}> · </span>}
-                  {resolvedRootCount > 0 && <span className="codascope-annotation-count-resolved">{resolvedRootCount} ✓</span>}
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2, transition: "transform 0.15s ease", transform: allExpanded ? "rotate(90deg)" : "rotate(0deg)" }}><polyline points="3,1.5 7,5 3,8.5" /></svg>
+                  {resolvedRootCount > 0 && <span className="codascope-annotation-count-resolved">{resolvedRootCount} <IconCheckCircle size={11} /></span>}
+                  <IconArrowRight size={10} style={{ marginLeft: 2, transition: "transform 0.15s ease", transform: allExpanded ? "rotate(90deg)" : "rotate(0deg)" }} />
                 </button>
                 <span className="codascope-annotation-nav">
                   <button
@@ -615,7 +615,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                     title="Next comment"
                     disabled={annotatedBlockIdsOrdered.length === 0}
                   >
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5,3 5,7 8.5,3" /></svg>
+                    <IconChevronDown size={10} />
                   </button>
                   <span className="codascope-annotation-nav-pos">
                     {commentNavIndex >= 0 ? commentNavIndex + 1 : "–"}/{annotatedBlockIdsOrdered.length}
@@ -627,7 +627,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
                     title="Previous comment"
                     disabled={annotatedBlockIdsOrdered.length === 0}
                   >
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5,7 5,3 8.5,7" /></svg>
+                    <IconChevronDown size={10} style={{ transform: "rotate(180deg)" }} />
                   </button>
                 </span>
               </>
@@ -660,7 +660,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
           )}
           {!editing && (
             <button className="codascope-btn codascope-btn-secondary" onClick={startEditing} type="button">
-              ✏️ Edit
+              <IconRewrite size={14} /> Edit
             </button>
           )}
         </div>
@@ -691,7 +691,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
       {/* Lock warning (P4: heartbeat-aware) */}
       {lockWarning && (
         <div className="codascope-lock-heartbeat-warning">
-          <span className="codascope-lock-heartbeat-warning-icon">⚠️</span>
+          <span className="codascope-lock-heartbeat-warning-icon"><IconWarning size={14} /></span>
           Lock expires in less than 1 minute. Save your changes or type to extend.
         </div>
       )}

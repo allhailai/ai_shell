@@ -12,7 +12,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useShellStore } from "../../../shell/store";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { MarkdownViewer } from "../../../shared/markdown";
-import { IconChat, IconSparkle, IconDownload } from "../components/CodaScopeIcons";
+import { IconBlocked, IconChat, IconDownload, IconRefresh, IconRewrite, IconSparkle, IconWarning } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EditLock } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -284,7 +284,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
       <div className="codascope-epic-define-editor">
         {lockWarning && (
           <div className="codascope-epic-lock-warning">
-            ⚠️ Lock expires in ~1 minute due to inactivity. Continue editing to keep the lock.
+            <IconWarning size={14} /> Lock expires in ~1 minute due to inactivity. Continue editing to keep the lock.
           </div>
         )}
         <div className="codascope-epic-define-editor-toolbar">
@@ -329,7 +329,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
       {/* Lock indicator */}
       {isLockedByOther && (
         <div className="codascope-edit-lock-banner">
-          <span className="codascope-edit-lock-banner-icon">🔒</span>
+          <span className="codascope-edit-lock-banner-icon"><IconBlocked size={14} /></span>
           <span>
             <strong>{lockInfo.lockedBy}</strong> is currently editing this definition
           </span>
@@ -346,7 +346,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
             title={isLockedByOther ? `Locked by ${lockInfo.lockedBy}` : "Edit definition directly"}
             type="button"
           >
-            ✏️ Edit
+            <IconRewrite size={14} /> Edit
           </button>
           <button
             className="codascope-btn codascope-btn-ghost"
@@ -354,7 +354,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
             title="Refresh from server"
             type="button"
           >
-            ↻ Refresh
+            <IconRefresh size={14} /> Refresh
           </button>
           <a
             className="codascope-btn codascope-btn-ghost"

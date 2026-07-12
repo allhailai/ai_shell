@@ -12,7 +12,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { DocumentEditor } from "../components/DocumentEditor";
 import { ArtifactViewer } from "../components/artifact-viewer/ArtifactViewer";
-import { IconPaintbrush, IconChat, IconArtifact, IconInsert } from "../components/CodaScopeIcons";
+import { IconPaintbrush, IconChat, IconArtifact, IconClose, IconInsert } from "../components/CodaScopeIcons";
 import { useShellStore } from "../../../shell/store";
 import { useCommandBus } from "../../../shell/hooks";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
@@ -190,7 +190,7 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
               onClick={() => setRenderedHtmlUrl(null)}
               type="button"
             >
-              ✕ Close Preview
+              <IconClose size={13} /> Close Preview
             </button>
           </div>
         </div>

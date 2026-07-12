@@ -8,10 +8,10 @@
    - Checks server build status on mount (survives refresh)
    - Reconnects to SSE stream on refresh to resume live output
    - Shows build history with auto-generated summaries
-   - Deep Run ⚡ button with confirmation modal and gold accent styling
+   - Deep Run button with confirmation modal and gold accent styling
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, type ReactNode } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
@@ -24,6 +24,10 @@ import {
   IconChat,
   IconGitPull,
   IconCheck,
+  IconClose,
+  IconClock,
+  IconBolt,
+  IconHelp,
   IconRefresh,
   IconWarning,
 } from "../components/CodaScopeIcons";
@@ -42,12 +46,12 @@ function timeAgo(iso: string): string {
 
 /* ── Step Icon helpers ───────────────────────────────────────────────── */
 
-function stepIcon(status: PipelineStepStatus): string {
+function stepIcon(status: PipelineStepStatus): ReactNode {
   switch (status) {
-    case "running": return "⟳";
-    case "complete": return "✓";
+    case "running": return <IconRefresh size={13} />;
+    case "complete": return <IconCheck size={13} />;
     case "skipped": return "—";
-    case "error": return "✕";
+    case "error": return <IconClose size={13} />;
     default: return "○";
   }
 }
@@ -281,14 +285,14 @@ export function ProjectDashboard() {
   const isRegularAnalyzing = build.isAnalyzing && !isDeepRunning;
 
   const analyzeButtonLabel = isRegularAnalyzing
-    ? `⟳ Analyzing… (${build.elapsed})`
+    ? `Analyzing… (${build.elapsed})`
     : isDeepRunning
-      ? "⟳ Deep Run in progress…"
-      : "Run ▶";
+      ? "Deep Run in progress…"
+      : "Run";
 
   const deepRunButtonLabel = isDeepRunning
-    ? `⚡ Deep Run in progress… (${build.elapsed})`
-    : "Deep Run ⚡";
+    ? `Deep Run in progress… (${build.elapsed})`
+    : "Deep Run";
 
   /* ── Sync badge computation ────────────────────────────────────── */
 
@@ -325,7 +329,7 @@ export function ProjectDashboard() {
       {/* Sync point badge */}
       {syncBadge && (
         <div className="codascope-sync-badge">
-          <span className="codascope-sync-badge-icon">⚡</span>
+          <span className="codascope-sync-badge-icon"><IconBolt size={14} /></span>
           Wiki synced to {syncBadge.branch}@{syncBadge.shortHash ?? "???"}
           <span className="codascope-sync-badge-time"> — {syncBadge.ago}</span>
         </div>
@@ -492,7 +496,7 @@ export function ProjectDashboard() {
               type="button"
               id="deep-run-btn"
             >
-              {deepRunButtonLabel}
+              <IconBolt size={14} /> {deepRunButtonLabel}
             </button>
 
             {/* Regular Run / Stop button */}
@@ -503,7 +507,7 @@ export function ProjectDashboard() {
                 type="button"
                 id="analyze-stop-btn"
               >
-                ■ Stop
+                <IconClose size={14} /> Stop
               </button>
             ) : (
               <button
@@ -513,7 +517,7 @@ export function ProjectDashboard() {
                 type="button"
                 id="analyze-run-btn"
               >
-                {analyzeButtonLabel}
+                <IconSearch size={14} /> {analyzeButtonLabel}
               </button>
             )}
           </div>
@@ -590,7 +594,7 @@ export function ProjectDashboard() {
         {/* Footer with Code Map freshness info */}
         <div className="codascope-analyze-footer">
           <div className="codascope-analyze-footer-info">
-            <span className="codascope-analyze-footer-info-icon">ⓘ</span>
+            <span className="codascope-analyze-footer-info-icon"><IconHelp size={13} /></span>
             <span>Code Map auto-rebuilds when repository HEAD changes</span>
           </div>
         </div>
@@ -604,7 +608,9 @@ export function ProjectDashboard() {
         >
           <div className="codascope-pipeline-header">
             <div className="codascope-pipeline-title">
-              {build.isAnalyzing ? (isDeepRunning ? "⚡" : "⟳") : "✓"}{" "}
+              {build.isAnalyzing
+                ? isDeepRunning ? <IconBolt size={14} /> : <IconRefresh size={14} />
+                : <IconCheck size={14} />}{" "}
               {isDeepRunning ? "Deep Run Pipeline" : "Analysis Pipeline"}
             </div>
             {build.isAnalyzing && (
@@ -668,7 +674,7 @@ export function ProjectDashboard() {
       {/* Build status banner */}
       {build.buildSummary && !agentRunning && (
         <div className="codascope-alert codascope-alert--success codascope-dashboard-alert">
-          <span className="codascope-alert-icon">✓</span>
+          <span className="codascope-alert-icon"><IconCheck size={14} /></span>
           <span>{build.buildSummary}</span>
           <button
             className="codascope-alert-dismiss"
@@ -676,7 +682,7 @@ export function ProjectDashboard() {
             type="button"
             aria-label="Dismiss"
           >
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
       )}
@@ -684,7 +690,7 @@ export function ProjectDashboard() {
       {/* Error alert */}
       {build.runError && !agentRunning && (
         <div className="codascope-alert codascope-alert--danger codascope-dashboard-alert">
-          <span className="codascope-alert-icon">⚠</span>
+          <span className="codascope-alert-icon"><IconWarning size={14} /></span>
           <span>{build.runError}</span>
           <button
             className="codascope-alert-dismiss"
@@ -692,7 +698,7 @@ export function ProjectDashboard() {
             type="button"
             aria-label="Dismiss error"
           >
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
       )}
@@ -703,8 +709,8 @@ export function ProjectDashboard() {
           <div className="codascope-build-log-header">
             <span>
               {agentRunning
-                ? `${isDeepRunning ? "⚡" : "⟳"} Agent Output — ${build.elapsed}`
-                : "✓ Complete"}
+                ? <>{isDeepRunning ? <IconBolt size={13} /> : <IconRefresh size={13} />} Agent Output — {build.elapsed}</>
+                : <><IconCheck size={13} /> Complete</>}
             </span>
             {!agentRunning && (
               <button
@@ -749,11 +755,11 @@ export function ProjectDashboard() {
                         : `codascope-dashboard-build-history-status--${log.status}`
                     }`}>
                       {isDeepRunLog
-                        ? "⚡"
-                        : log.status === "complete" ? "✓" : log.status === "error" ? "✕" : "●"}
+                        ? <IconBolt size={13} />
+                        : log.status === "complete" ? <IconCheck size={13} /> : log.status === "error" ? <IconClose size={13} /> : "●"}
                     </span>
                     <span>
-                      {isDeepRunLog ? "⚡ " : ""}
+                      {isDeepRunLog && <IconBolt size={13} />}{" "}
                       {log.summary ?? log.command}
                     </span>
                   </div>
@@ -782,7 +788,7 @@ export function ProjectDashboard() {
           >
             <div className="codascope-modal-header">
               <div className="codascope-modal-title">
-                ⚡ Start Deep Run?
+                <IconBolt size={16} /> Start Deep Run?
               </div>
               <button
                 className="codascope-modal-close"
@@ -804,9 +810,9 @@ export function ProjectDashboard() {
               </div>
               <div className="codascope-deep-run-confirm-details">
                 <span>
-                  ⏱ Estimated: ~2–5 minutes per topic{topicCount != null ? ` (${topicCount} topics)` : ""}
+                  <IconClock size={13} /> Estimated: ~2–5 minutes per topic{topicCount != null ? ` (${topicCount} topics)` : ""}
                 </span>
-                <span>💰 Heavy token usage per topic</span>
+                <span><IconBolt size={13} /> Heavy token usage per topic</span>
               </div>
               <label
                 className="codascope-form-label"
@@ -849,7 +855,7 @@ export function ProjectDashboard() {
                 type="button"
                 id="deep-run-confirm-btn"
               >
-                ⚡ Start Deep Run
+                <IconBolt size={14} /> Start Deep Run
               </button>
             </div>
           </div>
@@ -858,4 +864,3 @@ export function ProjectDashboard() {
     </div>
   );
 }
-

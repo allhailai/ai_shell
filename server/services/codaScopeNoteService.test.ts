@@ -151,6 +151,10 @@ describe("CodaScopeNoteService", () => {
       expect(dir).toBe(path.join(root, "_notes", "private", "default"));
     });
 
+    it("rejects user IDs that would escape the private-notes namespace", () => {
+      expect(() => svc.resolveNotesDir("codascope", "private", { userId: "../other-user" })).toThrow("Invalid user ID");
+    });
+
     it("should return null for project scope without projectId", () => {
       const dir = svc.resolveNotesDir("project", "shared", {});
       expect(dir).toBeNull();
@@ -206,6 +210,25 @@ describe("CodaScopeNoteService", () => {
       const note = await svc.readNote("codascope", "shared", {}, "custom.md");
       expect(note!.frontmatter.title).toBe("Custom Title");
       expect(note!.frontmatter.tags).toEqual(["important"]);
+    });
+
+    it("owns server-managed frontmatter even when callers provide it", async () => {
+      const content = "---\nid: ../../reader-log\ntitle: Custom Title\ntags: [important]\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: another-user\n---\n\nBody.";
+      await svc.createNote("codascope", "private", { userId: "alan" }, "owned.md", content);
+
+      const created = await svc.readNote("codascope", "private", { userId: "alan" }, "owned.md");
+      expect(created!.frontmatter.id).not.toContain("/");
+      expect(created!.frontmatter.owner).toBe("alan");
+
+      const updatedContent = created!.content.replace(
+        /^id:.*$/m,
+        "id: ../../another-reader-log",
+      ).replace(/^owner:.*$/m, "owner: another-user");
+      await svc.updateNote("codascope", "private", { userId: "alan" }, "owned.md", updatedContent, created!.contentHash);
+
+      const updated = await svc.readNote("codascope", "private", { userId: "alan" }, "owned.md");
+      expect(updated!.frontmatter.id).toBe(created!.frontmatter.id);
+      expect(updated!.frontmatter.owner).toBe("alan");
     });
 
     it("should reject creating duplicate note", async () => {
@@ -298,6 +321,10 @@ describe("CodaScopeNoteService", () => {
       const notes = await svc.listNotes("codascope", "shared", {});
       expect(notes).toEqual([]);
     });
+
+    it("rejects traversal in folder filters", async () => {
+      await expect(svc.listNotes("codascope", "private", { userId: "alan" }, "../other-user")).rejects.toThrow("Path traversal");
+    });
   });
 
   // ── Folders ───────────────────────────────────────────────────────
@@ -313,6 +340,11 @@ describe("CodaScopeNoteService", () => {
       expect(folders[0].name).toBe("meeting-notes");
       expect(folders[0].noteCount).toBe(1);
       expect(folders[0].subfolders.length).toBe(1);
+    });
+
+    it("rejects traversal when creating folders", async () => {
+      await expect(svc.createFolder("codascope", "private", { userId: "alan" }, "../../outside")).rejects.toThrow("Path traversal");
+      expect(existsSync(path.join(root, "outside"))).toBe(false);
     });
   });
 
@@ -436,6 +468,28 @@ describe("CodaScopeNoteService", () => {
       expect(existsSync(path.join(notesDir, "moved", "with-assets.assets"))).toBe(true);
       // Old assets should not exist
       expect(existsSync(path.join(notesDir, "with-assets.assets"))).toBe(false);
+    });
+
+    it("leaves a note and its assets untouched when destination data already exists", async () => {
+      await svc.createNote("codascope", "private", { userId: "alan" }, "source.md", "Note");
+      await svc.uploadImage("codascope", "private", { userId: "alan" }, "source.md", Buffer.from("img"), "image/png");
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
+      mkdirSync(path.join(notesDir, "target", "source.assets"), { recursive: true });
+
+      await expect(svc.moveNote({
+        fromScope: "codascope",
+        fromVisibility: "private",
+        fromOpts: { userId: "alan" },
+        fromPath: "source.md",
+        toScope: "codascope",
+        toVisibility: "private",
+        toOpts: { userId: "alan" },
+        toPath: "target/source.md",
+      })).rejects.toThrow("Target note data already exists");
+
+      expect(existsSync(path.join(notesDir, "source.md"))).toBe(true);
+      expect(existsSync(path.join(notesDir, "source.assets"))).toBe(true);
+      expect(existsSync(path.join(notesDir, "target", "source.md"))).toBe(false);
     });
   });
 

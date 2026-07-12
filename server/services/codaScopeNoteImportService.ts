@@ -17,11 +17,14 @@ import * as unzipper from "unzipper";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
+import { resolveWithin } from "./codaScopePathSafety.js";
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
-const MAX_ZIP_SIZE = 500 * 1024 * 1024; // 500 MB
-const MAX_ENTRY_COUNT = 10_000;
+const MAX_ZIP_SIZE = 50 * 1024 * 1024; // compressed upload size
+const MAX_ENTRY_COUNT = 5_000;
+const MAX_ENTRY_UNCOMPRESSED_SIZE = 25 * 1024 * 1024;
+const MAX_TOTAL_UNCOMPRESSED_SIZE = 200 * 1024 * 1024;
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -313,6 +316,7 @@ export class CodaScopeNoteImportService {
     const entries = new Map<string, Buffer>();
     let manifest: ExportManifest | null = null;
     let entryCount = 0;
+    let totalUncompressedSize = 0;
 
     const directory = await unzipper.Open.buffer(zipBuffer);
 
@@ -324,13 +328,29 @@ export class CodaScopeNoteImportService {
 
       // Path traversal protection
       const normalizedPath = path.normalize(file.path);
-      if (normalizedPath.startsWith("..") || normalizedPath.includes("/../") || path.isAbsolute(normalizedPath)) {
+      if (
+        normalizedPath.startsWith("..")
+        || normalizedPath.includes(`/..${path.sep}`)
+        || path.isAbsolute(normalizedPath)
+        || file.path.includes("\\")
+      ) {
         throw new Error(`Path traversal detected in ZIP entry: "${file.path}"`);
       }
 
       if (file.type === "Directory") continue;
 
-      const content = await file.buffer();
+      if (file.uncompressedSize > MAX_ENTRY_UNCOMPRESSED_SIZE) {
+        throw new Error(`ZIP entry exceeds the ${MAX_ENTRY_UNCOMPRESSED_SIZE / 1024 / 1024} MB limit: "${file.path}"`);
+      }
+      if (totalUncompressedSize + file.uncompressedSize > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+        throw new Error(`ZIP expanded content exceeds the ${MAX_TOTAL_UNCOMPRESSED_SIZE / 1024 / 1024} MB limit.`);
+      }
+
+      const content = await this.readEntryWithLimit(
+        file,
+        Math.min(MAX_ENTRY_UNCOMPRESSED_SIZE, MAX_TOTAL_UNCOMPRESSED_SIZE - totalUncompressedSize),
+      );
+      totalUncompressedSize += content.length;
       entries.set(file.path, content);
 
       // Parse manifest
@@ -344,6 +364,23 @@ export class CodaScopeNoteImportService {
     }
 
     return { manifest, entries };
+  }
+
+  /** Read a ZIP entry without allowing a forged size header to exhaust memory. */
+  private async readEntryWithLimit(file: unzipper.File, maxSize: number): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+
+    for await (const chunk of file.stream()) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maxSize) {
+        throw new Error(`ZIP entry exceeds the permitted expanded-content limit: "${file.path}"`);
+      }
+      chunks.push(buffer);
+    }
+
+    return Buffer.concat(chunks, size);
   }
 
   /* ── Private: single note import ──────────────────────────────────── */
@@ -440,12 +477,8 @@ export class CodaScopeNoteImportService {
       let relative = attZipPath;
       if (relative.startsWith("notes/")) relative = relative.slice(6);
 
-      const targetPath = path.join(notesDir, relative);
+      const targetPath = resolveWithin(notesDir, relative, "attachment path");
       const targetDir = path.dirname(targetPath);
-
-      // Security: ensure within notesDir
-      const resolved = path.resolve(targetPath);
-      if (!resolved.startsWith(path.resolve(notesDir))) return;
 
       if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
       writeFileSync(targetPath, content);
@@ -456,12 +489,8 @@ export class CodaScopeNoteImportService {
 
   private writeVersionFile(notesDir: string, vRelativePath: string, content: Buffer): void {
     try {
-      const targetPath = path.join(notesDir, vRelativePath);
+      const targetPath = resolveWithin(notesDir, vRelativePath, "version path");
       const targetDir = path.dirname(targetPath);
-
-      // Security: ensure within notesDir
-      const resolved = path.resolve(targetPath);
-      if (!resolved.startsWith(path.resolve(notesDir))) return;
 
       if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
       writeFileSync(targetPath, content);

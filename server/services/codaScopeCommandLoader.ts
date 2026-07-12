@@ -219,7 +219,7 @@ export interface ArtifactPromptServices {
     getProject(projectId: string): Promise<{ name: string } | null>;
   };
   artifactSvc: {
-    getArtifact(projectId: string, epicId: string, artifactId: string): Promise<{ title: string; body: string; modelId?: string | null; sources?: string[] } | null>;
+    getArtifact(projectId: string, epicId: string, artifactId: string): Promise<{ title: string } | null>;
   };
 }
 

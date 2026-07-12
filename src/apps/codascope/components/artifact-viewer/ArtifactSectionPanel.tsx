@@ -21,6 +21,7 @@ import {
   IconCheckmark,
   IconWarning,
   IconClock,
+  IconArrowRight,
 } from "../CodaScopeIcons";
 
 /* ── Props ─────────────────────────────────────────────────────────── */
@@ -227,7 +228,7 @@ export function ArtifactSectionPanel({
           title="Collapse panel"
           type="button"
         >
-          ▶
+          <IconArrowRight size={14} />
         </button>
         <h3 className="codascope-artifact-section-panel-title">
           Sections & Annotations

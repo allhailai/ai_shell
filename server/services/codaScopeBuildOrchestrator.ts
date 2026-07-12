@@ -384,7 +384,7 @@ export interface EpicDeepenOptions {
   }>;
 }
 
-export interface EpicDeepenServices extends AnalyzeServices {
+export interface EpicDeepenServices extends Omit<AnalyzeServices, "epicSvc"> {
   epicSvc: { updateScopeEntry: (pid: string, eid: string, tid: string, changes: Record<string, unknown>) => Promise<unknown> };
 }
 
@@ -554,4 +554,3 @@ export async function runEpicDeepenPipeline(
 // from this file continue to work unchanged.
 
 export { runDeepRunPipeline, type DeepRunOptions } from "./codaScopeDeepRunOrchestrator.js";
-

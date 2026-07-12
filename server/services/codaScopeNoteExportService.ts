@@ -23,7 +23,7 @@ import {
 import path from "node:path";
 import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
 import type { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
@@ -146,7 +146,7 @@ export class CodaScopeNoteExportService {
     // Build manifest items and create ZIP
     const items: ManifestItem[] = [];
 
-    const archive = archiver("zip", { zlib: { level: 6 } });
+    const archive = new ZipArchive({ zlib: { level: 6 } });
     const output = createWriteStream(zipPath);
 
     const archivePromise = new Promise<void>((resolve, reject) => {

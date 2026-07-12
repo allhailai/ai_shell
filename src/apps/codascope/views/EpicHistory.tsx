@@ -11,7 +11,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { DiffViewer } from "../components/DiffViewer";
-import { IconCurate, IconCheckCircle, IconWarning, IconClock } from "../components/CodaScopeIcons";
+import { IconArtifact, IconClipboard, IconCurate, IconCheckCircle, IconWarning, IconClock } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EpicVersion, VersionDiff, CurationLogEntry, CurationResults } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -362,7 +362,7 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
               }}
               type="button"
             >
-              {compareMode ? "Cancel Compare" : "📊 Compare"}
+              {compareMode ? "Cancel Compare" : <><IconArtifact size={14} /> Compare</>}
             </button>
           )}
           <button
@@ -370,7 +370,7 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
             onClick={() => setShowCreateForm(true)}
             type="button"
           >
-            📸 Create Snapshot
+            <IconClipboard size={14} /> Create Snapshot
           </button>
         </div>
       </div>
@@ -440,7 +440,7 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
       {/* Version list */}
       {versions.length === 0 ? (
         <div className="codascope-empty-state">
-          <span className="codascope-empty-state-icon">📸</span>
+          <span className="codascope-empty-state-icon"><IconClipboard size={22} /></span>
           <h3>No version snapshots yet</h3>
           <p>Create a snapshot to capture the current state of your epic. Snapshots include the definition, scope, and all design documents.</p>
           <button
@@ -448,7 +448,7 @@ export function EpicHistory({ epic, setEpic }: EpicHistoryProps) {
             onClick={() => setShowCreateForm(true)}
             type="button"
           >
-            📸 Create Snapshot
+            <IconClipboard size={14} /> Create Snapshot
           </button>
         </div>
       ) : (

@@ -3,26 +3,10 @@ import { CodaScopeContent } from "./CodaScopeContent";
 import { CodaScopeNav } from "./CodaScopeNav";
 import { CodaScopeHeaderItems } from "./CodaScopeHeaderItems";
 import { CodaScopeAssistant } from "./CodaScopeAssistant";
+import { IconCodeMap } from "./components/CodaScopeIcons";
 
 function CodaScopeIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {/* Magnifying glass over code brackets */}
-      <circle cx="11" cy="11" r="8" />
-      <path d="M21 21l-4.35-4.35" />
-      <path d="M8 8l-2 3 2 3" />
-      <path d="M14 8l2 3-2 3" />
-    </svg>
-  );
+  return <IconCodeMap size={size} />;
 }
 
 export const codaScopeApp: AppManifest = {
@@ -64,4 +48,3 @@ export const codaScopeApp: AppManifest = {
     },
   ],
 };
-

@@ -278,7 +278,12 @@ export class CodaScopeCurationService {
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.AISHELL_INTERNAL_REQUEST_TOKEN
+            ? { "X-AIShell-Internal-Token": process.env.AISHELL_INTERNAL_REQUEST_TOKEN }
+            : {}),
+        },
         body: JSON.stringify({ modelId }),
       });
 

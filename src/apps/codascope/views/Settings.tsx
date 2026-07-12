@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { FolderPicker } from "../../../shared/folder-picker";
-import { IconSettings, IconKey, IconPackage, IconFolderOpen, IconPalette, IconPlus } from "../components/CodaScopeIcons";
+import { IconSettings, IconKey, IconPackage, IconFolderOpen, IconPalette, IconPlus, IconCheck, IconClose, IconRefresh, IconWarning } from "../components/CodaScopeIcons";
 
 export function Settings() {
   const {
@@ -365,17 +365,17 @@ export function Settings() {
           <IconKey size={14} /> Cursor API Key
           {apiKeyStatus.state === "valid" && (
             <span className="codascope-api-key-badge codascope-api-key-badge--valid">
-              ✓ Connected · {apiKeyStatus.modelCount} models
+              <IconCheck size={12} /> Connected · {apiKeyStatus.modelCount} models
             </span>
           )}
           {apiKeyStatus.state === "validating" && (
             <span className="codascope-api-key-badge codascope-api-key-badge--validating">
-              ⟳ Validating…
+              <IconRefresh size={12} /> Validating…
             </span>
           )}
           {apiKeyStatus.state === "error" && (
             <span className="codascope-api-key-badge codascope-api-key-badge--error">
-              ✗ Invalid
+              <IconClose size={12} /> Invalid
             </span>
           )}
         </div>
@@ -732,7 +732,7 @@ export function Settings() {
           >
             <div className="codascope-modal-header">
               <div className="codascope-modal-title codascope-settings-remove-modal-title">
-                ⚠ Remove Repository
+                <IconWarning size={15} /> Remove Repository
               </div>
               <button
                 className="codascope-modal-close"

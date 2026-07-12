@@ -21,6 +21,7 @@ import type {
 } from "../codaScopeTypes";
 import { DepthBadge, TypeBadge, SourceBadge, EnrichmentStatus } from "../components/ScopeBadges";
 import { ScopeDiffModal } from "../components/ScopeDiffModal";
+import { IconCheck, IconClock } from "../components/CodaScopeIcons";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -299,10 +300,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
       <div className="codascope-scope-empty">
         <div className="codascope-empty-state">
           <div className="codascope-scope-empty-icon">
-            <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="8" cy="8" r="6" />
-              <path d="M8 5v3l2 1" />
-            </svg>
+            <IconClock size={32} />
           </div>
           <h3>No scope yet</h3>
           <p>Scope identifies which wiki pages and topics are relevant to this epic. The agent can analyze your definition to suggest a scope, or you can add topics manually.</p>
@@ -376,7 +374,7 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
               type="button"
               title={deepenBuild.summary ?? undefined}
             >
-              ✓ Deepened · Rebuild
+              <IconCheck size={13} /> Deepened · Rebuild
             </button>
           ) : deepenFailed ? (
             <button

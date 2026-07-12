@@ -13,6 +13,7 @@
 
 import express from "express";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { detectPlatform } from "./services/platform.js";
 import { createLocalAuthStrategy } from "./services/localAuthStrategy.js";
@@ -122,6 +123,7 @@ const localStrategy = createLocalAuthStrategy({
 });
 
 const authService = createAuthService(localStrategy);
+const internalRequestToken = randomBytes(32).toString("hex");
 
 const authMiddleware = createAuthMiddleware({
   authService,
@@ -129,7 +131,12 @@ const authMiddleware = createAuthMiddleware({
   osUsername: platformInfo.osUsername,
   dataDir: platformInfo.dataDir,
   sessionExpiryDays: SESSION_EXPIRY_DAYS,
+  internalRequestToken,
 });
+
+// Internal agent tools need to start authenticated SSE pipelines without a
+// browser cookie. This process-local value is never persisted or exposed.
+process.env.AISHELL_INTERNAL_REQUEST_TOKEN = internalRequestToken;
 
 if (SHELL_MODE === "server") {
   app.set("trust proxy", 1);
@@ -174,11 +181,13 @@ app.get("/api/version", (_req, res) => {
   });
 });
 
-// ── Protect all /api/* in server mode ───────────────────────────────
-
-if (SHELL_MODE === "server") {
-  app.use("/api", authMiddleware.requireAuth);
-}
+// ── Attach an authenticated principal to application APIs ────────────
+//
+// In standalone mode this injects the local user; in server mode it
+// validates the session cookie. Auth routes were registered above, so login
+// remains reachable while every subsequently registered application route
+// receives the same `req.user` contract.
+app.use("/api", authMiddleware.requireAuth);
 
 // ── Secret infrastructure ───────────────────────────────────────────
 

@@ -14,9 +14,12 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  renameSync,
 } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -64,7 +67,7 @@ export class CodaScopeNoteUserPrefsService {
   /* ── Path helpers ─────────────────────────────────────────────────── */
 
   private prefsDir(userId: string): string {
-    return path.join(this.root, "_notes", "_user-prefs", userId);
+    return path.join(this.root, "_notes", "_user-prefs", assertSafePathSegment(userId, "user ID"));
   }
 
   private starredPath(userId: string): string {
@@ -78,6 +81,12 @@ export class CodaScopeNoteUserPrefsService {
   private ensureDir(userId: string): void {
     const dir = this.prefsDir(userId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  }
+
+  private writeJsonAtomically(filePath: string, data: unknown): void {
+    const tempPath = `${filePath}.tmp.${randomUUID()}`;
+    writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8");
+    renameSync(tempPath, filePath);
   }
 
   /* ── Starred ──────────────────────────────────────────────────────── */
@@ -96,7 +105,7 @@ export class CodaScopeNoteUserPrefsService {
   /** Write the starred list to disk. */
   private writeStarredFile(userId: string, data: StarredFile): void {
     this.ensureDir(userId);
-    writeFileSync(this.starredPath(userId), JSON.stringify(data, null, 2), "utf-8");
+    this.writeJsonAtomically(this.starredPath(userId), data);
   }
 
   /** Get all starred notes for a user. */
@@ -148,7 +157,7 @@ export class CodaScopeNoteUserPrefsService {
   /** Write the recents list to disk. */
   private writeRecentsFile(userId: string, data: RecentsFile): void {
     this.ensureDir(userId);
-    writeFileSync(this.recentsPath(userId), JSON.stringify(data, null, 2), "utf-8");
+    this.writeJsonAtomically(this.recentsPath(userId), data);
   }
 
   /** Get recent notes for a user. */
@@ -190,7 +199,7 @@ export class CodaScopeNoteUserPrefsService {
   }
 
   private noteReadersPath(noteId: string): string {
-    return path.join(this.readTrackingDir(), `${noteId}.json`);
+    return path.join(this.readTrackingDir(), `${assertSafePathSegment(noteId, "note ID")}.json`);
   }
 
   /** Read the per-user read status map from disk. */
@@ -207,7 +216,7 @@ export class CodaScopeNoteUserPrefsService {
   /** Write the per-user read status map to disk. */
   private writeReadStatusFile(userId: string, data: Record<string, string>): void {
     this.ensureDir(userId);
-    writeFileSync(this.readStatusPath(userId), JSON.stringify(data, null, 2), "utf-8");
+    this.writeJsonAtomically(this.readStatusPath(userId), data);
   }
 
   /**
@@ -258,7 +267,7 @@ export class CodaScopeNoteUserPrefsService {
       readers.push({ userId, readAt: now });
     }
 
-    writeFileSync(filePath, JSON.stringify(readers, null, 2), "utf-8");
+    this.writeJsonAtomically(filePath, readers);
   }
 
   /** Get all readers for a note. */

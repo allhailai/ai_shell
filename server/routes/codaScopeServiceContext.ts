@@ -5,6 +5,7 @@
 
 import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
 import type { SecretService } from "../services/secretService.js";
+import type { User } from "../services/authService.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
 import { CodaScopeWikiService } from "../services/codaScopeWikiService.js";
 import { CodaScopeChatService } from "../services/codaScopeChatService.js";
@@ -41,6 +42,12 @@ import multer from "multer";
 // ── Types ────────────────────────────────────────────────────────────
 
 export type HttpErrorFn = (message: string, status: number, code: string) => Error;
+
+/** The authenticated identity available to every CodaScope route. */
+export interface CodaScopePrincipal {
+  username: string;
+  isAdmin: boolean;
+}
 
 export interface CodaScopeRoutesDeps {
   secretService: SecretService;
@@ -89,6 +96,7 @@ export interface CodaScopeRouteContext {
   ensureServices: () => Promise<CodaScopeServices>;
   wrap: (fn: (req: Request, res: Response) => Promise<void>) => RequestHandler;
   param: (req: Request, name: string) => string;
+  principal: (req: Request) => CodaScopePrincipal;
   upload: multer.Multer;
 }
 
@@ -155,6 +163,19 @@ export async function setProjectsRoot(secretService: SecretService, value: strin
 export function param(req: Request, name: string): string {
   const val = req.params[name];
   return Array.isArray(val) ? val[0] ?? "" : val ?? "";
+}
+
+/**
+ * Convert the shell authentication middleware's request user into the only
+ * identity CodaScope routes may use. Never fall back to request headers or
+ * request payloads for an actor identity.
+ */
+export function principal(req: Request, httpError: HttpErrorFn): CodaScopePrincipal {
+  const user = req.user as User | undefined;
+  if (!user?.username) {
+    throw httpError("Authentication required.", 401, "authentication_required");
+  }
+  return { username: user.username, isAdmin: user.is_admin === true };
 }
 
 // ── Service Initialization ──────────────────────────────────────────
@@ -315,6 +336,7 @@ export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): Cod
     ensureServices: () => ensureServicesImpl(secretService, httpError),
     wrap,
     param,
+    principal: (req) => principal(req, httpError),
     upload: uploadInstance,
   };
 }

@@ -9,7 +9,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { MarkdownEditor } from "../../../shared/markdown";
 import { ModelPicker } from "../components/ModelPicker";
 import type { WikiState } from "../codaScopeTypes";
-import { IconWiki, IconRefresh, IconFile, IconHome, IconDownload } from "../components/CodaScopeIcons";
+import { IconWiki, IconRefresh, IconFile, IconHome, IconDownload, IconCheckCircle, IconClock, IconClose, IconWarning } from "../components/CodaScopeIcons";
 import { connectToSseStream } from "../codaScopeSseClient";
 
 export function WikiBrowser() {
@@ -339,7 +339,7 @@ export function WikiBrowser() {
                     className={`codascope-wiki-depth-badge codascope-wiki-depth-badge--${topicDepths[topic.id]}`}
                     title={`Depth: ${topicDepths[topic.id]}`}
                   >
-                    {topicDepths[topic.id] === "deep" ? "🟢" : topicDepths[topic.id] === "developed" ? "🟡" : "🔵"}
+                    {topicDepths[topic.id] === "deep" ? <IconCheckCircle size={11} /> : topicDepths[topic.id] === "developed" ? <IconClock size={11} /> : <IconFile size={11} />}
                   </span>
                 )}
               </button>
@@ -353,7 +353,7 @@ export function WikiBrowser() {
         {/* Error alert */}
         {buildError && (
           <div className="codascope-alert codascope-alert--danger" style={{ margin: "var(--space-4)" }}>
-            <span className="codascope-alert-icon">⚠</span>
+            <span className="codascope-alert-icon"><IconWarning size={14} /></span>
             <span>{buildError}</span>
             <button
               className="codascope-alert-dismiss"
@@ -361,7 +361,7 @@ export function WikiBrowser() {
               type="button"
               aria-label="Dismiss error"
             >
-              ✕
+              <IconClose size={12} />
             </button>
           </div>
         )}
@@ -371,7 +371,7 @@ export function WikiBrowser() {
           <div className="codascope-build-log">
             <div className="codascope-build-log-header">
               <span>
-                {agentRunning ? "⟳ Agent Output" : "✓ Build Complete"}
+                {agentRunning ? <><IconRefresh size={13} /> Agent Output</> : <><IconCheckCircle size={13} /> Build Complete</>}
               </span>
               {!agentRunning && (
                 <button

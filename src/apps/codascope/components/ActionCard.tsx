@@ -1,15 +1,31 @@
 /* ── CodaScope: Action Card Component ─────────────────────────────────
    Renders interactive action cards inline in the assistant message thread.
    
-   Actions are proposed by the agent and dispatched client-side through
-   existing CodaScope APIs when the user clicks to confirm.
+   Pending operations are dispatched client-side. Tool-confirmed mutations
+   render as completed cards so the user can see what was actually changed.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { CodaScopeAction } from "../codaScopeTypes";
-import { IconInsertContent, IconRewrite, IconExpand } from "./CodaScopeIcons";
+import {
+  IconArtifact,
+  IconBook,
+  IconCheck,
+  IconClipboard,
+  IconCodeMap,
+  IconEpic,
+  IconExpand,
+  IconFile,
+  IconInsertContent,
+  IconLaunch,
+  IconPlan,
+  IconRewrite,
+  IconRefresh,
+  IconSearch,
+  IconWarning,
+} from "./CodaScopeIcons";
 import { connectToSseStream, parseSseChunk } from "../codaScopeSseClient";
 import { useBuildState } from "../hooks/useBuildState";
 import { useCommandBus } from "../../../shell/hooks";
@@ -22,41 +38,44 @@ type ActionStatus = "idle" | "running" | "success" | "error";
 /* ── Icons ───────────────────────────────────────────────────────────── */
 
 function ActionIcon({ type }: { type: string }) {
+  const icon = (content: ReactNode) => <span className="codascope-action-icon">{content}</span>;
   switch (type) {
     case "build_wiki_page":
-      return <span className="codascope-action-icon">📝</span>;
+      return icon(<IconBook size={14} />);
     case "build_full_wiki":
-      return <span className="codascope-action-icon">📚</span>;
+      return icon(<IconBook size={14} />);
     case "navigate":
-      return <span className="codascope-action-icon">🔗</span>;
+      return icon(<IconLaunch size={14} />);
     case "explore_codebase":
-      return <span className="codascope-action-icon">🧭</span>;
+      return icon(<IconSearch size={14} />);
     case "create_epic":
-      return <span className="codascope-action-icon">🏗️</span>;
+      return icon(<IconEpic size={14} />);
     case "update_epic_definition":
-      return <span className="codascope-action-icon">📋</span>;
+      return icon(<IconClipboard size={14} />);
     case "scope_epic":
-      return <span className="codascope-action-icon">🎯</span>;
+      return icon(<IconPlan size={14} />);
     case "deepen_wiki":
-      return <span className="codascope-action-icon">🔬</span>;
+      return icon(<IconSearch size={14} />);
     case "create_design_doc":
-      return <span className="codascope-action-icon">📐</span>;
+      return icon(<IconFile size={14} />);
     case "update_design_doc":
-      return <span className="codascope-action-icon">✏️</span>;
+      return icon(<IconFile size={14} />);
     case "create_version":
-      return <span className="codascope-action-icon">📸</span>;
+      return icon(<IconClipboard size={14} />);
     case "insert_content":
-      return <span className="codascope-action-icon"><IconInsertContent size={14} /></span>;
+      return icon(<IconInsertContent size={14} />);
     case "replace_content":
-      return <span className="codascope-action-icon"><IconRewrite size={14} /></span>;
+      return icon(<IconRewrite size={14} />);
     case "expand_content":
-      return <span className="codascope-action-icon"><IconExpand size={14} /></span>;
+      return icon(<IconExpand size={14} />);
     case "trigger_research":
-      return <span className="codascope-action-icon">🔬</span>;
+      return icon(<IconSearch size={14} />);
     case "artifact_built":
-      return <span className="codascope-action-icon">📊</span>;
+      return icon(<IconArtifact size={14} />);
+    case "operation_completed":
+      return icon(<IconCheck size={14} />);
     default:
-      return <span className="codascope-action-icon">⚡</span>;
+      return icon(<IconCodeMap size={14} />);
   }
 }
 
@@ -78,14 +97,15 @@ function actionLabel(type: string): string {
     case "expand_content": return "Expand Content";
     case "trigger_research": return "Research";
     case "artifact_built": return "Artifact Built";
+    case "operation_completed": return "Completed";
     default: return "Action";
   }
 }
 
 function actionButtonLabel(type: string, status: ActionStatus): string {
   if (status === "running") return "Running…";
-  if (status === "success") return "✓ Done";
-  if (status === "error") return "✗ Failed";
+  if (status === "success") return "Done";
+  if (status === "error") return "Failed";
   switch (type) {
     case "navigate": return "Go";
     case "create_epic": return "Create";
@@ -145,6 +165,10 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
   const { navigate } = useAppSubRoute("codascope");
   const { activeProjectId, selectedModel } = useCodaScopeStore();
   const commandBus = useCommandBus();
+  const isCompletedOperation = COMPLETED_ACTION_TYPES.has(type);
+  const canNavigateCompletedOperation = [
+    "artifact_built", "design_doc_created", "design_doc_edited",
+  ].includes(type);
 
   // Determine if this action has a server-tracked build scope
   const buildScope = getBuildScope(type, attributes);
@@ -213,7 +237,9 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
   // Local state takes priority while the user is actively dispatching.
   // Once idle, the hydrated state takes over.
   // Research log fallback: if build state is idle but a matching log entry exists, treat as success.
-  const baseStatus: ActionStatus = localStatus !== "idle" ? localStatus : hydrated.status;
+  const baseStatus: ActionStatus = isCompletedOperation
+    ? "success"
+    : localStatus !== "idle" ? localStatus : hydrated.status;
   const effectiveStatus: ActionStatus =
     baseStatus === "idle" && researchLogDone ? "success" : baseStatus;
   const effectiveProgress = localStatus === "running" ? progressMsg : hydrated.progressMsg;
@@ -419,10 +445,10 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
         )}
         {/* Status badge — prominent success/error indicator */}
         {effectiveStatus === "success" && (
-          <span className="codascope-action-card-badge codascope-action-card-badge-success">✓ Completed</span>
+          <span className="codascope-action-card-badge codascope-action-card-badge-success"><IconCheck size={12} /> Completed</span>
         )}
         {effectiveStatus === "error" && (
-          <span className="codascope-action-card-badge codascope-action-card-badge-error">✗ Failed</span>
+          <span className="codascope-action-card-badge codascope-action-card-badge-error"><IconWarning size={12} /> Failed</span>
         )}
       </div>
       <p className="codascope-action-card-desc">{description}</p>
@@ -439,7 +465,7 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
       {isTerminal && hydrated.summary && (
         <p className="codascope-action-card-summary">{hydrated.summary}</p>
       )}
-      <div className="codascope-action-card-footer">
+      {(!isCompletedOperation || canNavigateCompletedOperation) && <div className="codascope-action-card-footer">
         {/* Primary action button (or secondary rebuild/retry for completed cards) */}
         <button
           className={`codascope-action-card-btn codascope-action-card-btn-${effectiveStatus}${isTerminal && tracked ? " codascope-action-card-btn-ghost" : ""}`}
@@ -448,36 +474,36 @@ export function ActionCard({ action }: { action: CodaScopeAction }) {
           type="button"
         >
           {effectiveStatus === "running" && <span className="codascope-action-card-spinner" />}
-          {isTerminal && tracked
-            ? (effectiveStatus === "success" ? "↻ Rebuild" : "↻ Retry")
+          {isCompletedOperation && canNavigateCompletedOperation
+            ? "View"
+            : isTerminal && tracked
+            ? <><IconRefresh size={13} /> {effectiveStatus === "success" ? "Rebuild" : "Retry"}</>
             : actionButtonLabel(type, effectiveStatus)}
         </button>
         {effectiveError && (
           <span className="codascope-action-card-error">{effectiveError}</span>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
 
 /* ── Action Card List (renders inline after a message) ─────────────── */
 
-/** Action types that represent already-completed operations — they are
- *  handled by the event bus and should not appear as actionable cards. */
+/** Action types that represent already-completed operations. */
 const COMPLETED_ACTION_TYPES = new Set([
   "design_doc_edited",
   "design_doc_created",
+  "artifact_built",
+  "operation_completed",
 ]);
 
 export function ActionCardList({ actions }: { actions: CodaScopeAction[] }) {
   if (!actions || actions.length === 0) return null;
 
-  const actionable = actions.filter((a) => !COMPLETED_ACTION_TYPES.has(a.type));
-  if (actionable.length === 0) return null;
-
   return (
     <div className="codascope-action-cards">
-      {actionable.map((action, i) => (
+      {actions.map((action, i) => (
         <ActionCard key={`${action.type}-${i}`} action={action} />
       ))}
     </div>
@@ -622,7 +648,7 @@ function runResearchStream(
                   const pi = parsed.pageIndex ?? 0;
                   const pc = parsed.pageCount ?? 0;
                   const ptitle = parsed.title ?? "";
-                  onProgress(`Phase 3/3 — ✓ Created: ${ptitle} (${pi + 1}/${pc})`);
+                  onProgress(`Phase 3/3 — Created: ${ptitle} (${pi + 1}/${pc})`);
                   break;
                 }
                 default:

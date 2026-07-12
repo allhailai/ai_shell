@@ -117,6 +117,6 @@ export function getToolsForPurpose(
   const epicTools = buildEpicTools(projectId, services, collectorHolder);
   const write = buildWriteTools(projectId, services);
   const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-  const noteWrite = buildNoteWriteTools(projectId, services);
+  const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder);
   return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
 }

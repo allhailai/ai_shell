@@ -456,7 +456,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
       agentSvc.send({
         projectId: id,
         message: regenPrompt,
-        modelId: artifact?.modelId ?? "default",
+        modelId: "default",
         purpose: "artifact-section-regen",
         onMessage: () => {
           artifactSvc.setBuildProgress(id, epicId, artId, {

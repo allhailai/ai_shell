@@ -3,7 +3,7 @@
    search, move, annotations, blocks, and versions.
 
    URL pattern: /api/codascope/notes/:scope/:visibility/...
-   Security: userId is derived from session, never from query string.
+   Security: userId is derived from the authenticated request principal.
    ──────────────────────────────────────────────────────────────────── */
 
 
@@ -17,17 +17,18 @@ const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
 
 export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
 
   /**
    * Validate :scope and :visibility params and extract resolve opts.
-   * SECURITY: userId is derived from the session, never from the query string.
+   * SECURITY: userId is derived from the authenticated principal, never from
+   * request headers, query parameters, or a request body.
    */
   function parseScopeAndOpts(
     scopeParam: string,
     visibilityParam: string,
     query: Record<string, unknown>,
-    req: any,
+    req: Parameters<typeof principal>[0],
   ): { scope: NoteScope; visibility: NoteVisibility; opts: NoteResolveOpts } {
     if (!VALID_SCOPES.includes(scopeParam as NoteScope)) {
       throw httpError(`Invalid scope: "${scopeParam}". Must be one of: ${VALID_SCOPES.join(", ")}`, 400, "invalid_scope");
@@ -36,8 +37,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError(`Invalid visibility: "${visibilityParam}". Must be one of: ${VALID_VISIBILITIES.join(", ")}`, 400, "invalid_visibility");
     }
 
-    // SECURITY: userId from session, never from query string
-    const userId = req.session?.user?.username ?? req.headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     return {
       scope: scopeParam as NoteScope,
@@ -71,13 +71,13 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Export / Import ────────────────────────────────────────────────
   // Placed BEFORE :scope/:visibility so these fixed paths don't collide.
 
-  // Larger multer instance for import (500 MB)
-  const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+  // Import parsing also enforces compressed and expanded-content limits.
+  const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   /** POST /api/codascope/notes/export — start export */
   app.post("/api/codascope/notes/export", wrap(async (req, res) => {
     const { noteExportSvc, noteAuditSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const {
       scope: scopeParam,
@@ -131,7 +131,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   /** POST /api/codascope/notes/import/preview — upload ZIP, get preview */
   app.post("/api/codascope/notes/import/preview", importUpload.single("file"), wrap(async (req, res) => {
     const { noteImportSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const file = (req as any).file as { buffer: Buffer } | undefined;
     if (!file) {
@@ -171,7 +171,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   /** POST /api/codascope/notes/import/execute — execute import */
   app.post("/api/codascope/notes/import/execute", importUpload.single("file"), wrap(async (req, res) => {
     const { noteImportSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const file = (req as any).file as { buffer: Buffer } | undefined;
     if (!file) {
@@ -232,8 +232,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError(`Invalid scope: "${scopeParam}"`, 400, "invalid_scope");
     }
 
-    // SECURITY: userId from session, never from query string
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const opts: NoteResolveOpts = {
       userId,
@@ -261,7 +260,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError(`Invalid visibility: "${visibilityParam}"`, 400, "invalid_visibility");
     }
 
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const opts: NoteResolveOpts = {
       userId,
       projectId: (req.query.projectId as string) ?? undefined,
@@ -286,7 +285,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   app.get("/api/codascope/notes/starred", wrap(async (req, res) => {
     const { noteUserPrefsSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const items = noteUserPrefsSvc.getStarred(userId);
     res.json({ items });
   }));
@@ -295,7 +294,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   app.put("/api/codascope/notes/starred/:noteId", wrap(async (req, res) => {
     const { noteUserPrefsSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const noteId = param(req, "noteId");
 
     const { scope, visibility, path: notePath, title } = req.body as {
@@ -324,7 +323,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   app.delete("/api/codascope/notes/starred/:noteId", wrap(async (req, res) => {
     const { noteUserPrefsSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const noteId = param(req, "noteId");
 
     const removed = noteUserPrefsSvc.unstar(userId, noteId);
@@ -337,7 +336,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   app.get("/api/codascope/notes/recents", wrap(async (req, res) => {
     const { noteUserPrefsSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const items = noteUserPrefsSvc.getRecents(userId);
     res.json({ items });
   }));
@@ -346,7 +345,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   app.post("/api/codascope/notes/capture", wrap(async (req, res) => {
     const { noteSvc, noteUserPrefsSvc } = await ensureServices();
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const { body: noteBody } = req.body as { body?: string };
     if (!noteBody || typeof noteBody !== "string" || !noteBody.trim()) {
@@ -535,20 +534,19 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     notePath = stripSuffix(notePath, "/annotations");
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
-    const { anchor, author, body, parentId } = req.body as {
+    const { anchor, body, parentId } = req.body as {
       anchor?: any;
-      author?: string;
       body?: string;
       parentId?: string;
     };
 
-    if (!anchor || !author || !body) {
-      throw httpError("anchor, author, and body are required.", 400, "invalid_input");
+    if (!anchor || !body) {
+      throw httpError("anchor and body are required.", 400, "invalid_input");
     }
 
     const annotation = await noteAnnotationSvc.createAnnotation(scope, visibility, opts, notePath, {
       anchor,
-      author: author ?? "user",
+      author: principal(req).username,
       body,
       parentId,
     });
@@ -821,7 +819,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError("Cannot move more than 100 notes at once.", 400, "too_many");
     }
 
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
     const correlationId = randomUUID();
     let moved = 0;
     const failed: string[] = [];
@@ -1117,8 +1115,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     // Check for permanent deletion (admin only)
     const permanent = req.query.permanent === "true";
     if (permanent) {
-      const isAdmin = (req as any).session?.user?.isAdmin === true;
-      if (!isAdmin) throw httpError("Permanent deletion requires admin privileges.", 403, "forbidden");
+      if (!principal(req).isAdmin) throw httpError("Permanent deletion requires admin privileges.", 403, "forbidden");
     }
 
     // Read note before deletion for audit log
@@ -1176,8 +1173,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError("Invalid visibility.", 400, "invalid_visibility");
     }
 
-    // SECURITY: inject userId from session into opts
-    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const userId = principal(req).username;
 
     const moved = await noteSvc.moveNote({
       fromScope: fromScope as NoteScope,

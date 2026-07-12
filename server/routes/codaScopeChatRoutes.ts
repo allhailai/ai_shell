@@ -19,6 +19,17 @@ import {
   type ReferenceItem,
   type SelectionContext,
 } from "../services/codaScopeChatOrchestrator.js";
+import type { MessageContext } from "../services/codaScopeChatService.js";
+
+function parseMessageContext(value: Record<string, unknown> | undefined): MessageContext | null {
+  if (!value || typeof value.view !== "string" || !value.view.trim()) return null;
+  return {
+    view: value.view,
+    ...(typeof value.topicId === "string" || value.topicId === null ? { topicId: value.topicId } : {}),
+    ...(typeof value.projectName === "string" ? { projectName: value.projectName } : {}),
+    ...(typeof value.projectId === "string" ? { projectId: value.projectId } : {}),
+  };
+}
 
 export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, upload } = ctx;
@@ -101,6 +112,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       if (attachments !== undefined && !Array.isArray(attachments)) {
         throw httpError("attachments must be an array.", 400, "invalid_input");
       }
+      const persistedContext = parseMessageContext(context);
+      if (context !== undefined && !persistedContext) {
+        throw httpError("context.view must be a non-empty string.", 400, "invalid_input");
+      }
 
       // Resolve image attachments: read from disk and base64-encode for the SDK
       const imageAttachmentPaths: Array<{ path: string; filename: string }> = [];
@@ -135,7 +150,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         content: message.trim(),
         modelId: null,
         status: "complete",
-        context: context ?? null,
+        context: persistedContext,
         ...(imageAttachmentPaths.length > 0 ? { metadata: { images: imageAttachmentPaths } } : {}),
       });
 

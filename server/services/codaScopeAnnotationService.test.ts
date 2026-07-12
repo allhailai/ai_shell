@@ -170,12 +170,12 @@ describe("CodaScopeAnnotationService", () => {
     it("lists annotations for a document", async () => {
       scaffoldProject(root, "proj-ann2", "epic2");
       await svc.createAnnotation("proj-ann2", "epic2", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Comment A" },
         author: "user",
         body: "Comment A",
       });
       await svc.createAnnotation("proj-ann2", "epic2", "doc1", {
-        anchor: { blockId: "b2", sectionSlug: "root", lineNumber: 5 },
+        anchor: { blockId: "b2", sectionSlug: "root", lineNumber: 5, anchorText: "Comment B" },
         author: "agent",
         body: "Comment B",
       });
@@ -187,7 +187,7 @@ describe("CodaScopeAnnotationService", () => {
     it("updates annotation status", async () => {
       scaffoldProject(root, "proj-ann3", "epic3");
       const ann = await svc.createAnnotation("proj-ann3", "epic3", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Needs work" },
         author: "user",
         body: "Needs work",
       });
@@ -203,18 +203,18 @@ describe("CodaScopeAnnotationService", () => {
     it("resolving a parent resolves all replies", async () => {
       scaffoldProject(root, "proj-ann4", "epic4");
       const parent = await svc.createAnnotation("proj-ann4", "epic4", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Parent comment" },
         author: "user",
         body: "Parent comment",
       });
       await svc.createAnnotation("proj-ann4", "epic4", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Reply 1" },
         author: "agent",
         body: "Reply 1",
         parentId: parent.id,
       });
       await svc.createAnnotation("proj-ann4", "epic4", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Reply 2" },
         author: "user",
         body: "Reply 2",
         parentId: parent.id,
@@ -231,12 +231,12 @@ describe("CodaScopeAnnotationService", () => {
     it("deletes an annotation and its replies", async () => {
       scaffoldProject(root, "proj-ann5", "epic5");
       const parent = await svc.createAnnotation("proj-ann5", "epic5", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Deletable" },
         author: "user",
         body: "Deletable",
       });
       await svc.createAnnotation("proj-ann5", "epic5", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Reply" },
         author: "agent",
         body: "Reply",
         parentId: parent.id,
@@ -252,18 +252,18 @@ describe("CodaScopeAnnotationService", () => {
     it("counts open annotations (top-level only)", async () => {
       scaffoldProject(root, "proj-ann6", "epic6");
       const parent = await svc.createAnnotation("proj-ann6", "epic6", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Open parent" },
         author: "user",
         body: "Open parent",
       });
       await svc.createAnnotation("proj-ann6", "epic6", "doc1", {
-        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+        anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Open reply" },
         author: "agent",
         body: "Open reply",
         parentId: parent.id,
       });
       const other = await svc.createAnnotation("proj-ann6", "epic6", "doc1", {
-        anchor: { blockId: "b2", sectionSlug: "root", lineNumber: 5 },
+        anchor: { blockId: "b2", sectionSlug: "root", lineNumber: 5, anchorText: "Resolved" },
         author: "user",
         body: "Resolved",
       });
@@ -282,7 +282,7 @@ describe("CodaScopeAnnotationService", () => {
     it("throws when creating in nonexistent project", async () => {
       await expect(
         svc.createAnnotation("nonexistent", "epic1", "doc1", {
-          anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1 },
+          anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Test" },
           author: "user",
           body: "Test",
         }),
@@ -339,6 +339,7 @@ describe("CodaScopeAnnotationService", () => {
           blockId: block!.blockId,
           sectionSlug: block!.sectionSlug,
           lineNumber: block!.lineStart,
+          anchorText: "Some content.",
         },
         author: "user",
         body: "Note",

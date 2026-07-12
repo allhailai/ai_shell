@@ -6,7 +6,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore, type SkillInfo } from "../useCodaScopeStore";
 import { ModelPicker } from "../components/ModelPicker";
-import { IconSkills } from "../components/CodaScopeIcons";
+import { IconCheck, IconClose, IconRefresh, IconSkills, IconArrowRight } from "../components/CodaScopeIcons";
 import { connectToSseStream } from "../codaScopeSseClient";
 
 export function SkillsManager() {
@@ -159,7 +159,7 @@ export function SkillsManager() {
         <div className="codascope-build-log" style={{ marginBottom: "var(--space-4)" }}>
           <div className="codascope-build-log-header">
             <span>
-              {runningSkillId ? "⟳ Skill Running…" : runError ? "✗ Error" : "✓ Complete"}
+              {runningSkillId ? <><IconRefresh size={13} /> Skill Running…</> : runError ? <><IconClose size={13} /> Error</> : <><IconCheck size={13} /> Complete</>}
             </span>
             {!runningSkillId && (
               <button
@@ -276,7 +276,7 @@ export function SkillsManager() {
                     disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write") || !selectedModel}
                     type="button"
                   >
-                    {runningSkillId === skill.id ? "Running…" : "▶ Run"}
+                    {runningSkillId === skill.id ? "Running…" : <><IconArrowRight size={13} /> Run</>}
                   </button>
                 </div>
               </div>
@@ -333,7 +333,7 @@ export function SkillsManager() {
                   disabled={runningSkillId === skill.id || (agentRunning && skill.lockType === "write") || !selectedModel}
                   type="button"
                 >
-                  {runningSkillId === skill.id ? "Running…" : "▶ Run"}
+                  {runningSkillId === skill.id ? "Running…" : <><IconArrowRight size={13} /> Run</>}
                 </button>
               </div>
             </div>

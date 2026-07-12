@@ -68,10 +68,10 @@ describe("CodaScopeEpicService", () => {
       const epic = await svc.createEpic("proj2", {
         title: "Payment Flow",
         createdBy: "agent",
-        status: "researching",
+        status: "curating",
       });
 
-      expect(epic.status).toBe("researching");
+      expect(epic.status).toBe("curating");
       expect(epic.createdBy).toBe("agent");
       expect(epic.collaborators).toEqual(["agent"]);
     });
@@ -166,12 +166,12 @@ describe("CodaScopeEpicService", () => {
 
       const updated = await svc.updateEpic("proj-upd", created.id, {
         title: "New Title",
-        status: "researching",
+        status: "curating",
       });
 
       expect(updated).not.toBeNull();
       expect(updated!.title).toBe("New Title");
-      expect(updated!.status).toBe("researching");
+      expect(updated!.status).toBe("curating");
     });
 
     it("updates collaborators", async () => {

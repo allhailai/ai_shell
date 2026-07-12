@@ -9,6 +9,7 @@ import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import type { TopicDepth, CurationReasonType } from "../../../src/apps/codascope/codaScopeTypes.js";
 import { searchWeb } from "../codaScopeWebSearchService.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
+import { formatCompletedAction } from "../codaScopeActionParser.js";
 
 /**
  * Build epic-related write tools and new read tools.
@@ -29,6 +30,16 @@ export function buildEpicTools(
     buildState: buildStateService,
     designDoc: designDocService,
   } = services;
+
+  const completed = (
+    operation: string,
+    description: string,
+    attributes: Record<string, string | number | undefined> = {},
+  ): string => {
+    const resultText = `${description}\n\n${formatCompletedAction(operation, description, attributes)}`;
+    collector?.collect(resultText);
+    return resultText;
+  };
 
   return {
     // ── Write Tools ─────────────────────────────────────────────────
@@ -53,7 +64,7 @@ export function buildEpicTools(
         if (!topicId || !content) return "topicId and content are required.";
         try {
           await wikiService.updateTopicContent(projectId, topicId, content);
-          return `Wiki topic "${topicId}" has been written successfully.`;
+          return completed("write_wiki_topic", `Wiki topic "${topicId}" has been written successfully.`, { topicId });
         } catch (err) {
           return `Failed to write wiki topic "${topicId}": ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -89,7 +100,11 @@ export function buildEpicTools(
             epicId: args.epicId as string | undefined,
             curationId: args.curationId as string | undefined,
           });
-          return `Deletion of '${topicId}' queued for human approval. The page remains unchanged until approved.`;
+          return completed(
+            "queue_wiki_deletion",
+            `Deletion of '${topicId}' queued for human approval. The page remains unchanged until approved.`,
+            { topicId },
+          );
         } catch (err) {
           return `Failed to request deletion of "${topicId}": ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -127,7 +142,11 @@ export function buildEpicTools(
             projectId, epicId, pageId, title, content,
             args.sourceRefs as string[] | undefined,
           );
-          return `Epic wiki page "${title}" (${pageId}) written successfully. Word count: ${page.wordCount}`;
+          return completed(
+            "write_epic_wiki_page",
+            `Epic wiki page "${title}" (${pageId}) written successfully. Word count: ${page.wordCount}`,
+            { epicId, pageId },
+          );
         } catch (err) {
           return `Failed to write epic wiki page: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -178,7 +197,11 @@ export function buildEpicTools(
             currentDepth,
           });
           if (!added) return `Topic "${topicId}" already exists in scope for epic "${epicId}".`;
-          return `Added "${topicTitle}" to epic scope with target depth "${targetDepth}".`;
+          return completed(
+            "add_scope_entry",
+            `Added "${topicTitle}" to epic scope with target depth "${targetDepth}".`,
+            { epicId, topicId },
+          );
         } catch (err) {
           return `Failed to add scope entry: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -214,7 +237,11 @@ export function buildEpicTools(
           }
           const updated = await epicService.updateScopeEntry(projectId, epicId, topicId, changes);
           if (!updated) return `Scope entry "${topicId}" not found in epic "${epicId}".`;
-          return `Scope entry "${topicId}" updated. Current depth: ${updated.currentDepth ?? "unchanged"}.`;
+          return completed(
+            "update_scope_entry",
+            `Scope entry "${topicId}" updated. Current depth: ${updated.currentDepth ?? "unchanged"}.`,
+            { epicId, topicId },
+          );
         } catch (err) {
           return `Failed to update scope entry: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -246,7 +273,11 @@ export function buildEpicTools(
           await curationService.addReason(projectId, epicId, {
             type, at: new Date().toISOString(), detail,
           });
-          return `Curation reason "${type}" added for epic "${epicId}".`;
+          return completed(
+            "add_curation_reason",
+            `Curation reason "${type}" added for epic "${epicId}".`,
+            { epicId },
+          );
         } catch (err) {
           return `Failed to add curation reason: ${err instanceof Error ? err.message : String(err)}`;
         }
@@ -287,8 +318,11 @@ export function buildEpicTools(
           return `Failed to start curation: ${result.error ?? "Unknown error"}`;
         }
 
-        return `Curation pipeline started for epic "${epicId}". The UI will show a progress ` +
-          `banner with live step-by-step updates. Pending curation reasons are being processed.`;
+        return completed(
+          "start_curation",
+          `Curation pipeline started for epic "${epicId}". The UI will show a progress banner with live step-by-step updates. Pending curation reasons are being processed.`,
+          { epicId },
+        );
       },
     },
 
@@ -305,18 +339,50 @@ export function buildEpicTools(
             items: { type: "string" },
             description: "Topics to research",
           },
+          modelId: { type: "string", description: "The model ID to use for research" },
         },
-        required: ["epicId", "topics"],
+        required: ["epicId", "topics", "modelId"],
       },
       execute: async (args) => {
         const epicId = args.epicId as string;
         const topics = args.topics as string[];
-        if (!epicId || !topics?.length) return "epicId and topics are required.";
-        // Research pipeline runs via SSE — direct to the API
-        return `Research pipeline for epic "${epicId}" on topics [${topics.join(", ")}] ` +
-          `should be triggered via the UI or ` +
-          `POST /api/codascope/projects/${projectId}/epics/${epicId}/knowledge/research. ` +
-          `The pipeline runs autonomously: plan → download → process.`;
+        const modelId = args.modelId as string;
+        if (!epicId || !topics?.length || !modelId) return "epicId, topics, and modelId are required.";
+
+        try {
+          const port = process.env.AISHELL_PORT ?? "5175";
+          const response = await fetch(
+            `http://localhost:${port}/api/codascope/projects/${projectId}/epics/${epicId}/knowledge/research`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(process.env.AISHELL_INTERNAL_REQUEST_TOKEN
+                  ? { "X-AIShell-Internal-Token": process.env.AISHELL_INTERNAL_REQUEST_TOKEN }
+                  : {}),
+              },
+              body: JSON.stringify({ modelId, topics }),
+            },
+          );
+          if (!response.ok) {
+            return `Failed to start research: ${await response.text()}`;
+          }
+
+          // Keep the internal SSE connection alive while the server executes
+          // the pipeline. Progress remains available through build state.
+          if (response.body) {
+            const reader = response.body.getReader();
+            const pump = (): void => { void reader.read().then(({ done }) => { if (!done) pump(); }); };
+            pump();
+          }
+          return completed(
+            "start_research",
+            `Research pipeline started for epic "${epicId}" on ${topics.length} topic(s).`,
+            { epicId },
+          );
+        } catch (err) {
+          return `Failed to start research: ${err instanceof Error ? err.message : String(err)}`;
+        }
       },
     },
 
@@ -396,7 +462,11 @@ export function buildEpicTools(
             author: "agent",
             body: `${categoryPrefix}${body}`,
           });
-          return `Annotation created (ID: ${annotation.id}) on block "${blockId}" in document "${documentId}".`;
+          return completed(
+            "create_annotation",
+            `Annotation created (ID: ${annotation.id}) on block "${blockId}" in document "${documentId}".`,
+            { epicId, documentId },
+          );
         } catch (err) {
           return `Failed to create annotation: ${err instanceof Error ? err.message : String(err)}`;
         }

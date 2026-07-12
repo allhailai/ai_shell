@@ -12,7 +12,7 @@ import { useState, useCallback } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { EpicBriefResponse } from "../codaScopeTypes";
 import { MarkdownViewer } from "../../../shared/markdown";
-import { IconClipboard } from "./CodaScopeIcons";
+import { IconClipboard, IconClose } from "./CodaScopeIcons";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -103,7 +103,7 @@ export function EpicBriefExport({ epicId }: EpicBriefExportProps) {
                 onClick={closeModal}
                 type="button"
               >
-                ✕
+                <IconClose size={13} />
               </button>
             </div>
             <div className="codascope-epic-brief-modal-content">

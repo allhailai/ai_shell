@@ -49,6 +49,7 @@ import type {
   NoteActivityEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
+import { assertSafePathSegment, isSafePathSegment, resolveWithin } from "./codaScopePathSafety.js";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -169,7 +170,7 @@ export class CodaScopeNoteService {
     switch (scope) {
       case "codascope": {
         if (visibility === "private") {
-          const userId = opts.userId ?? "default";
+          const userId = assertSafePathSegment(opts.userId ?? "default", "user ID");
           return path.join(this.root, "_notes", "private", userId);
         }
         return path.join(this.root, "_notes", "shared");
@@ -179,7 +180,7 @@ export class CodaScopeNoteService {
         const projectDir = this.dirResolver.resolve(opts.projectId);
         if (!projectDir) return null;
         if (visibility === "private") {
-          const userId = opts.userId ?? "default";
+          const userId = assertSafePathSegment(opts.userId ?? "default", "user ID");
           return path.join(projectDir, "_notes", "private", userId);
         }
         return path.join(projectDir, "_notes", "shared");
@@ -188,11 +189,12 @@ export class CodaScopeNoteService {
         if (!opts.projectId || !opts.epicId) return null;
         const projectDir = this.dirResolver.resolve(opts.projectId);
         if (!projectDir) return null;
+        const epicId = assertSafePathSegment(opts.epicId, "epic ID");
         if (visibility === "private") {
-          const userId = opts.userId ?? "default";
-          return path.join(projectDir, "epics", opts.epicId, "_notes", "private", userId);
+          const userId = assertSafePathSegment(opts.userId ?? "default", "user ID");
+          return path.join(projectDir, "epics", epicId, "_notes", "private", userId);
         }
-        return path.join(projectDir, "epics", opts.epicId, "_notes", "shared");
+        return path.join(projectDir, "epics", epicId, "_notes", "shared");
       }
       default:
         return null;
@@ -233,7 +235,8 @@ export class CodaScopeNoteService {
     const tagsMatch = yamlBlock.match(/^tags:\s*\[([^\]]*)\]$/m);
     const statusMatch = yamlBlock.match(/^status:\s*(.+)$/m);
 
-    const id = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : randomUUID();
+    const rawId = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : "";
+    const id = isSafePathSegment(rawId) ? rawId : randomUUID();
     const title = titleMatch ? titleMatch[1].trim().replace(/^["']|["']$/g, "") : "Untitled";
     const created = createdMatch ? createdMatch[1].trim() : new Date().toISOString();
     const updated = updatedMatch ? updatedMatch[1].trim() : new Date().toISOString();
@@ -307,6 +310,12 @@ export class CodaScopeNoteService {
     return crypto.createHash("md5").update(content).digest("hex");
   }
 
+  private writeTextAtomically(filePath: string, content: string): void {
+    const tempPath = `${filePath}.tmp.${randomUUID()}`;
+    writeFileSync(tempPath, content, "utf-8");
+    renameSync(tempPath, filePath);
+  }
+
   /** Count words in text. */
   private countWords(text: string): number {
     const stripped = text.trim();
@@ -324,7 +333,7 @@ export class CodaScopeNoteService {
     const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return [];
 
-    const targetDir = folder ? path.join(notesDir, folder) : notesDir;
+    const targetDir = folder ? resolveWithin(notesDir, folder, "folder path") : notesDir;
     if (!existsSync(targetDir)) return [];
 
     // Try reading from index first
@@ -380,8 +389,12 @@ export class CodaScopeNoteService {
     // Build content with frontmatter
     let finalContent: string;
     if (content && content.startsWith("---\n")) {
-      // Content already has frontmatter
-      finalContent = content;
+      // User-provided frontmatter may set presentation fields, but identity
+      // fields belong to the server and must never be path-bearing input.
+      const { frontmatter, body } = this.parseFrontmatter(content);
+      frontmatter.owner = opts.userId ?? "default";
+      if (visibility === "private") delete frontmatter.status;
+      finalContent = this.serializeFrontmatter(frontmatter) + body;
     } else {
       // Extract title from path or content
       const basename = path.basename(notePath, ".md");
@@ -390,7 +403,7 @@ export class CodaScopeNoteService {
       finalContent = this.serializeFrontmatter(fm) + (content ?? "");
     }
 
-    writeFileSync(filePath, finalContent, "utf-8");
+    this.writeTextAtomically(filePath, finalContent);
 
     // Refresh the index for the parent directory
     await this.refreshIndex(parentDir);
@@ -419,18 +432,27 @@ export class CodaScopeNoteService {
     const filePath = this.resolveNotePath(notesDir, notePath);
     if (!existsSync(filePath)) return null;
 
+    const currentContent = readFileSync(filePath, "utf-8");
+
     // Optimistic concurrency check
     if (expectedHash) {
-      const currentContent = readFileSync(filePath, "utf-8");
       const currentHash = this.computeHash(currentContent);
       if (currentHash !== expectedHash) {
         return { conflict: true, currentHash, currentContent };
       }
     }
 
-    // Update the frontmatter `updated` timestamp
+    const { frontmatter: currentFrontmatter } = this.parseFrontmatter(currentContent);
+
+    // Preserve stable server-owned metadata across edits. The client may
+    // change the title, body, tags, and shared-note status, but cannot adopt
+    // another owner or redirect reader-tracking through a crafted note ID.
     const { frontmatter } = this.parseFrontmatter(content);
+    frontmatter.id = currentFrontmatter.id;
+    frontmatter.owner = currentFrontmatter.owner;
+    frontmatter.created = currentFrontmatter.created;
     frontmatter.updated = new Date().toISOString();
+    if (visibility === "private") delete frontmatter.status;
 
     // Reconstruct content with updated frontmatter
     const { body } = this.parseFrontmatter(content);
@@ -439,7 +461,7 @@ export class CodaScopeNoteService {
     // Snapshot the current content BEFORE overwriting with the update
     this.snapshotVersion(filePath);
 
-    writeFileSync(filePath, finalContent, "utf-8");
+    this.writeTextAtomically(filePath, finalContent);
 
     // Refresh index with last-editor metadata
     const parentDir = path.dirname(filePath);
@@ -560,10 +582,9 @@ export class CodaScopeNoteService {
       reason,
       title: frontmatter.title,
     };
-    writeFileSync(
+    this.writeTextAtomically(
       path.join(envelopeDir, "_archive-meta.json"),
       JSON.stringify(meta, null, 2),
-      "utf-8",
     );
 
     // Refresh index for source directory
@@ -694,7 +715,7 @@ export class CodaScopeNoteService {
     const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) throw new Error("Cannot resolve notes directory for the given scope.");
 
-    const targetDir = path.join(notesDir, folderPath);
+    const targetDir = resolveWithin(notesDir, folderPath, "folder path");
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
   }
 
@@ -745,16 +766,16 @@ export class CodaScopeNoteService {
 
     const filePath = this.resolveNotePath(notesDir, notePath);
     const assetsPath = this.assetsDir(filePath);
-    const imgPath = path.join(assetsPath, filename);
+    const safeFilename = assertSafePathSegment(filename, "image filename");
+    const imgPath = path.join(assetsPath, safeFilename);
 
     if (!existsSync(imgPath)) return null;
 
-    // Security: ensure the resolved path is within the assets directory
-    const resolvedImg = path.resolve(imgPath);
-    const resolvedAssets = path.resolve(assetsPath);
-    if (!resolvedImg.startsWith(resolvedAssets)) return null;
-
-    return imgPath;
+    try {
+      return resolveWithin(assetsPath, safeFilename, "image filename");
+    } catch {
+      return null;
+    }
   }
 
   /* ── Move ─────────────────────────────────────────────────────────── */
@@ -774,24 +795,52 @@ export class CodaScopeNoteService {
     if (!existsSync(fromFile)) return false;
     if (existsSync(toFile)) throw new Error(`Target note already exists: ${moveOpts.toPath}`);
 
+    const fromAssets = this.assetsDir(fromFile);
+    const toAssets = this.assetsDir(toFile);
+    const fromVersions = this.versionsDir(fromFile);
+    const toVersions = this.versionsDir(toFile);
+
+    // Preflight every companion path before moving the note itself. A stale
+    // destination assets/versions directory would otherwise split a note from
+    // its data after the first rename succeeds.
+    if (existsSync(toAssets) || existsSync(toVersions)) {
+      throw new Error(`Target note data already exists: ${moveOpts.toPath}`);
+    }
+
     // Ensure target directory exists
     const toParent = path.dirname(toFile);
     if (!existsSync(toParent)) mkdirSync(toParent, { recursive: true });
 
-    // Move the .md file
-    renameSync(fromFile, toFile);
-
-    // Move the .assets/ directory if it exists
-    const fromAssets = this.assetsDir(fromFile);
-    const toAssets = this.assetsDir(toFile);
-    if (existsSync(fromAssets)) {
-      renameSync(fromAssets, toAssets);
-    }
-
-    // Refresh indexes for both source and target directories
+    let fileMoved = false;
+    let assetsMoved = false;
+    let versionsMoved = false;
     const fromParent = path.dirname(fromFile);
-    await this.refreshIndex(fromParent);
-    await this.refreshIndex(toParent);
+
+    try {
+      renameSync(fromFile, toFile);
+      fileMoved = true;
+
+      if (existsSync(fromAssets)) {
+        renameSync(fromAssets, toAssets);
+        assetsMoved = true;
+      }
+      if (existsSync(fromVersions)) {
+        renameSync(fromVersions, toVersions);
+        versionsMoved = true;
+      }
+
+      await this.refreshIndex(fromParent);
+      await this.refreshIndex(toParent);
+    } catch (error) {
+      // Same-volume renames are atomic; reverse completed operations so a
+      // failed companion move never strands the note or its history.
+      try { if (versionsMoved && existsSync(toVersions)) renameSync(toVersions, fromVersions); } catch { /* best effort */ }
+      try { if (assetsMoved && existsSync(toAssets)) renameSync(toAssets, fromAssets); } catch { /* best effort */ }
+      try { if (fileMoved && existsSync(toFile)) renameSync(toFile, fromFile); } catch { /* best effort */ }
+      try { await this.refreshIndex(fromParent); } catch { /* best effort */ }
+      try { await this.refreshIndex(toParent); } catch { /* best effort */ }
+      throw error;
+    }
 
     return true;
   }
@@ -890,7 +939,7 @@ export class CodaScopeNoteService {
     // Write cache
     try {
       const index: TagIndex = { generatedAt: new Date().toISOString(), tags };
-      writeFileSync(cachePath, JSON.stringify(index, null, 2), "utf-8");
+      this.writeTextAtomically(cachePath, JSON.stringify(index, null, 2));
     } catch { /* best effort */ }
 
     return tags;
@@ -1026,13 +1075,7 @@ export class CodaScopeNoteService {
    */
   private resolveNotePath(notesDir: string, notePath: string): string {
     const normalized = notePath.endsWith(".md") ? notePath : `${notePath}.md`;
-    // Security: resolve and verify it's within the notes directory
-    const resolved = path.resolve(notesDir, normalized);
-    const resolvedNotesDir = path.resolve(notesDir);
-    if (!resolved.startsWith(resolvedNotesDir)) {
-      throw new Error("Path traversal detected.");
-    }
-    return resolved;
+    return resolveWithin(notesDir, normalized, "note path");
   }
 
   /** Get the .assets/ directory path for a note file. */
@@ -1097,11 +1140,7 @@ export class CodaScopeNoteService {
       notes,
       editorMeta,
     };
-    writeFileSync(
-      path.join(dir, "_notes-index.json"),
-      JSON.stringify(index, null, 2),
-      "utf-8",
-    );
+    this.writeTextAtomically(path.join(dir, "_notes-index.json"), JSON.stringify(index, null, 2));
     return notes;
   }
 

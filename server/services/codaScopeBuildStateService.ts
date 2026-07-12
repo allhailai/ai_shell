@@ -414,7 +414,7 @@ export class CodaScopeBuildStateService {
     runId: string,
     pageCount?: number,
     buildInfo?: {
-      buildMode?: "outline" | "delta" | "full";
+      buildMode?: "outline" | "delta" | "full" | "epic-deepen";
       buildType?: "analyze" | "deep-run";
       topicsRebuilt?: number;
       topicsSkipped?: number;

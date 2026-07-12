@@ -705,8 +705,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           {/* Save status indicator */}
           <span className={`codascope-notes-editor-save-status codascope-notes-editor-save-status--${saveStatus}`}>
             {saveStatus === "saving" && "Saving…"}
-            {saveStatus === "saved" && "✓ Saved"}
-            {saveStatus === "error" && "⚠ Error"}
+            {saveStatus === "saved" && <><IconCheckCircle size={12} /> Saved</>}
+            {saveStatus === "error" && <><IconWarning size={12} /> Error</>}
           </span>
 
           {/* Annotations toggle */}

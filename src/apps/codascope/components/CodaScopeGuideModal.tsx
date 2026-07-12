@@ -49,9 +49,7 @@ function ExpandableSection({ title, children }: { title: string; children: React
         type="button"
       >
         <span className="codascope-guide-expandable-arrow">
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points={open ? "2,3 5,6 8,3" : "3,2 6,5 3,8"} />
-          </svg>
+          <IconArrowRight size={10} style={{ transform: open ? "rotate(90deg)" : undefined }} />
         </span>
         {title}
       </button>

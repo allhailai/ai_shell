@@ -10,6 +10,8 @@
 import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import type { NoteScope, NoteVisibility } from "../../../src/apps/codascope/codaScopeTypes.js";
+import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
+import { formatCompletedAction } from "../codaScopeActionParser.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -258,6 +260,7 @@ export function buildNoteReadTools(
 export function buildNoteWriteTools(
   projectId: string,
   services: ToolServices,
+  collector?: ToolResultCollectorHolder,
 ): Record<string, SDKCustomTool> {
   const { note: noteService } = services;
 
@@ -309,7 +312,10 @@ export function buildNoteWriteTools(
             epicId,
           }, notePath, content);
 
-          return `Created note "${notePath}" at scope "${scope}" (${visibility}). Hash: ${result.contentHash}`;
+          const description = `Created note "${notePath}" at scope "${scope}" (${visibility}).`;
+          const resultText = `${description}\n\n${formatCompletedAction("create_note", description, { scope, visibility, notePath, epicId })}`;
+          collector?.collect(resultText);
+          return resultText;
         } catch (e) {
           return `Failed to create note: ${(e as Error).message}`;
         }
@@ -368,7 +374,10 @@ export function buildNoteWriteTools(
             return `Conflict: The note was modified since you last read it. Re-read the note and try again.`;
           }
 
-          return `Updated note "${notePath}". New hash: ${result.contentHash}`;
+          const description = `Updated note "${notePath}".`;
+          const resultText = `${description}\n\n${formatCompletedAction("edit_note", description, { scope, visibility, notePath, epicId })}`;
+          collector?.collect(resultText);
+          return resultText;
         } catch (e) {
           return `Failed to edit note: ${(e as Error).message}`;
         }

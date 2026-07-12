@@ -163,11 +163,23 @@ export async function streamAssistantResponse(options: {
         // Extract actions from both model text and tool results
         const textActions = extractActions(fullResponse);
         const toolActions = extractActions(toolResultText);
-        // Merge, deduplicating by type+docId
-        const seen = new Set(textActions.map(a => `${a.type}:${a.attributes?.docId ?? ""}`));
+        // Merge while retaining distinct completed mutations in the same run.
+        // A document ID is insufficient for notes, wiki pages, and generic
+        // completion cards, which otherwise collapse into one card.
+        const actionKey = (action: { type: string; attributes?: Record<string, string> }) =>
+          [
+            action.type,
+            action.attributes?.docId,
+            action.attributes?.artifactId,
+            action.attributes?.topicId,
+            action.attributes?.pageId,
+            action.attributes?.notePath,
+            action.attributes?.operation,
+          ].filter(Boolean).join(":");
+        const seen = new Set(textActions.map(actionKey));
         const merged = [...textActions];
         for (const ta of toolActions) {
-          const key = `${ta.type}:${ta.attributes?.docId ?? ""}`;
+          const key = actionKey(ta);
           if (!seen.has(key)) {
             merged.push(ta);
             seen.add(key);

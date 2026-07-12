@@ -114,6 +114,16 @@ export function IconLaunch({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Paper plane — Send */
+export function IconSend({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M14 2L2 7l5 2 2 5 5-12z" />
+      <path d="M7 9l3-3" />
+    </svg>
+  );
+}
+
 /** File tree / sitemap — Code Map */
 export function IconCodeMap({ size = 16, style, className }: IconProps) {
   return (

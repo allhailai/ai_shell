@@ -26,6 +26,8 @@ interface AuthMiddlewareOpts {
   osUsername: string;
   dataDir: string;
   sessionExpiryDays?: number;
+  /** Per-process capability used only by in-process pipeline triggers. */
+  internalRequestToken?: string;
 }
 
 // Extend Express Request to include user
@@ -38,7 +40,7 @@ declare global {
 }
 
 export function createAuthMiddleware(opts: AuthMiddlewareOpts) {
-  const { authService, mode, osUsername, dataDir, sessionExpiryDays = 3 } = opts;
+  const { authService, mode, osUsername, dataDir, sessionExpiryDays = 3, internalRequestToken } = opts;
   const cookieMaxAgeMs = sessionExpiryDays * 24 * 60 * 60 * 1000;
 
   // ── Cookie helpers ──────────────────────────────────────────────
@@ -97,6 +99,24 @@ export function createAuthMiddleware(opts: AuthMiddlewareOpts) {
   // ── Middleware functions ───────────────────────────────────────────
 
   async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+    // Long-running agent tools start a same-process SSE pipeline through the
+    // normal HTTP route. A random, non-persisted capability preserves the
+    // route's authentication invariant without forwarding a user's cookie
+    // into background work.
+    if (internalRequestToken && req.get("x-aishell-internal-token") === internalRequestToken) {
+      req.user = {
+        username: "system",
+        firstname: "",
+        lastname: "",
+        is_admin: true,
+        is_system: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      next();
+      return;
+    }
+
     if (mode === "standalone") {
       // Standalone: always authenticated as the local user
       req.user = standaloneUser;

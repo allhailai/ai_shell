@@ -7,11 +7,11 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "./dist-server",
-    "rootDir": "./server",
+    "rootDir": ".",
     "declaration": false,
     "sourceMap": true,
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts", "src/apps/codascope/codaScopeTypes.ts"]
 }

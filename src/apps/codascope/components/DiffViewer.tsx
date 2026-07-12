@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import type { FileDiff, VersionDiff } from "../codaScopeTypes";
+import { IconClose } from "./CodaScopeIcons";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -28,7 +29,7 @@ export function DiffViewer({ diff, onClose }: DiffViewerProps) {
           </h3>
           {onClose && (
             <button className="codascope-btn codascope-btn-ghost" onClick={onClose} type="button">
-              ✕ Close
+              <IconClose size={13} /> Close
             </button>
           )}
         </div>
@@ -54,7 +55,7 @@ export function DiffViewer({ diff, onClose }: DiffViewerProps) {
         </div>
         {onClose && (
           <button className="codascope-btn codascope-btn-ghost" onClick={onClose} type="button">
-            ✕ Close
+            <IconClose size={13} /> Close
           </button>
         )}
       </div>

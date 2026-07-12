@@ -7,7 +7,7 @@
 import { useState, useCallback, useRef, type DragEvent } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconFolder, IconArchive, IconFolderOpen, IconSettings, IconWarning } from "../components/CodaScopeIcons";
+import { IconClose, IconFolder, IconArchive, IconFolderOpen, IconRefresh, IconSettings, IconWarning } from "../components/CodaScopeIcons";
 import { CodaScopeRepoRemapModal } from "../components/CodaScopeRepoRemapModal";
 import { FolderPicker } from "../../../shared/folder-picker";
 
@@ -557,12 +557,12 @@ export function ProjectList() {
         />
         {importState.status === "uploading" ? (
           <>
-            <div className="codascope-import-dropzone-icon">⟳</div>
+            <div className="codascope-import-dropzone-icon"><IconRefresh size={20} /></div>
             <div className="codascope-import-dropzone-text">Importing project…</div>
           </>
         ) : importState.status === "error" ? (
           <>
-            <div className="codascope-import-dropzone-icon codascope-import-dropzone-icon--error">✕</div>
+            <div className="codascope-import-dropzone-icon codascope-import-dropzone-icon--error"><IconClose size={20} /></div>
             <div className="codascope-import-dropzone-text codascope-import-dropzone-text--error">
               {importState.error}
             </div>
@@ -683,4 +683,3 @@ export function ProjectList() {
     </div>
   );
 }
-

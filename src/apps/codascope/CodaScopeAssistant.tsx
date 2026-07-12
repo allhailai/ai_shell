@@ -17,7 +17,7 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch, IconCopy, IconCheck, IconCurate, IconMap, IconBook, IconShield, IconPlan } from "./components/CodaScopeIcons";
+import { IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend } from "./components/CodaScopeIcons";
 import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
@@ -841,7 +841,7 @@ export function CodaScopeAssistant() {
       {/* Phase 3: Epic Context Banner */}
       {currentEpic && (
         <div className="codascope-assistant-epic-banner">
-          <span className="codascope-assistant-epic-banner-icon">📋</span>
+          <span className="codascope-assistant-epic-banner-icon"><IconClipboard size={14} /></span>
           <span className="codascope-assistant-epic-banner-text">
             Scoped to <strong>{currentEpic.title}</strong>
           </span>
@@ -1024,7 +1024,7 @@ export function CodaScopeAssistant() {
                 type="button"
                 title="Stop generation"
               >
-                ■
+                <IconClose size={14} />
               </button>
             )}
             <button
@@ -1090,10 +1090,7 @@ export function CodaScopeAssistant() {
             type="button"
             title="Send message"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
+            <IconSend size={16} />
           </button>
         </div>
 
@@ -1101,7 +1098,7 @@ export function CodaScopeAssistant() {
         {/* Slash command toast */}
         {slashToast && (
           <div className="codascope-slash-toast" key={slashToast}>
-            <span className="codascope-slash-toast-icon">✓</span>
+            <span className="codascope-slash-toast-icon"><IconCheck size={13} /></span>
             {slashToast}
           </div>
         )}

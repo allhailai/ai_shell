@@ -18,7 +18,7 @@ These principles govern all CodaScope development. Violating them creates archit
 
 1. **Chat is a contextual sidekick, not a command center.** The user's primary workflow is browsing wiki, dashboards, and epics. The chat assistant *enhances* that workflow — it is always available in the right panel alongside whatever view the user has open, not a separate destination.
 
-2. **The agent proposes, the user confirms.** The agent suggests actions via interactive cards in chat. The user clicks to dispatch. No autonomous execution — the agent is advisory, not autonomous.
+2. **The agent acts when the user's directive is clear.** The agent uses its scoped write tools for explicit requests. It asks a concise clarifying question only when intent or an essential input is genuinely ambiguous. Each successful mutation emits a completed-operation card sourced from the tool result, so the UI records what actually happened.
 
 3. **Context is automatic, not user-managed.** The system captures what the user is viewing (view, topic, recent navigation) and injects it into the agent prompt. No manual "add file to context" flows. The user simply asks questions and the agent knows where they are.
 
@@ -45,7 +45,7 @@ src/apps/codascope/
 ├── CodaScopeHeaderItems.tsx    # Header bar items for shell manifest (28 lines)
 ├── CodaScopeAssistant.tsx      # Right panel — persistent AI chat assistant (1111 lines)
 ├── components/
-│   ├── ActionCard.tsx          # Interactive action cards from agent suggestions (552 lines)
+│   ├── ActionCard.tsx          # Pending-action and completed-operation cards (552 lines)
 │   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs (212 lines)
 │   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input (393 lines)
 │   ├── BlockedDownloadItem.tsx # Blocked download resolution UI (199 lines)
@@ -262,7 +262,7 @@ Icon rules:
 ### CSS
 
 - All styles namespaced with `codascope-` prefix
-- Single CSS file: `codascope.css` (+ `CodaScopeAssistant.css` for the assistant panel)
+- Scoped CSS files: `codascope.css` for the app, `CodaScopeAssistant.css` for the assistant panel, and `codascope-notes.css` for notes
 - Uses shell design tokens (`--color-*`, `--space-*`, `--text-*`, etc.)
 - Dark theme assumed (inherits from shell `:root` tokens)
 - Never use hard-coded colors — always reference design tokens
@@ -305,7 +305,7 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 
 **Client**: `CodaScopeAssistant.tsx` manages:
 - `ConversationHeader` — title bar with dropdown history popover, search, and new-conversation button
-- `ActionCardList` — renders interactive action cards parsed from agent responses
+- `ActionCardList` — renders pending-action and tool-confirmed completion cards parsed from agent responses
 - Streaming via SSE with cancel support
 - Wikilink conversion (`[[topic-id]]` → internal routes)
 - Action tag stripping from display text (tags are rendered as cards instead)
@@ -367,7 +367,9 @@ Epic tools include `create_design_doc`, `edit_design_doc`, `edit_design_doc_sect
 
 ### Action Tags
 
-The agent can propose structured actions via XML tags embedded in responses:
+Action tags provide two distinct UI signals: pending UI-only actions and
+tool-confirmed completed operations. A clear request to mutate data is handled
+by a write tool; it is never deferred to a confirmation card.
 
 ```xml
 <codascope_action type="build_wiki_page" topic="auth-flow">
@@ -377,14 +379,14 @@ The agent can propose structured actions via XML tags embedded in responses:
 
 **Server-side** (`codaScopeActionParser.ts`):
 - Extracts all `<codascope_action>` tags from agent text
-- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `navigate`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`
-- **Notification-only tags**: `design_doc_created`, `design_doc_edited`, and `artifact_built` are emitted automatically by agent write tools — they are not user-actionable cards in the ActionCard UI. They trigger side effects (auto-navigation, diff highlighting, build status updates) via the command bus.
+- Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `navigate`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`, `operation_completed`
+- **Completed-operation tags**: `operation_completed`, `design_doc_created`, `design_doc_edited`, and `artifact_built` are emitted automatically by successful tools. They render as success cards; navigation-capable cards include a View button and never re-run the mutation.
 - Parsed actions are stored in `message.metadata.actions`
 
 **Client-side** (`ActionCard.tsx`):
-- Renders each action as an interactive card with icon, description, and confirm button
-- Actions dispatch through existing CodaScope APIs when clicked (e.g., triggering a wiki build)
-- Cards track status: `idle` → `running` → `success` | `error`
+- Renders pending actions as interactive cards and successful tool results as durable completion cards
+- Pending UI-only actions dispatch through existing CodaScope APIs when clicked (e.g., triggering a wiki build)
+- Pending cards track status: `idle` → `running` → `success` | `error`; completed-operation cards begin in `success`
 - Action tags are stripped from the display text and shown as cards instead
 
 ### Prompt Construction
@@ -871,4 +873,3 @@ The `artifact:` prefix distinguishes artifact routes from design doc routes with
 - `do_chat.md` includes capability summary
 - Agent answers "what can you do?" naturally
 - Only teaches when asked — no unsolicited suggestions
-

@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useShellStore } from "../../../shell/store";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconEpic } from "../components/CodaScopeIcons";
+import { IconBlocked, IconBolt, IconCheckCircle, IconClock, IconEpic } from "../components/CodaScopeIcons";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import type { EpicDesign, EpicStatus, EpicHealth, EpicHealthInfo } from "../codaScopeTypes";
 
@@ -22,11 +22,11 @@ const STATUS_LABELS: Record<EpicStatus, { label: string; className: string }> = 
   archived:    { label: "Archived",   className: "codascope-epic-status-badge--archived" },
 };
 
-const HEALTH_INDICATORS: Record<EpicHealth, { emoji: string; label: string }> = {
-  active:  { emoji: "🟢", label: "Active" },
-  hot:     { emoji: "⚡", label: "Hot" },
-  stale:   { emoji: "🟡", label: "Stale" },
-  blocked: { emoji: "🔴", label: "Blocked" },
+const HEALTH_INDICATORS: Record<EpicHealth, { Icon: typeof IconEpic; label: string }> = {
+  active:  { Icon: IconCheckCircle, label: "Active" },
+  hot:     { Icon: IconBolt, label: "Hot" },
+  stale:   { Icon: IconClock, label: "Stale" },
+  blocked: { Icon: IconBlocked, label: "Blocked" },
 };
 
 function timeAgo(iso: string): string {
@@ -240,10 +240,10 @@ export function EpicList() {
           onChange={(e) => setHealthFilter(e.target.value as EpicHealth | "all")}
         >
           <option value="all">All Health</option>
-          <option value="active">🟢 Active</option>
-          <option value="hot">⚡ Hot</option>
-          <option value="stale">🟡 Stale</option>
-          <option value="blocked">🔴 Blocked</option>
+          <option value="active">Active</option>
+          <option value="hot">Hot</option>
+          <option value="stale">Stale</option>
+          <option value="blocked">Blocked</option>
         </select>
       </div>
 
@@ -286,7 +286,7 @@ export function EpicList() {
                       className="codascope-epic-health-badge"
                       title={healthInfo?.reason ?? ""}
                     >
-                      {health.emoji}
+                      <health.Icon size={13} />
                     </span>
                   )}
                 </div>

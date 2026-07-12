@@ -43,7 +43,31 @@ export const VALID_ACTION_TYPES = new Set([
   "trigger_research",
   // Visual Artifacts
   "artifact_built",
+  // Tool-confirmed mutations. These are rendered as completed cards, not
+  // proposals that require a second user action.
+  "operation_completed",
 ]);
+
+/**
+ * Create a notification tag for a mutation that has already succeeded.
+ *
+ * Tool implementations return the tag to the agent and place it in the
+ * per-run collector. The client can then render a durable completion card
+ * alongside the assistant's prose without trusting the model to report work
+ * accurately in free-form text.
+ */
+export function formatCompletedAction(
+  operation: string,
+  description: string,
+  attributes: Record<string, string | number | undefined> = {},
+): string {
+  const escapedAttributes = Object.entries({ operation, ...attributes })
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => ` ${key}="${escapeAttribute(String(value))}"`)
+    .join("");
+
+  return `<codascope_action type="operation_completed"${escapedAttributes}>${escapeText(description)}</codascope_action>`;
+}
 
 /* ── Parser ────────────────────────────────────────────────────────── */
 
@@ -63,7 +87,7 @@ export function extractActions(text: string): CodaScopeAction[] {
 
   for (const match of text.matchAll(tagPattern)) {
     const attrString = match[1] ?? "";
-    const description = (match[2] ?? "").trim();
+    const description = decodeEntities((match[2] ?? "").trim());
 
     // Parse attributes from the opening tag
     const attributes = parseAttributes(attrString);
@@ -112,8 +136,31 @@ function parseAttributes(attrString: string): Record<string, string> {
   for (const match of attrString.matchAll(attrPattern)) {
     const key = match[1];
     const value = match[2] ?? match[3] ?? match[4] ?? "";
-    if (key) attrs[key] = value;
+    if (key) attrs[key] = decodeEntities(value);
   }
 
   return attrs;
+}
+
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }

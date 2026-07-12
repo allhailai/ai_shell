@@ -601,7 +601,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const num = parseInt(req.params.num, 10);
+    const num = parseInt(param(req, "num"), 10);
     if (isNaN(num)) throw httpError("Invalid version number.", 400, "invalid_input");
     const result = await designDocSvc.getDocVersion(id, epicId, docId, num);
     if (!result) throw httpError("Version not found.", 404, "not_found");
@@ -614,7 +614,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const num = parseInt(req.params.num, 10);
+    const num = parseInt(param(req, "num"), 10);
     if (isNaN(num)) throw httpError("Invalid version number.", 400, "invalid_input");
     const result = await designDocSvc.revertToVersion(id, epicId, docId, num);
     if (!result) throw httpError("Version not found or revert failed.", 404, "not_found");

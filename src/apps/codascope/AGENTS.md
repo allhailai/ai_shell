@@ -17,7 +17,7 @@ For shell-level patterns (design tokens, URL routing, app manifest), see the [AI
 These principles are **non-negotiable**. They shaped every architectural decision. Read [`ARCHITECTURE.md` Level 0.5](ARCHITECTURE.md#level-05--design-philosophy) for the full rationale.
 
 1. **Chat is a sidekick, not a destination.** It lives in the right panel — never add a routed `ChatView.tsx`.
-2. **Propose, don't execute.** The agent suggests actions via cards. The user clicks to confirm. No autonomous execution.
+2. **Act when the directive is clear.** The agent uses its scoped write tools for explicit requests and asks one concise question only when essential intent or required details are genuinely ambiguous. Successful mutations must surface a completed-operation card backed by the tool result.
 3. **Context is automatic.** The system injects what the user is viewing. No manual "add to context" flows.
 4. **Manifest + tools, not content dumping.** Inject ~500 tokens of *what exists*. Let the agent tool-call for full content.
 5. **Intelligence before infrastructure.** Smarter context > more features.
@@ -43,7 +43,7 @@ CodaScope uses **conceptual inline SVG icons**, never emoji or icon fonts. All i
 ```bash
 grep -rn '[🗑📐🖨📝🔍⚡🔄💡🎯📊📋🚀✨🛠️🧹]' src/apps/codascope/ --include='*.tsx'
 ```
-If any hits outside `ActionCard.tsx` (legacy exception), fix them before submitting.
+If any hits exist outside `CodaScopeIcons.tsx`, fix them before submitting.
 
 When adding a new icon:
 - Add it to `CodaScopeIcons.tsx` as a named export
@@ -55,7 +55,7 @@ When adding a new icon:
 
 - **Prefix all classes** with `codascope-` (e.g., `codascope-wiki-tree`, `codascope-action-card`)
 - **Never hard-code colors** — use shell design tokens: `--color-*`, `--space-*`, `--text-*`, `--radius-*`
-- Primary styles go in `codascope.css`; assistant-specific styles in `CodaScopeAssistant.css`
+- Primary styles go in `codascope.css`; assistant-specific styles in `CodaScopeAssistant.css`; notes styles in `codascope-notes.css`
 - Dark theme is assumed (inherited from shell `:root` tokens)
 
 ### 3. State Management — Zustand + URL
@@ -118,7 +118,7 @@ The chat agent is built on a **manifest + tool use** architecture:
 When extending agent capabilities:
 - Add new action types to `VALID_ACTION_TYPES` in `codaScopeActionParser.ts`
 - Add corresponding card rendering in `ActionCard.tsx`
-- Actions must dispatch through existing CodaScope APIs — never bypass the API layer
+- Pending UI-only actions dispatch through existing CodaScope APIs. Successful mutation tools emit completion tags; do not use an action card to defer an explicit write request.
 - New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, `buildWriteTools()`, or `buildArtifactTools()` in the `tools/` subdirectory under `server/services/tools/`
 - Artifact tools (`write_artifact_html`, `read_artifact_html`, `read_epic_context`) are in `buildArtifactTools()`
 - Tool safety: assistant/chat = ALL tools (read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic. Artifact-build/regen = read + artifact.
@@ -142,7 +142,7 @@ When extending agent capabilities:
 | New artifact service | `server/services/codaScopeArtifact*Service.ts` |
 | Artifact API endpoints | `server/routes/codaScopeArtifactRoutes.ts` |
 | New slash commands | `commandRegistry.ts` |
-| New styles | Add to `codascope.css` (or `CodaScopeAssistant.css` for assistant) |
+| New styles | Add to `codascope.css` (or `CodaScopeAssistant.css` for assistant, `codascope-notes.css` for notes) |
 | New icons | Add to `components/CodaScopeIcons.tsx` |
 
 ---

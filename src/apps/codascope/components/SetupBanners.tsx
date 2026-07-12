@@ -13,7 +13,7 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconKey, IconPackage, IconWarning } from "./CodaScopeIcons";
+import { IconArrowRight, IconKey, IconPackage, IconWarning } from "./CodaScopeIcons";
 
 interface SetupStatus {
   hasApiKey: boolean;
@@ -167,13 +167,10 @@ export function SetupBanners() {
           <span className="codascope-setup-banner-text">{b.text}</span>
           <span className="codascope-setup-banner-action">
             {b.action}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
+            <IconArrowRight size={14} />
           </span>
         </button>
       ))}
     </div>
   );
 }
-

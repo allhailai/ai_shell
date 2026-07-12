@@ -23,6 +23,8 @@ import {
   IconArtifact,
   IconPin,
   IconArchive,
+  IconArrowRight,
+  IconChevronDown,
   IconNotes,
 } from "./CodaScopeIcons";
 import { CurateButton } from "./CurateButton";
@@ -403,7 +405,7 @@ export function EpicSidebar({
             type="button"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {collapsed ? "▶" : "◀"}
+            <IconArrowRight size={13} style={collapsed ? undefined : { transform: "rotate(180deg)" }} />
           </button>
         </div>
         {!collapsed && (
@@ -435,13 +437,9 @@ export function EpicSidebar({
             title={navCollapsed ? "Show sections" : "Hide sections"}
           >
             <span className="codascope-epic-sidebar-nav-toggle-label">Sections</span>
-            <svg className="codascope-epic-sidebar-nav-toggle-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {navCollapsed ? (
-                <polyline points="9 18 15 12 9 6" />
-              ) : (
-                <polyline points="6 9 12 15 18 9" />
-              )}
-            </svg>
+            {navCollapsed
+              ? <IconArrowRight className="codascope-epic-sidebar-nav-toggle-chevron" size={14} />
+              : <IconChevronDown className="codascope-epic-sidebar-nav-toggle-chevron" size={14} />}
           </button>
         )}
 

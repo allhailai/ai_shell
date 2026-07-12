@@ -6,7 +6,7 @@
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 
 export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal } = ctx;
 
   // ── Annotations ───────────────────────────────────────────────────
 
@@ -36,9 +36,8 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const { anchor, author, body, parentId, documentVersion } = req.body as {
+    const { anchor, body, parentId, documentVersion } = req.body as {
       anchor?: unknown;
-      author?: string;
       body?: string;
       parentId?: string;
       documentVersion?: number;
@@ -48,7 +47,7 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     }
     const annotation = await annotationSvc.createAnnotation(id, epicId, docId, {
       anchor: anchor as any,
-      author: author ?? "user",
+      author: principal(req).username,
       body,
       parentId,
       documentVersion,
@@ -105,9 +104,9 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-    const { type, afterLine, startLine, endLine, blockId, anchorText, instruction, author } = req.body as {
+    const { type, afterLine, startLine, endLine, blockId, anchorText, instruction } = req.body as {
       type?: string; afterLine?: number; startLine?: number; endLine?: number;
-      blockId?: string; anchorText?: string; instruction?: string; author?: string;
+      blockId?: string; anchorText?: string; instruction?: string;
     };
     if (!type || !instruction) {
       throw httpError("type and instruction are required.", 400, "invalid_input");
@@ -123,7 +122,7 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
       blockId,
       anchorText,
       instruction,
-      author: author ?? "user",
+      author: principal(req).username,
     });
     res.status(201).json({ directive });
   }));
