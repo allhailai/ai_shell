@@ -11,8 +11,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
-import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
-import { IconClose, IconWarning, IconComment, IconClock, IconMove } from "../components/CodaScopeIcons";
+import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
@@ -92,8 +91,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveReason, setArchiveReason] = useState("");
 
   // Conflict state
   const [conflictData, setConflictData] = useState<{
@@ -305,12 +305,14 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     }
   }, [title, saveNote]);
 
-  // ── Delete note ────────────────────────────────────────────────────
-  const handleDelete = useCallback(async () => {
-    setDeleting(true);
+  // ── Archive note ───────────────────────────────────────────────────
+  const handleArchive = useCallback(async () => {
+    setArchiving(true);
     try {
-      const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
-        method: "DELETE",
+      const res = await fetch(`${apiBase}/note/${apiPath}/archive?${queryString}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: archiveReason.trim() || undefined }),
       });
       if (res.ok) {
         onBack();
@@ -318,9 +320,10 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     } catch {
       // Silently fail
     }
-    setDeleting(false);
-    setShowDeleteConfirm(false);
-  }, [apiBase, apiPath, queryString, onBack]);
+    setArchiving(false);
+    setShowArchiveConfirm(false);
+    setArchiveReason("");
+  }, [apiBase, apiPath, queryString, onBack, archiveReason]);
 
   // ── Conflict resolution ────────────────────────────────────────────
   const handleConflictReload = useCallback(() => {
@@ -561,16 +564,16 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             <IconMove size={14} />
           </button>
 
-          {/* Delete */}
+          {/* Archive */}
           <button
             className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={deleting}
+            onClick={() => setShowArchiveConfirm(true)}
+            disabled={archiving}
             type="button"
-            title="Delete note"
-            style={{ color: "var(--color-danger)" }}
+            title="Archive note"
+            style={{ color: "var(--color-warning)" }}
           >
-            <IconClose size={14} />
+            <IconArchive size={14} />
           </button>
         </div>
       </div>
@@ -742,17 +745,49 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         </span>
       </div>
 
-      {/* Delete confirmation dialog */}
-      <ConfirmDialog
-        open={showDeleteConfirm}
-        title="Delete Note?"
-        message="This will permanently delete this note and any associated images. This cannot be undone."
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        variant="danger"
-        onConfirm={handleDelete}
-        onCancel={() => setShowDeleteConfirm(false)}
-      />
+      {/* Archive confirmation dialog */}
+      {showArchiveConfirm && (
+        <div className="codascope-notes-archive-dialog-overlay" onClick={() => { setShowArchiveConfirm(false); setArchiveReason(""); }}>
+          <div className="codascope-notes-archive-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="codascope-notes-archive-dialog-header">
+              <IconArchive size={16} />
+              <span>Archive Note?</span>
+            </div>
+            <p className="codascope-notes-archive-dialog-message">
+              This note will be moved to the archive. You can restore it at any time from the archive browser.
+            </p>
+            <div className="codascope-notes-archive-dialog-reason">
+              <label htmlFor="archive-reason">Reason (optional)</label>
+              <input
+                id="archive-reason"
+                type="text"
+                className="codascope-notes-archive-reason-input"
+                placeholder="e.g. No longer relevant"
+                value={archiveReason}
+                onChange={(e) => setArchiveReason(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="codascope-notes-archive-dialog-actions">
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+                onClick={() => { setShowArchiveConfirm(false); setArchiveReason(""); }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="codascope-btn codascope-btn-primary codascope-btn-sm"
+                onClick={handleArchive}
+                disabled={archiving}
+                type="button"
+              >
+                {archiving ? "Archiving…" : "Archive"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Move dialog */}
       <NoteMoveDialog

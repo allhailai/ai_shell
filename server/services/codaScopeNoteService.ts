@@ -44,6 +44,7 @@ import type {
   NoteFrontmatter,
   NoteEntry,
   NoteFolderEntry,
+  NoteArchiveMeta,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
@@ -419,9 +420,16 @@ export class CodaScopeNoteService {
   }
 
   /**
-   * Delete a note and its co-located .assets/ directory.
+   * Delete a note. By default, archives instead of destroying.
+   * Set permanent=true for actual deletion (admin-only, enforced at route level).
    */
-  async deleteNote(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string): Promise<boolean> {
+  async deleteNote(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string, permanent?: boolean): Promise<boolean> {
+    if (!permanent) {
+      // Soft delete: archive instead
+      const meta = await this.archiveNote(scope, visibility, opts, notePath);
+      return meta !== null;
+    }
+
     const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return false;
 
@@ -437,11 +445,204 @@ export class CodaScopeNoteService {
       rmSync(assetsDir, { recursive: true, force: true });
     }
 
+    // Delete .versions/ directory if it exists
+    const vDir = this.versionsDir(filePath);
+    if (existsSync(vDir)) {
+      rmSync(vDir, { recursive: true, force: true });
+    }
+
     // Refresh index
     const parentDir = path.dirname(filePath);
     await this.refreshIndex(parentDir);
 
     return true;
+  }
+
+  /* ── Archive / Restore ───────────────────────────────────────────── */
+
+  /** Resolve the archive directory for a given scope/visibility. */
+  private resolveArchiveDir(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts): string | null {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+    // _archive lives alongside the notes dirs: <notesRoot>/_archive/<visibility>/
+    const notesRoot = path.dirname(notesDir); // up from shared/ or private/<userId>/
+    if (visibility === "private" && opts.userId) {
+      // For private notes the notesDir is <root>/_notes/private/<userId>
+      // Archive is <root>/_notes/_archive/private/<userId>/
+      return path.join(path.dirname(path.dirname(notesDir)), "_archive", "private", opts.userId ?? "default");
+    }
+    return path.join(notesRoot, "_archive", visibility);
+  }
+
+  /**
+   * Archive a note: move it to _archive/<visibility>/<noteId>/ with metadata.
+   */
+  async archiveNote(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    reason?: string,
+  ): Promise<NoteArchiveMeta | null> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+
+    const filePath = this.resolveNotePath(notesDir, notePath);
+    if (!existsSync(filePath)) return null;
+
+    // Read frontmatter for UUID and title
+    const content = readFileSync(filePath, "utf-8");
+    const { frontmatter } = this.parseFrontmatter(content);
+    const noteId = frontmatter.id;
+
+    // Create archive envelope
+    const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
+    if (!archiveDir) return null;
+    const envelopeDir = path.join(archiveDir, noteId);
+    if (!existsSync(envelopeDir)) mkdirSync(envelopeDir, { recursive: true });
+
+    // Move .md file
+    const destMd = path.join(envelopeDir, path.basename(filePath));
+    renameSync(filePath, destMd);
+
+    // Move .assets/ if present
+    const assetsPath = this.assetsDir(filePath);
+    if (existsSync(assetsPath)) {
+      const destAssets = path.join(envelopeDir, path.basename(assetsPath));
+      renameSync(assetsPath, destAssets);
+    }
+
+    // Move .versions/ if present
+    const vDir = this.versionsDir(filePath);
+    if (existsSync(vDir)) {
+      const destVersions = path.join(envelopeDir, path.basename(vDir));
+      renameSync(vDir, destVersions);
+    }
+
+    // Write _archive-meta.json
+    const meta: NoteArchiveMeta = {
+      noteId,
+      archivedAt: new Date().toISOString(),
+      archivedBy: opts.userId ?? "default",
+      originalPath: notePath,
+      originalScope: scope,
+      originalVisibility: visibility,
+      reason,
+      title: frontmatter.title,
+    };
+    writeFileSync(
+      path.join(envelopeDir, "_archive-meta.json"),
+      JSON.stringify(meta, null, 2),
+      "utf-8",
+    );
+
+    // Refresh index for source directory
+    const parentDir = path.dirname(filePath);
+    await this.refreshIndex(parentDir);
+
+    return meta;
+  }
+
+  /**
+   * Restore an archived note back to its original location.
+   * If the original path is occupied, appends " (restored)" to the filename.
+   */
+  async restoreNote(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    noteId: string,
+  ): Promise<{ restoredPath: string; meta: NoteArchiveMeta } | null> {
+    const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
+    if (!archiveDir) return null;
+
+    const envelopeDir = path.join(archiveDir, noteId);
+    if (!existsSync(envelopeDir)) return null;
+
+    // Read archive metadata
+    const metaPath = path.join(envelopeDir, "_archive-meta.json");
+    if (!existsSync(metaPath)) return null;
+    const meta: NoteArchiveMeta = JSON.parse(readFileSync(metaPath, "utf-8"));
+
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+
+    // Determine restore path — append "(restored)" if original is occupied
+    let restorePath = meta.originalPath;
+    const targetFile = this.resolveNotePath(notesDir, restorePath);
+    if (existsSync(targetFile)) {
+      const ext = path.extname(restorePath);
+      const base = restorePath.slice(0, restorePath.length - ext.length);
+      restorePath = `${base} (restored)${ext}`;
+    }
+    const destFile = this.resolveNotePath(notesDir, restorePath);
+
+    // Ensure target directory exists
+    const destParent = path.dirname(destFile);
+    if (!existsSync(destParent)) mkdirSync(destParent, { recursive: true });
+
+    // Find the .md file in the envelope
+    const envelopeItems = readdirSync(envelopeDir);
+    const mdFile = envelopeItems.find((f: string) => f.endsWith(".md"));
+    if (!mdFile) return null;
+
+    // Move .md file back
+    renameSync(path.join(envelopeDir, mdFile), destFile);
+
+    // Move .assets/ back if present
+    const assetsItem = envelopeItems.find((f: string) => f.endsWith(".assets"));
+    if (assetsItem) {
+      const destAssets = this.assetsDir(destFile);
+      renameSync(path.join(envelopeDir, assetsItem), destAssets);
+    }
+
+    // Move .versions/ back if present
+    const versionsItem = envelopeItems.find((f: string) => f.endsWith(".versions"));
+    if (versionsItem) {
+      const destVersions = this.versionsDir(destFile);
+      renameSync(path.join(envelopeDir, versionsItem), destVersions);
+    }
+
+    // Remove the envelope directory
+    rmSync(envelopeDir, { recursive: true, force: true });
+
+    // Refresh index
+    await this.refreshIndex(destParent);
+
+    return { restoredPath: restorePath, meta };
+  }
+
+  /**
+   * List all archived notes for a given scope/visibility.
+   */
+  async listArchived(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+  ): Promise<NoteArchiveMeta[]> {
+    const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
+    if (!archiveDir || !existsSync(archiveDir)) return [];
+
+    const results: NoteArchiveMeta[] = [];
+
+    try {
+      const entries = readdirSync(archiveDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        const metaPath = path.join(archiveDir, entry.name, "_archive-meta.json");
+        if (existsSync(metaPath)) {
+          try {
+            const meta: NoteArchiveMeta = JSON.parse(readFileSync(metaPath, "utf-8"));
+            results.push(meta);
+          } catch { /* skip corrupted */ }
+        }
+      }
+    } catch { /* best effort */ }
+
+    // Sort by archivedAt, newest first
+    results.sort((a, b) => (b.archivedAt || "").localeCompare(a.archivedAt || ""));
+
+    return results;
   }
 
   /* ── Folders ─────────────────────────────────────────────────────── */

@@ -7,7 +7,8 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive } from "../components/CodaScopeIcons";
+import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import type { NoteScope, NoteVisibility, NoteEntry } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
@@ -159,6 +160,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
 
 
 
@@ -526,6 +528,28 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           )
         )}
       </div>
+
+      {/* Archive section (collapsible) */}
+      {!showSearchResults && (
+        <div className="codascope-notes-archive-section">
+          <button
+            className="codascope-notes-archive-toggle"
+            onClick={() => setShowArchive((v) => !v)}
+            type="button"
+          >
+            <IconArchive size={14} />
+            <span>Archive</span>
+            <span className="codascope-notes-archive-chevron">{showArchive ? "▴" : "▾"}</span>
+          </button>
+          {showArchive && (
+            <NoteArchiveBrowser
+              scope={scope}
+              visibility={visibility}
+              queryString={queryString}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

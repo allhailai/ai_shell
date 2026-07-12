@@ -662,3 +662,38 @@ export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId"
   noteVisibility: NoteVisibility;
   notePath: string;
 }
+
+/** Metadata stored in _archive-meta.json inside each archive envelope */
+export interface NoteArchiveMeta {
+  noteId: string;
+  archivedAt: string;
+  archivedBy: string;
+  originalPath: string;
+  originalScope: NoteScope;
+  originalVisibility: NoteVisibility;
+  reason?: string;
+  title: string;
+}
+
+/** Audit event for note operations (append-only JSONL) */
+export interface NoteAuditEvent {
+  event: string;
+  timestamp: string;
+  actor: string;
+  noteId: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
+  metadata?: Record<string, unknown>;
+  correlationId?: string;
+}
+
+/** Filters for querying audit events */
+export interface NoteAuditQueryFilters {
+  noteId?: string;
+  event?: string;
+  actor?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}

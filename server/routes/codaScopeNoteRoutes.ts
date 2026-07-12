@@ -8,7 +8,7 @@
 
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
-import type { NoteScope, NoteVisibility, NoteEntry } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
@@ -348,6 +348,94 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   }));
 
   // ══════════════════════════════════════════════════════════════════════
+  // ── ARCHIVE / RESTORE ROUTES ─────────────────────────────────────────
+  // Must be registered BEFORE the generic wildcard CRUD routes.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── Archive a Note ─────────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/archive", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+
+    let notePath = extractPath(req);
+    notePath = stripSuffix(notePath, "/archive");
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    const { reason } = req.body as { reason?: string };
+
+    const meta = await noteSvc.archiveNote(scope, visibility, opts, notePath, reason);
+    if (!meta) throw httpError("Note not found.", 404, "not_found");
+
+    // Audit log
+    noteAuditSvc.log({
+      event: "note.archived",
+      timestamp: new Date().toISOString(),
+      actor: opts.userId ?? "default",
+      noteId: meta.noteId,
+      scope,
+      visibility,
+      path: notePath,
+      metadata: reason ? { reason } : undefined,
+    });
+
+    res.json(meta);
+  }));
+
+  // ── Restore an Archived Note ──────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/archive/restore/:noteId", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const noteId = param(req, "noteId");
+
+    const result = await noteSvc.restoreNote(scope, visibility, opts, noteId);
+    if (!result) throw httpError("Archived note not found.", 404, "not_found");
+
+    // Audit log
+    noteAuditSvc.log({
+      event: "note.restored",
+      timestamp: new Date().toISOString(),
+      actor: opts.userId ?? "default",
+      noteId,
+      scope,
+      visibility,
+      path: result.restoredPath,
+      metadata: { originalPath: result.meta.originalPath },
+    });
+
+    res.json({ restored: true, restoredPath: result.restoredPath });
+  }));
+
+  // ── List Archived Notes ────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/:scope/:visibility/archive", wrap(async (req, res) => {
+    const { noteSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+
+    const archived: NoteArchiveMeta[] = await noteSvc.listArchived(scope, visibility, opts);
+    res.json({ archived });
+  }));
+
+  // ── Query Audit Log (admin only) ───────────────────────────────────
+
+  app.get("/api/codascope/audit/notes", wrap(async (req, res) => {
+    const { noteAuditSvc } = await ensureServices();
+
+    const filters = {
+      noteId: (req.query.noteId as string) ?? undefined,
+      event: (req.query.event as string) ?? undefined,
+      actor: (req.query.actor as string) ?? undefined,
+      from: (req.query.from as string) ?? undefined,
+      to: (req.query.to as string) ?? undefined,
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+    };
+
+    const events = noteAuditSvc.query(filters);
+    res.json({ events });
+  }));
+
+  // ══════════════════════════════════════════════════════════════════════
   // ── GENERIC NOTE CRUD ROUTES ──────────────────────────────────────────
   // These MUST come LAST because `*path` would greedily match suffixes.
   // ══════════════════════════════════════════════════════════════════════
@@ -369,20 +457,37 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Create Note ─────────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
     const { content } = req.body as { content?: string };
     const result = await noteSvc.createNote(scope, visibility, opts, notePath, content);
+
+    // Read back frontmatter to get the note UUID for audit
+    try {
+      const note = await noteSvc.readNote(scope, visibility, opts, notePath);
+      if (note) {
+        noteAuditSvc.log({
+          event: "note.created",
+          timestamp: new Date().toISOString(),
+          actor: opts.userId ?? "default",
+          noteId: note.frontmatter.id,
+          scope,
+          visibility,
+          path: notePath,
+        });
+      }
+    } catch { /* best effort */ }
+
     res.status(201).json(result);
   }));
 
   // ── Update Note ─────────────────────────────────────────────────────
 
   app.put("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -404,19 +509,62 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       return;
     }
 
+    // Audit log (best effort — don't read back note for every auto-save,
+    // use a lightweight approach: read frontmatter from the content we just saved)
+    try {
+      const note = await noteSvc.readNote(scope, visibility, opts, notePath);
+      if (note) {
+        noteAuditSvc.log({
+          event: "note.updated",
+          timestamp: new Date().toISOString(),
+          actor: opts.userId ?? "default",
+          noteId: note.frontmatter.id,
+          scope,
+          visibility,
+          path: notePath,
+        });
+      }
+    } catch { /* best effort */ }
+
     res.json(result);
   }));
 
   // ── Delete Note ─────────────────────────────────────────────────────
 
   app.delete("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
-    const deleted = await noteSvc.deleteNote(scope, visibility, opts, notePath);
+    // Check for permanent deletion (admin only)
+    const permanent = req.query.permanent === "true";
+    if (permanent) {
+      const isAdmin = (req as any).session?.user?.isAdmin === true;
+      if (!isAdmin) throw httpError("Permanent deletion requires admin privileges.", 403, "forbidden");
+    }
+
+    // Read note before deletion for audit log
+    let noteId = "unknown";
+    try {
+      const note = await noteSvc.readNote(scope, visibility, opts, notePath);
+      if (note) noteId = note.frontmatter.id;
+    } catch { /* best effort */ }
+
+    const deleted = await noteSvc.deleteNote(scope, visibility, opts, notePath, permanent);
     if (!deleted) throw httpError("Note not found.", 404, "not_found");
+
+    // Audit log
+    noteAuditSvc.log({
+      event: permanent ? "note.deleted" : "note.archived",
+      timestamp: new Date().toISOString(),
+      actor: opts.userId ?? "default",
+      noteId,
+      scope,
+      visibility,
+      path: notePath,
+      metadata: permanent ? { permanent: true } : undefined,
+    });
 
     res.json({ deleted: true });
   }));
@@ -424,7 +572,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Move Note ───────────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/move", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc } = await ensureServices();
 
     const {
       fromScope, fromVisibility, fromPath, fromOpts,
@@ -466,6 +614,32 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     });
 
     if (!moved) throw httpError("Move failed. Source note not found.", 404, "not_found");
+
+    // Audit log (best effort — read the note at the destination)
+    try {
+      const note = await noteSvc.readNote(
+        toScope as NoteScope,
+        toVisibility as NoteVisibility,
+        { ...toOpts, userId },
+        toPath!,
+      );
+      if (note) {
+        noteAuditSvc.log({
+          event: "note.moved",
+          timestamp: new Date().toISOString(),
+          actor: userId,
+          noteId: note.frontmatter.id,
+          scope: toScope as NoteScope,
+          visibility: toVisibility as NoteVisibility,
+          path: toPath!,
+          metadata: {
+            fromScope, fromVisibility, fromPath,
+            toScope, toVisibility, toPath,
+          },
+        });
+      }
+    } catch { /* best effort */ }
+
     res.json({ moved: true });
   }));
 }
