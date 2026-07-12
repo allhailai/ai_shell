@@ -1,6 +1,8 @@
 /* ── CodaScope: Note Service — Unit Tests ────────────────────────────
    Tests for frontmatter parsing, CRUD, image upload, search, and
    content hashing.
+
+   Updated for scope+visibility model (codascope/project/epic × shared/private).
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -39,10 +41,12 @@ describe("CodaScopeNoteService", () => {
     it("should parse valid frontmatter", () => {
       const content = [
         "---",
+        "id: 550e8400-e29b-41d4-a716-446655440000",
         "title: My Note",
         "tags: [meeting, sprint-12]",
         "created: 2026-07-09T21:00:00Z",
         "updated: 2026-07-09T22:15:00Z",
+        "owner: alan",
         "---",
         "",
         "# My Note",
@@ -50,10 +54,12 @@ describe("CodaScopeNoteService", () => {
       ].join("\n");
 
       const result = svc.parseFrontmatter(content);
+      expect(result.frontmatter.id).toBe("550e8400-e29b-41d4-a716-446655440000");
       expect(result.frontmatter.title).toBe("My Note");
       expect(result.frontmatter.tags).toEqual(["meeting", "sprint-12"]);
       expect(result.frontmatter.created).toBe("2026-07-09T21:00:00Z");
       expect(result.frontmatter.updated).toBe("2026-07-09T22:15:00Z");
+      expect(result.frontmatter.owner).toBe("alan");
       expect(result.body).toContain("# My Note");
     });
 
@@ -62,19 +68,28 @@ describe("CodaScopeNoteService", () => {
       const result = svc.parseFrontmatter(content);
       expect(result.frontmatter.title).toBe("Untitled");
       expect(result.frontmatter.tags).toEqual([]);
+      expect(result.frontmatter.id).toBeTruthy(); // auto-generated UUID
+      expect(result.frontmatter.owner).toBe("default");
       expect(result.body).toBe(content);
     });
 
     it("should handle empty tags", () => {
-      const content = "---\ntitle: Empty Tags\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nBody.";
+      const content = "---\nid: abc-123\ntitle: Empty Tags\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: default\n---\n\nBody.";
       const result = svc.parseFrontmatter(content);
       expect(result.frontmatter.tags).toEqual([]);
     });
 
     it("should handle quoted title", () => {
-      const content = '---\ntitle: "My Quoted Title"\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nBody.';
+      const content = '---\nid: abc-456\ntitle: "My Quoted Title"\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: default\n---\n\nBody.';
       const result = svc.parseFrontmatter(content);
       expect(result.frontmatter.title).toBe("My Quoted Title");
+    });
+
+    it("should auto-generate id when missing from frontmatter", () => {
+      const content = "---\ntitle: No ID\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nBody.";
+      const result = svc.parseFrontmatter(content);
+      expect(result.frontmatter.id).toBeTruthy();
+      expect(result.frontmatter.id.length).toBeGreaterThan(0);
     });
   });
 
@@ -83,29 +98,37 @@ describe("CodaScopeNoteService", () => {
   describe("serializeFrontmatter", () => {
     it("should produce valid frontmatter", () => {
       const fm = {
+        id: "test-uuid-123",
         title: "Test Note",
         tags: ["a", "b"],
         created: "2026-07-09T00:00:00Z",
         updated: "2026-07-09T01:00:00Z",
+        owner: "alan",
       };
       const result = svc.serializeFrontmatter(fm);
       expect(result).toContain("---");
+      expect(result).toContain("id: test-uuid-123");
       expect(result).toContain("title: Test Note");
       expect(result).toContain('tags: ["a", "b"]');
       expect(result).toContain("created: 2026-07-09T00:00:00Z");
+      expect(result).toContain("owner: alan");
     });
 
     it("should roundtrip frontmatter", () => {
       const fm = {
+        id: "roundtrip-uuid",
         title: "Roundtrip",
         tags: ["x"],
         created: "2026-07-09T00:00:00Z",
         updated: "2026-07-09T01:00:00Z",
+        owner: "alan",
       };
       const serialized = svc.serializeFrontmatter(fm);
       const parsed = svc.parseFrontmatter(serialized + "Some body text.");
+      expect(parsed.frontmatter.id).toBe("roundtrip-uuid");
       expect(parsed.frontmatter.title).toBe("Roundtrip");
       expect(parsed.frontmatter.tags).toEqual(["x"]);
+      expect(parsed.frontmatter.owner).toBe("alan");
       expect(parsed.body).toContain("Some body text.");
     });
   });
@@ -113,28 +136,28 @@ describe("CodaScopeNoteService", () => {
   // ── Path Resolution ──────────────────────────────────────────────
 
   describe("resolveNotesDir", () => {
-    it("should resolve personal notes dir", () => {
-      const dir = svc.resolveNotesDir("personal", { username: "alan" });
-      expect(dir).toBe(path.join(root, "_notes", "alan"));
+    it("should resolve codascope private notes dir", () => {
+      const dir = svc.resolveNotesDir("codascope", "private", { userId: "alan" });
+      expect(dir).toBe(path.join(root, "_notes", "private", "alan"));
     });
 
-    it("should resolve public notes dir", () => {
-      const dir = svc.resolveNotesDir("public", {});
-      expect(dir).toBe(path.join(root, "_notes", "_public_notes"));
+    it("should resolve codascope shared notes dir", () => {
+      const dir = svc.resolveNotesDir("codascope", "shared", {});
+      expect(dir).toBe(path.join(root, "_notes", "shared"));
     });
 
-    it("should default username to 'default' for personal", () => {
-      const dir = svc.resolveNotesDir("personal", {});
-      expect(dir).toBe(path.join(root, "_notes", "default"));
+    it("should default userId to 'default' for private", () => {
+      const dir = svc.resolveNotesDir("codascope", "private", {});
+      expect(dir).toBe(path.join(root, "_notes", "private", "default"));
     });
 
-    it("should return null for project level without projectId", () => {
-      const dir = svc.resolveNotesDir("project", {});
+    it("should return null for project scope without projectId", () => {
+      const dir = svc.resolveNotesDir("project", "shared", {});
       expect(dir).toBeNull();
     });
 
-    it("should return null for epic level without epicId", () => {
-      const dir = svc.resolveNotesDir("epic", { projectId: "p1" });
+    it("should return null for epic scope without epicId", () => {
+      const dir = svc.resolveNotesDir("epic", "shared", { projectId: "p1" });
       expect(dir).toBeNull();
     });
   });
@@ -143,84 +166,86 @@ describe("CodaScopeNoteService", () => {
 
   describe("CRUD", () => {
     it("should create and read a note", async () => {
-      const result = await svc.createNote("personal", { username: "alan" }, "test-note.md");
+      const result = await svc.createNote("codascope", "private", { userId: "alan" }, "test-note.md");
       expect(result.path).toBe("test-note.md");
       expect(result.contentHash).toBeTruthy();
 
-      const note = await svc.readNote("personal", { username: "alan" }, "test-note.md");
+      const note = await svc.readNote("codascope", "private", { userId: "alan" }, "test-note.md");
       expect(note).not.toBeNull();
       expect(note!.frontmatter.title).toBe("test note");
+      expect(note!.frontmatter.id).toBeTruthy();
+      expect(note!.frontmatter.owner).toBe("alan");
       expect(note!.contentHash).toBeTruthy();
     });
 
     it("should create note with initial content", async () => {
       const content = "# Hello World\nThis is my note.";
-      await svc.createNote("public", {}, "hello.md", content);
+      await svc.createNote("codascope", "shared", {}, "hello.md", content);
 
-      const note = await svc.readNote("public", {}, "hello.md");
+      const note = await svc.readNote("codascope", "shared", {}, "hello.md");
       expect(note).not.toBeNull();
       expect(note!.content).toContain("# Hello World");
       expect(note!.frontmatter.title).toBe("hello");
     });
 
     it("should create note with custom frontmatter", async () => {
-      const content = "---\ntitle: Custom Title\ntags: [important]\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\n# Custom Title\nBody.";
-      await svc.createNote("public", {}, "custom.md", content);
+      const content = "---\nid: custom-id\ntitle: Custom Title\ntags: [important]\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: alan\n---\n\n# Custom Title\nBody.";
+      await svc.createNote("codascope", "shared", {}, "custom.md", content);
 
-      const note = await svc.readNote("public", {}, "custom.md");
+      const note = await svc.readNote("codascope", "shared", {}, "custom.md");
       expect(note!.frontmatter.title).toBe("Custom Title");
       expect(note!.frontmatter.tags).toEqual(["important"]);
     });
 
     it("should reject creating duplicate note", async () => {
-      await svc.createNote("personal", { username: "alan" }, "dup.md");
-      await expect(svc.createNote("personal", { username: "alan" }, "dup.md")).rejects.toThrow("already exists");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "dup.md");
+      await expect(svc.createNote("codascope", "private", { userId: "alan" }, "dup.md")).rejects.toThrow("already exists");
     });
 
     it("should update a note", async () => {
-      await svc.createNote("personal", { username: "alan" }, "update-me.md");
-      const note = await svc.readNote("personal", { username: "alan" }, "update-me.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "update-me.md");
+      const note = await svc.readNote("codascope", "private", { userId: "alan" }, "update-me.md");
 
-      const newContent = "---\ntitle: Updated Title\ntags: [updated]\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nNew body content.";
-      const result = await svc.updateNote("personal", { username: "alan" }, "update-me.md", newContent, note!.contentHash);
+      const newContent = "---\nid: update-id\ntitle: Updated Title\ntags: [updated]\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: alan\n---\n\nNew body content.";
+      const result = await svc.updateNote("codascope", "private", { userId: "alan" }, "update-me.md", newContent, note!.contentHash);
       expect(result).not.toBeNull();
       expect("contentHash" in result!).toBe(true);
 
-      const updated = await svc.readNote("personal", { username: "alan" }, "update-me.md");
+      const updated = await svc.readNote("codascope", "private", { userId: "alan" }, "update-me.md");
       expect(updated!.frontmatter.title).toBe("Updated Title");
       expect(updated!.content).toContain("New body content.");
     });
 
     it("should detect conflict on stale hash", async () => {
-      await svc.createNote("personal", { username: "alan" }, "conflict.md");
-      const note = await svc.readNote("personal", { username: "alan" }, "conflict.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "conflict.md");
+      const note = await svc.readNote("codascope", "private", { userId: "alan" }, "conflict.md");
 
       // Simulate another write
-      const notesDir = svc.resolveNotesDir("personal", { username: "alan" })!;
-      writeFileSync(path.join(notesDir, "conflict.md"), "---\ntitle: Sneaky Update\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nDifferent content.", "utf-8");
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
+      writeFileSync(path.join(notesDir, "conflict.md"), "---\nid: conflict-id\ntitle: Sneaky Update\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: alan\n---\n\nDifferent content.", "utf-8");
 
-      const result = await svc.updateNote("personal", { username: "alan" }, "conflict.md", "new content", note!.contentHash);
+      const result = await svc.updateNote("codascope", "private", { userId: "alan" }, "conflict.md", "new content", note!.contentHash);
       expect(result).not.toBeNull();
       expect("conflict" in result!).toBe(true);
     });
 
     it("should delete a note and its assets", async () => {
-      await svc.createNote("personal", { username: "alan" }, "delete-me.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "delete-me.md");
 
       // Create a fake assets directory
-      const notesDir = svc.resolveNotesDir("personal", { username: "alan" })!;
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
       const assetsDir = path.join(notesDir, "delete-me.assets");
       mkdirSync(assetsDir, { recursive: true });
       writeFileSync(path.join(assetsDir, "img.png"), "fake-image");
 
-      const deleted = await svc.deleteNote("personal", { username: "alan" }, "delete-me.md");
+      const deleted = await svc.deleteNote("codascope", "private", { userId: "alan" }, "delete-me.md");
       expect(deleted).toBe(true);
       expect(existsSync(path.join(notesDir, "delete-me.md"))).toBe(false);
       expect(existsSync(assetsDir)).toBe(false);
     });
 
     it("should return null for non-existent note read", async () => {
-      const result = await svc.readNote("personal", { username: "alan" }, "no-such-note.md");
+      const result = await svc.readNote("codascope", "private", { userId: "alan" }, "no-such-note.md");
       expect(result).toBeNull();
     });
   });
@@ -229,23 +254,23 @@ describe("CodaScopeNoteService", () => {
 
   describe("listNotes", () => {
     it("should list notes in a directory", async () => {
-      await svc.createNote("public", {}, "note-a.md", "Content A");
-      await svc.createNote("public", {}, "note-b.md", "Content B");
+      await svc.createNote("codascope", "shared", {}, "note-a.md", "Content A");
+      await svc.createNote("codascope", "shared", {}, "note-b.md", "Content B");
 
-      const notes = await svc.listNotes("public", {});
+      const notes = await svc.listNotes("codascope", "shared", {});
       expect(notes.length).toBe(2);
     });
 
     it("should list notes in a subfolder", async () => {
-      await svc.createNote("personal", { username: "alan" }, "meeting/standup.md", "Standup notes");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "meeting/standup.md", "Standup notes");
 
-      const notes = await svc.listNotes("personal", { username: "alan" }, "meeting");
+      const notes = await svc.listNotes("codascope", "private", { userId: "alan" }, "meeting");
       expect(notes.length).toBe(1);
       expect(notes[0].title).toBe("standup");
     });
 
     it("should return empty array for empty directory", async () => {
-      const notes = await svc.listNotes("public", {});
+      const notes = await svc.listNotes("codascope", "shared", {});
       expect(notes).toEqual([]);
     });
   });
@@ -254,11 +279,11 @@ describe("CodaScopeNoteService", () => {
 
   describe("folders", () => {
     it("should create and list folders", async () => {
-      await svc.createFolder("personal", { username: "alan" }, "meeting-notes");
-      await svc.createFolder("personal", { username: "alan" }, "meeting-notes/2026");
-      await svc.createNote("personal", { username: "alan" }, "meeting-notes/test.md", "test");
+      await svc.createFolder("codascope", "private", { userId: "alan" }, "meeting-notes");
+      await svc.createFolder("codascope", "private", { userId: "alan" }, "meeting-notes/2026");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "meeting-notes/test.md", "test");
 
-      const folders = await svc.listFolders("personal", { username: "alan" });
+      const folders = await svc.listFolders("codascope", "private", { userId: "alan" });
       expect(folders.length).toBe(1);
       expect(folders[0].name).toBe("meeting-notes");
       expect(folders[0].noteCount).toBe(1);
@@ -270,12 +295,13 @@ describe("CodaScopeNoteService", () => {
 
   describe("uploadImage", () => {
     it("should upload an image and return relative path", async () => {
-      await svc.createNote("personal", { username: "alan" }, "img-note.md", "Note with images");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "img-note.md", "Note with images");
 
       const buffer = Buffer.from("fake-png-data");
       const result = await svc.uploadImage(
-        "personal",
-        { username: "alan" },
+        "codascope",
+        "private",
+        { userId: "alan" },
         "img-note.md",
         buffer,
         "image/png",
@@ -285,14 +311,14 @@ describe("CodaScopeNoteService", () => {
       expect(result.filename).toMatch(/^\d+_[a-f0-9]+\.png$/);
 
       // Verify file was actually written
-      const notesDir = svc.resolveNotesDir("personal", { username: "alan" })!;
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
       const imgPath = path.join(notesDir, result.relativePath);
       expect(existsSync(imgPath)).toBe(true);
     });
 
     it("should reject upload for non-existent note", async () => {
       await expect(
-        svc.uploadImage("personal", { username: "alan" }, "no-note.md", Buffer.from("data"), "image/png"),
+        svc.uploadImage("codascope", "private", { userId: "alan" }, "no-note.md", Buffer.from("data"), "image/png"),
       ).rejects.toThrow("Note not found");
     });
   });
@@ -301,75 +327,87 @@ describe("CodaScopeNoteService", () => {
 
   describe("searchNotes", () => {
     it("should find notes matching a query", async () => {
-      await svc.createNote("personal", { username: "alan" }, "search-a.md", "This mentions architecture decisions.");
-      await svc.createNote("personal", { username: "alan" }, "search-b.md", "This is about design patterns.");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "search-a.md", "This mentions architecture decisions.");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "search-b.md", "This is about design patterns.");
 
-      const results = await svc.searchNotes("architecture", { username: "alan" }, ["personal"]);
+      const results = await svc.searchNotes("architecture", "codascope", { userId: "alan" });
       expect(results.length).toBe(1);
       expect(results[0].path).toBe("search-a.md");
       expect(results[0].matchLine).toContain("architecture");
     });
 
     it("should be case-insensitive", async () => {
-      await svc.createNote("personal", { username: "alan" }, "case.md", "This is IMPORTANT content.");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "case.md", "This is IMPORTANT content.");
 
-      const results = await svc.searchNotes("important", { username: "alan" }, ["personal"]);
+      const results = await svc.searchNotes("important", "codascope", { userId: "alan" });
       expect(results.length).toBe(1);
     });
 
     it("should return empty for no matches", async () => {
-      await svc.createNote("personal", { username: "alan" }, "no-match.md", "Nothing special here.");
-      const results = await svc.searchNotes("zyxwvutsrqponmlk", { username: "alan" }, ["personal"]);
+      await svc.createNote("codascope", "private", { userId: "alan" }, "no-match.md", "Nothing special here.");
+      const results = await svc.searchNotes("zyxwvutsrqponmlk", "codascope", { userId: "alan" });
       expect(results.length).toBe(0);
+    });
+
+    it("should search both shared and private within scope", async () => {
+      await svc.createNote("codascope", "shared", {}, "shared-note.md", "This has architecture info.");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "private-note.md", "Architecture private thoughts.");
+
+      const results = await svc.searchNotes("architecture", "codascope", { userId: "alan" });
+      expect(results.length).toBe(2);
     });
   });
 
   // ── Move ──────────────────────────────────────────────────────────
 
   describe("moveNote", () => {
-    it("should move a note within the same level", async () => {
-      await svc.createNote("personal", { username: "alan" }, "movable.md", "Move me");
-      await svc.createFolder("personal", { username: "alan" }, "archive");
+    it("should move a note within the same scope and visibility", async () => {
+      await svc.createNote("codascope", "private", { userId: "alan" }, "movable.md", "Move me");
+      await svc.createFolder("codascope", "private", { userId: "alan" }, "archive");
 
       const moved = await svc.moveNote({
-        fromLevel: "personal",
-        fromOpts: { username: "alan" },
+        fromScope: "codascope",
+        fromVisibility: "private",
+        fromOpts: { userId: "alan" },
         fromPath: "movable.md",
-        toLevel: "personal",
-        toOpts: { username: "alan" },
+        toScope: "codascope",
+        toVisibility: "private",
+        toOpts: { userId: "alan" },
         toPath: "archive/movable.md",
       });
 
       expect(moved).toBe(true);
 
       // Original should not exist
-      const original = await svc.readNote("personal", { username: "alan" }, "movable.md");
+      const original = await svc.readNote("codascope", "private", { userId: "alan" }, "movable.md");
       expect(original).toBeNull();
 
       // Moved note should exist
-      const movedNote = await svc.readNote("personal", { username: "alan" }, "archive/movable.md");
+      const movedNote = await svc.readNote("codascope", "private", { userId: "alan" }, "archive/movable.md");
       expect(movedNote).not.toBeNull();
       expect(movedNote!.content).toContain("Move me");
     });
 
     it("should move assets along with the note", async () => {
-      await svc.createNote("personal", { username: "alan" }, "with-assets.md", "Note");
-      await svc.uploadImage("personal", { username: "alan" }, "with-assets.md", Buffer.from("img"), "image/png");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "with-assets.md", "Note");
+      await svc.uploadImage("codascope", "private", { userId: "alan" }, "with-assets.md", Buffer.from("img"), "image/png");
 
-      await svc.createFolder("personal", { username: "alan" }, "moved");
+      await svc.createFolder("codascope", "private", { userId: "alan" }, "moved");
       const moved = await svc.moveNote({
-        fromLevel: "personal",
-        fromOpts: { username: "alan" },
+        fromScope: "codascope",
+        fromVisibility: "private",
+        fromOpts: { userId: "alan" },
         fromPath: "with-assets.md",
-        toLevel: "personal",
-        toOpts: { username: "alan" },
+        toScope: "codascope",
+        toVisibility: "private",
+        toOpts: { userId: "alan" },
         toPath: "moved/with-assets.md",
       });
 
       expect(moved).toBe(true);
 
       // Assets dir should exist at new location
-      const notesDir = svc.resolveNotesDir("personal", { username: "alan" })!;
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
       expect(existsSync(path.join(notesDir, "moved", "with-assets.assets"))).toBe(true);
       // Old assets should not exist
       expect(existsSync(path.join(notesDir, "with-assets.assets"))).toBe(false);
@@ -380,9 +418,9 @@ describe("CodaScopeNoteService", () => {
 
   describe("refreshIndex", () => {
     it("should generate _notes-index.json", async () => {
-      await svc.createNote("public", {}, "indexed-note.md", "Indexed content");
+      await svc.createNote("codascope", "shared", {}, "indexed-note.md", "Indexed content");
 
-      const notesDir = svc.resolveNotesDir("public", {})!;
+      const notesDir = svc.resolveNotesDir("codascope", "shared", {})!;
       const indexPath = path.join(notesDir, "_notes-index.json");
       expect(existsSync(indexPath)).toBe(true);
 
@@ -397,20 +435,20 @@ describe("CodaScopeNoteService", () => {
 
   describe("content hash", () => {
     it("should produce consistent MD5 hash", async () => {
-      await svc.createNote("personal", { username: "alan" }, "hash-test.md", "Consistent content");
-      const read1 = await svc.readNote("personal", { username: "alan" }, "hash-test.md");
-      const read2 = await svc.readNote("personal", { username: "alan" }, "hash-test.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "hash-test.md", "Consistent content");
+      const read1 = await svc.readNote("codascope", "private", { userId: "alan" }, "hash-test.md");
+      const read2 = await svc.readNote("codascope", "private", { userId: "alan" }, "hash-test.md");
       expect(read1!.contentHash).toBe(read2!.contentHash);
     });
 
     it("should change hash after update", async () => {
-      await svc.createNote("personal", { username: "alan" }, "hash-change.md", "Original");
-      const read1 = await svc.readNote("personal", { username: "alan" }, "hash-change.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "hash-change.md", "Original");
+      const read1 = await svc.readNote("codascope", "private", { userId: "alan" }, "hash-change.md");
 
-      const newContent = "---\ntitle: hash change\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\n---\n\nModified content.";
-      await svc.updateNote("personal", { username: "alan" }, "hash-change.md", newContent);
+      const newContent = "---\nid: hash-id\ntitle: hash change\ntags: []\ncreated: 2026-07-09T00:00:00Z\nupdated: 2026-07-09T00:00:00Z\nowner: alan\n---\n\nModified content.";
+      await svc.updateNote("codascope", "private", { userId: "alan" }, "hash-change.md", newContent);
 
-      const read2 = await svc.readNote("personal", { username: "alan" }, "hash-change.md");
+      const read2 = await svc.readNote("codascope", "private", { userId: "alan" }, "hash-change.md");
       expect(read1!.contentHash).not.toBe(read2!.contentHash);
     });
   });

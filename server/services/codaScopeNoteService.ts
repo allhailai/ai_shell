@@ -1,24 +1,27 @@
 /* ── CodaScope: Note Service ──────────────────────────────────────────
-   Filesystem-based CRUD for notes at 4 levels: personal, public, project, epic.
+   Filesystem-based CRUD for notes using scope (codascope, project, epic)
+   and visibility (shared, private).
    Follows existing service patterns (module singleton, atomic writes,
    content hashing).
 
    Responsibilities:
-   - Path resolution for each level (personal, public, project, epic)
-   - Frontmatter parsing (regex-based, no npm deps)
+   - Path resolution for each scope + visibility combination
+   - Frontmatter parsing (regex-based, no npm deps) with id + owner
    - Note CRUD (create, read, update, delete, list)
    - Folder management (list, create)
    - Image upload to co-located .assets/ directories
    - Content hashing for optimistic concurrency control
    - Index generation (_notes-index.json)
-   - Full-text search (grep-based)
+   - Full-text search (within scope, both visibilities)
    - Atomic move of notes + assets
 
    Storage layout:
-   <root>/_notes/<username>/              (personal notes)
-   <root>/_notes/_public_notes/           (public notes)
-   <project-dir>/_notes/                  (project notes)
-   <project-dir>/epics/<epicId>/_notes/   (epic notes)
+   <root>/_notes/shared/                            (codascope shared notes)
+   <root>/_notes/private/<userId>/                   (codascope private notes)
+   <project-dir>/_notes/shared/                      (project shared notes)
+   <project-dir>/_notes/private/<userId>/             (project private notes)
+   <project-dir>/epics/<epicId>/_notes/shared/        (epic shared notes)
+   <project-dir>/epics/<epicId>/_notes/private/<userId>/ (epic private notes)
    ──────────────────────────────────────────────────────────────────── */
 
 import {
@@ -34,8 +37,10 @@ import {
 } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
-  NoteLevel,
+  NoteScope,
+  NoteVisibility,
   NoteFrontmatter,
   NoteEntry,
   NoteFolderEntry,
@@ -45,11 +50,11 @@ import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 /* ── Types ────────────────────────────────────────────────────────── */
 
 export interface NoteResolveOpts {
-  /** Username (required for personal level) */
-  username?: string;
-  /** Project ID (required for project/epic levels) */
+  /** User ID (derived from session, used for private note paths) */
+  userId?: string;
+  /** Project ID (required for project/epic scopes) */
   projectId?: string;
-  /** Epic ID (required for epic level) */
+  /** Epic ID (required for epic scope) */
   epicId?: string;
 }
 
@@ -80,7 +85,8 @@ export interface NoteImageResult {
 }
 
 export interface NoteSearchResult {
-  level: NoteLevel;
+  scope: NoteScope;
+  visibility: NoteVisibility;
   path: string;
   title: string;
   matchLine: string;
@@ -88,10 +94,12 @@ export interface NoteSearchResult {
 }
 
 export interface NoteMoveOpts {
-  fromLevel: NoteLevel;
+  fromScope: NoteScope;
+  fromVisibility: NoteVisibility;
   fromOpts: NoteResolveOpts;
   fromPath: string;
-  toLevel: NoteLevel;
+  toScope: NoteScope;
+  toVisibility: NoteVisibility;
   toOpts: NoteResolveOpts;
   toPath: string;
 }
@@ -138,29 +146,37 @@ export class CodaScopeNoteService {
   /* ── Path Resolution ─────────────────────────────────────────────── */
 
   /**
-   * Resolve the notes directory for a given level and options.
+   * Resolve the notes directory for a given scope, visibility, and options.
    * Returns null if the required context (project, epic) cannot be resolved.
    */
-  resolveNotesDir(level: NoteLevel, opts: NoteResolveOpts): string | null {
-    switch (level) {
-      case "personal": {
-        const username = opts.username ?? "default";
-        return path.join(this.root, "_notes", username);
+  resolveNotesDir(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts): string | null {
+    switch (scope) {
+      case "codascope": {
+        if (visibility === "private") {
+          const userId = opts.userId ?? "default";
+          return path.join(this.root, "_notes", "private", userId);
+        }
+        return path.join(this.root, "_notes", "shared");
       }
-      case "public":
-        return path.join(this.root, "_notes", "_public_notes");
-
       case "project": {
         if (!opts.projectId) return null;
         const projectDir = this.dirResolver.resolve(opts.projectId);
         if (!projectDir) return null;
-        return path.join(projectDir, "_notes");
+        if (visibility === "private") {
+          const userId = opts.userId ?? "default";
+          return path.join(projectDir, "_notes", "private", userId);
+        }
+        return path.join(projectDir, "_notes", "shared");
       }
       case "epic": {
         if (!opts.projectId || !opts.epicId) return null;
         const projectDir = this.dirResolver.resolve(opts.projectId);
         if (!projectDir) return null;
-        return path.join(projectDir, "epics", opts.epicId, "_notes");
+        if (visibility === "private") {
+          const userId = opts.userId ?? "default";
+          return path.join(projectDir, "epics", opts.epicId, "_notes", "private", userId);
+        }
+        return path.join(projectDir, "epics", opts.epicId, "_notes", "shared");
       }
       default:
         return null;
@@ -178,10 +194,12 @@ export class CodaScopeNoteService {
     if (!match) {
       return {
         frontmatter: {
+          id: randomUUID(),
           title: "Untitled",
           tags: [],
           created: new Date().toISOString(),
           updated: new Date().toISOString(),
+          owner: "default",
         },
         body: content,
       };
@@ -191,14 +209,18 @@ export class CodaScopeNoteService {
     const body = match[2];
 
     // Parse individual YAML fields
+    const idMatch = yamlBlock.match(/^id:\s*(.+)$/m);
     const titleMatch = yamlBlock.match(/^title:\s*(.+)$/m);
     const createdMatch = yamlBlock.match(/^created:\s*(.+)$/m);
     const updatedMatch = yamlBlock.match(/^updated:\s*(.+)$/m);
+    const ownerMatch = yamlBlock.match(/^owner:\s*(.+)$/m);
     const tagsMatch = yamlBlock.match(/^tags:\s*\[([^\]]*)\]$/m);
 
+    const id = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : randomUUID();
     const title = titleMatch ? titleMatch[1].trim().replace(/^["']|["']$/g, "") : "Untitled";
     const created = createdMatch ? createdMatch[1].trim() : new Date().toISOString();
     const updated = updatedMatch ? updatedMatch[1].trim() : new Date().toISOString();
+    const owner = ownerMatch ? ownerMatch[1].trim().replace(/^["']|["']$/g, "") : "default";
     const tags = tagsMatch
       ? tagsMatch[1]
           .split(",")
@@ -207,7 +229,7 @@ export class CodaScopeNoteService {
       : [];
 
     return {
-      frontmatter: { title, tags, created, updated },
+      frontmatter: { id, title, tags, created, updated, owner },
       body,
     };
   }
@@ -221,10 +243,12 @@ export class CodaScopeNoteService {
       : "[]";
     return [
       "---",
+      `id: ${fm.id}`,
       `title: ${fm.title}`,
       `tags: ${tagStr}`,
       `created: ${fm.created}`,
       `updated: ${fm.updated}`,
+      `owner: ${fm.owner}`,
       "---",
       "",
     ].join("\n");
@@ -233,14 +257,16 @@ export class CodaScopeNoteService {
   /**
    * Generate default frontmatter for a new note.
    */
-  private defaultFrontmatter(title?: string): NoteFrontmatter {
+  private defaultFrontmatter(title?: string, opts?: NoteResolveOpts): NoteFrontmatter {
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
     return {
+      id: randomUUID(),
       title: title ?? `Untitled ${dateStr}`,
       tags: [],
       created: now.toISOString(),
       updated: now.toISOString(),
+      owner: opts?.userId ?? "default",
     };
   }
 
@@ -264,8 +290,8 @@ export class CodaScopeNoteService {
    * List notes in a directory (optionally filtered to a subfolder).
    * Returns entries from the index if available, or by scanning the directory.
    */
-  async listNotes(level: NoteLevel, opts: NoteResolveOpts, folder?: string): Promise<NoteEntry[]> {
-    const notesDir = this.resolveNotesDir(level, opts);
+  async listNotes(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, folder?: string): Promise<NoteEntry[]> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return [];
 
     const targetDir = folder ? path.join(notesDir, folder) : notesDir;
@@ -282,8 +308,8 @@ export class CodaScopeNoteService {
   /**
    * Read a note's content, hash, and parsed frontmatter.
    */
-  async readNote(level: NoteLevel, opts: NoteResolveOpts, notePath: string): Promise<NoteReadResult | null> {
-    const notesDir = this.resolveNotesDir(level, opts);
+  async readNote(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string): Promise<NoteReadResult | null> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
     const filePath = this.resolveNotePath(notesDir, notePath);
@@ -301,13 +327,14 @@ export class CodaScopeNoteService {
    * Auto-generates frontmatter if content doesn't include it.
    */
   async createNote(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     content?: string,
   ): Promise<NoteCreateResult> {
-    const notesDir = this.resolveNotesDir(level, opts);
-    if (!notesDir) throw new Error("Cannot resolve notes directory for the given level.");
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) throw new Error("Cannot resolve notes directory for the given scope.");
 
     const filePath = this.resolveNotePath(notesDir, notePath);
 
@@ -329,7 +356,7 @@ export class CodaScopeNoteService {
       // Extract title from path or content
       const basename = path.basename(notePath, ".md");
       const title = basename.replace(/[-_]/g, " ");
-      const fm = this.defaultFrontmatter(title);
+      const fm = this.defaultFrontmatter(title, opts);
       finalContent = this.serializeFrontmatter(fm) + (content ?? "");
     }
 
@@ -349,13 +376,14 @@ export class CodaScopeNoteService {
    * Returns 409-style conflict if hash mismatch.
    */
   async updateNote(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     content: string,
     expectedHash?: string,
   ): Promise<NoteUpdateResult | NoteConflictResult | null> {
-    const notesDir = this.resolveNotesDir(level, opts);
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
     const filePath = this.resolveNotePath(notesDir, notePath);
@@ -393,8 +421,8 @@ export class CodaScopeNoteService {
   /**
    * Delete a note and its co-located .assets/ directory.
    */
-  async deleteNote(level: NoteLevel, opts: NoteResolveOpts, notePath: string): Promise<boolean> {
-    const notesDir = this.resolveNotesDir(level, opts);
+  async deleteNote(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string): Promise<boolean> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return false;
 
     const filePath = this.resolveNotePath(notesDir, notePath);
@@ -421,8 +449,8 @@ export class CodaScopeNoteService {
   /**
    * List the folder structure for a notes directory.
    */
-  async listFolders(level: NoteLevel, opts: NoteResolveOpts): Promise<NoteFolderEntry[]> {
-    const notesDir = this.resolveNotesDir(level, opts);
+  async listFolders(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts): Promise<NoteFolderEntry[]> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir || !existsSync(notesDir)) return [];
 
     return this.scanFolders(notesDir, "");
@@ -431,9 +459,9 @@ export class CodaScopeNoteService {
   /**
    * Create a folder within the notes directory.
    */
-  async createFolder(level: NoteLevel, opts: NoteResolveOpts, folderPath: string): Promise<void> {
-    const notesDir = this.resolveNotesDir(level, opts);
-    if (!notesDir) throw new Error("Cannot resolve notes directory for the given level.");
+  async createFolder(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, folderPath: string): Promise<void> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) throw new Error("Cannot resolve notes directory for the given scope.");
 
     const targetDir = path.join(notesDir, folderPath);
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
@@ -446,14 +474,15 @@ export class CodaScopeNoteService {
    * Returns the relative path for embedding in markdown.
    */
   async uploadImage(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     buffer: Buffer,
     mimeType: string,
   ): Promise<NoteImageResult> {
-    const notesDir = this.resolveNotesDir(level, opts);
-    if (!notesDir) throw new Error("Cannot resolve notes directory for the given level.");
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) throw new Error("Cannot resolve notes directory for the given scope.");
 
     const filePath = this.resolveNotePath(notesDir, notePath);
     if (!existsSync(filePath)) throw new Error(`Note not found: ${notePath}`);
@@ -479,8 +508,8 @@ export class CodaScopeNoteService {
   /**
    * Get the absolute path to an image file within a note's assets.
    */
-  getImagePath(level: NoteLevel, opts: NoteResolveOpts, notePath: string, filename: string): string | null {
-    const notesDir = this.resolveNotesDir(level, opts);
+  getImagePath(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string, filename: string): string | null {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
     const filePath = this.resolveNotePath(notesDir, notePath);
@@ -504,8 +533,8 @@ export class CodaScopeNoteService {
    * Supports cross-level moves (e.g., personal → project).
    */
   async moveNote(moveOpts: NoteMoveOpts): Promise<boolean> {
-    const fromDir = this.resolveNotesDir(moveOpts.fromLevel, moveOpts.fromOpts);
-    const toDir = this.resolveNotesDir(moveOpts.toLevel, moveOpts.toOpts);
+    const fromDir = this.resolveNotesDir(moveOpts.fromScope, moveOpts.fromVisibility, moveOpts.fromOpts);
+    const toDir = this.resolveNotesDir(moveOpts.toScope, moveOpts.toVisibility, moveOpts.toOpts);
     if (!fromDir || !toDir) return false;
 
     const fromFile = this.resolveNotePath(fromDir, moveOpts.fromPath);
@@ -543,18 +572,22 @@ export class CodaScopeNoteService {
    */
   async searchNotes(
     query: string,
+    scope: NoteScope,
     opts: NoteResolveOpts,
-    levels?: NoteLevel[],
   ): Promise<NoteSearchResult[]> {
     const results: NoteSearchResult[] = [];
-    const levelsToSearch: NoteLevel[] = levels ?? ["personal", "public", "project", "epic"];
     const lowerQuery = query.toLowerCase();
 
-    for (const level of levelsToSearch) {
-      const notesDir = this.resolveNotesDir(level, opts);
-      if (!notesDir || !existsSync(notesDir)) continue;
+    // Search shared notes within this scope
+    const sharedDir = this.resolveNotesDir(scope, "shared", opts);
+    if (sharedDir && existsSync(sharedDir)) {
+      this.searchInDir(sharedDir, sharedDir, scope, "shared", lowerQuery, results);
+    }
 
-      this.searchInDir(notesDir, notesDir, level, lowerQuery, results);
+    // Search current user's private notes within this scope
+    const privateDir = this.resolveNotesDir(scope, "private", opts);
+    if (privateDir && existsSync(privateDir)) {
+      this.searchInDir(privateDir, privateDir, scope, "private", lowerQuery, results);
     }
 
     return results.slice(0, 50); // Cap at 50 results
@@ -755,7 +788,8 @@ export class CodaScopeNoteService {
   private searchInDir(
     dir: string,
     rootDir: string,
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     lowerQuery: string,
     results: NoteSearchResult[],
   ): void {
@@ -771,7 +805,7 @@ export class CodaScopeNoteService {
         const fullPath = path.join(dir, item.name);
 
         if (item.isDirectory()) {
-          this.searchInDir(fullPath, rootDir, level, lowerQuery, results);
+          this.searchInDir(fullPath, rootDir, scope, visibility, lowerQuery, results);
         } else if (item.name.endsWith(".md")) {
           try {
             const content = readFileSync(fullPath, "utf-8");
@@ -782,7 +816,8 @@ export class CodaScopeNoteService {
             for (let i = 0; i < lines.length; i++) {
               if (lines[i].toLowerCase().includes(lowerQuery)) {
                 results.push({
-                  level,
+                  scope,
+                  visibility,
                   path: relativePath,
                   title: frontmatter.title,
                   matchLine: lines[i].trim().slice(0, 200),
@@ -864,11 +899,12 @@ export class CodaScopeNoteService {
 
   /** List available versions for a note. */
   async listVersions(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
   ): Promise<NoteVersionEntry[]> {
-    const notesDir = this.resolveNotesDir(level, opts);
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return [];
 
     const filePath = this.resolveNotePath(notesDir, notePath);
@@ -889,12 +925,13 @@ export class CodaScopeNoteService {
 
   /** Get a specific version's content. */
   async getVersion(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     version: string,
   ): Promise<NoteVersionContent | null> {
-    const notesDir = this.resolveNotesDir(level, opts);
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
     const filePath = this.resolveNotePath(notesDir, notePath);

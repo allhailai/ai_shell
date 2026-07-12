@@ -52,7 +52,8 @@ export interface MessageContext {
   projectId?: string;
   recentViews?: Array<{ view: string; label: string }>;
   /** Note context (when viewing a note) */
-  noteLevel?: NoteLevel;
+  noteScope?: NoteScope;
+  noteVisibility?: NoteVisibility;
   notePath?: string;
 }
 
@@ -620,13 +621,17 @@ export interface EpicBriefResponse {
 
 // ── Notes ────────────────────────────────────────────────────────────
 
-export type NoteLevel = "personal" | "public" | "project" | "epic";
+export type NoteScope = "codascope" | "project" | "epic";
+export type NoteVisibility = "shared" | "private";
+export type NoteState = "active" | "archived";
 
 export interface NoteFrontmatter {
+  id: string;           // Stable UUID
   title: string;
   tags: string[];
   created: string;
   updated: string;
+  owner: string;        // User ID who created the note
 }
 
 export interface NoteEntry {
@@ -653,6 +658,7 @@ export interface NoteFolderEntry {
  * but defined here to avoid cross-boundary imports that trigger node:fs errors.
  */
 export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion"> {
-  noteLevel: NoteLevel;
+  noteScope: NoteScope;
+  noteVisibility: NoteVisibility;
   notePath: string;
 }

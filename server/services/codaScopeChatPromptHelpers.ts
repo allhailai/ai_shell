@@ -50,7 +50,8 @@ export interface ViewContext {
   /** Current epic tab (define/scope/knowledge/design/history) */
   epicTab?: string | null;
   /** Note context (when viewing a note) */
-  noteLevel?: string | null;
+  noteScope?: string | null;
+  noteVisibility?: string | null;
   notePath?: string | null;
 }
 
@@ -229,16 +230,17 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
 
     case "notes":
     case "note": {
-      const noteLevel = ctx.noteLevel ?? "unknown";
+      const noteScope = ctx.noteScope ?? "codascope";
+      const noteVisibility = ctx.noteVisibility ?? "shared";
       const notePath = ctx.notePath;
       if (notePath) {
         lines.push(
-          `The user is viewing a note at the "${noteLevel}" level: "${notePath}"${project}.`,
-          `Use read_note(level="${noteLevel}", path="${notePath}") to see the full content.`,
+          `The user is viewing a note at scope "${noteScope}" (${noteVisibility}): "${notePath}"${project}.`,
+          `Use read_note(scope="${noteScope}", visibility="${noteVisibility}", path="${notePath}") to see the full content.`,
           `The user may ask you to help edit, expand, or reorganize this note.`,
         );
       } else {
-        lines.push(`The user is browsing notes at the "${noteLevel}" level${project}. Use list_notes to see available notes.`);
+        lines.push(`The user is browsing notes at scope "${noteScope}" (${noteVisibility})${project}. Use list_notes to see available notes.`);
       }
       break;
     }

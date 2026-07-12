@@ -24,7 +24,7 @@ import type {
   BlockInfo,
   BlockAnchor,
 } from "../../src/apps/codascope/codaScopeTypes.js";
-import type { NoteLevel } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 
 /* ── Storage schema ──────────────────────────────────────────────── */
@@ -38,8 +38,10 @@ interface NoteAnnotationsFile {
  * context fields instead of epicId/documentId.
  */
 export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion"> {
-  /** Note level where this annotation lives */
-  noteLevel: NoteLevel;
+  /** Note scope where this annotation lives */
+  noteScope: NoteScope;
+  /** Note visibility */
+  noteVisibility: NoteVisibility;
   /** Note path (relative within the notes dir, e.g. "meeting-notes/standup.md") */
   notePath: string;
 }
@@ -246,12 +248,13 @@ export class CodaScopeNoteAnnotationService {
 
   /** List all annotations for a note, with re-anchored block IDs. */
   async listAnnotations(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     noteContent?: string,
   ): Promise<NoteAnnotation[]> {
-    const notesDir = this.noteSvc.resolveNotesDir(level, opts);
+    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return [];
 
     const file = this.readAnnotations(notesDir, notePath);
@@ -278,7 +281,8 @@ export class CodaScopeNoteAnnotationService {
 
   /** Create a new annotation on a note. */
   async createAnnotation(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     data: {
@@ -288,13 +292,14 @@ export class CodaScopeNoteAnnotationService {
       parentId?: string;
     },
   ): Promise<NoteAnnotation> {
-    const notesDir = this.noteSvc.resolveNotesDir(level, opts);
+    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) throw new Error("Cannot resolve notes directory");
 
     const id = `nann_${crypto.randomBytes(6).toString("hex")}`;
     const annotation: NoteAnnotation = {
       id,
-      noteLevel: level,
+      noteScope: scope,
+      noteVisibility: visibility,
       notePath,
       anchor: data.anchor,
       author: data.author,
@@ -314,7 +319,8 @@ export class CodaScopeNoteAnnotationService {
 
   /** Update an annotation (status, body, reactions). */
   async updateAnnotation(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     annotationId: string,
@@ -324,7 +330,7 @@ export class CodaScopeNoteAnnotationService {
       reactions?: Array<{ emoji: string; user: string }>;
     },
   ): Promise<NoteAnnotation | null> {
-    const notesDir = this.noteSvc.resolveNotesDir(level, opts);
+    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
     const file = this.readAnnotations(notesDir, notePath);
@@ -352,12 +358,13 @@ export class CodaScopeNoteAnnotationService {
 
   /** Delete an annotation (and its replies). */
   async deleteAnnotation(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
     annotationId: string,
   ): Promise<boolean> {
-    const notesDir = this.noteSvc.resolveNotesDir(level, opts);
+    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return false;
 
     const file = this.readAnnotations(notesDir, notePath);
@@ -384,11 +391,12 @@ export class CodaScopeNoteAnnotationService {
 
   /** Count open annotations for a note. */
   async getOpenAnnotationCount(
-    level: NoteLevel,
+    scope: NoteScope,
+    visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
   ): Promise<number> {
-    const notesDir = this.noteSvc.resolveNotesDir(level, opts);
+    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return 0;
 
     const file = this.readAnnotations(notesDir, notePath);

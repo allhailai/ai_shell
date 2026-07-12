@@ -89,13 +89,7 @@ function parseNotesContext(
   return null;
 }
 
-/* ── Template type ───────────────────────────────────────────────────── */
 
-interface NoteTemplate {
-  id: string;
-  title: string;
-  content: string;
-}
 
 /* ── Search result type ──────────────────────────────────────────────── */
 
@@ -152,10 +146,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // Template state
-  const [templates, setTemplates] = useState<NoteTemplate[]>([]);
-  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-  const templateMenuRef = useRef<HTMLDivElement>(null);
+
 
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -186,30 +177,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     void fetchNotes();
   }, [fetchNotes]);
 
-  // ── Fetch templates ────────────────────────────────────────────────
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/codascope/notes/templates");
-        if (res.ok) {
-          const data = await res.json();
-          setTemplates(data.templates ?? []);
-        }
-      } catch { /* ignore */ }
-    })();
-  }, []);
 
-  // ── Close template menu on outside click ──────────────────────────
-  useEffect(() => {
-    if (!showTemplateMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (templateMenuRef.current && !templateMenuRef.current.contains(e.target as Node)) {
-        setShowTemplateMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showTemplateMenu]);
 
   // ── Full-text search (debounced) ──────────────────────────────────
   useEffect(() => {
@@ -307,9 +275,8 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   );
 
   // ── Create note ────────────────────────────────────────────────────
-  const handleCreateNote = useCallback(async (templateContent?: string) => {
+  const handleCreateNote = useCallback(async () => {
     setCreating(true);
-    setShowTemplateMenu(false);
     try {
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10);
@@ -318,16 +285,10 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
 
       const params = new URLSearchParams(queryString);
 
-      // If template content provided, replace {{DATE}} placeholders
-      let content: string | undefined;
-      if (templateContent) {
-        content = templateContent.replace(/\{\{DATE\}\}/g, dateStr);
-      }
-
       const res = await fetch(`/api/codascope/notes/${level}/note/${fullPath}?${params.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({}),
       });
 
       if (res.ok) {
@@ -390,50 +351,16 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
           </div>
         </div>
 
-        {/* Create note button with template dropdown */}
-        <div className="codascope-notes-create-wrapper" ref={templateMenuRef}>
-          <button
-            className="codascope-btn codascope-btn-primary"
-            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
-            onClick={() => {
-              if (templates.length > 0) {
-                setShowTemplateMenu((s) => !s);
-              } else {
-                void handleCreateNote();
-              }
-            }}
-            disabled={creating}
-            type="button"
-          >
-            {creating ? "Creating…" : "+ Note"}
-          </button>
-
-          {/* Template dropdown menu */}
-          {showTemplateMenu && (
-            <div className="codascope-notes-template-menu">
-              <button
-                className="codascope-notes-template-item"
-                onClick={() => handleCreateNote()}
-                type="button"
-              >
-                <span className="codascope-notes-template-item-title">Blank Note</span>
-                <span className="codascope-notes-template-item-desc">Start from scratch</span>
-              </button>
-              <div className="codascope-notes-template-divider" />
-              {templates.map((template) => (
-                <button
-                  key={template.id}
-                  className="codascope-notes-template-item"
-                  onClick={() => handleCreateNote(template.content)}
-                  type="button"
-                >
-                  <span className="codascope-notes-template-item-title">{template.title}</span>
-                  <span className="codascope-notes-template-item-desc">{template.id.replace(/-/g, " ")}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Create note button */}
+        <button
+          className="codascope-btn codascope-btn-primary"
+          style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+          onClick={() => void handleCreateNote()}
+          disabled={creating}
+          type="button"
+        >
+          {creating ? "Creating…" : "+ Note"}
+        </button>
       </div>
 
       {/* Level tabs for codascope-level notes */}

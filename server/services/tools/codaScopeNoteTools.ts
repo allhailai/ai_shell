@@ -2,13 +2,17 @@
    Agent tools for reading and writing notes.
    Read tools available to ALL agent purposes.
    Write tools available to assistant/chat only.
+
+   Uses scope (codascope, project, epic) + visibility (shared, private)
+   model instead of the legacy level-based approach.
    ──────────────────────────────────────────────────────────────────── */
 
 import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
-import type { NoteLevel } from "../../../src/apps/codascope/codaScopeTypes.js";
+import type { NoteScope, NoteVisibility } from "../../../src/apps/codascope/codaScopeTypes.js";
 
-const VALID_LEVELS: NoteLevel[] = ["personal", "public", "project", "epic"];
+const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
+const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
 
 /**
  * Build read-only note tools available to ALL agent purposes.
@@ -22,16 +26,22 @@ export function buildNoteReadTools(
   return {
     list_notes: {
       description:
-        "List notes at a specific level and optional folder. Levels: personal, public, project, epic. " +
-        "For project/epic levels, the projectId is derived from the current project context. " +
+        "List notes at a specific scope and visibility. Scopes: codascope, project, epic. " +
+        "Visibilities: shared (visible to everyone), private (only the current user). " +
+        "For project/epic scopes, the projectId is derived from the current project context. " +
         "Returns note entries with title, tags, dates, and word count.",
       inputSchema: {
         type: "object",
         properties: {
-          level: {
+          scope: {
             type: "string",
-            enum: VALID_LEVELS,
-            description: "The note level to list",
+            enum: VALID_SCOPES,
+            description: "The note scope (where the note lives)",
+          },
+          visibility: {
+            type: "string",
+            enum: VALID_VISIBILITIES,
+            description: "The note visibility (shared = everyone, private = current user only)",
           },
           folder: {
             type: "string",
@@ -39,27 +49,29 @@ export function buildNoteReadTools(
           },
           epicId: {
             type: "string",
-            description: "Epic ID (required when level is 'epic')",
+            description: "Epic ID (required when scope is 'epic')",
           },
         },
-        required: ["level"],
+        required: ["scope", "visibility"],
       },
       execute: async (args) => {
-        const level = args.level as NoteLevel;
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
         const folder = args.folder as string | undefined;
         const epicId = args.epicId as string | undefined;
-        if (!VALID_LEVELS.includes(level)) return `Invalid level: ${level}`;
+        if (!VALID_SCOPES.includes(scope)) return `Invalid scope: ${scope}`;
+        if (!VALID_VISIBILITIES.includes(visibility)) return `Invalid visibility: ${visibility}`;
 
         try {
-          const notes = await noteService.listNotes(level, {
+          const notes = await noteService.listNotes(scope, visibility, {
             projectId,
             epicId,
           }, folder);
 
           if (notes.length === 0) {
             return folder
-              ? `No notes found in folder "${folder}" at level "${level}".`
-              : `No notes found at level "${level}".`;
+              ? `No notes found in folder "${folder}" at scope "${scope}" (${visibility}).`
+              : `No notes found at scope "${scope}" (${visibility}).`;
           }
 
           return JSON.stringify(
@@ -76,23 +88,28 @@ export function buildNoteReadTools(
             2,
           );
         } catch {
-          return `Failed to list notes at level "${level}".`;
+          return `Failed to list notes at scope "${scope}" (${visibility}).`;
         }
       },
     },
 
     read_note: {
       description:
-        "Read the full content of a specific note by level and path. " +
+        "Read the full content of a specific note by scope, visibility, and path. " +
         "Returns the markdown content, frontmatter metadata, and content hash. " +
         "Use list_notes first to discover available note paths.",
       inputSchema: {
         type: "object",
         properties: {
-          level: {
+          scope: {
             type: "string",
-            enum: VALID_LEVELS,
-            description: "The note level",
+            enum: VALID_SCOPES,
+            description: "The note scope",
+          },
+          visibility: {
+            type: "string",
+            enum: VALID_VISIBILITIES,
+            description: "The note visibility",
           },
           path: {
             type: "string",
@@ -100,24 +117,25 @@ export function buildNoteReadTools(
           },
           epicId: {
             type: "string",
-            description: "Epic ID (required when level is 'epic')",
+            description: "Epic ID (required when scope is 'epic')",
           },
         },
-        required: ["level", "path"],
+        required: ["scope", "visibility", "path"],
       },
       execute: async (args) => {
-        const level = args.level as NoteLevel;
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
         const notePath = args.path as string;
         const epicId = args.epicId as string | undefined;
-        if (!level || !notePath) return "level and path are required.";
+        if (!scope || !visibility || !notePath) return "scope, visibility, and path are required.";
 
         try {
-          const result = await noteService.readNote(level, {
+          const result = await noteService.readNote(scope, visibility, {
             projectId,
             epicId,
           }, notePath);
 
-          if (!result) return `Note not found: "${notePath}" at level "${level}".`;
+          if (!result) return `Note not found: "${notePath}" at scope "${scope}" (${visibility}).`;
 
           return `# ${result.frontmatter.title}\n\n` +
             `_Tags: ${result.frontmatter.tags.join(", ") || "none"} | ` +
@@ -125,15 +143,16 @@ export function buildNoteReadTools(
             `Updated: ${result.frontmatter.updated}_\n\n` +
             result.content;
         } catch {
-          return `Failed to read note "${notePath}" at level "${level}".`;
+          return `Failed to read note "${notePath}" at scope "${scope}" (${visibility}).`;
         }
       },
     },
 
     search_notes: {
       description:
-        "Search across notes for a keyword or phrase. Searches across all accessible levels " +
-        "(personal, public, project, epic). Returns matching note paths with context snippets.",
+        "Search across notes for a keyword or phrase within a scope. " +
+        "Searches both shared and private notes within the specified scope. " +
+        "Returns matching note paths with context snippets.",
       inputSchema: {
         type: "object",
         properties: {
@@ -141,29 +160,36 @@ export function buildNoteReadTools(
             type: "string",
             description: "The search query (case-insensitive)",
           },
+          scope: {
+            type: "string",
+            enum: VALID_SCOPES,
+            description: "The scope to search within (defaults to codascope)",
+          },
           epicId: {
             type: "string",
-            description: "Epic ID (to include epic-level notes in search)",
+            description: "Epic ID (to search epic-scoped notes)",
           },
         },
         required: ["query"],
       },
       execute: async (args) => {
         const query = args.query as string;
+        const scope = (args.scope as NoteScope) ?? "codascope";
         const epicId = args.epicId as string | undefined;
         if (!query) return "query is required.";
 
         try {
-          const results = await noteService.searchNotes(query, {
+          const results = await noteService.searchNotes(query, scope, {
             projectId,
             epicId,
           });
 
-          if (results.length === 0) return `No notes matched "${query}".`;
+          if (results.length === 0) return `No notes matched "${query}" in scope "${scope}".`;
 
           return JSON.stringify(
             results.map((r) => ({
-              level: r.level,
+              scope: r.scope,
+              visibility: r.visibility,
               path: r.path,
               title: r.title,
               matchLine: r.matchLine,
@@ -180,39 +206,46 @@ export function buildNoteReadTools(
 
     list_note_folders: {
       description:
-        "List the folder structure for notes at a specific level. " +
+        "List the folder structure for notes at a specific scope and visibility. " +
         "Returns a tree of folders with note counts.",
       inputSchema: {
         type: "object",
         properties: {
-          level: {
+          scope: {
             type: "string",
-            enum: VALID_LEVELS,
-            description: "The note level",
+            enum: VALID_SCOPES,
+            description: "The note scope",
+          },
+          visibility: {
+            type: "string",
+            enum: VALID_VISIBILITIES,
+            description: "The note visibility",
           },
           epicId: {
             type: "string",
-            description: "Epic ID (required when level is 'epic')",
+            description: "Epic ID (required when scope is 'epic')",
           },
         },
-        required: ["level"],
+        required: ["scope", "visibility"],
       },
       execute: async (args) => {
-        const level = args.level as NoteLevel;
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
         const epicId = args.epicId as string | undefined;
-        if (!VALID_LEVELS.includes(level)) return `Invalid level: ${level}`;
+        if (!VALID_SCOPES.includes(scope)) return `Invalid scope: ${scope}`;
+        if (!VALID_VISIBILITIES.includes(visibility)) return `Invalid visibility: ${visibility}`;
 
         try {
-          const folders = await noteService.listFolders(level, {
+          const folders = await noteService.listFolders(scope, visibility, {
             projectId,
             epicId,
           });
 
-          if (folders.length === 0) return `No folders found at level "${level}".`;
+          if (folders.length === 0) return `No folders found at scope "${scope}" (${visibility}).`;
 
           return JSON.stringify(folders, null, 2);
         } catch {
-          return `Failed to list folders at level "${level}".`;
+          return `Failed to list folders at scope "${scope}" (${visibility}).`;
         }
       },
     },
@@ -231,16 +264,21 @@ export function buildNoteWriteTools(
   return {
     create_note: {
       description:
-        "Create a new note at a specific level and path. Optionally provide initial content. " +
+        "Create a new note at a specific scope, visibility, and path. Optionally provide initial content. " +
         "If no content is provided, a note with default frontmatter is created. " +
         "The path should include the filename (e.g., 'meeting-notes/standup.md').",
       inputSchema: {
         type: "object",
         properties: {
-          level: {
+          scope: {
             type: "string",
-            enum: VALID_LEVELS,
-            description: "The note level to create at",
+            enum: VALID_SCOPES,
+            description: "The note scope to create at",
+          },
+          visibility: {
+            type: "string",
+            enum: VALID_VISIBILITIES,
+            description: "The note visibility",
           },
           path: {
             type: "string",
@@ -252,25 +290,26 @@ export function buildNoteWriteTools(
           },
           epicId: {
             type: "string",
-            description: "Epic ID (required when level is 'epic')",
+            description: "Epic ID (required when scope is 'epic')",
           },
         },
-        required: ["level", "path"],
+        required: ["scope", "visibility", "path"],
       },
       execute: async (args) => {
-        const level = args.level as NoteLevel;
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
         const notePath = args.path as string;
         const content = args.content as string | undefined;
         const epicId = args.epicId as string | undefined;
-        if (!level || !notePath) return "level and path are required.";
+        if (!scope || !visibility || !notePath) return "scope, visibility, and path are required.";
 
         try {
-          const result = await noteService.createNote(level, {
+          const result = await noteService.createNote(scope, visibility, {
             projectId,
             epicId,
           }, notePath, content);
 
-          return `Created note "${notePath}" at level "${level}". Hash: ${result.contentHash}`;
+          return `Created note "${notePath}" at scope "${scope}" (${visibility}). Hash: ${result.contentHash}`;
         } catch (e) {
           return `Failed to create note: ${(e as Error).message}`;
         }
@@ -285,10 +324,15 @@ export function buildNoteWriteTools(
       inputSchema: {
         type: "object",
         properties: {
-          level: {
+          scope: {
             type: "string",
-            enum: VALID_LEVELS,
-            description: "The note level",
+            enum: VALID_SCOPES,
+            description: "The note scope",
+          },
+          visibility: {
+            type: "string",
+            enum: VALID_VISIBILITIES,
+            description: "The note visibility",
           },
           path: {
             type: "string",
@@ -300,25 +344,26 @@ export function buildNoteWriteTools(
           },
           epicId: {
             type: "string",
-            description: "Epic ID (required when level is 'epic')",
+            description: "Epic ID (required when scope is 'epic')",
           },
         },
-        required: ["level", "path", "content"],
+        required: ["scope", "visibility", "path", "content"],
       },
       execute: async (args) => {
-        const level = args.level as NoteLevel;
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
         const notePath = args.path as string;
         const content = args.content as string;
         const epicId = args.epicId as string | undefined;
-        if (!level || !notePath || !content) return "level, path, and content are required.";
+        if (!scope || !visibility || !notePath || !content) return "scope, visibility, path, and content are required.";
 
         try {
-          const result = await noteService.updateNote(level, {
+          const result = await noteService.updateNote(scope, visibility, {
             projectId,
             epicId,
           }, notePath, content);
 
-          if (!result) return `Note not found: "${notePath}" at level "${level}".`;
+          if (!result) return `Note not found: "${notePath}" at scope "${scope}" (${visibility}).`;
           if ("conflict" in result) {
             return `Conflict: The note was modified since you last read it. Re-read the note and try again.`;
           }
