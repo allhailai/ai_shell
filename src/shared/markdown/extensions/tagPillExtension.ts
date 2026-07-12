@@ -67,18 +67,6 @@ const HEADING_LINE_RE = /^#{1,6}\s/;
 
 // ── Cursor-line detection ───────────────────────────────────────────
 
-function cursorPositions(state: EditorState, editable: boolean): Set<number> {
-  if (!editable) return new Set();
-  const positions = new Set<number>();
-  for (const range of state.selection.ranges) {
-    // Mark a range of character positions as "cursor-occupied"
-    for (let pos = range.from; pos <= range.to; pos++) {
-      positions.add(pos);
-    }
-  }
-  return positions;
-}
-
 function cursorLineNumbers(state: EditorState, editable: boolean): Set<number> {
   if (!editable) return new Set();
   const lines = new Set<number>();

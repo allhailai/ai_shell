@@ -178,6 +178,17 @@ describe("CodaScopeNoteService", () => {
       expect(note!.contentHash).toBeTruthy();
     });
 
+    it("defaults shared notes to draft and leaves private notes without a shared status", async () => {
+      await svc.createNote("codascope", "shared", { userId: "alan" }, "shared.md");
+      await svc.createNote("codascope", "private", { userId: "alan" }, "private.md");
+
+      const shared = await svc.readNote("codascope", "shared", { userId: "alan" }, "shared.md");
+      const privateNote = await svc.readNote("codascope", "private", { userId: "alan" }, "private.md");
+
+      expect(shared!.frontmatter.status).toBe("draft");
+      expect(privateNote!.frontmatter.status).toBeUndefined();
+    });
+
     it("should create note with initial content", async () => {
       const content = "# Hello World\nThis is my note.";
       await svc.createNote("codascope", "shared", {}, "hello.md", content);
@@ -214,6 +225,20 @@ describe("CodaScopeNoteService", () => {
       const updated = await svc.readNote("codascope", "private", { userId: "alan" }, "update-me.md");
       expect(updated!.frontmatter.title).toBe("Updated Title");
       expect(updated!.content).toContain("New body content.");
+    });
+
+    it("records the last editor in the directory index after an update", async () => {
+      await svc.createNote("codascope", "shared", { userId: "alex" }, "edited.md");
+      const note = await svc.readNote("codascope", "shared", { userId: "alex" }, "edited.md");
+      const updatedContent = note!.content.replace("Untitled", "Edited");
+
+      await svc.updateNote("codascope", "shared", { userId: "alex" }, "edited.md", updatedContent, note!.contentHash);
+
+      const notes = await svc.listNotes("codascope", "shared", { userId: "alex" });
+      const entry = notes.find((item) => item.path === "edited.md");
+      expect(entry?.noteId).toBe(note!.frontmatter.id);
+      expect(entry?.lastEditor).toBe("alex");
+      expect(entry?.lastEditedAt).toBeTruthy();
     });
 
     it("should detect conflict on stale hash", async () => {
@@ -428,6 +453,58 @@ describe("CodaScopeNoteService", () => {
       expect(index.notes.length).toBe(1);
       expect(index.notes[0].path).toBe("indexed-note.md");
       expect(index.generatedAt).toBeTruthy();
+    });
+  });
+
+  // ── Activity ──────────────────────────────────────────────────────
+
+  describe("getActivity", () => {
+    it("uses audit actors and word deltas for versioned edits", async () => {
+      await svc.createNote("codascope", "shared", { userId: "alex" }, "activity.md", "one two");
+      const original = await svc.readNote("codascope", "shared", { userId: "alex" }, "activity.md");
+      await svc.updateNote(
+        "codascope",
+        "shared",
+        { userId: "alex" },
+        "activity.md",
+        `${original!.content} three four`,
+        original!.contentHash,
+      );
+
+      const activity = await svc.getActivity("codascope", "shared", { userId: "alex" }, "activity.md", {
+        query: () => [
+          {
+            event: "note.updated",
+            timestamp: "2026-07-11T00:00:01.000Z",
+            actor: "alex",
+            noteId: original!.frontmatter.id,
+            scope: "codascope",
+            visibility: "shared",
+            path: "activity.md",
+          },
+          {
+            event: "note.visibility_changed",
+            timestamp: "2026-07-11T00:00:02.000Z",
+            actor: "alex",
+            noteId: original!.frontmatter.id,
+            scope: "codascope",
+            visibility: "shared",
+            path: "activity.md",
+            metadata: { fromVisibility: "private", toVisibility: "shared" },
+          },
+        ],
+      });
+
+      expect(activity).toContainEqual(expect.objectContaining({
+        type: "edit",
+        actor: "alex",
+        details: expect.stringContaining("Added 2 words"),
+      }));
+      expect(activity).toContainEqual(expect.objectContaining({
+        type: "visibility_changed",
+        actor: "alex",
+        details: "Changed visibility from private to shared",
+      }));
     });
   });
 

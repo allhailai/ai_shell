@@ -342,7 +342,7 @@ function createLinkElement(
     icon.className = "shared-md-wiki-link-folder-icon";
     icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3.5A1 1 0 0 0 5.8 3H3a1 1 0 0 0-1 1z"/></svg>';
     link.appendChild(icon);
-    link.title = resolved.resolution === "resolved" ? rawTarget : `Not found: ${rawTarget}`;
+    link.title = resolved.resolution === "resolved" ? rawTarget ?? resolved.path : `Not found: ${rawTarget}`;
   } else {
     link.title = resolved.resolution === "resolved" ? resolved.path : `Not found: ${resolved.path}`;
   }

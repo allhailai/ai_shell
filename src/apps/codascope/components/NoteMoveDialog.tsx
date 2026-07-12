@@ -6,7 +6,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { IconFolder, IconWarning } from "./CodaScopeIcons";
+import { IconClose, IconFolder, IconWarning } from "./CodaScopeIcons";
 import type { NoteScope, NoteVisibility, NoteFolderEntry } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -63,11 +63,10 @@ export function NoteMoveDialog({
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Build resolve opts for the target
-  const targetOpts = useMemo((): Record<string, string> => {
-    // Inherit project/epic context from the source opts
+  // Only scope identifiers belong in resolve options. User identity is always
+  // derived by the server from the authenticated session.
+  const scopeOpts = useMemo((): Record<string, string> => {
     return {
-      username: fromOpts.username,
       projectId: fromOpts.projectId,
       epicId: fromOpts.epicId,
     };
@@ -90,9 +89,8 @@ export function NoteMoveDialog({
     if (!open) return;
     setLoadingFolders(true);
     const params = new URLSearchParams();
-    if (targetOpts.projectId) params.set("projectId", targetOpts.projectId);
-    if (targetOpts.epicId) params.set("epicId", targetOpts.epicId);
-    if (targetOpts.username) params.set("username", targetOpts.username);
+    if (scopeOpts.projectId) params.set("projectId", scopeOpts.projectId);
+    if (scopeOpts.epicId) params.set("epicId", scopeOpts.epicId);
 
     void (async () => {
       try {
@@ -104,7 +102,7 @@ export function NoteMoveDialog({
       } catch { /* ignore */ }
       setLoadingFolders(false);
     })();
-  }, [open, targetScope, targetVisibility, targetOpts]);
+  }, [open, targetScope, targetVisibility, scopeOpts]);
 
   // Reset when opening
   useEffect(() => {
@@ -135,10 +133,10 @@ export function NoteMoveDialog({
             noteIds: bulkNoteIds,
             fromScope,
             fromVisibility,
-            fromOpts,
+            fromOpts: scopeOpts,
             toScope: targetScope,
             toVisibility: targetVisibility,
-            toOpts: targetOpts,
+            toOpts: scopeOpts,
             toFolder: targetFolder,
           }),
         });
@@ -159,11 +157,11 @@ export function NoteMoveDialog({
             fromScope,
             fromVisibility,
             fromPath,
-            fromOpts,
+            fromOpts: scopeOpts,
             toScope: targetScope,
             toVisibility: targetVisibility,
             toPath: destinationPath,
-            toOpts: targetOpts,
+            toOpts: scopeOpts,
           }),
         });
 
@@ -179,7 +177,7 @@ export function NoteMoveDialog({
       setError("Network error.");
     }
     setMoving(false);
-  }, [fromScope, fromVisibility, fromPath, fromOpts, targetScope, targetVisibility, destinationPath, targetOpts, onMoved, onClose]);
+  }, [fromScope, fromVisibility, fromPath, scopeOpts, targetScope, targetVisibility, destinationPath, onMoved, onClose]);
 
   if (!open) return null;
 
@@ -211,7 +209,7 @@ export function NoteMoveDialog({
             onClick={onClose}
             type="button"
           >
-            ✕
+            <IconClose size={14} />
           </button>
         </div>
 

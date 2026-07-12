@@ -187,7 +187,6 @@ function buildFootnoteMaps(state: EditorState): FootnoteMap {
 
 type DecorationEntry = { from: number; to: number; decoration: Decoration };
 
-const replaceDecoration = Decoration.replace({});
 const footnoteDefLineDecoration = Decoration.line({ class: "shared-md-footnote-def-line" });
 
 function buildFootnoteDecorations(view: EditorView, editable: boolean): DecorationSet {

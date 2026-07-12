@@ -11,12 +11,13 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
-import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink } from "../components/CodaScopeIcons";
+import { useAuth } from "../../../shell/authContext";
+import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
-import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
 /* ── Frontmatter helpers ─────────────────────────────────────────────── */
@@ -84,6 +85,7 @@ interface NoteEditorProps {
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }: NoteEditorProps) {
+  const { user } = useAuth();
   // ── State ──────────────────────────────────────────────────────────
   const [content, setContent] = useState("");
   const [contentHash, setContentHash] = useState<string | null>(null);
@@ -125,6 +127,23 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [backlinks, setBacklinks] = useState<NoteBacklink[]>([]);
   const [showBacklinks, setShowBacklinks] = useState(false);
 
+  // Last editor state
+  const [lastEditor, setLastEditor] = useState<{ username: string; editedAt: string } | null>(null);
+  const [lastEditorDismissed, setLastEditorDismissed] = useState(false);
+
+  // Activity feed state
+  const [activityEntries, setActivityEntries] = useState<NoteActivityEntry[]>([]);
+  const [showActivity, setShowActivity] = useState(false);
+
+  // Read indicator state (shared notes only)
+  const [readers, setReaders] = useState<NoteReaderInfo[]>([]);
+
+  // Draft/ready status state (shared notes only)
+  const [noteStatus, setNoteStatus] = useState<"draft" | "ready" | undefined>(undefined);
+
+  // Note ID (extracted from frontmatter)
+  const [noteId, setNoteId] = useState<string | null>(null);
+
   // Refs
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
@@ -150,13 +169,16 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // NOT from the queryParams object reference (which may change identity).
   const queryString = useMemo(() => {
     return new URLSearchParams(queryParams).toString();
-  }, [queryParams.projectId, queryParams.epicId, queryParams.username]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [queryParams.projectId, queryParams.epicId]);
 
   // ── Load note ──────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setLastEditor(null);
+    setLastEditorDismissed(false);
+    setReaders([]);
 
     void (async () => {
       try {
@@ -167,6 +189,23 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           setContent(data.content ?? "");
           setContentHash(data.contentHash ?? null);
           setTitle(extractTitle(data.content ?? ""));
+
+          // Extract noteId and status from frontmatter
+          const fm = data.frontmatter;
+          if (fm) {
+            setNoteId(fm.id ?? null);
+            setNoteStatus(fm.status ?? undefined);
+          }
+
+          // Last editor tracking
+          if (data.lastEditor && data.lastEditedAt) {
+            setLastEditor({ username: data.lastEditor, editedAt: data.lastEditedAt });
+          }
+
+          // Auto mark-read for shared notes (fire-and-forget)
+          if (visibility === "shared") {
+            fetch(`${apiBase}/note/${apiPath}/read?${queryString}`, { method: "POST" }).catch(() => {});
+          }
         } else {
           setError("Note not found");
         }
@@ -362,6 +401,37 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     }
   }, [conflictData, apiBase, apiPath, queryString]);
 
+  // Save as copy (conflict resolution)
+  const handleConflictSaveAsCopy = useCallback(async () => {
+    if (!conflictData) return;
+    try {
+      // Create a copy with "(conflict copy)" suffix
+      const copyPath = apiPath.replace(/\.md$/, " (conflict copy).md");
+      const res = await fetch(`${apiBase}/note/${copyPath}?${queryString}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: contentRef.current }),
+      });
+      if (res.ok) {
+        // Reload the server version into the current editor
+        setContent(conflictData.currentContent);
+        setContentHash(conflictData.currentHash);
+        setTitle(extractTitle(conflictData.currentContent));
+        setConflictData(null);
+        setSaveStatus("idle");
+      }
+    } catch { /* best effort */ }
+  }, [conflictData, apiBase, apiPath, queryString]);
+
+  // ── Stash content on conflict for recovery ─────────────────────────
+  useEffect(() => {
+    if (conflictData && noteId) {
+      try {
+        localStorage.setItem(`codascope-note-recovery-${noteId}`, contentRef.current);
+      } catch { /* best effort */ }
+    }
+  }, [conflictData, noteId]);
+
   // ── Image paste handler ────────────────────────────────────────────
   const handleImagePaste = useCallback(async (file: File, view: EditorView) => {
     try {
@@ -494,6 +564,61 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     }
   }, [content, fetchBacklinks]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Fetch readers (shared notes) ───────────────────────────────────
+  useEffect(() => {
+    if (visibility !== "shared" || !noteId) return;
+    void (async () => {
+      try {
+        const params = new URLSearchParams(queryString);
+        const res = await fetch(`${apiBase}/readers/${noteId}?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setReaders(data.readers ?? []);
+        }
+      } catch { /* best effort */ }
+    })();
+  }, [visibility, noteId, apiBase, queryString]);
+
+  // ── Fetch activity ─────────────────────────────────────────────────
+  const fetchActivity = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/note/${apiPath}/activity?${queryString}`);
+      if (res.ok) {
+        const data = await res.json();
+        setActivityEntries(data.activity ?? []);
+      }
+    } catch { /* best effort */ }
+  }, [apiBase, apiPath, queryString]);
+
+  // ── Draft/Ready toggle ─────────────────────────────────────────────
+  const handleStatusToggle = useCallback(() => {
+    const newStatus = noteStatus === "ready" ? "draft" : "ready";
+    setNoteStatus(newStatus);
+
+    // Update frontmatter in content
+    const match = FRONTMATTER_RE.exec(contentRef.current);
+    if (match) {
+      let fm = match[1];
+      if (/^status:\s*.+$/m.test(fm)) {
+        fm = fm.replace(/^status:\s*.+$/m, `status: ${newStatus}`);
+      } else {
+        fm = fm + `\nstatus: ${newStatus}`;
+      }
+      const body = contentRef.current.slice(match[0].length);
+      const updatedContent = `---\n${fm}\n---\n${body}`;
+      setContent(updatedContent);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      void saveNote(updatedContent, hashRef.current);
+    }
+  }, [noteStatus, saveNote]);
+
+  // ── Last editor banner logic ───────────────────────────────────────
+  const showLastEditorBanner = useMemo(() => {
+    if (lastEditorDismissed || !lastEditor || lastEditor.username === user?.username) return false;
+    const diff = Date.now() - new Date(lastEditor.editedAt).getTime();
+    return diff < 5 * 60 * 1000; // < 5 minutes ago
+  }, [lastEditor, lastEditorDismissed, user?.username]);
+
   // ── Render ─────────────────────────────────────────────────────────
 
   if (loading) {
@@ -555,6 +680,27 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           {visibilityLabel(visibility, scope)}
         </span>
 
+        {/* Draft/Ready toggle (shared notes only) */}
+        {visibility === "shared" && (
+          <button
+            className={`codascope-notes-status-toggle codascope-notes-status-toggle--${noteStatus ?? "draft"}`}
+            onClick={handleStatusToggle}
+            type="button"
+            title={noteStatus === "ready" ? "Revert to draft" : "Mark as ready"}
+          >
+            {noteStatus === "ready" ? <IconCheckCircle size={12} /> : <IconDraft size={12} />}
+            <span>{noteStatus === "ready" ? "Ready" : "Draft"}</span>
+          </button>
+        )}
+
+        {/* Read by indicator (shared notes only) */}
+        {visibility === "shared" && readers.length > 0 && (
+          <span className="codascope-notes-read-indicator" title={readers.map((r) => r.userId).join(", ")}>
+            <IconEye size={12} />
+            <span>Read by {readers.length}</span>
+          </span>
+        )}
+
         <div className="codascope-notes-editor-actions">
           {/* Save status indicator */}
           <span className={`codascope-notes-editor-save-status codascope-notes-editor-save-status--${saveStatus}`}>
@@ -595,6 +741,16 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             <IconMove size={14} />
           </button>
 
+          {/* Activity */}
+          <button
+            className={`codascope-btn codascope-btn-ghost codascope-btn-sm${showActivity ? " codascope-notes-editor-ann-toggle--active" : ""}`}
+            onClick={() => { setShowActivity((s) => !s); if (!showActivity) void fetchActivity(); }}
+            type="button"
+            title="Activity feed"
+          >
+            <IconActivity size={14} />
+          </button>
+
           {/* Archive */}
           <button
             className="codascope-btn codascope-btn-ghost codascope-btn-sm"
@@ -609,28 +765,62 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         </div>
       </div>
 
-      {/* Conflict banner */}
+      {/* Last editor banner */}
+      {showLastEditorBanner && lastEditor && (
+        <div className="codascope-notes-last-editor-banner">
+          <IconUser size={12} />
+          <span>
+            {lastEditor.username} edited this {(() => {
+              const diff = Math.round((Date.now() - new Date(lastEditor.editedAt).getTime()) / 60000);
+              return diff <= 1 ? "just now" : `${diff} min ago`;
+            })()}
+          </span>
+          <button
+            className="codascope-notes-last-editor-dismiss"
+            onClick={() => setLastEditorDismissed(true)}
+            type="button"
+          >
+            <IconClose size={10} />
+          </button>
+        </div>
+      )}
+
+      {/* Conflict dialog (modal) */}
       {conflictData && (
-        <div className="codascope-notes-conflict-banner">
-          <div className="codascope-notes-conflict-banner-text">
-            <IconWarning size={14} />
-            <span>This note was modified externally. Your save was blocked to prevent overwriting.</span>
-          </div>
-          <div className="codascope-notes-conflict-banner-actions">
-            <button
-              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-              type="button"
-              onClick={handleConflictReload}
-            >
-              Reload
-            </button>
-            <button
-              className="codascope-btn codascope-btn-danger codascope-btn-sm"
-              type="button"
-              onClick={handleConflictForce}
-            >
-              Force Save
-            </button>
+        <div className="codascope-notes-conflict-overlay">
+          <div className="codascope-notes-conflict-dialog">
+            <div className="codascope-notes-conflict-dialog-header">
+              <IconWarning size={18} />
+              <span>Save Conflict</span>
+            </div>
+            <p className="codascope-notes-conflict-dialog-message">
+              This note was modified by someone else since you started editing.
+              Your changes have been preserved.
+            </p>
+            <div className="codascope-notes-conflict-dialog-actions">
+              <button
+                className="codascope-btn codascope-btn-primary codascope-btn-sm"
+                type="button"
+                onClick={handleConflictForce}
+              >
+                Save my version
+              </button>
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+                type="button"
+                onClick={handleConflictReload}
+              >
+                Load their version
+              </button>
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+                type="button"
+                onClick={handleConflictSaveAsCopy}
+              >
+                <IconCopy size={12} />
+                Save as copy
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -642,7 +832,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       />
 
       {/* Editor body — split layout when annotation panel is open */}
-      <div className={`codascope-notes-editor-body${showAnnotations ? " codascope-notes-editor-body--split" : ""}`}>
+      <div className={`codascope-notes-editor-body${(showAnnotations || showActivity) ? " codascope-notes-editor-body--split" : ""}`}>
         {/* Editor pane */}
         <div className="codascope-notes-editor-pane">
           {showVersions && selectedVersion ? (
@@ -765,6 +955,51 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             activeBlockId={activeBlockId}
             onClose={() => setShowAnnotations(false)}
           />
+        )}
+
+        {/* Activity panel (right split) */}
+        {showActivity && !showAnnotations && (
+          <div className="codascope-notes-activity-panel">
+            <div className="codascope-notes-activity-panel-header">
+              <IconActivity size={14} />
+              <span>Activity</span>
+              <button
+                className="codascope-notes-activity-panel-close"
+                onClick={() => setShowActivity(false)}
+                type="button"
+              >
+                <IconClose size={12} />
+              </button>
+            </div>
+            <div className="codascope-notes-activity-list">
+              {activityEntries.length === 0 ? (
+                <div className="codascope-notes-activity-empty">No activity yet</div>
+              ) : (
+                activityEntries.map((entry, i) => (
+                  <div key={`${entry.timestamp}-${i}`} className={`codascope-notes-activity-item codascope-notes-activity-item--${entry.type}`}>
+                    <div className="codascope-notes-activity-item-icon">
+                      {entry.type === "edit" && <IconClock size={12} />}
+                      {entry.type === "created" && <IconCheckCircle size={12} />}
+                      {entry.type === "moved" && <IconMove size={12} />}
+                      {entry.type === "archived" && <IconArchive size={12} />}
+                      {entry.type === "restored" && <IconCheckCircle size={12} />}
+                    </div>
+                    <div className="codascope-notes-activity-item-content">
+                      <span className="codascope-notes-activity-item-details">{entry.details}</span>
+                      <div className="codascope-notes-activity-item-meta">
+                        {entry.actor !== "unknown" && <span className="codascope-notes-activity-item-actor">{entry.actor}</span>}
+                        <span className="codascope-notes-activity-item-time">
+                          {new Date(entry.timestamp).toLocaleDateString("en-US", {
+                            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
 

@@ -177,4 +177,98 @@ export class CodaScopeNoteUserPrefsService {
     }
     this.writeRecentsFile(userId, file);
   }
+
+  /* ── Read Status Tracking ──────────────────────────────────────────── */
+
+  /** Path helpers for read tracking */
+  private readStatusPath(userId: string): string {
+    return path.join(this.prefsDir(userId), "read-status.json");
+  }
+
+  private readTrackingDir(): string {
+    return path.join(this.root, "_notes", "_read-tracking");
+  }
+
+  private noteReadersPath(noteId: string): string {
+    return path.join(this.readTrackingDir(), `${noteId}.json`);
+  }
+
+  /** Read the per-user read status map from disk. */
+  private readReadStatusFile(userId: string): Record<string, string> {
+    const p = this.readStatusPath(userId);
+    if (!existsSync(p)) return {};
+    try {
+      return JSON.parse(readFileSync(p, "utf-8"));
+    } catch {
+      return {};
+    }
+  }
+
+  /** Write the per-user read status map to disk. */
+  private writeReadStatusFile(userId: string, data: Record<string, string>): void {
+    this.ensureDir(userId);
+    writeFileSync(this.readStatusPath(userId), JSON.stringify(data, null, 2), "utf-8");
+  }
+
+  /**
+   * Mark a note as read by the user.
+   * Also records the user as a reader of the note.
+   */
+  markRead(userId: string, noteId: string): void {
+    const now = new Date().toISOString();
+    const data = this.readReadStatusFile(userId);
+    data[noteId] = now;
+    this.writeReadStatusFile(userId, data);
+    // Also record this user as a reader of the note
+    this.recordReader(noteId, userId);
+  }
+
+  /**
+   * Get read status for a list of noteIds for a given user.
+   * Returns a map of noteId → readAt (ISO string) or null if unread.
+   */
+  getReadStatus(userId: string, noteIds: string[]): Record<string, string | null> {
+    const data = this.readReadStatusFile(userId);
+    const result: Record<string, string | null> = {};
+    for (const id of noteIds) {
+      result[id] = data[id] ?? null;
+    }
+    return result;
+  }
+
+  /** Record a user as a reader of a specific note. */
+  private recordReader(noteId: string, userId: string): void {
+    const dir = this.readTrackingDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    const filePath = this.noteReadersPath(noteId);
+    let readers: Array<{ userId: string; readAt: string }> = [];
+
+    if (existsSync(filePath)) {
+      try {
+        readers = JSON.parse(readFileSync(filePath, "utf-8"));
+      } catch { /* reset */ }
+    }
+
+    const now = new Date().toISOString();
+    const idx = readers.findIndex((r) => r.userId === userId);
+    if (idx >= 0) {
+      readers[idx].readAt = now;
+    } else {
+      readers.push({ userId, readAt: now });
+    }
+
+    writeFileSync(filePath, JSON.stringify(readers, null, 2), "utf-8");
+  }
+
+  /** Get all readers for a note. */
+  getReadersForNote(noteId: string): Array<{ userId: string; readAt: string }> {
+    const filePath = this.noteReadersPath(noteId);
+    if (!existsSync(filePath)) return [];
+    try {
+      return JSON.parse(readFileSync(filePath, "utf-8"));
+    } catch {
+      return [];
+    }
+  }
 }

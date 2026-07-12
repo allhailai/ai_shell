@@ -337,8 +337,8 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
     };
 
     // Listen to selection and doc changes
-    const listener = editorView.dom.addEventListener("keyup", updateActive);
-    const mouseListener = editorView.dom.addEventListener("mouseup", updateActive);
+    editorView.dom.addEventListener("keyup", updateActive);
+    editorView.dom.addEventListener("mouseup", updateActive);
 
     // Initial check
     updateActive();

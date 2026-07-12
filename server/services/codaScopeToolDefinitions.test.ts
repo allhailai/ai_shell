@@ -10,6 +10,8 @@ import {
   buildEpicTools,
   buildWriteTools,
   buildArtifactTools,
+  buildNoteReadTools,
+  buildNoteWriteTools,
   getToolsForPurpose,
   type AgentPurpose,
 } from "./codaScopeToolDefinitions.js";
@@ -124,11 +126,13 @@ describe("getToolsForPurpose", () => {
   const epicTools = buildEpicTools(PROJECT_ID, services);
   const writeTools = buildWriteTools(PROJECT_ID, services);
   const artifactTools = buildArtifactTools(PROJECT_ID, services);
-  const readCount = Object.keys(readTools).length;
+  const noteReadTools = buildNoteReadTools(PROJECT_ID, services);
+  const noteWriteTools = buildNoteWriteTools(PROJECT_ID, services);
+  const readCount = Object.keys(readTools).length + Object.keys(noteReadTools).length;
   const epicCount = Object.keys(epicTools).length;
   const writeCount = Object.keys(writeTools).length;
   const artifactCount = Object.keys(artifactTools).length;
-  const allCount = readCount + epicCount + writeCount + artifactCount;
+  const allCount = readCount + epicCount + writeCount + artifactCount + Object.keys(noteWriteTools).length;
 
   it("'assistant' gets ALL tools (read + epic + write + artifact)", () => {
     const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "assistant");

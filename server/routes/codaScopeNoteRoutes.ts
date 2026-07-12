@@ -866,6 +866,19 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
               correlationId,
               metadata: { fromScope, fromVisibility, fromPath: found.path, bulk: true },
             });
+            if (fromVisibility !== toVisibility) {
+              noteAuditSvc.log({
+                event: "note.visibility_changed",
+                timestamp: new Date().toISOString(),
+                actor: userId,
+                noteId,
+                scope: toScope as NoteScope,
+                visibility: toVisibility as NoteVisibility,
+                path: destPath,
+                correlationId,
+                metadata: { fromVisibility, toVisibility, fromScope, toScope, bulk: true },
+              });
+            }
           } catch { /* best effort */ }
         } else {
           failed.push(noteId);
@@ -876,6 +889,92 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
 
     res.json({ moved, failed, correlationId });
+  }));
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── COLLABORATION V2 ROUTES ────────────────────────────────────────
+  // Must come BEFORE wildcard CRUD routes.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── Activity Feed ──────────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/:scope/:visibility/note/*path/activity", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const notePath = extractPath(req);
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    // Strip trailing "/activity" from the path (Express includes it in *path)
+    const cleanPath = notePath.replace(/\/activity$/, "");
+    if (!cleanPath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    const activity = await noteSvc.getActivity(scope, visibility, opts, cleanPath, noteAuditSvc);
+    res.json({ activity });
+  }));
+
+  // ── Mark Note as Read ──────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/read", wrap(async (req, res) => {
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    if (visibility !== "shared") {
+      throw httpError("Reading indicators are available only for shared notes.", 400, "invalid_visibility");
+    }
+    const notePath = extractPath(req);
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    // Strip trailing "/read" from the path
+    const cleanPath = notePath.replace(/\/read$/, "");
+    if (!cleanPath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    // Get noteId from the file
+    const note = await noteSvc.readNote(scope, visibility, opts, cleanPath);
+    if (!note) throw httpError("Note not found.", 404, "not_found");
+
+    const userId = opts.userId ?? "default";
+    noteUserPrefsSvc.markRead(userId, note.frontmatter.id);
+
+    res.json({ marked: true });
+  }));
+
+  // ── Read Status (batch check) ──────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/read-status", wrap(async (req, res) => {
+    const { noteUserPrefsSvc } = await ensureServices();
+    const { visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    if (visibility !== "shared") {
+      throw httpError("Reading indicators are available only for shared notes.", 400, "invalid_visibility");
+    }
+
+    const { noteIds } = req.body as { noteIds?: string[] };
+    if (!noteIds || !Array.isArray(noteIds)) {
+      throw httpError("noteIds array is required.", 400, "invalid_input");
+    }
+
+    const userId = opts.userId ?? "default";
+    const status = noteUserPrefsSvc.getReadStatus(userId, noteIds);
+    res.json({ status });
+  }));
+
+  // ── Readers for a Note ─────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/:scope/:visibility/readers/:noteId", wrap(async (req, res) => {
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    if (visibility !== "shared") {
+      throw httpError("Reading indicators are available only for shared notes.", 400, "invalid_visibility");
+    }
+    const noteId = param(req, "noteId");
+    if (!noteId) throw httpError("noteId is required.", 400, "invalid_input");
+
+    // Only expose reader information when the requested shared note is in
+    // the caller's current scope. This prevents a note ID from becoming a
+    // cross-scope read-tracking lookup key.
+    const note = await noteSvc.findNoteById(scope, visibility, opts, noteId);
+    if (!note) throw httpError("Note not found.", 404, "not_found");
+
+    const readers = noteUserPrefsSvc.getReadersForNote(noteId);
+    res.json({ readers });
   }));
 
   // ══════════════════════════════════════════════════════════════════════
@@ -906,7 +1005,21 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       });
     } catch { /* best effort — never block the read response */ }
 
-    res.json(result);
+    // Enrich response with lastEditor metadata from index
+    let lastEditor: string | undefined;
+    let lastEditedAt: string | undefined;
+    try {
+      const noteFolder = notePath.includes("/") ? notePath.slice(0, notePath.lastIndexOf("/")) : undefined;
+      const filename = notePath.split("/").pop() ?? notePath;
+      const notes = await noteSvc.listNotes(scope, visibility, opts, noteFolder);
+      const entry = notes.find((n) => n.path === filename);
+      if (entry) {
+        lastEditor = entry.lastEditor;
+        lastEditedAt = entry.lastEditedAt;
+      }
+    } catch { /* best effort */ }
+
+    res.json({ ...result, lastEditor, lastEditedAt });
   }));
 
   // ── Create Note ─────────────────────────────────────────────────────
@@ -1101,6 +1214,18 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
             toScope, toVisibility, toPath,
           },
         });
+        if (fromVisibility !== toVisibility) {
+          noteAuditSvc.log({
+            event: "note.visibility_changed",
+            timestamp: new Date().toISOString(),
+            actor: userId,
+            noteId: note.frontmatter.id,
+            scope: toScope as NoteScope,
+            visibility: toVisibility as NoteVisibility,
+            path: toPath!,
+            metadata: { fromVisibility, toVisibility, fromScope, toScope },
+          });
+        }
       }
     } catch { /* best effort */ }
 

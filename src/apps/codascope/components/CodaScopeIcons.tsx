@@ -887,3 +887,23 @@ export function IconCheckboxChecked({ size = 16, style, className }: IconProps) 
     </svg>
   );
 }
+
+/** Activity / timeline pulse */
+export function IconActivity({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="1.5 8 4 8 5.5 4 8 12 10 6 11.5 8 14.5 8" />
+    </svg>
+  );
+}
+
+/** Draft (pencil in circle) */
+export function IconDraft({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M6 10.5l-.5-2L9.5 4.5l2 2L7.5 10.5z" />
+      <line x1="5.5" y1="10.5" x2="7.5" y2="10.5" />
+    </svg>
+  );
+}

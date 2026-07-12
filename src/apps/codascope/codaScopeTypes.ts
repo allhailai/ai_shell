@@ -632,6 +632,7 @@ export interface NoteFrontmatter {
   created: string;
   updated: string;
   owner: string;        // User ID who created the note
+  status?: "draft" | "ready";  // Shared notes only; private notes ignore this
 }
 
 export interface NoteEntry {
@@ -643,6 +644,10 @@ export interface NoteEntry {
   wordCount: number;
   isFolder?: boolean;
   childCount?: number;
+  noteId?: string;             // Frontmatter UUID (for read tracking)
+  lastEditor?: string;         // Username of last editor
+  lastEditedAt?: string;       // ISO timestamp of last edit
+  status?: "draft" | "ready";  // Shared notes only
 }
 
 export interface NoteFolderEntry {
@@ -778,5 +783,26 @@ export interface QuickCaptureResponse {
   path: string;
   noteId: string;
   contentHash: string;
+}
+
+// ── Note Activity ──────────────────────────────────────────────────
+
+export interface NoteActivityEntry {
+  type: "edit" | "created" | "moved" | "archived" | "restored" | "visibility_changed";
+  timestamp: string;
+  actor: string;
+  details: string;  // human-readable: "Added 45 words", "Moved from shared to private"
+}
+
+// ── Note Read Status ───────────────────────────────────────────────
+
+export interface NoteReadStatus {
+  noteId: string;
+  readAt: string | null;
+}
+
+export interface NoteReaderInfo {
+  userId: string;
+  readAt: string;
 }
 

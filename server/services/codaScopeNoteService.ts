@@ -46,6 +46,7 @@ import type {
   NoteFolderEntry,
   NoteArchiveMeta,
   NoteTagIndexEntry,
+  NoteActivityEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
@@ -120,9 +121,17 @@ export interface NoteVersionContent {
 
 /* ── Index schema ─────────────────────────────────────────────────── */
 
+interface NotesIndexEditorMeta {
+  noteId: string;
+  lastEditor?: string;
+  lastEditedAt?: string;
+}
+
 interface NotesIndex {
   generatedAt: string;
   notes: NoteEntry[];
+  /** Per-note editor metadata, keyed by noteId — survives re-scans */
+  editorMeta?: NotesIndexEditorMeta[];
 }
 
 interface TagIndex {
@@ -222,6 +231,7 @@ export class CodaScopeNoteService {
     const updatedMatch = yamlBlock.match(/^updated:\s*(.+)$/m);
     const ownerMatch = yamlBlock.match(/^owner:\s*(.+)$/m);
     const tagsMatch = yamlBlock.match(/^tags:\s*\[([^\]]*)\]$/m);
+    const statusMatch = yamlBlock.match(/^status:\s*(.+)$/m);
 
     const id = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : randomUUID();
     const title = titleMatch ? titleMatch[1].trim().replace(/^["']|["']$/g, "") : "Untitled";
@@ -234,9 +244,11 @@ export class CodaScopeNoteService {
           .map((t) => t.trim().replace(/^["']|["']$/g, ""))
           .filter(Boolean)
       : [];
+    const statusRaw = statusMatch ? statusMatch[1].trim().replace(/^["']|["']$/g, "") : undefined;
+    const status = (statusRaw === "draft" || statusRaw === "ready") ? statusRaw : undefined;
 
     return {
-      frontmatter: { id, title, tags, created, updated, owner },
+      frontmatter: { id, title, tags, created, updated, owner, status },
       body,
     };
   }
@@ -248,7 +260,7 @@ export class CodaScopeNoteService {
     const tagStr = fm.tags.length > 0
       ? `[${fm.tags.map((t) => JSON.stringify(t)).join(", ")}]`
       : "[]";
-    return [
+    const lines = [
       "---",
       `id: ${fm.id}`,
       `title: ${fm.title}`,
@@ -256,15 +268,22 @@ export class CodaScopeNoteService {
       `created: ${fm.created}`,
       `updated: ${fm.updated}`,
       `owner: ${fm.owner}`,
-      "---",
-      "",
-    ].join("\n");
+    ];
+    if (fm.status) {
+      lines.push(`status: ${fm.status}`);
+    }
+    lines.push("---", "");
+    return lines.join("\n");
   }
 
   /**
    * Generate default frontmatter for a new note.
    */
-  private defaultFrontmatter(title?: string, opts?: NoteResolveOpts): NoteFrontmatter {
+  private defaultFrontmatter(
+    title: string | undefined,
+    opts: NoteResolveOpts | undefined,
+    visibility: NoteVisibility,
+  ): NoteFrontmatter {
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
     return {
@@ -274,6 +293,10 @@ export class CodaScopeNoteService {
       created: now.toISOString(),
       updated: now.toISOString(),
       owner: opts?.userId ?? "default",
+      // Shared notes enter the collaboration workflow as drafts. Private
+      // notes deliberately have no status, since they are personal working
+      // material and should never show shared-workflow UI.
+      status: visibility === "shared" ? "draft" : undefined,
     };
   }
 
@@ -363,7 +386,7 @@ export class CodaScopeNoteService {
       // Extract title from path or content
       const basename = path.basename(notePath, ".md");
       const title = basename.replace(/[-_]/g, " ");
-      const fm = this.defaultFrontmatter(title, opts);
+      const fm = this.defaultFrontmatter(title, opts, visibility);
       finalContent = this.serializeFrontmatter(fm) + (content ?? "");
     }
 
@@ -418,9 +441,10 @@ export class CodaScopeNoteService {
 
     writeFileSync(filePath, finalContent, "utf-8");
 
-    // Refresh index
+    // Refresh index with last-editor metadata
     const parentDir = path.dirname(filePath);
-    await this.refreshIndex(parentDir);
+    const editor = opts.userId ?? "default";
+    await this.refreshIndexWithEditor(parentDir, frontmatter.id, editor);
 
     return { contentHash: this.computeHash(finalContent) };
   }
@@ -807,16 +831,27 @@ export class CodaScopeNoteService {
    */
   async refreshIndex(notesDir: string): Promise<void> {
     if (!existsSync(notesDir)) return;
-    const entries = this.scanDirectory(notesDir);
-    const index: NotesIndex = {
-      generatedAt: new Date().toISOString(),
-      notes: entries,
-    };
-    writeFileSync(
-      path.join(notesDir, "_notes-index.json"),
-      JSON.stringify(index, null, 2),
-      "utf-8",
-    );
+    this.writeIndex(notesDir, this.readIndexData(notesDir)?.editorMeta ?? []);
+  }
+
+  /**
+   * Refresh an index after an edit while retaining a small, per-note record
+   * of who made that edit. Keeping this separate from frontmatter avoids
+   * rewriting user content for collaborative metadata.
+   */
+  private async refreshIndexWithEditor(
+    notesDir: string,
+    noteId: string,
+    lastEditor: string,
+  ): Promise<void> {
+    if (!existsSync(notesDir)) return;
+
+    const existingMeta = this.readIndexData(notesDir)?.editorMeta ?? [];
+    const editorMeta = [
+      ...existingMeta.filter((meta) => meta.noteId !== noteId),
+      { noteId, lastEditor, lastEditedAt: new Date().toISOString() },
+    ];
+    this.writeIndex(notesDir, editorMeta);
   }
 
   /* ── Tag Index ──────────────────────────────────────────────────── */
@@ -1020,35 +1055,63 @@ export class CodaScopeNoteService {
 
   /** Read index from _notes-index.json if it exists and is fresh enough. */
   private readIndex(dir: string): NoteEntry[] | null {
-    const indexPath = path.join(dir, "_notes-index.json");
-    if (!existsSync(indexPath)) return null;
+    const data = this.readIndexData(dir);
+    if (!data) return null;
     try {
-      const data: NotesIndex = JSON.parse(readFileSync(indexPath, "utf-8"));
       // Consider index stale if older than 60 seconds
       const age = Date.now() - new Date(data.generatedAt).getTime();
       if (age > 60_000) return null;
-      return data.notes;
+      return this.withEditorMetadata(data.notes, data.editorMeta ?? []);
     } catch {
       return null;
     }
   }
 
+  /** Read the complete index even when stale, so a rescan retains metadata. */
+  private readIndexData(dir: string): NotesIndex | null {
+    const indexPath = path.join(dir, "_notes-index.json");
+    if (!existsSync(indexPath)) return null;
+    try {
+      return JSON.parse(readFileSync(indexPath, "utf-8")) as NotesIndex;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Attach durable index-only collaboration metadata to visible note entries. */
+  private withEditorMetadata(entries: NoteEntry[], editorMeta: NotesIndexEditorMeta[]): NoteEntry[] {
+    const metadataByNoteId = new Map(editorMeta.map((meta) => [meta.noteId, meta]));
+    return entries.map((entry) => {
+      const metadata = entry.noteId ? metadataByNoteId.get(entry.noteId) : undefined;
+      return metadata
+        ? { ...entry, lastEditor: metadata.lastEditor, lastEditedAt: metadata.lastEditedAt }
+        : entry;
+    });
+  }
+
+  /** Scan a directory and atomically replace its index payload. */
+  private writeIndex(dir: string, editorMeta: NotesIndexEditorMeta[]): NoteEntry[] {
+    const notes = this.withEditorMetadata(this.scanDirectory(dir), editorMeta);
+    const index: NotesIndex = {
+      generatedAt: new Date().toISOString(),
+      notes,
+      editorMeta,
+    };
+    writeFileSync(
+      path.join(dir, "_notes-index.json"),
+      JSON.stringify(index, null, 2),
+      "utf-8",
+    );
+    return notes;
+  }
+
   /** Scan directory and generate index, returning entries. */
   private scanAndIndex(dir: string): NoteEntry[] {
-    const entries = this.scanDirectory(dir);
     // Write index for next time (best effort)
     try {
-      const index: NotesIndex = {
-        generatedAt: new Date().toISOString(),
-        notes: entries,
-      };
-      writeFileSync(
-        path.join(dir, "_notes-index.json"),
-        JSON.stringify(index, null, 2),
-        "utf-8",
-      );
+      return this.writeIndex(dir, this.readIndexData(dir)?.editorMeta ?? []);
     } catch { /* best effort */ }
-    return entries;
+    return this.scanDirectory(dir);
   }
 
   /** Scan a directory for .md files and subdirectories. */
@@ -1092,6 +1155,8 @@ export class CodaScopeNoteService {
               created: frontmatter.created || stat.birthtime.toISOString(),
               updated: frontmatter.updated || stat.mtime.toISOString(),
               wordCount: this.countWords(body),
+              noteId: frontmatter.id,
+              status: frontmatter.status,
             });
           } catch { /* skip unreadable files */ }
         }
@@ -1321,5 +1386,146 @@ export class CodaScopeNoteService {
       content,
       savedAt: stat.mtime.toISOString(),
     };
+  }
+
+  /* ── Activity Feed ──────────────────────────────────────────────── */
+
+  /**
+   * Build a unified activity timeline for a note by merging:
+   * - version history (edit events with size deltas)
+   * - audit log entries (created, moved, archived, etc.)
+   */
+  async getActivity(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    auditService: { query(filters: { noteId: string; limit?: number }): import("../../src/apps/codascope/codaScopeTypes.js").NoteAuditEvent[] },
+  ): Promise<NoteActivityEntry[]> {
+    const entries: NoteActivityEntry[] = [];
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return entries;
+
+    const filePath = this.resolveNotePath(notesDir, notePath);
+    if (!existsSync(filePath)) return entries;
+
+    // Get noteId from current content
+    const content = readFileSync(filePath, "utf-8");
+    const { frontmatter, body } = this.parseFrontmatter(content);
+    const noteId = frontmatter.id;
+    const currentWordCount = this.countWords(body);
+
+    let auditEvents: import("../../src/apps/codascope/codaScopeTypes.js").NoteAuditEvent[] = [];
+    try {
+      auditEvents = auditService.query({ noteId, limit: 100 });
+    } catch { /* audit not available */ }
+
+    // 1. Version history plus audit entries → edits with actor and delta.
+    // A snapshot is written immediately before each update, so pairing newest
+    // snapshots with newest update events yields the before/after word delta.
+    const vDir = this.versionsDir(filePath);
+    if (existsSync(vDir)) {
+      try {
+        const versionFiles = readdirSync(vDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .sort()
+          .reverse();
+
+        const snapshots: Array<{ savedAt: string; wordCount: number; label: string }> = [];
+
+        for (const vf of versionFiles.slice(0, 50)) {
+          const vPath = path.join(vDir, vf);
+          try {
+            const stat = statSync(vPath);
+            const vContent = readFileSync(vPath, "utf-8");
+            snapshots.push({
+              savedAt: stat.mtime.toISOString(),
+              wordCount: this.countWords(vContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")),
+              label: vf.replace(".md", ""),
+            });
+          } catch { /* skip */ }
+        }
+
+        const updates = auditEvents
+          .filter((event) => event.event === "note.updated")
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+        for (let index = 0; index < snapshots.length; index++) {
+          const snapshot = snapshots[index];
+          const update = updates[index];
+          const afterWordCount = index === 0 ? currentWordCount : snapshots[index - 1].wordCount;
+          const delta = afterWordCount - snapshot.wordCount;
+          const deltaLabel = delta > 0
+            ? `Added ${delta} word${delta === 1 ? "" : "s"}`
+            : delta < 0
+              ? `Removed ${Math.abs(delta)} word${delta === -1 ? "" : "s"}`
+              : "Edited note";
+
+          entries.push({
+            type: "edit",
+            timestamp: update?.timestamp ?? snapshot.savedAt,
+            actor: update?.actor ?? "unknown",
+            details: `${deltaLabel} (${snapshot.label})`,
+          });
+        }
+
+        // Retained audit entries can outnumber version snapshots after old
+        // versions are pruned, so keep those edits visible as well.
+        for (const update of updates.slice(snapshots.length, 50)) {
+            entries.push({
+              type: "edit",
+              timestamp: update.timestamp,
+              actor: update.actor,
+              details: "Edited note",
+            });
+        }
+      } catch { /* no versions dir */ }
+    } else {
+      for (const update of auditEvents.filter((event) => event.event === "note.updated").slice(0, 50)) {
+        entries.push({
+          type: "edit",
+          timestamp: update.timestamp,
+          actor: update.actor,
+          details: "Edited note",
+        });
+      }
+    }
+
+    // 2. Non-edit audit log entries.
+    try {
+      for (const ev of auditEvents) {
+        const typeMap: Record<string, NoteActivityEntry["type"]> = {
+          "note.created": "created",
+          "note.moved": "moved",
+          "note.archived": "archived",
+          "note.restored": "restored",
+          "note.visibility_changed": "visibility_changed",
+        };
+        const type = typeMap[ev.event];
+        if (!type) continue;
+
+        let details = ev.event.replace("note.", "");
+        if (ev.metadata) {
+          const meta = ev.metadata as Record<string, unknown>;
+          if (ev.event === "note.visibility_changed") {
+            details = `Changed visibility from ${meta.fromVisibility} to ${meta.toVisibility}`;
+          } else if (meta.fromScope || meta.toScope) {
+            details = `Moved from ${meta.fromScope}/${meta.fromVisibility} to ${meta.toScope}/${meta.toVisibility}`;
+          }
+        }
+
+        entries.push({
+          type,
+          timestamp: ev.timestamp,
+          actor: ev.actor,
+          details,
+        });
+      }
+    } catch { /* audit not available */ }
+
+    // Sort newest first
+    entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+    return entries.slice(0, 50);
   }
 }

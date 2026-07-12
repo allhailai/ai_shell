@@ -262,8 +262,6 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
     while ((match = TEXT_COLOR_RE.exec(text)) !== null) {
       const fullMatch = match[0]; // <span style="color:red">text</span>
       const colorValue = match[1]; // e.g., "red", "#ff0000"
-      const innerText = match[2]; // e.g., "text"
-
       const matchFrom = from + match.index;
       const matchTo = matchFrom + fullMatch.length;
 

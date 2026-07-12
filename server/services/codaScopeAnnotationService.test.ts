@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node
 import path from "node:path";
 import crypto from "node:crypto";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
+import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -352,6 +353,12 @@ describe("CodaScopeAnnotationService", () => {
   // ── Directive CRUD ────────────────────────────────────────────
 
   describe("directive CRUD", () => {
+    let svc: CodaScopeDirectiveService;
+
+    beforeEach(() => {
+      svc = new CodaScopeDirectiveService(root);
+    });
+
     it("creates a directive", async () => {
       scaffoldProject(root, "proj-dir", "epic-d");
       const dir = await svc.createDirective("proj-dir", "epic-d", "doc1", {
@@ -425,6 +432,12 @@ describe("CodaScopeAnnotationService", () => {
   // ── Directive Apply / Undo / Reject ─────────────────────────
 
   describe("directive apply / undo / reject", () => {
+    let svc: CodaScopeDirectiveService;
+
+    beforeEach(() => {
+      svc = new CodaScopeDirectiveService(root);
+    });
+
     it("applies an insert directive", async () => {
       scaffoldProject(root, "proj-apply", "epic-a");
       const dir = await svc.createDirective("proj-apply", "epic-a", "doc1", {
@@ -539,6 +552,12 @@ describe("CodaScopeAnnotationService", () => {
   // ── Batch Directives ──────────────────────────────────────────
 
   describe("executeBatchDirectives", () => {
+    let svc: CodaScopeDirectiveService;
+
+    beforeEach(() => {
+      svc = new CodaScopeDirectiveService(root);
+    });
+
     it("applies all pending directives top-to-bottom", async () => {
       scaffoldProject(root, "proj-batch", "epic-b");
 

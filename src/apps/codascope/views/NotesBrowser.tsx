@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import { NoteExportDialog } from "../components/NoteExportDialog";
@@ -167,7 +167,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [showArchive, setShowArchive] = useState(false);
 
   // Starred & recents state
-  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [starredNotes, setStarredNotes] = useState<StarredNoteRef[]>([]);
   const [recents, setRecents] = useState<RecentNoteRef[]>([]);
   const [showRecents, setShowRecents] = useState(true);
@@ -198,6 +197,9 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   // Export/Import dialog state
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
+
+  // Read status state (shared notes)
+  const [readStatus, setReadStatus] = useState<Record<string, string | null>>({});
 
   // Visibility tabs for codascope-level notes (shared/private)
   const showVisibilityTabs = !propVisibility && scope === "codascope";
@@ -247,7 +249,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         const data = await res.json();
         const items: StarredNoteRef[] = data.items ?? [];
         setStarredNotes(items);
-        setStarredIds(new Set(items.map((s) => s.noteId)));
       }
     } catch { /* best effort */ }
   }, []);
@@ -267,6 +268,29 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     void fetchStarred();
     void fetchRecents();
   }, [fetchStarred, fetchRecents]);
+
+  // ── Fetch read status for shared notes ──────────────────────────────
+  useEffect(() => {
+    if (visibility !== "shared" || notes.length === 0) return;
+    // Collect noteIds from the notes list
+    const noteIds = notes.filter((n) => !n.isFolder && n.noteId).map((n) => n.noteId!);
+    if (noteIds.length === 0) return;
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams(queryString);
+        const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/read-status?${params.toString()}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ noteIds }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setReadStatus(data.status ?? {});
+        }
+      } catch { /* best effort */ }
+    })();
+  }, [visibility, notes, scope, queryString]);
 
   // ── Star / unstar handlers ─────────────────────────────────────────
   const handleStar = useCallback(async (noteId: string, noteScope: NoteScope, noteVisibility: NoteVisibility, notePath: string, title: string) => {
@@ -497,21 +521,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   }, []);
 
   const toggleNoteSelection = useCallback(async (entry: NoteEntry) => {
-    // Need the noteId from the entry — fetch if not cached
-    const existingId = getStarredId(entry);
-    let noteId = existingId;
-
-    if (!noteId) {
-      try {
-        const params = new URLSearchParams(queryString);
-        const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${entry.path}?${params.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          noteId = data.frontmatter?.id ?? null;
-        }
-      } catch { /* best effort */ }
-    }
-
+    const noteId = entry.noteId;
     if (!noteId) return;
 
     setSelectedNoteIds((prev) => {
@@ -523,7 +533,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       }
       return next;
     });
-  }, [getStarredId, queryString, scope, visibility]);
+  }, []);
 
   const handleBulkArchive = useCallback(async () => {
     setBulkArchiving(true);
@@ -575,9 +585,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     );
   }, [starredNotes, scope, visibility]);
 
-  // ── Get noteId from entry (need to fetch) ─────────────────────────
-  // Since NoteEntry doesn't carry the noteId, star/unstar uses the starred
-  // list to find the noteId by path, or falls back to fetching the note.
+  // ── Get a starred note ID for a note entry ─────────────────────────
   const getStarredId = useCallback((entry: NoteEntry): string | null => {
     const found = starredNotes.find(
       (s) => s.path === entry.path && s.scope === scope && s.visibility === visibility,
@@ -880,21 +888,21 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                   </div>
                 </div>
                 {/* Inbox badge */}
-                {entry.path === "_inbox" && (entry.childCount ?? 0) > 0 && (
-                  <span className="codascope-notes-inbox-badge">{entry.childCount}</span>
+                {entry.path === "_inbox" && inboxCount > 0 && (
+                  <span className="codascope-notes-inbox-badge">{inboxCount}</span>
                 )}
               </button>
             ) : (
               <button
                 key={entry.path}
-                className={`codascope-notes-item${selectionMode && selectedNoteIds.has(getStarredId(entry) ?? "") ? " codascope-notes-item-selected" : ""}`}
+                className={`codascope-notes-item${selectionMode && entry.noteId && selectedNoteIds.has(entry.noteId) ? " codascope-notes-item-selected" : ""}`}
                 onClick={() => selectionMode ? void toggleNoteSelection(entry) : handleNoteClick(entry.path)}
                 type="button"
               >
                 {/* Selection checkbox */}
                 {selectionMode && (
                   <div className="codascope-notes-item-checkbox">
-                    {selectedNoteIds.has(getStarredId(entry) ?? "") ? (
+                    {entry.noteId && selectedNoteIds.has(entry.noteId) ? (
                       <IconCheckboxChecked size={14} />
                     ) : (
                       <IconCheckbox size={14} />
@@ -905,8 +913,23 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                   <IconFile size={14} />
                 </div>
                 <div className="codascope-notes-item-content">
-                  <div className="codascope-notes-item-title">{entry.title}</div>
+                  <div className="codascope-notes-item-title">
+                    {entry.title}
+                    {/* Unread dot (shared notes) */}
+                    {visibility === "shared" && entry.noteId && (
+                      readStatus[entry.noteId] === null || (readStatus[entry.noteId] && entry.lastEditedAt && readStatus[entry.noteId]! < entry.lastEditedAt)
+                    ) && (
+                      <span className="codascope-notes-unread-dot" title="Unread or updated" />
+                    )}
+                  </div>
                   <div className="codascope-notes-item-meta">
+                    {/* Draft/Ready badge (shared notes only) */}
+                    {visibility === "shared" && entry.status && (
+                      <span className={`codascope-notes-${entry.status}-badge`}>
+                        {entry.status === "draft" ? <IconDraft size={10} /> : <IconCheckCircle size={10} />}
+                        <span>{entry.status === "draft" ? "Draft" : "Ready"}</span>
+                      </span>
+                    )}
                     {entry.tags.length > 0 && (
                       <div className="codascope-notes-tags">
                         {entry.tags.map((tag) => (

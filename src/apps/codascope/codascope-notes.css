@@ -2430,3 +2430,294 @@
   color: var(--color-danger);
   font-size: 10px;
 }
+
+/* ── Collaboration v2: Last Editor Banner ────────────────────────────── */
+
+.codascope-notes-last-editor-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+  background: hsla(210, 60%, 50%, 0.08);
+  border-bottom: 1px solid hsla(210, 60%, 50%, 0.15);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.codascope-notes-last-editor-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: var(--space-1);
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-last-editor-dismiss:hover {
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Collaboration v2: Conflict Dialog (Modal) ───────────────────────── */
+
+.codascope-notes-conflict-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsla(0, 0%, 0%, 0.5);
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.codascope-notes-conflict-dialog {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  max-width: 420px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+}
+
+.codascope-notes-conflict-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-warning);
+}
+
+.codascope-notes-conflict-dialog-message {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0 0 var(--space-4);
+}
+
+.codascope-notes-conflict-dialog-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.codascope-notes-conflict-dialog-actions .codascope-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ── Collaboration v2: Activity Panel ────────────────────────────────── */
+
+.codascope-notes-activity-panel {
+  width: 300px;
+  min-width: 240px;
+  border-left: 1px solid var(--color-border-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.codascope-notes-activity-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.codascope-notes-activity-panel-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: var(--space-1);
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-activity-panel-close:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.codascope-notes-activity-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.codascope-notes-activity-empty {
+  text-align: center;
+  color: var(--color-text-quaternary);
+  font-size: var(--text-xs);
+  padding: var(--space-6) var(--space-3);
+}
+
+.codascope-notes-activity-item {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.codascope-notes-activity-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.codascope-notes-activity-item-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-notes-activity-item--created .codascope-notes-activity-item-icon {
+  background: hsla(140, 50%, 50%, 0.12);
+  color: hsl(140, 50%, 50%);
+}
+
+.codascope-notes-activity-item--moved .codascope-notes-activity-item-icon {
+  background: hsla(210, 60%, 50%, 0.12);
+  color: hsl(210, 60%, 50%);
+}
+
+.codascope-notes-activity-item--archived .codascope-notes-activity-item-icon {
+  background: hsla(30, 60%, 50%, 0.12);
+  color: hsl(30, 60%, 50%);
+}
+
+.codascope-notes-activity-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.codascope-notes-activity-item-details {
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-notes-activity-item-meta {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 10px;
+  color: var(--color-text-quaternary);
+  margin-top: 2px;
+}
+
+.codascope-notes-activity-item-actor {
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-medium);
+}
+
+/* ── Collaboration v2: Read Indicator ────────────────────────────────── */
+
+.codascope-notes-read-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  padding: 2px var(--space-2);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* ── Collaboration v2: Unread Dot ────────────────────────────────────── */
+
+.codascope-notes-unread-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: hsl(210, 80%, 55%);
+  margin-left: var(--space-1);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* ── Collaboration v2: Draft / Ready Badges ──────────────────────────── */
+
+.codascope-notes-draft-badge,
+.codascope-notes-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.codascope-notes-draft-badge {
+  color: hsl(35, 70%, 50%);
+  background: hsla(35, 70%, 50%, 0.1);
+}
+
+.codascope-notes-ready-badge {
+  color: hsl(140, 50%, 45%);
+  background: hsla(140, 50%, 50%, 0.1);
+}
+
+/* ── Collaboration v2: Status Toggle (Editor Header) ─────────────────── */
+
+.codascope-notes-status-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background: none;
+}
+
+.codascope-notes-status-toggle--draft {
+  color: hsl(35, 70%, 50%);
+  border-color: hsla(35, 70%, 50%, 0.25);
+  background: hsla(35, 70%, 50%, 0.06);
+}
+
+.codascope-notes-status-toggle--draft:hover {
+  background: hsla(35, 70%, 50%, 0.12);
+}
+
+.codascope-notes-status-toggle--ready {
+  color: hsl(140, 50%, 45%);
+  border-color: hsla(140, 50%, 50%, 0.25);
+  background: hsla(140, 50%, 50%, 0.06);
+}
+
+.codascope-notes-status-toggle--ready:hover {
+  background: hsla(140, 50%, 50%, 0.12);
+}
