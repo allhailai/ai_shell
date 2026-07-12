@@ -4,14 +4,15 @@
    URL scheme:
      /codascope                                      → redirects to /codascope/projects
      /codascope/projects                             → project list / setup
-     /codascope/notes/personal/<path>                → personal notes
-     /codascope/notes/public/<path>                  → public notes
+     /codascope/notes/shared/<path>                 → CodaScope shared notes
+     /codascope/notes/private/<path>                → CodaScope private notes
      /codascope/project/:id                          → redirects to /project/:id/dashboard
      /codascope/project/:id/dashboard                → project dashboard
      /codascope/project/:id/wiki                     → wiki browser (no topic)
      /codascope/project/:id/wiki/:topicId            → wiki browser (specific topic)
      /codascope/project/:id/chat                     → redirects to dashboard (chat is in right panel)
-     /codascope/project/:id/notes/<path>             → project notes
+     /codascope/project/:id/notes/shared/<path>     → project shared notes
+     /codascope/project/:id/notes/private/<path>    → project private notes
      /codascope/project/:id/skills                   → skills manager
      /codascope/project/:id/settings                 → project settings
      /codascope/project/:id/epics                    → epic list
@@ -25,7 +26,8 @@
      /codascope/project/:id/epic/:epicId/knowledge/sources/:sourceId → source viewer
      /codascope/project/:id/epic/:epicId/knowledge/failed           → failed sources
      /codascope/project/:id/epic/:epicId/design      → epic design docs
-     /codascope/project/:id/epic/:epicId/notes/<path> → epic notes
+     /codascope/project/:id/epic/:epicId/notes/shared/<path> → epic shared notes
+     /codascope/project/:id/epic/:epicId/notes/private/<path> → epic private notes
      /codascope/project/:id/epic/:epicId/history     → epic history
    ──────────────────────────────────────────────────────────────────── */
 
@@ -158,7 +160,7 @@ export function CodaScopeContent() {
   if (section === "" || section === "projects") {
     pageContent = <ProjectList />;
   } else if (section === "notes") {
-    // Codascope-level notes: /codascope/notes/personal/... or /codascope/notes/public/...
+    // Codascope-level notes: /codascope/notes/shared/... or /codascope/notes/private/...
     pageContent = <NotesRouter />;
   } else if (section === "project") {
     const view = segments[2] ?? "dashboard";

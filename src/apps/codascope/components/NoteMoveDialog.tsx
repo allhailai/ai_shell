@@ -1,20 +1,23 @@
 /* ── CodaScope: NoteMoveDialog ───────────────────────────────────────
-   Modal dialog for moving notes between levels and folders.
-   Provides a target level picker, folder browser within the selected
-   target level, and a "Move" button.
+   Modal dialog for moving notes between scopes, visibilities, and
+   folders. Provides target scope/visibility pickers, folder browser
+   within the selected target, and a "Move" button.
+   Shows cross-visibility warnings when changing shared↔private.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { IconFolder } from "./CodaScopeIcons";
-import type { NoteLevel, NoteFolderEntry } from "../codaScopeTypes";
+import { IconFolder, IconWarning } from "./CodaScopeIcons";
+import type { NoteScope, NoteVisibility, NoteFolderEntry } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NoteMoveDialogProps {
   /** Whether the dialog is open */
   open: boolean;
-  /** Current note level */
-  fromLevel: NoteLevel;
+  /** Current note scope */
+  fromScope: NoteScope;
+  /** Current note visibility */
+  fromVisibility: NoteVisibility;
   /** Current note path */
   fromPath: string;
   /** Current resolve opts */
@@ -25,33 +28,39 @@ interface NoteMoveDialogProps {
   onClose: () => void;
 }
 
-/* ── Level options ───────────────────────────────────────────────────── */
+/* ── Scope & visibility options ──────────────────────────────────────── */
 
-const LEVEL_OPTIONS: Array<{ value: NoteLevel; label: string }> = [
-  { value: "personal", label: "Personal" },
-  { value: "public", label: "Public" },
+const SCOPE_OPTIONS: Array<{ value: NoteScope; label: string }> = [
+  { value: "codascope", label: "CodaScope" },
   { value: "project", label: "Project" },
   { value: "epic", label: "Epic" },
+];
+
+const VISIBILITY_OPTIONS: Array<{ value: NoteVisibility; label: string }> = [
+  { value: "shared", label: "Shared" },
+  { value: "private", label: "Private" },
 ];
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function NoteMoveDialog({
   open,
-  fromLevel,
+  fromScope,
+  fromVisibility,
   fromPath,
   fromOpts,
   onMoved,
   onClose,
 }: NoteMoveDialogProps) {
-  const [targetLevel, setTargetLevel] = useState<NoteLevel>(fromLevel);
+  const [targetScope, setTargetScope] = useState<NoteScope>(fromScope);
+  const [targetVisibility, setTargetVisibility] = useState<NoteVisibility>(fromVisibility);
   const [targetFolder, setTargetFolder] = useState("");
   const [folders, setFolders] = useState<NoteFolderEntry[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   const [moving, setMoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Build resolve opts for the target level
+  // Build resolve opts for the target
   const targetOpts = useMemo((): Record<string, string> => {
     // Inherit project/epic context from the source opts
     return {
@@ -61,7 +70,19 @@ export function NoteMoveDialog({
     };
   }, [fromOpts]);
 
-  // Fetch folders when level changes
+  // Cross-visibility warning
+  const visibilityWarning = useMemo((): string | null => {
+    if (fromVisibility === targetVisibility) return null;
+    if (fromVisibility === "shared" && targetVisibility === "private") {
+      return "Moving to private will remove access for other users.";
+    }
+    if (fromVisibility === "private" && targetVisibility === "shared") {
+      return "Moving to shared will make this note visible to all team members.";
+    }
+    return null;
+  }, [fromVisibility, targetVisibility]);
+
+  // Fetch folders when scope/visibility changes
   useEffect(() => {
     if (!open) return;
     setLoadingFolders(true);
@@ -72,7 +93,7 @@ export function NoteMoveDialog({
 
     void (async () => {
       try {
-        const res = await fetch(`/api/codascope/notes/${targetLevel}/folders?${params.toString()}`);
+        const res = await fetch(`/api/codascope/notes/${targetScope}/${targetVisibility}/folders?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
           setFolders(data.folders ?? []);
@@ -80,16 +101,17 @@ export function NoteMoveDialog({
       } catch { /* ignore */ }
       setLoadingFolders(false);
     })();
-  }, [open, targetLevel, targetOpts]);
+  }, [open, targetScope, targetVisibility, targetOpts]);
 
   // Reset when opening
   useEffect(() => {
     if (open) {
-      setTargetLevel(fromLevel);
+      setTargetScope(fromScope);
+      setTargetVisibility(fromVisibility);
       setTargetFolder("");
       setError(null);
     }
-  }, [open, fromLevel]);
+  }, [open, fromScope, fromVisibility]);
 
   // Compute the destination path
   const destinationPath = useMemo(() => {
@@ -101,18 +123,17 @@ export function NoteMoveDialog({
     setMoving(true);
     setError(null);
     try {
-      const params = new URLSearchParams();
-      if (fromOpts.projectId) params.set("projectId", fromOpts.projectId);
-      if (fromOpts.epicId) params.set("epicId", fromOpts.epicId);
-
-      const res = await fetch(`/api/codascope/notes/${fromLevel}/move?${params.toString()}`, {
+      const res = await fetch("/api/codascope/notes/move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          fromScope,
+          fromVisibility,
           fromPath,
-          toLevel: targetLevel,
-          toPath: destinationPath,
           fromOpts,
+          toScope: targetScope,
+          toVisibility: targetVisibility,
+          toPath: destinationPath,
           toOpts: targetOpts,
         }),
       });
@@ -128,7 +149,7 @@ export function NoteMoveDialog({
       setError("Network error.");
     }
     setMoving(false);
-  }, [fromLevel, fromPath, fromOpts, targetLevel, destinationPath, targetOpts, onMoved, onClose]);
+  }, [fromScope, fromVisibility, fromPath, fromOpts, targetScope, targetVisibility, destinationPath, targetOpts, onMoved, onClose]);
 
   if (!open) return null;
 
@@ -165,15 +186,15 @@ export function NoteMoveDialog({
         </div>
 
         <div className="codascope-notes-move-dialog-body">
-          {/* Level picker */}
+          {/* Scope picker */}
           <div className="codascope-notes-move-section">
-            <label className="codascope-notes-move-label">Target Level</label>
+            <label className="codascope-notes-move-label">Target Scope</label>
             <div className="codascope-notes-move-level-picker">
-              {LEVEL_OPTIONS.map((opt) => (
+              {SCOPE_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
-                  className={`codascope-notes-move-level-btn${targetLevel === opt.value ? " codascope-notes-move-level-btn--active" : ""}`}
-                  onClick={() => { setTargetLevel(opt.value); setTargetFolder(""); }}
+                  className={`codascope-notes-move-level-btn${targetScope === opt.value ? " codascope-notes-move-level-btn--active" : ""}`}
+                  onClick={() => { setTargetScope(opt.value); setTargetFolder(""); }}
                   type="button"
                 >
                   {opt.label}
@@ -181,6 +202,31 @@ export function NoteMoveDialog({
               ))}
             </div>
           </div>
+
+          {/* Visibility picker */}
+          <div className="codascope-notes-move-section">
+            <label className="codascope-notes-move-label">Visibility</label>
+            <div className="codascope-notes-move-level-picker">
+              {VISIBILITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  className={`codascope-notes-move-level-btn${targetVisibility === opt.value ? " codascope-notes-move-level-btn--active" : ""}`}
+                  onClick={() => { setTargetVisibility(opt.value); setTargetFolder(""); }}
+                  type="button"
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Cross-visibility warning */}
+          {visibilityWarning && (
+            <div className="codascope-notes-move-warning">
+              <IconWarning size={13} />
+              <span>{visibilityWarning}</span>
+            </div>
+          )}
 
           {/* Folder browser */}
           <div className="codascope-notes-move-section">
@@ -207,7 +253,7 @@ export function NoteMoveDialog({
           <div className="codascope-notes-move-section">
             <label className="codascope-notes-move-label">Destination</label>
             <div className="codascope-notes-move-destination">
-              {targetLevel} / {destinationPath}
+              {targetScope} / {targetVisibility} / {destinationPath}
             </div>
           </div>
 

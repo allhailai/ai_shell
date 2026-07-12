@@ -17,7 +17,7 @@ import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
-import type { NoteLevel, NoteAnnotation } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility, NoteAnnotation } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
 /* ── Frontmatter helpers ─────────────────────────────────────────────── */
@@ -51,6 +51,14 @@ function countWords(content: string): number {
   return body.split(/\s+/).length;
 }
 
+/* ── Visibility label helpers ────────────────────────────────────────── */
+
+function visibilityLabel(visibility: NoteVisibility, scope: NoteScope): string {
+  const scopeLabel = scope === "codascope" ? "CodaScope" : scope === "project" ? "Project" : "Epic";
+  if (visibility === "shared") return `Shared · ${scopeLabel}`;
+  return "Private · You";
+}
+
 /* ── Version types ───────────────────────────────────────────────────── */
 
 interface VersionEntry {
@@ -62,8 +70,10 @@ interface VersionEntry {
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NoteEditorProps {
-  /** Note level */
-  level: NoteLevel;
+  /** Note scope */
+  scope: NoteScope;
+  /** Note visibility */
+  visibility: NoteVisibility;
   /** Note file path (relative, without .md for URL but with for API) */
   notePath: string;
   /** Query params for API calls */
@@ -74,7 +84,7 @@ interface NoteEditorProps {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorProps) {
+export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }: NoteEditorProps) {
   // ── State ──────────────────────────────────────────────────────────
   const [content, setContent] = useState("");
   const [contentHash, setContentHash] = useState<string | null>(null);
@@ -127,6 +137,11 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     return notePath.endsWith(".md") ? notePath : `${notePath}.md`;
   }, [notePath]);
 
+  // API base path for this scope/visibility
+  const apiBase = useMemo(() => {
+    return `/api/codascope/notes/${scope}/${visibility}`;
+  }, [scope, visibility]);
+
   // Compute stable query string from primitive values inside queryParams,
   // NOT from the queryParams object reference (which may change identity).
   const queryString = useMemo(() => {
@@ -141,7 +156,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
 
     void (async () => {
       try {
-        const res = await fetch(`/api/codascope/notes/${level}/note/${apiPath}?${queryString}`);
+        const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`);
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
@@ -158,20 +173,20 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     })();
 
     return () => { cancelled = true; };
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   // ── Fetch annotations ─────────────────────────────────────────────
   const fetchAnnotations = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/codascope/notes/${level}/note/${apiPath}/annotations?${queryString}`,
+        `${apiBase}/note/${apiPath}/annotations?${queryString}`,
       );
       if (res.ok) {
         const data = await res.json();
         setAnnotations(data.annotations ?? []);
       }
     } catch { /* ignore */ }
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   // Fetch annotations on mount and when content changes (debounced)
   useEffect(() => {
@@ -229,7 +244,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
   const saveNote = useCallback(async (newContent: string, expectedHash: string | null) => {
     setSaveStatus("saving");
     try {
-      const res = await fetch(`/api/codascope/notes/${level}/note/${apiPath}?${queryString}`, {
+      const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -259,7 +274,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     } catch {
       setSaveStatus("error");
     }
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   const handleContentChange = useCallback((newContent: string) => {
     setContent(newContent);
@@ -294,7 +309,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/codascope/notes/${level}/note/${apiPath}?${queryString}`, {
+      const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
         method: "DELETE",
       });
       if (res.ok) {
@@ -305,7 +320,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     }
     setDeleting(false);
     setShowDeleteConfirm(false);
-  }, [level, apiPath, queryString, onBack]);
+  }, [apiBase, apiPath, queryString, onBack]);
 
   // ── Conflict resolution ────────────────────────────────────────────
   const handleConflictReload = useCallback(() => {
@@ -322,7 +337,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     setConflictData(null);
     setSaveStatus("saving");
     try {
-      const res = await fetch(`/api/codascope/notes/${level}/note/${apiPath}?${queryString}`, {
+      const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: contentRef.current }),
@@ -338,7 +353,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     } catch {
       setSaveStatus("error");
     }
-  }, [conflictData, level, apiPath, queryString]);
+  }, [conflictData, apiBase, apiPath, queryString]);
 
   // ── Image paste handler ────────────────────────────────────────────
   const handleImagePaste = useCallback(async (file: File, view: EditorView) => {
@@ -347,7 +362,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
       formData.append("image", file);
 
       const res = await fetch(
-        `/api/codascope/notes/${level}/note/${apiPath}/images?${queryString}`,
+        `${apiBase}/note/${apiPath}/images?${queryString}`,
         { method: "POST", body: formData },
       );
 
@@ -361,7 +376,7 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     } catch {
       // Silently fail
     }
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   // ── Image URL resolver ─────────────────────────────────────────────
   const resolveImageUrl = useCallback((src: string) => {
@@ -376,8 +391,8 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     const assetDir = parts.length > 0 ? parts[0] : undefined;
     const sep = queryString ? "&" : "";
     const hint = assetDir ? `${sep}assetDir=${encodeURIComponent(assetDir)}` : "";
-    return `/api/codascope/notes/${level}/note/${apiPath}/images/${encodeURIComponent(filename)}?${queryString}${hint}`;
-  }, [level, apiPath, queryString]);
+    return `${apiBase}/note/${apiPath}/images/${encodeURIComponent(filename)}?${queryString}${hint}`;
+  }, [apiBase, apiPath, queryString]);
 
   // ── Insertion hotzone handler ──────────────────────────────────────
   const handleInsertionRequest = useCallback((afterLine: number, view: EditorView) => {
@@ -407,14 +422,14 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
   const fetchVersions = useCallback(async () => {
     try {
       const res = await fetch(
-        `/api/codascope/notes/${level}/note/${apiPath}/versions?${queryString}`,
+        `${apiBase}/note/${apiPath}/versions?${queryString}`,
       );
       if (res.ok) {
         const data = await res.json();
         setVersions(data.versions ?? []);
       }
     } catch { /* ignore */ }
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   const handleShowVersions = useCallback(() => {
     setShowVersions(true);
@@ -424,14 +439,14 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
   const handleViewVersion = useCallback(async (version: string) => {
     try {
       const res = await fetch(
-        `/api/codascope/notes/${level}/note/${apiPath}/versions/${version}?${queryString}`,
+        `${apiBase}/note/${apiPath}/versions/${version}?${queryString}`,
       );
       if (res.ok) {
         const data = await res.json();
         setSelectedVersion({ version: data.version, content: data.content });
       }
     } catch { /* ignore */ }
-  }, [level, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString]);
 
   const handleRestoreVersion = useCallback((versionContent: string) => {
     setContent(versionContent);
@@ -500,6 +515,11 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
           }}
           placeholder="Note title…"
         />
+
+        {/* Visibility chip */}
+        <span className={`codascope-notes-visibility-badge codascope-notes-visibility-badge--${visibility}`}>
+          {visibilityLabel(visibility, scope)}
+        </span>
 
         <div className="codascope-notes-editor-actions">
           {/* Save status indicator */}
@@ -690,7 +710,8 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
               afterLine={insertionPoint.afterLine}
               top={insertionPoint.top}
               left={insertionPoint.left}
-              level={level}
+              scope={scope}
+              visibility={visibility}
               notePath={apiPath}
               editorView={editorViewRef.current}
               onClose={() => setInsertionPoint(null)}
@@ -701,7 +722,8 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
         {/* Annotation panel (right split) */}
         {showAnnotations && (
           <NoteAnnotationPanel
-            level={level}
+            scope={scope}
+            visibility={visibility}
             notePath={apiPath}
             queryParams={queryParams}
             annotations={annotations}
@@ -735,7 +757,8 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
       {/* Move dialog */}
       <NoteMoveDialog
         open={showMoveDialog}
-        fromLevel={level}
+        fromScope={scope}
+        fromVisibility={visibility}
         fromPath={apiPath}
         fromOpts={queryParams}
         onMoved={onBack}
@@ -744,4 +767,3 @@ export function NoteEditor({ level, notePath, queryParams, onBack }: NoteEditorP
     </div>
   );
 }
-

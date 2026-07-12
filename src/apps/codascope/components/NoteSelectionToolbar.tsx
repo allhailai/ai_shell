@@ -29,7 +29,8 @@ export interface NoteSelectionInfo {
 interface NoteSelectionToolbarProps {
   selectionInfo: NoteSelectionInfo;
   notePath: string;
-  noteLevel: string;
+  noteScope: string;
+  noteVisibility: string;
   onDismiss: () => void;
   /** Called when user clicks "Comment" — creates an annotation at the selection's block */
   onComment?: (selectionInfo: NoteSelectionInfo) => void;
@@ -45,7 +46,8 @@ const VIEWPORT_PAD = 8;
 export function NoteSelectionToolbar({
   selectionInfo,
   notePath,
-  noteLevel,
+  noteScope,
+  noteVisibility,
   onDismiss,
   onComment,
 }: NoteSelectionToolbarProps) {
@@ -81,14 +83,15 @@ export function NoteSelectionToolbar({
       startLine: selectionInfo.startLine,
       endLine: selectionInfo.endLine,
       notePath,
-      noteLevel,
+      noteScope,
+      noteVisibility,
     });
     // Open the right panel to the assistant
     useShellStore.getState().openRightPanel("assistant");
     // Clear selection
     onDismiss();
     window.getSelection()?.removeAllRanges();
-  }, [selectionInfo, commandBus, notePath, noteLevel, onDismiss]);
+  }, [selectionInfo, commandBus, notePath, noteScope, noteVisibility, onDismiss]);
 
   const handleComment = useCallback(() => {
     if (onComment) {

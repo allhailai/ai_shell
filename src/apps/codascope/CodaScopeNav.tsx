@@ -145,7 +145,7 @@ export function CodaScopeNav() {
         {!urlProjectId && (
           <button
             className={`codascope-nav-item ${section === "notes" ? "codascope-nav-item--active" : ""}`}
-            onClick={() => navigate("notes/personal")}
+            onClick={() => navigate("notes/shared")}
             type="button"
           >
             <span className="codascope-nav-icon"><IconNotes size={14} /></span>

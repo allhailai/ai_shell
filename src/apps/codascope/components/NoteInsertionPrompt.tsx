@@ -9,7 +9,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useCommandBus } from "../../../shell/hooks";
 import { useShellStore } from "../../../shell/store";
 import { IconInsert, IconRewrite, IconExpand, IconClose } from "../components/CodaScopeIcons";
-import type { NoteLevel } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
 /* ── Types ───────────────────────────────────────────────────────────── */
@@ -23,8 +23,10 @@ interface NoteInsertionPromptProps {
   top: number;
   /** Absolute left position (px) */
   left: number;
-  /** Note level */
-  level: NoteLevel;
+  /** Note scope */
+  scope: NoteScope;
+  /** Note visibility */
+  visibility: NoteVisibility;
   /** Note file path */
   notePath: string;
   /** CM editor view reference (for inserting content) */
@@ -47,7 +49,8 @@ export function NoteInsertionPrompt({
   afterLine,
   top,
   left,
-  level,
+  scope,
+  visibility,
   notePath,
   editorView: _editorView,
   onClose,
@@ -107,7 +110,8 @@ export function NoteInsertionPrompt({
       afterLine,
       instruction: instruction.trim(),
       notePath,
-      level,
+      scope,
+      visibility,
     });
 
     // Open the assistant panel and pre-fill the prompt
@@ -115,7 +119,7 @@ export function NoteInsertionPrompt({
     commandBus?.emit("codascope:assistant-prefill", { prompt });
 
     onClose();
-  }, [instruction, type, afterLine, notePath, level, commandBus, onClose]);
+  }, [instruction, type, afterLine, notePath, scope, visibility, commandBus, onClose]);
 
   // Clamp position to viewport
   const clampedTop = Math.max(8, Math.min(top, window.innerHeight - 200));

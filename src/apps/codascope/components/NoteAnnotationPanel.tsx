@@ -21,8 +21,10 @@ import type { AnnotationStatus, NoteAnnotation } from "../codaScopeTypes";
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NoteAnnotationPanelProps {
-  /** Note level for API calls */
-  level: string;
+  /** Note scope for API calls */
+  scope: string;
+  /** Note visibility for API calls */
+  visibility: string;
   /** Note path for API calls */
   notePath: string;
   /** Query params for API calls */
@@ -47,7 +49,8 @@ interface AnnotationThread {
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function NoteAnnotationPanel({
-  level,
+  scope,
+  visibility,
   notePath,
   queryParams,
   annotations,
@@ -99,8 +102,8 @@ export function NoteAnnotationPanel({
   const queryString = useMemo(() => new URLSearchParams(queryParams).toString(), [queryParams.projectId, queryParams.epicId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const apiBase = useMemo(() => {
-    return `/api/codascope/notes/${level}/note/${notePath}/annotations`;
-  }, [level, notePath]);
+    return `/api/codascope/notes/${scope}/${visibility}/note/${notePath}/annotations`;
+  }, [scope, visibility, notePath]);
 
   const updateStatus = useCallback(async (annotationId: string, status: AnnotationStatus) => {
     try {

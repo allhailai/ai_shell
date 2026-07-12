@@ -4,24 +4,26 @@
    on the current URL.
 
    URL patterns:
-     /codascope/notes/<level>                       → browser (root)
-     /codascope/notes/<level>/<folder>/...           → browser (folder)
-     /codascope/notes/<level>/<...path>              → editor (if path is a note file)
-     /codascope/project/:id/notes/...                → project-level
-     /codascope/project/:id/epic/:epicId/notes/...   → epic-level
+     /codascope/notes/<visibility>                     → browser (root, codascope scope)
+     /codascope/notes/<visibility>/<folder>/...        → browser (folder)
+     /codascope/notes/<visibility>/<...path>           → editor (if path is a note file)
+     /codascope/project/:id/notes/<visibility>/...     → project-scope
+     /codascope/project/:id/epic/:eid/notes/<visibility>/... → epic-scope
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { NotesBrowser } from "./NotesBrowser";
 import { NoteEditor } from "./NoteEditor";
-import type { NoteLevel } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NotesRouterProps {
-  /** Override the note level (used when embedded in EpicDetail) */
-  level?: NoteLevel;
+  /** Override the note scope (used when embedded in EpicDetail) */
+  scope?: NoteScope;
+  /** Override visibility */
+  visibility?: NoteVisibility;
   /** Override project ID */
   projectId?: string;
   /** Override epic ID */
@@ -30,40 +32,61 @@ interface NotesRouterProps {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId: propEpicId }: NotesRouterProps = {}) {
+export function NotesRouter({ scope: propScope, visibility: propVisibility, projectId: propProjectId, epicId: propEpicId }: NotesRouterProps = {}) {
   const { segments, navigate } = useAppSubRoute("codascope");
 
-  // ── Parse URL to determine level, path, and whether we're editing ──
+  // ── Parse URL to determine scope, visibility, path, and whether we're editing ──
 
   const routeInfo = useMemo(() => {
-    // Codascope-level: /codascope/notes/<level>/...
+    // CodaScope-level: /codascope/notes/<visibility>/...
     if (segments[0] === "notes" && segments.length >= 2) {
-      const level = segments[1] as NoteLevel;
+      const visibility = segments[1] as NoteVisibility;
       const rest = segments.slice(2);
-      return { level, rest, urlPrefix: `notes/${level}`, queryParams: {} as Record<string, string> };
+      return {
+        scope: "codascope" as NoteScope,
+        visibility,
+        rest,
+        urlPrefix: `notes/${visibility}`,
+        queryParams: {} as Record<string, string>,
+      };
     }
 
-    // Project-level: /codascope/project/:id/notes/...
-    if (segments[0] === "project" && segments[2] === "notes") {
+    // Project-level: /codascope/project/:id/notes/<visibility>/...
+    if (segments[0] === "project" && segments[2] === "notes" && segments.length >= 4) {
       const projectId = segments[1];
-      const rest = segments.slice(3);
-      return { level: "project" as NoteLevel, rest, urlPrefix: `project/${projectId}/notes`, queryParams: { projectId } };
+      const visibility = segments[3] as NoteVisibility;
+      const rest = segments.slice(4);
+      return {
+        scope: "project" as NoteScope,
+        visibility,
+        rest,
+        urlPrefix: `project/${projectId}/notes/${visibility}`,
+        queryParams: { projectId },
+      };
     }
 
-    // Epic-level: /codascope/project/:id/epic/:epicId/notes/...
-    if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes") {
+    // Epic-level: /codascope/project/:id/epic/:eid/notes/<visibility>/...
+    if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && segments.length >= 6) {
       const projectId = segments[1];
       const epicId = segments[3];
-      const rest = segments.slice(5);
-      return { level: "epic" as NoteLevel, rest, urlPrefix: `project/${projectId}/epic/${epicId}/notes`, queryParams: { projectId, epicId } };
+      const visibility = segments[5] as NoteVisibility;
+      const rest = segments.slice(6);
+      return {
+        scope: "epic" as NoteScope,
+        visibility,
+        rest,
+        urlPrefix: `project/${projectId}/epic/${epicId}/notes/${visibility}`,
+        queryParams: { projectId, epicId },
+      };
     }
 
     return null;
   }, [segments]);
 
-  const level = propLevel ?? routeInfo?.level ?? "personal";
+  const scope = propScope ?? routeInfo?.scope ?? "codascope";
+  const visibility = propVisibility ?? routeInfo?.visibility ?? "shared";
   const rest = routeInfo?.rest ?? [];
-  const urlPrefix = routeInfo?.urlPrefix ?? "notes/personal";
+  const urlPrefix = routeInfo?.urlPrefix ?? `notes/${visibility}`;
   // Build STABLE queryParams from primitives — not from routeInfo.queryParams
   // which is a new object every render due to segments array identity changes.
   const effectiveProjectId = propProjectId ?? routeInfo?.queryParams?.projectId;
@@ -99,7 +122,7 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
     
     void (async () => {
       try {
-        const res = await fetch(`/api/codascope/notes/${level}/note/${notePath}?${queryString}`, {
+        const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${notePath}?${queryString}`, {
           method: "HEAD",
         });
         if (cancelled) return;
@@ -115,7 +138,7 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
     })();
 
     return () => { cancelled = true; };
-  }, [pathString, rest.length, level, queryString]);
+  }, [pathString, rest.length, scope, visibility, queryString]);
 
   // ── Navigation callbacks ───────────────────────────────────────────
 
@@ -149,7 +172,8 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
   if (viewMode === "editor" && pathString) {
     return (
       <NoteEditor
-        level={level}
+        scope={scope}
+        visibility={visibility}
         notePath={pathString}
         queryParams={queryParams}
         onBack={handleBack}
@@ -159,7 +183,8 @@ export function NotesRouter({ level: propLevel, projectId: propProjectId, epicId
 
   return (
     <NotesBrowser
-      level={level}
+      scope={scope}
+      visibility={visibility}
       projectId={queryParams.projectId ?? propProjectId}
       epicId={queryParams.epicId ?? propEpicId}
     />

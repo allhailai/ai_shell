@@ -20,7 +20,8 @@ export interface MessageContext {
   /** Current epic tab (define/scope/knowledge/design/history) */
   epicTab?: string | null;
   /** Note context (when viewing a note) */
-  noteLevel?: string | null;
+  noteScope?: string | null;
+  noteVisibility?: string | null;
   notePath?: string | null;
 }
 
@@ -110,24 +111,28 @@ export function assembleContext(
   // Epic tab: /project/:id/epic/:epicId/:tab
   const epicTab = view === "epic" ? (urlSegments[4] ?? options?.epicTab ?? "define") : null;
 
-  // Note context: /project/:id/notes/<path> or /project/:id/epic/:epicId/notes/<path>
-  let noteLevel: string | null = null;
+  // Note context: /project/:id/notes/<visibility>/<path> or
+  //               /project/:id/epic/:epicId/notes/<visibility>/<path>
+  let noteScope: string | null = null;
+  let noteVisibility: string | null = null;
   let notePath: string | null = null;
 
   if (view === "notes") {
-    // Project-level notes: /project/:id/notes/<path>
-    noteLevel = "project";
-    const pathParts = urlSegments.slice(3);
+    // Project-level notes: /project/:id/notes/<visibility>/<path>
+    noteScope = "project";
+    noteVisibility = urlSegments[3] ?? "shared";
+    const pathParts = urlSegments.slice(4);
     notePath = pathParts.length > 0 ? pathParts.join("/") : null;
   } else if (view === "epic" && urlSegments[4] === "notes") {
-    // Epic-level notes: /project/:id/epic/:epicId/notes/<path>
-    noteLevel = "epic";
-    const pathParts = urlSegments.slice(5);
+    // Epic-level notes: /project/:id/epic/:epicId/notes/<visibility>/<path>
+    noteScope = "epic";
+    noteVisibility = urlSegments[5] ?? "shared";
+    const pathParts = urlSegments.slice(6);
     notePath = pathParts.length > 0 ? pathParts.join("/") : null;
   }
 
   // Record this view visit
-  const effectiveView = noteLevel ? "notes" : view;
+  const effectiveView = noteScope ? "notes" : view;
   recordViewVisit(effectiveView, viewLabel(effectiveView, topicId, topicTitle, epicTitle));
 
   return {
@@ -141,8 +146,8 @@ export function assembleContext(
     epicId,
     epicTitle,
     epicTab,
-    noteLevel,
+    noteScope,
+    noteVisibility,
     notePath,
   };
 }
-

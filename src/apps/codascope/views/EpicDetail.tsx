@@ -625,7 +625,7 @@ export function EpicDetail() {
       content = <EpicDesignDocs epic={epic} setEpic={setEpic} docId={activeSubItemId} wikiPages={wikiPages} artifacts={artifacts} onArtifactsChange={setArtifacts} />;
       break;
     case "notes":
-      content = <NotesRouter level="epic" projectId={activeProjectId ?? undefined} epicId={epicId} />;
+      content = <NotesRouter scope="epic" projectId={activeProjectId ?? undefined} epicId={epicId} />;
       break;
     case "history":
       content = <EpicHistory epic={epic} setEpic={setEpic} />;

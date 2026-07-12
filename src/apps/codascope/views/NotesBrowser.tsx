@@ -1,15 +1,14 @@
 /* ── CodaScope: NotesBrowser View ────────────────────────────────────
-   List + folder browser for notes at any level (personal, public,
-   project, epic). URL-driven with breadcrumb navigation.
+   List + folder browser for notes at any scope/visibility.
+   URL-driven with breadcrumb navigation.
    Full-text search with highlighted match context.
-   Template picker for creating notes from templates.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { IconNotes, IconFolder, IconFile } from "../components/CodaScopeIcons";
-import type { NoteLevel, NoteEntry } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility, NoteEntry } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
 
@@ -31,14 +30,24 @@ function relativeTime(dateStr: string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+/* ── Scope label helper ──────────────────────────────────────────────── */
+
+function scopeLabel(scope: NoteScope): string {
+  switch (scope) {
+    case "codascope": return "CodaScope";
+    case "project": return "Project";
+    case "epic": return "Epic";
+    default: return scope;
+  }
+}
+
 /* ── URL parsing helpers ─────────────────────────────────────────────── */
 
 interface NotesBrowserContext {
-  level: NoteLevel;
+  scope: NoteScope;
+  visibility: NoteVisibility;
   /** Folder path segments (may be empty for root) */
   folderParts: string[];
-  /** The note filename if viewing a specific note (null for folder listing) */
-  notePath: string | null;
   /** Query params for the API */
   queryParams: Record<string, string>;
 }
@@ -51,37 +60,39 @@ function parseNotesContext(
   projectId: string | null,
   epicId?: string | null,
 ): NotesBrowserContext | null {
-  // Case 1: codascope-level notes: /codascope/notes/<level>/...
+  // Case 1: codascope-level notes: /codascope/notes/<visibility>/...
   if (segments[0] === "notes" && segments.length >= 2) {
-    const level = segments[1] as NoteLevel;
-    if (level !== "personal" && level !== "public") return null;
+    const visibility = segments[1] as NoteVisibility;
+    if (visibility !== "shared" && visibility !== "private") return null;
     const rest = segments.slice(2);
     return {
-      level,
+      scope: "codascope",
+      visibility,
       folderParts: rest,
-      notePath: null,
       queryParams: {},
     };
   }
 
-  // Case 2: project-level: /codascope/project/:id/notes/...
-  if (segments[0] === "project" && segments[2] === "notes" && projectId) {
-    const rest = segments.slice(3);
+  // Case 2: project-level: /codascope/project/:id/notes/<visibility>/...
+  if (segments[0] === "project" && segments[2] === "notes" && projectId && segments.length >= 4) {
+    const visibility = segments[3] as NoteVisibility;
+    const rest = segments.slice(4);
     return {
-      level: "project",
+      scope: "project",
+      visibility,
       folderParts: rest,
-      notePath: null,
       queryParams: { projectId },
     };
   }
 
-  // Case 3: epic-level: /codascope/project/:id/epic/:epicId/notes/...
-  if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && projectId && epicId) {
-    const rest = segments.slice(5);
+  // Case 3: epic-level: /codascope/project/:id/epic/:epicId/notes/<visibility>/...
+  if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && projectId && epicId && segments.length >= 6) {
+    const visibility = segments[5] as NoteVisibility;
+    const rest = segments.slice(6);
     return {
-      level: "epic",
+      scope: "epic",
+      visibility,
       folderParts: rest,
-      notePath: null,
       queryParams: { projectId, epicId },
     };
   }
@@ -94,7 +105,7 @@ function parseNotesContext(
 /* ── Search result type ──────────────────────────────────────────────── */
 
 interface SearchResult {
-  level: NoteLevel;
+  scope: NoteScope;
   path: string;
   title: string;
   matchLine: string;
@@ -104,8 +115,10 @@ interface SearchResult {
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NotesBrowserProps {
-  /** Override the note level (used when embedded in EpicDetail) */
-  level?: NoteLevel;
+  /** Note scope */
+  scope?: NoteScope;
+  /** Note visibility */
+  visibility?: NoteVisibility;
   /** Override project ID */
   projectId?: string;
   /** Override epic ID */
@@ -114,7 +127,7 @@ interface NotesBrowserProps {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicId: propEpicId }: NotesBrowserProps = {}) {
+export function NotesBrowser({ scope: propScope, visibility: propVisibility, projectId: propProjectId, epicId: propEpicId }: NotesBrowserProps = {}) {
   const { segments, navigate } = useAppSubRoute("codascope");
   const { activeProjectId } = useCodaScopeStore();
 
@@ -125,7 +138,8 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     [segments, effectiveProjectId, propEpicId],
   );
 
-  const level: NoteLevel = propLevel ?? urlContext?.level ?? "personal";
+  const scope: NoteScope = propScope ?? urlContext?.scope ?? "codascope";
+  const visibility: NoteVisibility = propVisibility ?? urlContext?.visibility ?? "shared";
   const folderParts = urlContext?.folderParts ?? [];
   const currentFolder = folderParts.length > 0 ? folderParts.join("/") : undefined;
 
@@ -153,8 +167,8 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   const [isSearching, setIsSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Level tabs for codascope-level notes (personal/public)
-  const showLevelTabs = !propLevel && level !== "project" && level !== "epic";
+  // Visibility tabs for codascope-level notes (shared/private)
+  const showVisibilityTabs = !propVisibility && scope === "codascope";
 
   // ── Fetch notes ────────────────────────────────────────────────────
   const fetchNotes = useCallback(async () => {
@@ -162,7 +176,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     try {
       const params = new URLSearchParams(queryString);
       if (currentFolder) params.set("folder", currentFolder);
-      const res = await fetch(`/api/codascope/notes/${level}?${params.toString()}`);
+      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setNotes(data.notes ?? []);
@@ -171,7 +185,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
       // Silently fail
     }
     setLoading(false);
-  }, [level, queryString, currentFolder]);
+  }, [scope, visibility, queryString, currentFolder]);
 
   useEffect(() => {
     void fetchNotes();
@@ -194,6 +208,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
       try {
         const params = new URLSearchParams(queryString);
         params.set("q", search.trim());
+        params.set("scope", scope);
         const res = await fetch(`/api/codascope/notes/search?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
@@ -206,7 +221,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
-  }, [search, queryString]);
+  }, [search, queryString, scope]);
 
   // ── Filtered notes (local filter for short queries) ─────────────────
   const filteredNotes = useMemo(() => {
@@ -225,17 +240,17 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
   // ── Navigation helpers ─────────────────────────────────────────────
 
   const getNotesUrlPrefix = useCallback((): string => {
-    if (level === "personal" || level === "public") {
-      return `notes/${level}`;
+    if (scope === "codascope") {
+      return `notes/${visibility}`;
     }
-    if (level === "epic" && effectiveProjectId && propEpicId) {
-      return `project/${effectiveProjectId}/epic/${propEpicId}/notes`;
+    if (scope === "epic" && effectiveProjectId && propEpicId) {
+      return `project/${effectiveProjectId}/epic/${propEpicId}/notes/${visibility}`;
     }
-    if (level === "project" && effectiveProjectId) {
-      return `project/${effectiveProjectId}/notes`;
+    if (scope === "project" && effectiveProjectId) {
+      return `project/${effectiveProjectId}/notes/${visibility}`;
     }
-    return "notes/personal";
-  }, [level, effectiveProjectId, propEpicId]);
+    return `notes/${visibility}`;
+  }, [scope, visibility, effectiveProjectId, propEpicId]);
 
   const handleFolderClick = useCallback(
     (folderPath: string) => {
@@ -267,11 +282,17 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
     [navigate, getNotesUrlPrefix, folderParts],
   );
 
-  const handleLevelSwitch = useCallback(
-    (newLevel: NoteLevel) => {
-      navigate(`notes/${newLevel}`);
+  const handleVisibilitySwitch = useCallback(
+    (newVisibility: NoteVisibility) => {
+      if (scope === "codascope") {
+        navigate(`notes/${newVisibility}`);
+      } else if (scope === "project" && effectiveProjectId) {
+        navigate(`project/${effectiveProjectId}/notes/${newVisibility}`);
+      } else if (scope === "epic" && effectiveProjectId && propEpicId) {
+        navigate(`project/${effectiveProjectId}/epic/${propEpicId}/notes/${newVisibility}`);
+      }
     },
-    [navigate],
+    [navigate, scope, effectiveProjectId, propEpicId],
   );
 
   // ── Create note ────────────────────────────────────────────────────
@@ -285,7 +306,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
 
       const params = new URLSearchParams(queryString);
 
-      const res = await fetch(`/api/codascope/notes/${level}/note/${fullPath}?${params.toString()}`, {
+      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${fullPath}?${params.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -300,7 +321,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
       // Silently fail
     }
     setCreating(false);
-  }, [level, queryString, currentFolder, handleNoteClick]);
+  }, [scope, visibility, queryString, currentFolder, handleNoteClick]);
 
   // ── Highlight match in text ────────────────────────────────────────
   const highlightMatch = useCallback((text: string, query: string): React.ReactNode => {
@@ -326,6 +347,11 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
           <IconNotes size={16} />
           <span className="codascope-notes-browser-title">Notes</span>
 
+          {/* Visibility badge */}
+          <span className={`codascope-notes-visibility-badge codascope-notes-visibility-badge--${visibility}`}>
+            {visibility === "shared" ? "Shared" : "Private"}
+          </span>
+
           {/* Breadcrumb */}
           <div className="codascope-notes-breadcrumb">
             <span className="codascope-notes-breadcrumb-sep">/</span>
@@ -334,7 +360,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
               onClick={() => handleBreadcrumbClick(-1)}
               type="button"
             >
-              {level === "personal" ? "Personal" : level === "public" ? "Public" : level === "project" ? "Project" : "Epic"}
+              {scopeLabel(scope)}
             </button>
             {folderParts.map((part, i) => (
               <span key={i}>
@@ -363,22 +389,22 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
         </button>
       </div>
 
-      {/* Level tabs for codascope-level notes */}
-      {showLevelTabs && (
+      {/* Visibility tabs (for codascope-level notes) */}
+      {showVisibilityTabs && (
         <div className="codascope-notes-level-tabs">
           <button
-            className={`codascope-notes-level-tab${level === "personal" ? " codascope-notes-level-tab--active" : ""}`}
-            onClick={() => handleLevelSwitch("personal")}
+            className={`codascope-notes-level-tab${visibility === "shared" ? " codascope-notes-level-tab--active" : ""}`}
+            onClick={() => handleVisibilitySwitch("shared")}
             type="button"
           >
-            Personal
+            Shared
           </button>
           <button
-            className={`codascope-notes-level-tab${level === "public" ? " codascope-notes-level-tab--active" : ""}`}
-            onClick={() => handleLevelSwitch("public")}
+            className={`codascope-notes-level-tab${visibility === "private" ? " codascope-notes-level-tab--active" : ""}`}
+            onClick={() => handleVisibilitySwitch("private")}
             type="button"
           >
-            Public
+            Private
           </button>
         </div>
       )}
@@ -409,7 +435,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
           ) : (
             searchResults.map((result, i) => (
               <button
-                key={`${result.level}:${result.path}:${i}`}
+                key={`${result.scope}:${result.path}:${i}`}
                 className="codascope-notes-item codascope-notes-search-result"
                 onClick={() => handleNoteClick(result.path)}
                 type="button"
@@ -422,7 +448,7 @@ export function NotesBrowser({ level: propLevel, projectId: propProjectId, epicI
                     {highlightMatch(result.title, search)}
                   </div>
                   <div className="codascope-notes-search-context">
-                    <span className="codascope-notes-search-level">{result.level}</span>
+                    <span className="codascope-notes-search-level">{result.scope}</span>
                     <span className="codascope-notes-search-line">L{result.lineNumber}</span>
                     <span className="codascope-notes-search-match">
                       {highlightMatch(result.matchLine, search)}
