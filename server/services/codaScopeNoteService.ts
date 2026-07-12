@@ -890,7 +890,9 @@ export class CodaScopeNoteService {
       const items = readdirSync(dir, { withFileTypes: true });
       for (const item of items) {
         // Skip hidden files, index files, and .assets directories
-        if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
+        // Allow _inbox as a special user-facing folder
+        if (item.name.startsWith(".")) continue;
+        if (item.name.startsWith("_") && item.name !== "_inbox") continue;
         if (item.name.endsWith(".assets")) continue;
 
         if (item.isDirectory()) {

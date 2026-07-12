@@ -697,3 +697,38 @@ export interface NoteAuditQueryFilters {
   to?: string;
   limit?: number;
 }
+
+// ── Starred & Recents ──────────────────────────────────────────────
+
+/** A starred note reference (stored per-user). */
+export interface StarredNoteRef {
+  noteId: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
+  title: string;
+  starredAt: string;
+}
+
+/** A recent note reference (stored per-user). */
+export interface RecentNoteRef {
+  noteId: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
+  title: string;
+  viewedAt: string;
+}
+
+/** Request body for quick capture. */
+export interface QuickCaptureRequest {
+  body: string;
+}
+
+/** Response from quick capture. */
+export interface QuickCaptureResponse {
+  path: string;
+  noteId: string;
+  contentHash: string;
+}
+

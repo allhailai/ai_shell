@@ -1562,3 +1562,286 @@
   gap: var(--space-2);
 }
 
+/* ── Header Actions Row ─────────────────────────────────────────────── */
+
+.codascope-notes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ── Star Filter Toggle ─────────────────────────────────────────────── */
+
+.codascope-notes-star-filter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-star-filter:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-star-filter-active {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+  background: hsla(45, 80%, 50%, 0.08);
+}
+
+.codascope-notes-star-filter-active:hover {
+  background: hsla(45, 80%, 50%, 0.14);
+}
+
+/* ── Star Toggle on Note Cards ──────────────────────────────────────── */
+
+.codascope-notes-star-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  color: var(--color-text-quaternary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.codascope-notes-item:hover .codascope-notes-star-toggle {
+  opacity: 1;
+}
+
+.codascope-notes-star-toggle:hover {
+  color: var(--color-warning);
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-star-active {
+  color: var(--color-warning);
+}
+
+.codascope-notes-item:hover .codascope-notes-star-toggle:has(.codascope-notes-star-active),
+.codascope-notes-star-toggle:has(.codascope-notes-star-active) {
+  opacity: 1;
+}
+
+/* ── Recents Section ────────────────────────────────────────────────── */
+
+.codascope-notes-recents-section {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-recents-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.codascope-notes-recents-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-recents-count {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+
+.codascope-notes-recents-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.codascope-notes-recent-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  max-width: 200px;
+  overflow: hidden;
+}
+
+.codascope-notes-recent-card:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
+}
+
+.codascope-notes-recent-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.codascope-notes-recent-time {
+  color: var(--color-text-quaternary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Quick Capture Button ───────────────────────────────────────────── */
+
+.codascope-notes-capture-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-capture-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: hsla(210, 80%, 50%, 0.06);
+}
+
+/* ── Quick Capture Dialog Overlay ───────────────────────────────────── */
+
+.codascope-notes-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: hsla(0, 0%, 0%, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.codascope-notes-capture-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 400px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.codascope-notes-capture-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.codascope-notes-capture-close {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.codascope-notes-capture-close:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-notes-capture-textarea {
+  flex: 1;
+  padding: var(--space-3) var(--space-4);
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  min-height: 140px;
+}
+
+.codascope-notes-capture-textarea::placeholder {
+  color: var(--color-text-quaternary);
+}
+
+.codascope-notes-capture-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+}
+
+.codascope-notes-capture-hint {
+  font-size: var(--text-2xs);
+  color: var(--color-text-quaternary);
+}
+
+/* ── Inbox Badge ────────────────────────────────────────────────────── */
+
+.codascope-notes-inbox-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.codascope-notes-item--inbox .codascope-notes-item-icon {
+  color: var(--color-accent);
+}

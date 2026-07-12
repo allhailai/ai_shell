@@ -8,8 +8,9 @@
 
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
-import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
+import { randomUUID } from "node:crypto";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -94,6 +95,124 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
     const results = await noteSvc.searchNotes(q.trim(), scopeParam as NoteScope, opts);
     res.json({ results });
+  }));
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── STARRED / RECENTS / QUICK CAPTURE ROUTES ─────────────────────────
+  // Placed BEFORE :scope/:visibility to avoid wildcard collision.
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── List Starred Notes ─────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/starred", wrap(async (req, res) => {
+    const { noteUserPrefsSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const items = noteUserPrefsSvc.getStarred(userId);
+    res.json({ items });
+  }));
+
+  // ── Star a Note ────────────────────────────────────────────────────
+
+  app.put("/api/codascope/notes/starred/:noteId", wrap(async (req, res) => {
+    const { noteUserPrefsSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const noteId = param(req, "noteId");
+
+    const { scope, visibility, path: notePath, title } = req.body as {
+      scope?: string;
+      visibility?: string;
+      path?: string;
+      title?: string;
+    };
+
+    if (!scope || !visibility || !notePath || !title) {
+      throw httpError("scope, visibility, path, and title are required.", 400, "invalid_input");
+    }
+
+    noteUserPrefsSvc.star(userId, {
+      noteId,
+      scope: scope as StarredNoteRef["scope"],
+      visibility: visibility as StarredNoteRef["visibility"],
+      path: notePath,
+      title,
+    });
+
+    res.json({ starred: true });
+  }));
+
+  // ── Unstar a Note ──────────────────────────────────────────────────
+
+  app.delete("/api/codascope/notes/starred/:noteId", wrap(async (req, res) => {
+    const { noteUserPrefsSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const noteId = param(req, "noteId");
+
+    const removed = noteUserPrefsSvc.unstar(userId, noteId);
+    if (!removed) throw httpError("Note was not starred.", 404, "not_found");
+
+    res.json({ unstarred: true });
+  }));
+
+  // ── List Recent Notes ──────────────────────────────────────────────
+
+  app.get("/api/codascope/notes/recents", wrap(async (req, res) => {
+    const { noteUserPrefsSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+    const items = noteUserPrefsSvc.getRecents(userId);
+    res.json({ items });
+  }));
+
+  // ── Quick Capture ──────────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/capture", wrap(async (req, res) => {
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
+    const userId = (req as any).session?.user?.username ?? (req as any).headers["x-auth-user"] ?? "default";
+
+    const { body: noteBody } = req.body as { body?: string };
+    if (!noteBody || typeof noteBody !== "string" || !noteBody.trim()) {
+      throw httpError("body is required.", 400, "invalid_input");
+    }
+
+    // Generate timestamp-based title
+    const now = new Date();
+    const title = `Quick Note — ${now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}`;
+    const safeFilename = `Quick Note ${now.toISOString().replace(/[:.]/g, "-")}.md`;
+    const notePath = `_inbox/${safeFilename}`;
+
+    // Build content with frontmatter
+    const noteId = randomUUID();
+    const fm = [
+      "---",
+      `id: ${noteId}`,
+      `title: ${title}`,
+      `tags: ["inbox"]`,
+      `created: ${now.toISOString()}`,
+      `updated: ${now.toISOString()}`,
+      `owner: ${userId}`,
+      "---",
+      "",
+    ].join("\n");
+
+    const content = fm + noteBody.trim() + "\n";
+
+    const result = await noteSvc.createNote("codascope", "private", { userId }, notePath, content);
+
+    // Add to recents (fire-and-forget)
+    try {
+      noteUserPrefsSvc.addRecent(userId, {
+        noteId,
+        scope: "codascope",
+        visibility: "private",
+        path: notePath,
+        title,
+      });
+    } catch { /* best effort */ }
+
+    res.status(201).json({
+      path: notePath,
+      noteId,
+      contentHash: result.contentHash,
+    });
   }));
 
   // ── List Notes ──────────────────────────────────────────────────────
@@ -443,13 +562,25 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Read Note ───────────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
     const result = await noteSvc.readNote(scope, visibility, opts, notePath);
     if (!result) throw httpError("Note not found.", 404, "not_found");
+
+    // Fire-and-forget: update recents when a note is read
+    const userId = opts.userId ?? "default";
+    try {
+      noteUserPrefsSvc.addRecent(userId, {
+        noteId: result.frontmatter.id,
+        scope,
+        visibility,
+        path: notePath,
+        title: result.frontmatter.title,
+      });
+    } catch { /* best effort — never block the read response */ }
 
     res.json(result);
   }));

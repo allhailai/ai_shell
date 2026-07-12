@@ -2,14 +2,15 @@
    List + folder browser for notes at any scope/visibility.
    URL-driven with breadcrumb navigation.
    Full-text search with highlighted match context.
+   Starred notes, recents section, quick capture.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
-import type { NoteScope, NoteVisibility, NoteEntry } from "../codaScopeTypes";
+import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
 
@@ -162,7 +163,17 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [creating, setCreating] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
 
+  // Starred & recents state
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [starredNotes, setStarredNotes] = useState<StarredNoteRef[]>([]);
+  const [recents, setRecents] = useState<RecentNoteRef[]>([]);
+  const [showRecents, setShowRecents] = useState(true);
+  const [showStarredOnly, setShowStarredOnly] = useState(false);
 
+  // Quick capture state
+  const [showCapture, setShowCapture] = useState(false);
+  const [captureText, setCaptureText] = useState("");
+  const [capturing, setCapturing] = useState(false);
 
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -193,7 +204,53 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     void fetchNotes();
   }, [fetchNotes]);
 
+  // ── Fetch starred ──────────────────────────────────────────────────
+  const fetchStarred = useCallback(async () => {
+    try {
+      const res = await fetch("/api/codascope/notes/starred");
+      if (res.ok) {
+        const data = await res.json();
+        const items: StarredNoteRef[] = data.items ?? [];
+        setStarredNotes(items);
+        setStarredIds(new Set(items.map((s) => s.noteId)));
+      }
+    } catch { /* best effort */ }
+  }, []);
 
+  // ── Fetch recents ──────────────────────────────────────────────────
+  const fetchRecents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/codascope/notes/recents");
+      if (res.ok) {
+        const data = await res.json();
+        setRecents((data.items ?? []).slice(0, 8));
+      }
+    } catch { /* best effort */ }
+  }, []);
+
+  useEffect(() => {
+    void fetchStarred();
+    void fetchRecents();
+  }, [fetchStarred, fetchRecents]);
+
+  // ── Star / unstar handlers ─────────────────────────────────────────
+  const handleStar = useCallback(async (noteId: string, noteScope: NoteScope, noteVisibility: NoteVisibility, notePath: string, title: string) => {
+    try {
+      await fetch(`/api/codascope/notes/starred/${noteId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: noteScope, visibility: noteVisibility, path: notePath, title }),
+      });
+      void fetchStarred();
+    } catch { /* best effort */ }
+  }, [fetchStarred]);
+
+  const handleUnstar = useCallback(async (noteId: string) => {
+    try {
+      await fetch(`/api/codascope/notes/starred/${noteId}`, { method: "DELETE" });
+      void fetchStarred();
+    } catch { /* best effort */ }
+  }, [fetchStarred]);
 
   // ── Full-text search (debounced) ──────────────────────────────────
   useEffect(() => {
@@ -227,17 +284,57 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
   // ── Filtered notes (local filter for short queries) ─────────────────
   const filteredNotes = useMemo(() => {
-    if (!search.trim() || search.trim().length >= 3) return notes;
+    let result = notes;
+
+    // Apply starred filter
+    if (showStarredOnly) {
+      result = result.filter((n) => {
+        // For folders, never hide them in starred mode
+        if (n.isFolder) return false;
+        // We need the noteId — notes in the list don't have it directly,
+        // so we check against the starredNotes by path match
+        return starredNotes.some((s) => s.path === n.path && s.scope === scope && s.visibility === visibility);
+      });
+    }
+
+    if (!search.trim() || search.trim().length >= 3) return result;
     const q = search.toLowerCase();
-    return notes.filter(
+    return result.filter(
       (n) =>
         n.title.toLowerCase().includes(q) ||
         n.tags.some((t) => t.toLowerCase().includes(q)),
     );
-  }, [notes, search]);
+  }, [notes, search, showStarredOnly, starredNotes, scope, visibility]);
 
   // Are we showing search results?
   const showSearchResults = search.trim().length >= 3;
+
+  // ── Quick Capture ──────────────────────────────────────────────────
+  const handleCapture = useCallback(async () => {
+    if (!captureText.trim()) return;
+    setCapturing(true);
+    try {
+      const res = await fetch("/api/codascope/notes/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: captureText.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCaptureText("");
+        setShowCapture(false);
+        // Refresh lists
+        void fetchNotes();
+        void fetchRecents();
+        // Navigate to the captured note
+        const notePath = data.path?.replace(/\.md$/, "") ?? "";
+        if (notePath) {
+          navigate(`notes/private/${notePath}`);
+        }
+      }
+    } catch { /* best effort */ }
+    setCapturing(false);
+  }, [captureText, fetchNotes, fetchRecents, navigate]);
 
   // ── Navigation helpers ─────────────────────────────────────────────
 
@@ -269,6 +366,25 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       navigate(`${prefix}/${cleanPath}`);
     },
     [navigate, getNotesUrlPrefix],
+  );
+
+  /** Navigate to a note from a starred/recent ref (may be in a different scope/visibility). */
+  const handleRefNoteClick = useCallback(
+    (ref: { scope: NoteScope; visibility: NoteVisibility; path: string }) => {
+      let prefix: string;
+      if (ref.scope === "codascope") {
+        prefix = `notes/${ref.visibility}`;
+      } else if (ref.scope === "project" && effectiveProjectId) {
+        prefix = `project/${effectiveProjectId}/notes/${ref.visibility}`;
+      } else if (ref.scope === "epic" && effectiveProjectId && propEpicId) {
+        prefix = `project/${effectiveProjectId}/epic/${propEpicId}/notes/${ref.visibility}`;
+      } else {
+        prefix = `notes/${ref.visibility}`;
+      }
+      const cleanPath = ref.path.replace(/\.md$/, "");
+      navigate(`${prefix}/${cleanPath}`);
+    },
+    [navigate, effectiveProjectId, propEpicId],
   );
 
   const handleBreadcrumbClick = useCallback(
@@ -339,6 +455,52 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     );
   }, []);
 
+  // ── Check if a note entry is starred by path ──────────────────────
+  const isNoteStarred = useCallback((entry: NoteEntry): boolean => {
+    return starredNotes.some(
+      (s) => s.path === entry.path && s.scope === scope && s.visibility === visibility,
+    );
+  }, [starredNotes, scope, visibility]);
+
+  // ── Get noteId from entry (need to fetch) ─────────────────────────
+  // Since NoteEntry doesn't carry the noteId, star/unstar uses the starred
+  // list to find the noteId by path, or falls back to fetching the note.
+  const getStarredId = useCallback((entry: NoteEntry): string | null => {
+    const found = starredNotes.find(
+      (s) => s.path === entry.path && s.scope === scope && s.visibility === visibility,
+    );
+    return found?.noteId ?? null;
+  }, [starredNotes, scope, visibility]);
+
+  // ── Star toggle handler for a note entry ──────────────────────────
+  const handleStarToggle = useCallback(async (entry: NoteEntry, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const existingId = getStarredId(entry);
+    if (existingId) {
+      // Already starred — unstar
+      await handleUnstar(existingId);
+    } else {
+      // Need to fetch the note to get its ID
+      try {
+        const params = new URLSearchParams(queryString);
+        const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${entry.path}?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          const noteId = data.frontmatter?.id;
+          if (noteId) {
+            await handleStar(noteId, scope, visibility, entry.path, entry.title);
+          }
+        }
+      } catch { /* best effort */ }
+    }
+  }, [getStarredId, handleUnstar, handleStar, scope, visibility, queryString]);
+
+  // ── Inbox note count (for badge) ──────────────────────────────────
+  const inboxCount = useMemo(() => {
+    const inbox = notes.find((n) => n.isFolder && n.path === "_inbox");
+    return inbox?.childCount ?? 0;
+  }, [notes]);
+
   // ── Render ─────────────────────────────────────────────────────────
 
   return (
@@ -379,16 +541,40 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           </div>
         </div>
 
-        {/* Create note button */}
-        <button
-          className="codascope-btn codascope-btn-primary"
-          style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
-          onClick={() => void handleCreateNote()}
-          disabled={creating}
-          type="button"
-        >
-          {creating ? "Creating…" : "+ Note"}
-        </button>
+        {/* Header actions */}
+        <div className="codascope-notes-header-actions">
+          {/* Quick capture button */}
+          <button
+            className="codascope-notes-capture-btn"
+            onClick={() => setShowCapture(true)}
+            title="Quick Capture"
+            type="button"
+          >
+            <IconCapture size={14} />
+            <span>Capture</span>
+          </button>
+
+          {/* Starred filter toggle */}
+          <button
+            className={`codascope-notes-star-filter${showStarredOnly ? " codascope-notes-star-filter-active" : ""}`}
+            onClick={() => setShowStarredOnly((v) => !v)}
+            title={showStarredOnly ? "Show all notes" : "Show starred only"}
+            type="button"
+          >
+            {showStarredOnly ? <IconStarFilled size={14} /> : <IconStar size={14} />}
+          </button>
+
+          {/* Create note button */}
+          <button
+            className="codascope-btn codascope-btn-primary"
+            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+            onClick={() => void handleCreateNote()}
+            disabled={creating}
+            type="button"
+          >
+            {creating ? "Creating…" : "+ Note"}
+          </button>
+        </div>
       </div>
 
       {/* Visibility tabs (for codascope-level notes) */}
@@ -421,6 +607,38 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {/* Recents section (collapsible) */}
+      {!showSearchResults && !showStarredOnly && recents.length > 0 && !currentFolder && (
+        <div className="codascope-notes-recents-section">
+          <button
+            className="codascope-notes-recents-toggle"
+            onClick={() => setShowRecents((v) => !v)}
+            type="button"
+          >
+            <IconClock size={13} />
+            <span>Recent</span>
+            <span className="codascope-notes-recents-count">{recents.length}</span>
+            <span className="codascope-notes-archive-chevron">{showRecents ? "▴" : "▾"}</span>
+          </button>
+          {showRecents && (
+            <div className="codascope-notes-recents-list">
+              {recents.map((r) => (
+                <button
+                  key={r.noteId}
+                  className="codascope-notes-recent-card"
+                  onClick={() => handleRefNoteClick(r)}
+                  type="button"
+                >
+                  <IconFile size={12} />
+                  <span className="codascope-notes-recent-title">{r.title}</span>
+                  <span className="codascope-notes-recent-time">{relativeTime(r.viewedAt)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Notes list / Search results */}
       <div className="codascope-notes-list">
@@ -467,12 +685,14 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         ) : filteredNotes.length === 0 ? (
           <div className="codascope-notes-list-empty">
             <div className="codascope-notes-list-empty-icon">
-              <IconNotes size={32} />
+              {showStarredOnly ? <IconStar size={32} /> : <IconNotes size={32} />}
             </div>
             <span>
-              {notes.length === 0
-                ? "No notes yet. Click + Note to create one."
-                : "No matching notes."}
+              {showStarredOnly
+                ? "No starred notes. Click the star icon on a note to bookmark it."
+                : notes.length === 0
+                  ? "No notes yet. Click + Note to create one."
+                  : "No matching notes."}
             </span>
           </div>
         ) : (
@@ -480,21 +700,27 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             entry.isFolder ? (
               <button
                 key={`folder:${entry.path}`}
-                className="codascope-notes-item codascope-notes-item--folder"
+                className={`codascope-notes-item codascope-notes-item--folder${entry.path === "_inbox" ? " codascope-notes-item--inbox" : ""}`}
                 onClick={() => handleFolderClick(entry.path)}
                 type="button"
               >
                 <div className="codascope-notes-item-icon">
-                  <IconFolder size={14} />
+                  {entry.path === "_inbox" ? <IconInbox size={14} /> : <IconFolder size={14} />}
                 </div>
                 <div className="codascope-notes-item-content">
-                  <div className="codascope-notes-item-title">{entry.title}</div>
+                  <div className="codascope-notes-item-title">
+                    {entry.path === "_inbox" ? "Inbox" : entry.title}
+                  </div>
                   <div className="codascope-notes-item-meta">
                     <span className="codascope-notes-folder-count">
                       {entry.childCount ?? 0} note{(entry.childCount ?? 0) !== 1 ? "s" : ""}
                     </span>
                   </div>
                 </div>
+                {/* Inbox badge */}
+                {entry.path === "_inbox" && (entry.childCount ?? 0) > 0 && (
+                  <span className="codascope-notes-inbox-badge">{entry.childCount}</span>
+                )}
               </button>
             ) : (
               <button
@@ -523,6 +749,19 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                     </span>
                   </div>
                 </div>
+                {/* Star toggle */}
+                <button
+                  className="codascope-notes-star-toggle"
+                  onClick={(e) => void handleStarToggle(entry, e)}
+                  title={isNoteStarred(entry) ? "Unstar" : "Star"}
+                  type="button"
+                >
+                  {isNoteStarred(entry) ? (
+                    <IconStarFilled size={14} className="codascope-notes-star-active" />
+                  ) : (
+                    <IconStar size={14} />
+                  )}
+                </button>
               </button>
             ),
           )
@@ -548,6 +787,50 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
               queryString={queryString}
             />
           )}
+        </div>
+      )}
+
+      {/* Quick Capture Dialog */}
+      {showCapture && (
+        <div className="codascope-notes-capture-overlay" onClick={() => setShowCapture(false)}>
+          <div className="codascope-notes-capture-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="codascope-notes-capture-header">
+              <IconCapture size={16} />
+              <span>Quick Capture</span>
+              <button
+                className="codascope-notes-capture-close"
+                onClick={() => setShowCapture(false)}
+                type="button"
+              >
+                <IconClose size={14} />
+              </button>
+            </div>
+            <textarea
+              className="codascope-notes-capture-textarea"
+              placeholder="Jot down a quick note…"
+              value={captureText}
+              onChange={(e) => setCaptureText(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  void handleCapture();
+                }
+              }}
+            />
+            <div className="codascope-notes-capture-footer">
+              <span className="codascope-notes-capture-hint">
+                Saves to Private / _inbox. {"\u2318"}+Enter to capture.
+              </span>
+              <button
+                className="codascope-btn codascope-btn-primary"
+                onClick={() => void handleCapture()}
+                disabled={capturing || !captureText.trim()}
+                type="button"
+              >
+                {capturing ? "Saving…" : "Capture"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

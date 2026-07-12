@@ -820,3 +820,41 @@ export function IconFocusMode({ size = 16, style, className }: IconProps) {
     </svg>
   );
 }
+
+/** Star outline — for un-starred state */
+export function IconStar({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 1.5l2 4 4.5.7-3.25 3.1.75 4.5L8 11.5l-4 2.3.75-4.5L1.5 6.2l4.5-.7z" />
+    </svg>
+  );
+}
+
+/** Star filled — for starred state */
+export function IconStarFilled({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+      <path d="M8 1.5l2 4 4.5.7-3.25 3.1.75 4.5L8 11.5l-4 2.3.75-4.5L1.5 6.2l4.5-.7z" />
+    </svg>
+  );
+}
+
+/** Inbox tray — for inbox/capture */
+export function IconInbox({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="4.5 6 8 9.5 11.5 6" />
+      <line x1="8" y1="1.5" x2="8" y2="9.5" />
+      <path d="M2.5 9.5H5l1 2h4l1-2h2.5v4h-11z" />
+    </svg>
+  );
+}
+
+/** Quick capture — lightning bolt */
+export function IconCapture({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M9 1.5L4 9h4l-1 5.5L12 7H8z" />
+    </svg>
+  );
+}
