@@ -730,11 +730,13 @@ export function IconInlineCode({ size = 16, style, className }: IconProps) {
   );
 }
 
-/** Highlight marker — Highlight formatting */
+/** Highlighter pen — Highlight formatting */
 export function IconHighlight({ size = 16, style, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <path d="M10 2L4 10h3l-1 4 6-8H9l1-4z" />
+      <path d="M5.9 11.5L12.7 4.7a2 2 0 10-2.8-2.8L3.1 8.7z" />
+      <path d="M3.1 8.7L1.5 11.3a1 1 0 001.4 1.4l2.6-1.6" />
+      <path d="M1.25 14h13.5" />
     </svg>
   );
 }

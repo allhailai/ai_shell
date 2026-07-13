@@ -24,7 +24,6 @@ import {
   IconHeading,
   IconChecklist,
   IconChevronDown,
-  IconPalette,
   IconTextColor,
   IconFocusMode,
 } from "./CodaScopeIcons";
@@ -33,12 +32,12 @@ import {
   toggleItalic,
   toggleStrikethrough,
   toggleInlineCode,
-  toggleHighlight,
   insertLink,
   setHeadingLevel,
   toggleChecklist,
 } from "../../../shared/markdown/extensions/formattingCommands";
 import { detectHighlightColors } from "../../../shared/markdown/extensions/highlightExtension";
+import { getHighlightApplyEdit } from "../../../shared/markdown/extensions/highlightMarkup";
 import { toggleFocusMode, isFocusModeOn } from "../../../shared/markdown/extensions/focusModeExtension";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -190,56 +189,218 @@ const DEFAULT_TEXT_COLORS: ColorSwatch[] = [
 function wrapWithHighlightColor(view: EditorView, colorName: string): void {
   const { state } = view;
   const range = state.selection.main;
-  const selectedText = state.doc.sliceString(range.from, range.to);
-  const suffix = colorName ? `{.${colorName}}` : "";
+  const edit = getHighlightApplyEdit(state.doc.toString(), range.from, range.to, colorName);
+  view.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+  });
+}
 
-  if (selectedText) {
-    const wrapped = `==${selectedText}==${suffix}`;
-    view.dispatch({
-      changes: { from: range.from, to: range.to, insert: wrapped },
-      selection: EditorSelection.range(
-        range.from + 2,
-        range.from + 2 + selectedText.length,
-      ),
+interface TextColorClearEdit {
+  from: number;
+  to: number;
+  insert: string;
+  selectionFrom: number;
+  selectionTo: number;
+}
+
+interface TextColorApplyEdit extends TextColorClearEdit {}
+
+interface ColorSpan {
+  from: number;
+  to: number;
+  hasColor: boolean;
+}
+
+const SPAN_TAG_RE = /<(\/)?span\b([^>]*)>/gi;
+const STYLE_ATTRIBUTE_RE = /\sstyle\s*=\s*(["'])([\s\S]*?)\1/i;
+
+/**
+ * Return a color-free opening tag when the span has a color declaration, or
+ * null when it does not. An empty string means the span had no attributes
+ * after color removal and can be unwrapped completely.
+ */
+function getColorFreeOpeningTag(attributes: string): string | null {
+  const style = attributes.match(STYLE_ATTRIBUTE_RE);
+  if (!style) return null;
+
+  const declarations = (style[2] ?? "")
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean);
+  if (!declarations.some((declaration) => /^color\s*:/i.test(declaration))) return null;
+
+  const remainingDeclarations = declarations
+    .filter((declaration) => !/^color\s*:/i.test(declaration));
+  const replacementAttributes = remainingDeclarations.length > 0
+    ? attributes.replace(STYLE_ATTRIBUTE_RE, ` style=${style[1]}${remainingDeclarations.join("; ")}${style[1]}`)
+    : attributes.replace(STYLE_ATTRIBUTE_RE, "");
+
+  return replacementAttributes.trim() ? `<span${replacementAttributes}>` : "";
+}
+
+/** Parse complete nested span ranges so operations can safely avoid nesting. */
+function getColorSpans(documentText: string): ColorSpan[] {
+  const spans: ColorSpan[] = [];
+  const stack: Array<{ from: number; hasColor: boolean }> = [];
+
+  for (const match of documentText.matchAll(SPAN_TAG_RE)) {
+    const fullTag = match[0];
+    const from = match.index ?? 0;
+    if (match[1]) {
+      const opening = stack.pop();
+      if (opening) {
+        spans.push({
+          from: opening.from,
+          to: from + fullTag.length,
+          hasColor: opening.hasColor,
+        });
+      }
+      continue;
+    }
+
+    stack.push({
+      from,
+      hasColor: getColorFreeOpeningTag(match[2] ?? "") !== null,
     });
-  } else {
-    const wrapped = `==${suffix === "" ? "" : "text"}==${suffix}`;
-    if (suffix) {
-      view.dispatch({
-        changes: { from: range.from, insert: wrapped },
-        selection: EditorSelection.range(range.from + 2, range.from + 6),
-      });
+  }
+
+  return spans.filter((span) => span.hasColor);
+}
+
+/** Remove color declarations from every complete span in a markup fragment. */
+function stripTextColorMarkup(markup: string): string {
+  let result = "";
+  let cursor = 0;
+  const closeTagStack: boolean[] = [];
+
+  for (const match of markup.matchAll(SPAN_TAG_RE)) {
+    const fullTag = match[0];
+    const from = match.index ?? 0;
+    result += markup.slice(cursor, from);
+
+    if (match[1]) {
+      if (closeTagStack.pop()) result += fullTag;
     } else {
-      view.dispatch({
-        changes: { from: range.from, insert: "====" },
-        selection: EditorSelection.cursor(range.from + 2),
-      });
+      const replacementOpenTag = getColorFreeOpeningTag(match[2] ?? "");
+      if (replacementOpenTag === null) {
+        result += fullTag;
+        closeTagStack.push(true);
+      } else {
+        result += replacementOpenTag;
+        closeTagStack.push(replacementOpenTag !== "");
+      }
+    }
+    cursor = from + fullTag.length;
+  }
+
+  return result + markup.slice(cursor);
+}
+
+function getColorTargetRange(
+  documentText: string,
+  selectionFrom: number,
+  selectionTo: number,
+): { from: number; to: number } | null {
+  const colorSpans = getColorSpans(documentText);
+  let from = selectionFrom;
+  let to = selectionTo;
+  let found = false;
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const span of colorSpans) {
+      const intersects = from === to
+        ? from >= span.from && from <= span.to
+        : from < span.to && to > span.from;
+      if (!intersects) continue;
+      found = true;
+      const nextFrom = Math.min(from, span.from);
+      const nextTo = Math.max(to, span.to);
+      if (nextFrom !== from || nextTo !== to) {
+        from = nextFrom;
+        to = nextTo;
+        changed = true;
+      }
     }
   }
+
+  return found ? { from, to } : null;
+}
+
+/**
+ * Normalize a selection before applying a new text color. Existing colors are
+ * stripped first, including nested and adjacent spans, so the replacement has
+ * exactly one color wrapper.
+ */
+export function getTextColorApplyEdit(
+  documentText: string,
+  selectionFrom: number,
+  selectionTo: number,
+  cssColor: string,
+): TextColorApplyEdit {
+  const target = getColorTargetRange(documentText, selectionFrom, selectionTo);
+  const from = target?.from ?? selectionFrom;
+  const to = target?.to ?? selectionTo;
+  const selectedMarkup = documentText.slice(from, to);
+  const normalizedContent = target ? stripTextColorMarkup(selectedMarkup) : selectedMarkup;
+  const content = normalizedContent || "text";
+  const openTag = `<span style="color:${cssColor}">`;
+
+  return {
+    from,
+    to,
+    insert: `${openTag}${content}</span>`,
+    selectionFrom: from + openTag.length,
+    selectionTo: from + openTag.length + content.length,
+  };
 }
 
 function wrapWithTextColor(view: EditorView, cssColor: string): void {
   const { state } = view;
   const range = state.selection.main;
-  const selectedText = state.doc.sliceString(range.from, range.to);
+  const edit = getTextColorApplyEdit(state.doc.toString(), range.from, range.to, cssColor);
+  view.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+  });
+}
 
-  if (selectedText) {
-    const wrapped = `<span style="color:${cssColor}">${selectedText}</span>`;
-    view.dispatch({
-      changes: { from: range.from, to: range.to, insert: wrapped },
-      selection: EditorSelection.range(
-        range.from + `<span style="color:${cssColor}">`.length,
-        range.from + `<span style="color:${cssColor}">`.length + selectedText.length,
-      ),
-    });
-  } else {
-    const wrapped = `<span style="color:${cssColor}">text</span>`;
-    const openTagLen = `<span style="color:${cssColor}">`.length;
-    view.dispatch({
-      changes: { from: range.from, insert: wrapped },
-      selection: EditorSelection.range(range.from + openTagLen, range.from + openTagLen + 4),
-    });
-  }
+/**
+ * Return the edit that removes the color wrapper around the current
+ * selection. Color markup is deliberately removed rather than replaced with
+ * `color: inherit`, so notes continue to use the editor's normal text color
+ * in both editing and rendered views.
+ */
+export function getTextColorClearEdit(
+  documentText: string,
+  selectionFrom: number,
+  selectionTo: number,
+): TextColorClearEdit | null {
+  const target = getColorTargetRange(documentText, selectionFrom, selectionTo);
+  if (!target) return null;
+  const insert = stripTextColorMarkup(documentText.slice(target.from, target.to));
+  return {
+    from: target.from,
+    to: target.to,
+    insert,
+    selectionFrom: target.from,
+    selectionTo: target.from + insert.length,
+  };
+}
+
+function clearTextColor(view: EditorView): boolean {
+  const { state } = view;
+  const range = state.selection.main;
+  const edit = getTextColorClearEdit(state.doc.toString(), range.from, range.to);
+  if (!edit) return false;
+
+  view.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+  });
+  return true;
 }
 
 /* ── Custom highlight colors from settings ───────────────────────────── */
@@ -387,7 +548,11 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
   const handleItalic = useCallback(() => withFocusReturn(toggleItalic), [withFocusReturn]);
   const handleStrikethrough = useCallback(() => withFocusReturn(toggleStrikethrough), [withFocusReturn]);
   const handleInlineCode = useCallback(() => withFocusReturn(toggleInlineCode), [withFocusReturn]);
-  const handleHighlight = useCallback(() => withFocusReturn(toggleHighlight), [withFocusReturn]);
+  const handleHighlight = useCallback(() => {
+    if (disabled) return;
+    setHighlightPickerOpen((open) => !open);
+    setTextColorPickerOpen(false);
+  }, [disabled]);
   const handleLink = useCallback(() => withFocusReturn(insertLink), [withFocusReturn]);
   const handleChecklist = useCallback(() => withFocusReturn(toggleChecklist), [withFocusReturn]);
 
@@ -408,6 +573,13 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
   const handleTextColor = useCallback((cssColor: string) => {
     if (!editorView || disabled) return;
     wrapWithTextColor(editorView, cssColor);
+    editorView.focus();
+    setTextColorPickerOpen(false);
+  }, [editorView, disabled]);
+
+  const handleClearTextColor = useCallback(() => {
+    if (!editorView || disabled) return;
+    clearTextColor(editorView);
     editorView.focus();
     setTextColorPickerOpen(false);
   }, [editorView, disabled]);
@@ -453,7 +625,7 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
       <div className="codascope-notes-formatting-divider" />
 
       {/* Inline formatting group */}
-      <div className="codascope-notes-formatting-group">
+      <div className="codascope-notes-formatting-group" ref={highlightDropdownRef}>
         <button
           className={`codascope-notes-formatting-btn${active.bold ? " codascope-notes-formatting-btn-active" : ""}`}
           onClick={handleBold}
@@ -495,32 +667,13 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         </button>
 
         <button
-          className={`codascope-notes-formatting-btn${active.highlight ? " codascope-notes-formatting-btn-active" : ""}`}
+          className={`codascope-notes-formatting-btn${active.highlight || highlightPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
           onClick={handleHighlight}
           disabled={disabled}
           type="button"
           title="Highlight (⌘⇧H)"
         >
           <IconHighlight size={14} />
-        </button>
-      </div>
-
-      <div className="codascope-notes-formatting-divider" />
-
-      {/* Color pickers group */}
-      <div className="codascope-notes-formatting-group" ref={highlightDropdownRef}>
-        <button
-          className={`codascope-notes-formatting-btn${highlightPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
-          onClick={() => {
-            setHighlightPickerOpen((o) => !o);
-            setTextColorPickerOpen(false);
-          }}
-          disabled={disabled}
-          type="button"
-          title="Highlight color"
-        >
-          <IconPalette size={14} />
-          <IconChevronDown size={8} />
         </button>
 
         {highlightPickerOpen && (
@@ -542,6 +695,9 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         )}
       </div>
 
+      <div className="codascope-notes-formatting-divider" />
+
+      {/* Color pickers group */}
       <div className="codascope-notes-formatting-group" ref={textColorDropdownRef}>
         <button
           className={`codascope-notes-formatting-btn${textColorPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
@@ -560,6 +716,15 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         {textColorPickerOpen && (
           <div className="codascope-notes-formatting-color-picker">
             <div className="codascope-notes-formatting-color-picker-label">Text Color</div>
+            <button
+              className="codascope-notes-formatting-color-default"
+              onClick={handleClearTextColor}
+              title="Restore the selected text to the default color"
+              type="button"
+            >
+              <IconTextColor size={13} />
+              Default
+            </button>
             <div className="codascope-notes-formatting-color-grid">
               {DEFAULT_TEXT_COLORS.map((color) => (
                 <button

@@ -17,11 +17,23 @@
 
 import { type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { HIGHLIGHT_RE } from "./highlightMarkup.js";
 
 // ── Decoration cache ────────────────────────────────────────────────
 
 const highlightMarkDecoration = Decoration.mark({ class: "cm-live-highlight" });
 const replaceDecoration = Decoration.replace({});
+
+const BUILTIN_HIGHLIGHT_BACKGROUNDS: Record<string, string> = {
+  yellow: "hsla(45, 90%, 55%, 0.3)",
+  red: "hsla(0, 80%, 55%, 0.3)",
+  green: "hsla(140, 70%, 45%, 0.3)",
+  blue: "hsla(220, 80%, 55%, 0.3)",
+  purple: "hsla(270, 70%, 55%, 0.3)",
+  orange: "hsla(30, 90%, 55%, 0.3)",
+  pink: "hsla(330, 80%, 55%, 0.3)",
+  cyan: "hsla(180, 70%, 45%, 0.3)",
+};
 
 // Cache for color-specific mark decorations
 const colorDecorationCache = new Map<string, Decoration>();
@@ -29,15 +41,18 @@ const colorDecorationCache = new Map<string, Decoration>();
 function getColorDecoration(colorName: string): Decoration {
   let dec = colorDecorationCache.get(colorName);
   if (!dec) {
-    dec = Decoration.mark({ class: `cm-live-highlight-${colorName}` });
+    const background = BUILTIN_HIGHLIGHT_BACKGROUNDS[colorName]
+      ?? (/^[0-9a-f]{3,8}$/i.test(colorName) ? `#${colorName}` : "hsla(0, 0%, 50%, 0.3)");
+    dec = Decoration.mark({
+      class: "cm-live-highlight",
+      attributes: { style: `background-color: ${background}` },
+    });
     colorDecorationCache.set(colorName, dec);
   }
   return dec;
 }
 
 // ── Regex for ==text== and ==text=={.colorname} ─────────────────────
-
-const HIGHLIGHT_RE = /==((?:[^=]|=[^=])+)==(?:\{\.(\w+)\})?/g;
 
 // ── Document color detection ────────────────────────────────────────
 

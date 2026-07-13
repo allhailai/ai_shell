@@ -8,6 +8,7 @@
 
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
+import { getHighlightApplyEdit, getHighlightClearEdit } from "./highlightMarkup";
 
 // ── Generic inline toggle ────────────────────────────────────────────
 
@@ -161,7 +162,16 @@ export function toggleInlineCode(view: EditorView): boolean {
 
 /** Toggle ==highlight== formatting. */
 export function toggleHighlight(view: EditorView): boolean {
-  return toggleInlineMarker(view, "==");
+  const { state } = view;
+  const range = state.selection.main;
+  const documentText = state.doc.toString();
+  const clearEdit = getHighlightClearEdit(documentText, range.from, range.to);
+  const edit = clearEdit ?? getHighlightApplyEdit(documentText, range.from, range.to);
+  view.dispatch({
+    changes: { from: edit.from, to: edit.to, insert: edit.insert },
+    selection: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+  });
+  return true;
 }
 
 /** Insert a [text](url) link. */
