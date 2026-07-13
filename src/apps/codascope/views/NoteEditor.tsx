@@ -20,35 +20,9 @@ import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
 import type { EditorView } from "@codemirror/view";
 
-/* ── Frontmatter helpers ─────────────────────────────────────────────── */
-
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
-
-function extractTitle(content: string): string {
-  const match = FRONTMATTER_RE.exec(content);
-  if (match) {
-    const titleMatch = /^title:\s*(.+)$/m.exec(match[1]);
-    if (titleMatch) return titleMatch[1].trim();
-  }
-  return "Untitled";
-}
-
-function updateFrontmatterTitle(content: string, newTitle: string): string {
-  const match = FRONTMATTER_RE.exec(content);
-  if (match) {
-    const updatedFm = match[1].replace(
-      /^title:\s*.+$/m,
-      `title: ${newTitle}`,
-    );
-    return content.replace(FRONTMATTER_RE, `---\n${updatedFm}\n---\n`);
-  }
-  return content;
-}
-
 function countWords(content: string): number {
-  const body = content.replace(FRONTMATTER_RE, "").trim();
-  if (!body) return 0;
-  return body.split(/\s+/).length;
+  const body = content.trim();
+  return body ? body.split(/\s+/).length : 0;
 }
 
 /* ── Visibility label helpers ────────────────────────────────────────── */
@@ -92,6 +66,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -101,6 +77,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [conflictData, setConflictData] = useState<{
     currentContent: string;
     currentHash: string;
+    currentFrontmatter?: { title?: string; tags?: string[]; status?: "draft" | "ready" };
   } | null>(null);
 
   // Insertion prompt state
@@ -188,11 +165,12 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           const data = await res.json();
           setContent(data.content ?? "");
           setContentHash(data.contentHash ?? null);
-          setTitle(extractTitle(data.content ?? ""));
 
-          // Extract noteId and status from frontmatter
+          // Metadata is supplied separately from the editable note body.
           const fm = data.frontmatter;
           if (fm) {
+            setTitle(fm.title ?? "Untitled");
+            setTags(fm.tags ?? []);
             setNoteId(fm.id ?? null);
             setNoteStatus(fm.status ?? undefined);
           }
@@ -284,7 +262,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   }, [annotations]);
 
   // ── Auto-save (debounced) ──────────────────────────────────────────
-  const saveNote = useCallback(async (newContent: string, expectedHash: string | null) => {
+  const saveNote = useCallback(async (
+    newContent: string,
+    expectedHash: string | null,
+    metadata: { title?: string; tags?: string[]; status?: "draft" | "ready" } = {},
+  ) => {
     setSaveStatus("saving");
     try {
       const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
@@ -292,6 +274,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content: newContent,
+          title: (metadata.title ?? title.trim()) || "Untitled",
+          tags: metadata.tags ?? tags,
+          status: metadata.status ?? noteStatus,
           expectedHash: expectedHash ?? undefined,
         }),
       });
@@ -301,6 +286,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         setConflictData({
           currentContent: data.currentContent,
           currentHash: data.currentHash,
+          currentFrontmatter: data.currentFrontmatter,
         });
         setSaveStatus("error");
         return;
@@ -317,11 +303,10 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     } catch {
       setSaveStatus("error");
     }
-  }, [apiBase, apiPath, queryString]);
+  }, [apiBase, apiPath, queryString, title, tags, noteStatus]);
 
   const handleContentChange = useCallback((newContent: string) => {
     setContent(newContent);
-    setTitle(extractTitle(newContent));
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
@@ -337,16 +322,25 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     };
   }, []);
 
-  // ── Title editing ──────────────────────────────────────────────────
+  // ── Editable presentation metadata ─────────────────────────────────
   const handleTitleBlur = useCallback(() => {
     if (!title.trim()) return;
-    const updated = updateFrontmatterTitle(contentRef.current, title.trim());
-    if (updated !== contentRef.current) {
-      setContent(updated);
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      void saveNote(updated, hashRef.current);
-    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    void saveNote(contentRef.current, hashRef.current, { title: title.trim() });
   }, [title, saveNote]);
+
+  const saveTags = useCallback((nextTags: string[]) => {
+    setTags(nextTags);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    void saveNote(contentRef.current, hashRef.current, { tags: nextTags });
+  }, [saveNote]);
+
+  const addTags = useCallback((value: string) => {
+    const additions = value.split(",").map((tag) => tag.trim()).filter(Boolean);
+    if (additions.length === 0) return;
+    saveTags(Array.from(new Set([...tags, ...additions])));
+    setTagInput("");
+  }, [tags, saveTags]);
 
   // ── Archive note ───────────────────────────────────────────────────
   const handleArchive = useCallback(async () => {
@@ -373,7 +367,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     if (!conflictData) return;
     setContent(conflictData.currentContent);
     setContentHash(conflictData.currentHash);
-    setTitle(extractTitle(conflictData.currentContent));
+    if (conflictData.currentFrontmatter) {
+      setTitle(conflictData.currentFrontmatter.title ?? "Untitled");
+      setTags(conflictData.currentFrontmatter.tags ?? []);
+      setNoteStatus(conflictData.currentFrontmatter.status);
+    }
     setConflictData(null);
     setSaveStatus("idle");
   }, [conflictData]);
@@ -386,7 +384,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: contentRef.current }),
+        body: JSON.stringify({ content: contentRef.current, title: title.trim() || "Untitled", tags, status: noteStatus }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -416,7 +414,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         // Reload the server version into the current editor
         setContent(conflictData.currentContent);
         setContentHash(conflictData.currentHash);
-        setTitle(extractTitle(conflictData.currentContent));
+        if (conflictData.currentFrontmatter) {
+          setTitle(conflictData.currentFrontmatter.title ?? "Untitled");
+          setTags(conflictData.currentFrontmatter.tags ?? []);
+          setNoteStatus(conflictData.currentFrontmatter.status);
+        }
         setConflictData(null);
         setSaveStatus("idle");
       }
@@ -551,18 +553,10 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     } catch { /* best effort */ }
   }, [scope, visibility, queryParams]);
 
-  // Fetch backlinks when the note loads
+  // Fetch backlinks when the note loads.
   useEffect(() => {
-    if (!content) return;
-    // Extract noteId from frontmatter
-    const match = FRONTMATTER_RE.exec(content);
-    if (match) {
-      const idMatch = /^id:\s*(.+)$/m.exec(match[1]);
-      if (idMatch) {
-        void fetchBacklinks(idMatch[1].trim());
-      }
-    }
-  }, [content, fetchBacklinks]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (noteId) void fetchBacklinks(noteId);
+  }, [noteId, fetchBacklinks]);
 
   // ── Fetch readers (shared notes) ───────────────────────────────────
   useEffect(() => {
@@ -594,22 +588,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const handleStatusToggle = useCallback(() => {
     const newStatus = noteStatus === "ready" ? "draft" : "ready";
     setNoteStatus(newStatus);
-
-    // Update frontmatter in content
-    const match = FRONTMATTER_RE.exec(contentRef.current);
-    if (match) {
-      let fm = match[1];
-      if (/^status:\s*.+$/m.test(fm)) {
-        fm = fm.replace(/^status:\s*.+$/m, `status: ${newStatus}`);
-      } else {
-        fm = fm + `\nstatus: ${newStatus}`;
-      }
-      const body = contentRef.current.slice(match[0].length);
-      const updatedContent = `---\n${fm}\n---\n${body}`;
-      setContent(updatedContent);
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      void saveNote(updatedContent, hashRef.current);
-    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    void saveNote(contentRef.current, hashRef.current, { status: newStatus });
   }, [noteStatus, saveNote]);
 
   // ── Last editor banner logic ───────────────────────────────────────
@@ -674,6 +654,37 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           }}
           placeholder="Note title…"
         />
+
+        <div className="codascope-notes-editor-tags" aria-label="Note tags">
+          {tags.map((tag) => (
+            <span className="codascope-notes-editor-tag" key={tag}>
+              {tag}
+              <button
+                type="button"
+                aria-label={`Remove tag ${tag}`}
+                title={`Remove ${tag}`}
+                onClick={() => saveTags(tags.filter((current) => current !== tag))}
+              >
+                <IconClose size={10} />
+              </button>
+            </span>
+          ))}
+          <input
+            className="codascope-notes-editor-tag-input"
+            type="text"
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onBlur={() => addTags(tagInput)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addTags(tagInput);
+              }
+            }}
+            placeholder={tags.length === 0 ? "Add tags…" : "+ tag"}
+            aria-label="Add tags"
+          />
+        </div>
 
         {/* Visibility chip */}
         <span className={`codascope-notes-visibility-badge codascope-notes-visibility-badge--${visibility}`}>

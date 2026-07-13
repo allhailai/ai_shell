@@ -518,7 +518,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     // Optionally read current content for re-anchoring
     let content: string | undefined;
     const noteData = await noteSvc.readNote(scope, visibility, opts, notePath);
-    if (noteData) content = noteData.content;
+    if (noteData) content = noteSvc.parseFrontmatter(noteData.content).body;
 
     const annotations = await noteAnnotationSvc.listAnnotations(scope, visibility, opts, notePath, content);
     res.json({ annotations });
@@ -614,7 +614,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const noteData = await noteSvc.readNote(scope, visibility, opts, notePath);
     if (!noteData) throw httpError("Note not found.", 404, "not_found");
 
-    const blocks = noteAnnotationSvc.computeBlocks(noteData.content);
+    const blocks = noteAnnotationSvc.computeBlocks(noteSvc.parseFrontmatter(noteData.content).body);
     res.json({ blocks });
   }));
 
@@ -650,7 +650,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const versionData = await noteSvc.getVersion(scope, visibility, opts, notePath, version);
     if (!versionData) throw httpError("Version not found.", 404, "not_found");
 
-    res.json(versionData);
+    res.json({ ...versionData, content: noteSvc.parseFrontmatter(versionData.content).body });
   }));
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1017,7 +1017,15 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       }
     } catch { /* best effort */ }
 
-    res.json({ ...result, lastEditor, lastEditedAt });
+    // Frontmatter is storage metadata, not editable document content. Keep it
+    // available as a separate read-only object for the UI while returning only
+    // the Markdown body to clients.
+    res.json({
+      ...result,
+      content: noteSvc.parseFrontmatter(result.content).body,
+      lastEditor,
+      lastEditedAt,
+    });
   }));
 
   // ── Create Note ─────────────────────────────────────────────────────
@@ -1058,19 +1066,51 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
-    const { content, expectedHash } = req.body as { content?: string; expectedHash?: string };
+    const { content, expectedHash, title, tags, status } = req.body as {
+      content?: string;
+      expectedHash?: string;
+      title?: string;
+      tags?: string[];
+      status?: "draft" | "ready";
+    };
     if (content === undefined || typeof content !== "string") {
       throw httpError("content is required.", 400, "invalid_input");
     }
 
-    const result = await noteSvc.updateNote(scope, visibility, opts, notePath, content, expectedHash);
+    if (title !== undefined && (typeof title !== "string" || !title.trim())) {
+      throw httpError("title must be a non-empty string.", 400, "invalid_input");
+    }
+    if (tags !== undefined && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string"))) {
+      throw httpError("tags must be an array of strings.", 400, "invalid_input");
+    }
+    if (status !== undefined && status !== "draft" && status !== "ready") {
+      throw httpError("status must be draft or ready.", 400, "invalid_input");
+    }
+
+    // The editor supplies only body text plus the small set of user-editable
+    // presentation fields. Merge them into the stored metadata here, rather
+    // than allowing a client to author IDs, owners, or timestamps in YAML.
+    const current = await noteSvc.readNote(scope, visibility, opts, notePath);
+    if (!current) throw httpError("Note not found.", 404, "not_found");
+    const frontmatter = {
+      ...current.frontmatter,
+      title: title?.trim() || current.frontmatter.title,
+      tags: tags === undefined
+        ? current.frontmatter.tags
+        : Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))),
+    };
+    if (visibility === "shared" && status !== undefined) frontmatter.status = status;
+    const storedContent = noteSvc.serializeFrontmatter(frontmatter) + content;
+
+    const result = await noteSvc.updateNote(scope, visibility, opts, notePath, storedContent, expectedHash);
     if (!result) throw httpError("Note not found.", 404, "not_found");
     if ("conflict" in result) {
       res.status(409).json({
         error: "conflict",
         message: "Note was modified since you loaded it.",
         currentHash: result.currentHash,
-        currentContent: result.currentContent,
+        currentContent: noteSvc.parseFrontmatter(result.currentContent).body,
+        currentFrontmatter: noteSvc.parseFrontmatter(result.currentContent).frontmatter,
       });
       return;
     }

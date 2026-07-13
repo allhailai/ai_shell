@@ -2,8 +2,9 @@
    CodeMirror 6 extension for inline image preview in markdown.
 
    Detects ![alt](url) patterns, hides the raw markdown when the cursor
-   is NOT on the image line, and renders an <img> widget with resize
-   handles. Resize updates alt text to ![alt|WxH](url) (Obsidian convention).
+   is NOT on the image line, and renders an <img> widget with resize and
+   an Edit control. Resize updates alt text to ![alt|WxH](url)
+   (Obsidian convention).
 
    Pattern: follows mermaidExtension.ts — WidgetType + StateField +
    cursor-aware show/hide.
@@ -153,6 +154,7 @@ class ImageWidget extends WidgetType {
     // Resize handle (only in editable mode)
     if (this.editable) {
       this.attachResizeHandle(container, img, view);
+      this.attachImageControls(container, view);
     }
 
     wrapper.appendChild(container);
@@ -189,7 +191,7 @@ class ImageWidget extends WidgetType {
       const finalHeight = Math.round(img.offsetHeight);
 
       // Update the markdown source: replace ![alt](url) with ![alt|WxH](url)
-      this.updateImageDimensions(view, finalWidth, finalHeight);
+      this.replaceImage(view, this.ref.cleanAlt, this.ref.url, finalWidth, finalHeight);
     };
 
     handle.addEventListener("mousedown", (e) => {
@@ -205,36 +207,42 @@ class ImageWidget extends WidgetType {
     });
   }
 
-  private updateImageDimensions(view: EditorView, width: number, height: number) {
-    const doc = view.state.doc;
-    const text = doc.toString();
+  private attachImageControls(container: HTMLElement, view: EditorView) {
+    const controls = document.createElement("div");
+    controls.className = "shared-md-image-preview-controls";
 
-    // Find the current image in the document by matching position
-    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-    let match: RegExpExecArray | null;
-    let currentIndex = 0;
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "shared-md-image-preview-control";
+    editButton.textContent = "Edit";
+    editButton.title = "Edit image alt text or URL";
+    editButton.setAttribute("aria-label", "Edit image alt text or URL");
+    editButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      // Selecting the image source reveals the Markdown on this line.
+      // This keeps image edits in the normal Markdown editing flow.
+      view.dispatch({
+        selection: { anchor: this.ref.from, head: this.ref.to },
+        scrollIntoView: true,
+      });
+      view.focus();
+    });
+    controls.appendChild(editButton);
+    container.appendChild(controls);
+  }
 
-    while ((match = imgRegex.exec(text)) !== null) {
-      if (match[2] === this.ref.url) {
-        // Check if this is roughly the same position (in case of duplicates)
-        if (currentIndex === 0 || Math.abs(match.index - this.ref.from) < 5) {
-          const rawAlt = match[1];
-          // Strip existing |WxH from alt
-          const cleanAlt = rawAlt.replace(/\|\d+x\d+$/, "").trim();
-          const newTag = `![${cleanAlt}|${width}x${height}](${this.ref.url})`;
-
-          view.dispatch({
-            changes: {
-              from: match.index,
-              to: match.index + match[0].length,
-              insert: newTag,
-            },
-          });
-          return;
-        }
-        currentIndex++;
-      }
-    }
+  private replaceImage(view: EditorView, alt: string, url: string, width?: number, height?: number) {
+    const cleanAlt = parseImageDimensions(alt).cleanAlt;
+    const dimensions = width && height ? `|${width}x${height}` : "";
+    const newTag = `![${cleanAlt}${dimensions}](${url})`;
+    view.dispatch({
+      changes: {
+        from: this.ref.from,
+        to: this.ref.to,
+        insert: newTag,
+      },
+    });
   }
 
   ignoreEvent() { return true; }

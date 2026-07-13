@@ -10,8 +10,8 @@
    - [x] → checked checkbox
    - [/] → in-progress indicator
 
-   Auto-links bare URLs (https://...) that are NOT inside [text](url)
-   markdown links — renders as clickable blue links when cursor is away.
+   Auto-links bare URLs and standard [text](url) Markdown links when the
+   cursor is away from the line.
 
    Adapted from kiss_ai for AI Shell's shared component library.
    ──────────────────────────────────────────────────────────────────── */
@@ -109,6 +109,7 @@ const TEXT_COLOR_RE = /<span\s+style="color:\s*([^"]+)">([\s\S]*?)<\/span>/g;
 // ── Bare URL regex ──────────────────────────────────────────────────
 // Matches https:// or http:// URLs that are NOT already inside [text](url)
 const BARE_URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
+const MARKDOWN_LINK_RE = /(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
 
 // ── Link widget for bare URLs ───────────────────────────────────────
 
@@ -137,6 +138,43 @@ class BareURLWidget extends WidgetType {
     link.addEventListener("mousedown", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      window.open(this.url, "_blank", "noopener,noreferrer");
+    });
+    return link;
+  }
+
+  ignoreEvent() { return false; }
+}
+
+// ── Standard Markdown link widget ──────────────────────────────────
+
+class MarkdownLinkWidget extends WidgetType {
+  constructor(
+    private readonly label: string,
+    private readonly url: string,
+  ) {
+    super();
+  }
+
+  eq(other: MarkdownLinkWidget) {
+    return this.label === other.label && this.url === other.url;
+  }
+
+  toDOM() {
+    const link = document.createElement("a");
+    link.className = "cm-live-markdown-link";
+    link.href = this.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = this.label;
+    link.title = this.url;
+    link.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       window.open(this.url, "_blank", "noopener,noreferrer");
     });
     return link;
@@ -290,6 +328,27 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
 
       // Hide the closing </span> tag
       entries.push({ from: closeTagStart, to: matchTo, decoration: replaceDecoration });
+    }
+  }
+
+  // ── Standard Markdown links ────────────────────────────────────────
+  for (const { from, to } of view.visibleRanges) {
+    const text = state.doc.sliceString(from, to);
+    MARKDOWN_LINK_RE.lastIndex = 0;
+
+    for (const match of text.matchAll(MARKDOWN_LINK_RE)) {
+      const line = state.doc.lineAt(from + (match.index ?? 0));
+      if (cursorLines.has(line.number) || tableLines.has(line.number)) continue;
+
+      const label = match[1];
+      const url = match[2];
+      if (!label || !url) continue;
+      const matchFrom = from + (match.index ?? 0);
+      entries.push({
+        from: matchFrom,
+        to: matchFrom + match[0].length,
+        decoration: Decoration.replace({ widget: new MarkdownLinkWidget(label, url) }),
+      });
     }
   }
 

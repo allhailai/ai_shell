@@ -23,6 +23,42 @@
   border-color: var(--color-border-secondary);
 }
 
+/* ── Image edit control ───────────────────────────────────────────── */
+
+.shared-md-image-preview-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  z-index: 3;
+}
+
+.shared-md-image-preview-container:hover .shared-md-image-preview-controls,
+.shared-md-image-preview-container:focus-within .shared-md-image-preview-controls {
+  opacity: 1;
+}
+
+.shared-md-image-preview-control {
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  box-shadow: 0 1px 3px hsl(220 20% 10% / 0.22);
+}
+
+.shared-md-image-preview-control:hover,
+.shared-md-image-preview-control:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
 /* ── Image element ───────────────────────────────────────────────── */
 
 .shared-md-image-preview-img {

@@ -117,7 +117,8 @@
 
 /* ── Bare URL auto-links ─────────────────────────────────────────── */
 
-.cm-live-bare-url {
+.cm-live-bare-url,
+.cm-live-markdown-link {
   color: var(--color-accent);
   text-decoration: underline;
   text-decoration-color: var(--color-accent);
@@ -126,7 +127,8 @@
   transition: color var(--transition-fast), text-decoration-color var(--transition-fast);
 }
 
-.cm-live-bare-url:hover {
+.cm-live-bare-url:hover,
+.cm-live-markdown-link:hover {
   color: var(--color-accent-text);
   text-decoration-color: var(--color-accent-text);
 }
@@ -142,4 +144,3 @@
 .cm-line:not(.shared-md-focus-dimmed) {
   transition: opacity 0.25s ease;
 }
-
