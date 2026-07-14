@@ -19,12 +19,17 @@ const { ZipArchive } = require("archiver") as {
     pipe: (dest: import("stream").Writable) => import("stream").Writable;
   };
 };
-import * as unzipper from "unzipper";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { rename, rm, readdir, cp } from "node:fs/promises";
+import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { rename, rm, readdir, cp, mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
+import {
+  assertAvailableSpace,
+  extractValidatedZipFile,
+  PROJECT_ARCHIVE_LIMITS,
+} from "../services/codaScopeZipArchiveService.js";
 
 // ── Write-blocking guard ──────────────────────────────────────────
 
@@ -48,7 +53,7 @@ export async function ensureReposMapped(
 }
 
 export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, secretService, httpError, repoRoot, ensureServices, wrap, param, upload } = ctx;
+  const { app, secretService, httpError, repoRoot, ensureServices, wrap, param } = ctx;
 
   // ── Config ──────────────────────────────────────────────────────
 
@@ -239,24 +244,16 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
 
   // ── Import project ─────────────────────────────────────────────
 
-  app.post("/api/codascope/projects/import", upload.single("file"), wrap(async (req, res) => {
+  app.post("/api/codascope/projects/import", archiveUpload.single("file"), wrap(async (req, res) => {
     const { projectSvc } = await ensureServices();
     const file = (req as unknown as { file?: Express.Multer.File }).file;
     if (!file) throw httpError("No file uploaded.", 400, "missing_file");
 
-    // Extract to a temp directory
-    const tmpDir = path.join(os.tmpdir(), `codascope-import-${crypto.randomUUID()}`);
-    mkdirSync(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "codascope-project-import-"));
 
     try {
-      // Write the uploaded buffer to a temp file and extract
-      const tmpZipPath = path.join(tmpDir, "upload.zip");
-      writeFileSync(tmpZipPath, file.buffer);
-
       const extractedDir = path.join(tmpDir, "extracted");
-      mkdirSync(extractedDir, { recursive: true });
-      const zipDir = await unzipper.Open.file(tmpZipPath);
-      await zipDir.extract({ path: extractedDir });
+      const archive = await extractValidatedZipFile(file.path, extractedDir, PROJECT_ARCHIVE_LIMITS);
 
       // Validate: project.json must exist
       if (!existsSync(path.join(extractedDir, "project.json"))) {
@@ -285,6 +282,10 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
         counter++;
       }
 
+      // If rename crosses filesystems, the copy fallback needs space at the
+      // destination as well as the validated staging directory.
+      await assertAvailableSpace(targetDir, archive.totalUncompressedBytes);
+
       // Move extracted content to the target directory
       // rename() fails with EXDEV across filesystem boundaries (e.g., /tmp → /opt on Linux)
       try {
@@ -307,6 +308,7 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
         updatedAt: now,
       };
       writeFileSync(path.join(targetDir, "project.json"), JSON.stringify(newProjectData, null, 2));
+      rebaseImportedProjectIdentifiers(targetDir, newId);
 
       // Remove export meta file if present
       const metaPath = path.join(targetDir, "_export_meta.json");
@@ -327,6 +329,7 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
       try {
         await rm(tmpDir, { recursive: true, force: true });
       } catch { /* ignore cleanup errors */ }
+      await removeUploadedArchive(file);
     }
   }));
 
@@ -368,4 +371,53 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     const result = await svc.validateApiKey(apiKey.trim());
     res.json(result);
   }));
+}
+
+/**
+ * A project bundle can contain epic metadata, indexes, and conversations that
+ * all carry the parent project ID. Rebase those internal references along with
+ * project.json so an imported project is self-consistent.
+ */
+function rebaseImportedProjectIdentifiers(projectDir: string, projectId: string): void {
+  const visit = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+
+      try {
+        const data = JSON.parse(readFileSync(entryPath, "utf-8"));
+        if (rebaseProjectId(data, projectId)) {
+          writeFileSync(entryPath, JSON.stringify(data, null, 2));
+        }
+      } catch {
+        // Preserve non-CodaScope or malformed JSON files without blocking the import.
+      }
+    }
+  };
+  visit(projectDir);
+}
+
+function rebaseProjectId(value: unknown, projectId: string): boolean {
+  if (Array.isArray(value)) {
+    let changed = false;
+    for (const item of value) changed = rebaseProjectId(item, projectId) || changed;
+    return changed;
+  }
+  if (!value || typeof value !== "object") return false;
+
+  let changed = false;
+  const record = value as Record<string, unknown>;
+  for (const [key, child] of Object.entries(record)) {
+    if (key === "projectId" && typeof child === "string" && child !== projectId) {
+      record[key] = projectId;
+      changed = true;
+      continue;
+    }
+    changed = rebaseProjectId(child, projectId) || changed;
+  }
+  return changed;
 }

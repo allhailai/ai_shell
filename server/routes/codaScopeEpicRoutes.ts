@@ -11,6 +11,7 @@ import {
   failSsePipeline,
   handlePreStreamError,
 } from "./utils/ssePipelineHelper.js";
+import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, upload } = ctx;
@@ -23,6 +24,21 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epics = await epicSvc.listEpics(id);
     res.json({ epics });
+  }));
+
+  // Import an epic into the current project as a new, forked epic.
+  app.post("/api/codascope/projects/:id/epics/import", archiveUpload.single("file"), wrap(async (req, res) => {
+    const { epicBundleSvc } = await ensureServices();
+    const id = param(req, "id");
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    if (!file) throw httpError("No ZIP file uploaded.", 400, "missing_file");
+
+    try {
+      const result = await epicBundleSvc.importEpic(id, file.path);
+      res.status(201).json(result);
+    } finally {
+      await removeUploadedArchive(file);
+    }
   }));
 
   // Create epic
@@ -45,6 +61,24 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const epic = await epicSvc.getEpic(id, epicId);
     if (!epic) throw httpError("Epic not found.", 404, "not_found");
     res.json({ epic });
+  }));
+
+  // Export a portable epic bundle. The stream excludes locks and chat history.
+  app.get("/api/codascope/projects/:id/epics/:epicId/export", wrap(async (req, res) => {
+    const { epicBundleSvc } = await ensureServices();
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const bundle = epicBundleSvc.createExport(id, epicId);
+    if (!bundle) throw httpError("Epic not found.", 404, "not_found");
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${bundle.filename}"`);
+    bundle.archive.on("error", (error: Error) => {
+      console.error("[CodaScope] Epic export archive error:", error);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to create archive." });
+    });
+    bundle.archive.pipe(res);
+    await bundle.archive.finalize();
   }));
 
   // Update epic metadata

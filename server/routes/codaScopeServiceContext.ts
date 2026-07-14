@@ -17,6 +17,7 @@ import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js"
 
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
 import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
+import { CodaScopeEpicBundleService } from "../services/codaScopeEpicBundleService.js";
 import { CodaScopeDesignDocService } from "../services/codaScopeDesignDocService.js";
 import { CodaScopeVersionService } from "../services/codaScopeVersionService.js";
 import { CodaScopeAnnotationService } from "../services/codaScopeAnnotationService.js";
@@ -72,6 +73,7 @@ export interface CodaScopeServices {
 
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
+  epicBundleSvc: CodaScopeEpicBundleService;
   designDocSvc: CodaScopeDesignDocService;
   versionSvc: CodaScopeVersionService;
   annotationSvc: CodaScopeAnnotationService;
@@ -128,6 +130,7 @@ let codeMapService: CodaScopeCodeMapService | null = null;
 
 let wikiStateService: CodaScopeWikiStateService | null = null;
 let epicService: CodaScopeEpicService | null = null;
+let epicBundleService: CodaScopeEpicBundleService | null = null;
 let designDocService: CodaScopeDesignDocService | null = null;
 let versionService: CodaScopeVersionService | null = null;
 let annotationService: CodaScopeAnnotationService | null = null;
@@ -250,6 +253,8 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!epicService) epicService = new CodaScopeEpicService(root);
   else epicService.setRoot(root);
 
+  if (!epicBundleService) epicBundleService = new CodaScopeEpicBundleService(projectService);
+
   if (!designDocService) designDocService = new CodaScopeDesignDocService(root);
   else designDocService.setRoot(root);
 
@@ -344,6 +349,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
 
     wikiStateSvc: wikiStateService,
     epicSvc: epicService,
+    epicBundleSvc: epicBundleService,
     designDocSvc: designDocService,
     versionSvc: versionService,
     annotationSvc: annotationService,

@@ -12,18 +12,18 @@
 
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import * as unzipper from "unzipper";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
 import type { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  NOTE_ARCHIVE_LIMITS,
+  openValidatedZipBuffer,
+  openValidatedZipFile,
+  readZipEntry,
+} from "./codaScopeZipArchiveService.js";
 
 /* ── Constants ────────────────────────────────────────────────────── */
-
-const MAX_ZIP_SIZE = 50 * 1024 * 1024; // compressed upload size
-const MAX_ENTRY_COUNT = 5_000;
-const MAX_ENTRY_UNCOMPRESSED_SIZE = 25 * 1024 * 1024;
-const MAX_TOTAL_UNCOMPRESSED_SIZE = 200 * 1024 * 1024;
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -87,6 +87,12 @@ interface ImportedNote {
   path: string;
 }
 
+type ZipSource = Buffer | string;
+
+interface ZipEntry {
+  read(): Promise<Buffer>;
+}
+
 /* ── Service ──────────────────────────────────────────────────────── */
 
 export class CodaScopeNoteImportService {
@@ -129,15 +135,29 @@ export class CodaScopeNoteImportService {
     destVisibility: NoteVisibility,
     opts: NoteResolveOpts,
   ): Promise<ImportPreview> {
+    return this.previewImportSource(zipBuffer, destScope, destVisibility, opts);
+  }
+
+  /** Disk-backed alternative used by HTTP uploads. */
+  async previewImportFile(
+    zipPath: string,
+    destScope: NoteScope,
+    destVisibility: NoteVisibility,
+    opts: NoteResolveOpts,
+  ): Promise<ImportPreview> {
+    return this.previewImportSource(zipPath, destScope, destVisibility, opts);
+  }
+
+  private async previewImportSource(
+    zipSource: ZipSource,
+    destScope: NoteScope,
+    destVisibility: NoteVisibility,
+    opts: NoteResolveOpts,
+  ): Promise<ImportPreview> {
     const userId = opts.userId ?? "default";
 
-    // Validate size
-    if (zipBuffer.length > MAX_ZIP_SIZE) {
-      throw new Error(`ZIP file exceeds maximum size of ${MAX_ZIP_SIZE / 1024 / 1024} MB.`);
-    }
-
     // Parse the ZIP
-    const { manifest, entries } = await this.parseZip(zipBuffer);
+    const { manifest, entries, compressedBytes } = await this.parseZip(zipSource);
 
     // Log audit: preview
     this.auditSvc.log({
@@ -148,7 +168,7 @@ export class CodaScopeNoteImportService {
       scope: destScope,
       visibility: destVisibility,
       path: "",
-      metadata: { noteCount: manifest?.items.length ?? 0, zipSizeBytes: zipBuffer.length },
+      metadata: { noteCount: manifest?.items.length ?? 0, zipSizeBytes: compressedBytes },
     });
 
     const warnings: string[] = [];
@@ -156,7 +176,7 @@ export class CodaScopeNoteImportService {
     if (!manifest) {
       warnings.push("No codascope-notes-manifest.json found. Import will use file structure.");
       // Build a preview from raw entries
-      return this.buildPreviewFromEntries(entries, destScope, destVisibility, opts, warnings, zipBuffer.length);
+      return this.buildPreviewFromEntries(entries, destScope, destVisibility, opts, warnings, compressedBytes);
     }
 
     if (manifest.format !== "codascope-notes") {
@@ -198,7 +218,7 @@ export class CodaScopeNoteImportService {
       sourceVisibility: manifest.visibility,
       noteCount: manifest.items.length,
       attachmentCount,
-      totalSizeBytes: zipBuffer.length,
+      totalSizeBytes: compressedBytes,
       collisions,
       items: manifest.items.map((item) => ({
         path: item.path,
@@ -219,19 +239,35 @@ export class CodaScopeNoteImportService {
     opts: NoteResolveOpts,
     collisionStrategy: CollisionStrategy = "skip",
   ): Promise<ImportReport> {
+    return this.executeImportSource(zipBuffer, destScope, destVisibility, opts, collisionStrategy);
+  }
+
+  /** Disk-backed alternative used by HTTP uploads. */
+  async executeImportFile(
+    zipPath: string,
+    destScope: NoteScope,
+    destVisibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    collisionStrategy: CollisionStrategy = "skip",
+  ): Promise<ImportReport> {
+    return this.executeImportSource(zipPath, destScope, destVisibility, opts, collisionStrategy);
+  }
+
+  private async executeImportSource(
+    zipSource: ZipSource,
+    destScope: NoteScope,
+    destVisibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    collisionStrategy: CollisionStrategy,
+  ): Promise<ImportReport> {
     const correlationId = randomUUID();
     const userId = opts.userId ?? "default";
-
-    // Validate size
-    if (zipBuffer.length > MAX_ZIP_SIZE) {
-      throw new Error(`ZIP file exceeds maximum size of ${MAX_ZIP_SIZE / 1024 / 1024} MB.`);
-    }
 
     if (!this.noteSvc.resolveNotesDir(destScope, destVisibility, opts)) {
       throw new Error("Cannot resolve notes directory for the given scope/visibility.");
     }
 
-    const { manifest, entries } = await this.parseZip(zipBuffer);
+    const { manifest, entries } = await this.parseZip(zipSource);
 
     let imported = 0;
     let skipped = 0;
@@ -241,13 +277,14 @@ export class CodaScopeNoteImportService {
 
     if (!manifest) {
       // No manifest — import raw .md files from the ZIP
-      for (const [entryPath, content] of entries) {
+      for (const [entryPath, entry] of entries) {
         if (!entryPath.endsWith(".md") || entryPath.includes(".versions/")) continue;
         // Strip leading notes/ prefix if present
         let notePath = entryPath;
         if (notePath.startsWith("notes/")) notePath = notePath.slice(6);
 
         try {
+          const content = await entry.read();
           const result = await this.importSingleNote(
             notePath, content, destScope, destVisibility, opts, collisionStrategy,
           );
@@ -265,13 +302,14 @@ export class CodaScopeNoteImportService {
       // Manifest-driven import
       for (const item of manifest.items) {
         const contentKey = item.contentFile;
-        const content = entries.get(contentKey);
-        if (!content) {
+        const entry = entries.get(contentKey);
+        if (!entry) {
           failed.push({ path: item.path, error: "Content file not found in ZIP." });
           continue;
         }
 
         try {
+          const content = await entry.read();
           // Ensure imported note gets a new ID if the existing ID collides
           let noteContent = content.toString("utf-8");
           noteContent = this.reassignNoteId(noteContent, destScope, destVisibility, opts);
@@ -311,78 +349,40 @@ export class CodaScopeNoteImportService {
 
   /* ── Private: ZIP parsing ─────────────────────────────────────────── */
 
-  private async parseZip(zipBuffer: Buffer): Promise<{
+  private async parseZip(zipSource: ZipSource): Promise<{
     manifest: ExportManifest | null;
-    entries: Map<string, Buffer>;
+    entries: Map<string, ZipEntry>;
+    compressedBytes: number;
   }> {
-    const entries = new Map<string, Buffer>();
+    const entries = new Map<string, ZipEntry>();
     let manifest: ExportManifest | null = null;
-    let entryCount = 0;
-    let totalUncompressedSize = 0;
+    const archive = typeof zipSource === "string"
+      ? await openValidatedZipFile(zipSource, NOTE_ARCHIVE_LIMITS)
+      : await openValidatedZipBuffer(zipSource, NOTE_ARCHIVE_LIMITS);
+    let streamedBytes = 0;
 
-    const directory = await unzipper.Open.buffer(zipBuffer);
-
-    for (const file of directory.files) {
-      entryCount++;
-      if (entryCount > MAX_ENTRY_COUNT) {
-        throw new Error(`ZIP contains more than ${MAX_ENTRY_COUNT} entries.`);
-      }
-
-      // Path traversal protection
-      const normalizedPath = path.normalize(file.path);
-      if (
-        normalizedPath.startsWith("..")
-        || normalizedPath.includes(`/..${path.sep}`)
-        || path.isAbsolute(normalizedPath)
-        || file.path.includes("\\")
-      ) {
-        throw new Error(`Path traversal detected in ZIP entry: "${file.path}"`);
-      }
-
-      if (file.type === "Directory") continue;
-
-      if (file.uncompressedSize > MAX_ENTRY_UNCOMPRESSED_SIZE) {
-        throw new Error(`ZIP entry exceeds the ${MAX_ENTRY_UNCOMPRESSED_SIZE / 1024 / 1024} MB limit: "${file.path}"`);
-      }
-      if (totalUncompressedSize + file.uncompressedSize > MAX_TOTAL_UNCOMPRESSED_SIZE) {
-        throw new Error(`ZIP expanded content exceeds the ${MAX_TOTAL_UNCOMPRESSED_SIZE / 1024 / 1024} MB limit.`);
-      }
-
-      const content = await this.readEntryWithLimit(
-        file,
-        Math.min(MAX_ENTRY_UNCOMPRESSED_SIZE, MAX_TOTAL_UNCOMPRESSED_SIZE - totalUncompressedSize),
-      );
-      totalUncompressedSize += content.length;
-      entries.set(file.path, content);
-
-      // Parse manifest
-      if (file.path === "codascope-notes-manifest.json") {
+    for (const [entryPath, file] of archive.entries) {
+      const entry: ZipEntry = {
+        read: async () => {
+          const content = await readZipEntry(file, NOTE_ARCHIVE_LIMITS.maxEntryUncompressedBytes);
+          streamedBytes += content.length;
+          if (streamedBytes > NOTE_ARCHIVE_LIMITS.maxTotalUncompressedBytes) {
+            throw new Error(`ZIP expanded content exceeds the ${NOTE_ARCHIVE_LIMITS.maxTotalUncompressedBytes / 1024 / 1024} MB limit.`);
+          }
+          return content;
+        },
+      };
+      entries.set(entryPath, entry);
+      if (entryPath === "codascope-notes-manifest.json") {
         try {
-          manifest = JSON.parse(content.toString("utf-8"));
+          manifest = JSON.parse((await entry.read()).toString("utf-8"));
         } catch {
-          // Malformed manifest — will be treated as warning
+          // Malformed manifest — will be treated as warning.
         }
       }
     }
 
-    return { manifest, entries };
-  }
-
-  /** Read a ZIP entry without allowing a forged size header to exhaust memory. */
-  private async readEntryWithLimit(file: unzipper.File, maxSize: number): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    let size = 0;
-
-    for await (const chunk of file.stream()) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      size += buffer.length;
-      if (size > maxSize) {
-        throw new Error(`ZIP entry exceeds the permitted expanded-content limit: "${file.path}"`);
-      }
-      chunks.push(buffer);
-    }
-
-    return Buffer.concat(chunks, size);
+    return { manifest, entries, compressedBytes: archive.compressedBytes };
   }
 
   /* ── Private: single note import ──────────────────────────────────── */
@@ -465,7 +465,7 @@ export class CodaScopeNoteImportService {
 
   /** Restore a note's portable artifacts through the shared bundle service. */
   private async restoreCompanions(
-    entries: Map<string, Buffer>,
+    entries: Map<string, ZipEntry>,
     sourceNotePath: string,
     targetNotePath: string,
     destScope: NoteScope,
@@ -473,8 +473,9 @@ export class CodaScopeNoteImportService {
     opts: NoteResolveOpts,
     warnings: string[],
   ): Promise<void> {
+    const companionEntries = await this.materializeCompanionEntries(entries, sourceNotePath);
     const restored = await this.bundleSvc.restoreArchiveContents(
-      destScope, destVisibility, opts, sourceNotePath, targetNotePath, entries,
+      destScope, destVisibility, opts, sourceNotePath, targetNotePath, companionEntries,
     );
     if (restored.annotationWarning) warnings.push(`${targetNotePath}: ${restored.annotationWarning}`);
     const unresolved = restored.annotations.filter((annotation) => !annotation.parentId && !annotation.archivedAt && (
@@ -485,10 +486,37 @@ export class CodaScopeNoteImportService {
     }
   }
 
+  /** Load only the companion files belonging to the note currently being imported. */
+  private async materializeCompanionEntries(
+    entries: Map<string, ZipEntry>,
+    sourceNotePath: string,
+  ): Promise<Map<string, Buffer>> {
+    const result = new Map<string, Buffer>();
+    const assetPrefix = `${sourceNotePath.replace(/\.md$/i, "")}.assets/`;
+    const versionPrefix = `${sourceNotePath.replace(/\.md$/i, "")}.versions/`;
+    const annotationPath = `${sourceNotePath.replace(/\.md$/i, "")}.annotations.json`;
+
+    for (const [entryPath, entry] of entries) {
+      const normalized = entryPath.startsWith("notes/")
+        ? entryPath.slice(6)
+        : entryPath.startsWith("versions/")
+          ? entryPath.slice(9)
+          : entryPath;
+      if (
+        normalized.startsWith(assetPrefix)
+        || normalized.startsWith(versionPrefix)
+        || normalized === annotationPath
+      ) {
+        result.set(entryPath, await entry.read());
+      }
+    }
+    return result;
+  }
+
   /* ── Private: preview from raw entries (no manifest) ──────────────── */
 
   private async buildPreviewFromEntries(
-    entries: Map<string, Buffer>,
+    entries: Map<string, ZipEntry>,
     destScope: NoteScope,
     destVisibility: NoteVisibility,
     opts: NoteResolveOpts,
@@ -505,11 +533,12 @@ export class CodaScopeNoteImportService {
       if (notePath.startsWith("notes/")) notePath = notePath.slice(6);
 
       if (notePath.endsWith(".md") && !notePath.includes(".versions/")) {
-        const content = entries.get(entryPath);
+        const entry = entries.get(entryPath);
         let title = path.basename(notePath, ".md").replace(/[-_]/g, " ");
 
-        if (content) {
+        if (entry) {
           try {
+            const content = await entry.read();
             const { frontmatter } = this.noteSvc.parseFrontmatter(content.toString("utf-8"));
             title = frontmatter.title;
           } catch { /* use filename */ }

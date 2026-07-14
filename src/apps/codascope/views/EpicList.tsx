@@ -3,11 +3,11 @@
    health indicators, and a "New Epic" button.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useShellStore } from "../../../shell/store";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconBlocked, IconBolt, IconCheckCircle, IconClock, IconEpic } from "../components/CodaScopeIcons";
+import { IconBlocked, IconBolt, IconCheckCircle, IconClock, IconDownload, IconEpic, IconUpload } from "../components/CodaScopeIcons";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import type { EpicDesign, EpicStatus, EpicHealth, EpicHealthInfo } from "../codaScopeTypes";
 
@@ -42,6 +42,11 @@ function timeAgo(iso: string): string {
 
 type EpicWithHealth = EpicDesign & { health: EpicHealthInfo };
 
+interface EpicImportResult {
+  epic: EpicDesign;
+  unresolvedScopeEntries: Array<{ topicId: string; topicTitle: string }>;
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function EpicList() {
@@ -57,6 +62,10 @@ export function EpicList() {
   const [archivedEpics, setArchivedEpics] = useState<EpicDesign[]>([]);
   const [loadingArchived, setLoadingArchived] = useState(false);
   const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<EpicImportResult | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch epics
   useEffect(() => {
@@ -158,6 +167,53 @@ export function EpicList() {
     } catch { /* ignore */ }
   }, [activeProjectId, epics, archivedEpics, setEpics]);
 
+  const handleImportEpic = useCallback(async (file: File) => {
+    if (!activeProjectId) return;
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      setImportError("Please choose a CodaScope epic .zip export.");
+      return;
+    }
+
+    setImporting(true);
+    setImportError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics/import`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Epic import failed.");
+      }
+      const result = await res.json() as EpicImportResult;
+      setEpics([...epics, result.epic]);
+      setImportResult(result);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Epic import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }, [activeProjectId, epics, setEpics]);
+
+  const handleExportEpic = useCallback((epicId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!activeProjectId) return;
+    const link = document.createElement("a");
+    link.href = `/api/codascope/projects/${activeProjectId}/epics/${epicId}/export`;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [activeProjectId]);
+
+  const openImportedEpic = useCallback((section: "define" | "scope") => {
+    if (!activeProjectId || !importResult) return;
+    navigate(`project/${activeProjectId}/epic/${importResult.epic.id}/${section}`);
+    setImportResult(null);
+  }, [activeProjectId, importResult, navigate]);
+
   if (!activeProjectId) {
     return (
       <div className="codascope-page">
@@ -178,14 +234,37 @@ export function EpicList() {
             Collaborative engineering design documents
           </p>
         </div>
-        <button
-          className="codascope-btn codascope-btn-primary"
-          onClick={() => setShowNewForm(true)}
-          type="button"
-        >
-          <IconEpic size={14} /> New Epic
-        </button>
+        <div className="codascope-epic-page-actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".zip"
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void handleImportEpic(file);
+              event.target.value = "";
+            }}
+          />
+          <button
+            className="codascope-btn codascope-btn-secondary"
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            type="button"
+          >
+            <IconUpload size={14} /> {importing ? "Importing…" : "Import Epic"}
+          </button>
+          <button
+            className="codascope-btn codascope-btn-primary"
+            onClick={() => setShowNewForm(true)}
+            type="button"
+          >
+            <IconEpic size={14} /> New Epic
+          </button>
+        </div>
       </div>
+
+      {importError && <p className="codascope-epic-import-error" role="alert">{importError}</p>}
 
       {/* New Epic Form */}
       {showNewForm && (
@@ -305,6 +384,14 @@ export function EpicList() {
                   </div>
                   <button
                     className="codascope-epic-card-action"
+                    onClick={(e) => handleExportEpic(epic.id, e)}
+                    type="button"
+                    title="Download a portable epic bundle"
+                  >
+                    <IconDownload size={13} /> Export
+                  </button>
+                  <button
+                    className="codascope-epic-card-action"
                     onClick={(e) => handleArchiveClick(epic.id, e)}
                     type="button"
                   >
@@ -368,6 +455,41 @@ export function EpicList() {
         onConfirm={handleArchiveConfirm}
         onCancel={() => setPendingArchiveId(null)}
       />
+
+      {importResult && (
+        <div className="codascope-modal-overlay" onClick={() => setImportResult(null)}>
+          <div className="codascope-modal codascope-epic-import-result" onClick={(event) => event.stopPropagation()}>
+            <div className="codascope-modal-header">
+              <div className="codascope-modal-title"><IconEpic size={16} /> Epic Imported</div>
+            </div>
+            <div className="codascope-modal-body">
+              <p><strong>{importResult.epic.title}</strong> was created as a new epic in this project.</p>
+              {importResult.unresolvedScopeEntries.length > 0 ? (
+                <>
+                  <p>The imported scope references wiki topics that are not in this project. Review or remove them before relying on the scope.</p>
+                  <ul className="codascope-epic-import-unresolved-list">
+                    {importResult.unresolvedScopeEntries.map((entry) => (
+                      <li key={entry.topicId}>{entry.topicTitle}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p>The imported scope matches this project’s current wiki topics.</p>
+              )}
+            </div>
+            <div className="codascope-modal-footer">
+              <button className="codascope-btn codascope-btn-ghost" onClick={() => setImportResult(null)} type="button">Close</button>
+              <button
+                className="codascope-btn codascope-btn-primary"
+                onClick={() => openImportedEpic(importResult.unresolvedScopeEntries.length > 0 ? "scope" : "define")}
+                type="button"
+              >
+                {importResult.unresolvedScopeEntries.length > 0 ? "Review Scope" : "Open Epic"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
