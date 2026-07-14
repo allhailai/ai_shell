@@ -3,10 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:container": "concurrently \"npm:dev:server\" \"npm:dev:client:container\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --host 127.0.0.1",
+    "dev:client:container": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "check": "tsc -p tsconfig.app.json --noEmit",
     "test": "vitest run",
