@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { ZipArchive } from "archiver";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
+import { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
 import { CodaScopeNoteExportService } from "./codaScopeNoteExportService.js";
 import { CodaScopeNoteImportService } from "./codaScopeNoteImportService.js";
@@ -33,6 +34,7 @@ describe("CodaScope note packages", () => {
     const root = tmpDir();
     const noteSvc = new CodaScopeNoteService(root);
     const annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
+    const bundleSvc = new CodaScopeNoteBundleService(noteSvc, annotationSvc);
     const auditSvc = new CodaScopeNoteAuditService(root);
     const opts = { userId: "alan" };
 
@@ -55,14 +57,14 @@ describe("CodaScope note packages", () => {
       body: "Carry this comment with the note.",
     });
 
-    const exportSvc = new CodaScopeNoteExportService(root, noteSvc, auditSvc, annotationSvc);
+    const exportSvc = new CodaScopeNoteExportService(root, noteSvc, auditSvc, bundleSvc);
     const exportId = await exportSvc.generateExport("codascope", "private", opts, {
       notePaths: ["research"],
       includeVersions: true,
     });
     const archivePath = exportSvc.getExportFile(exportId)!;
 
-    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, annotationSvc);
+    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, bundleSvc);
     const report = await importSvc.executeImport(
       readFileSync(archivePath),
       "codascope",
@@ -90,10 +92,11 @@ describe("CodaScope note packages", () => {
     const root = tmpDir();
     const noteSvc = new CodaScopeNoteService(root);
     const annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
+    const bundleSvc = new CodaScopeNoteBundleService(noteSvc, annotationSvc);
     const auditSvc = new CodaScopeNoteAuditService(root);
     const transferSvc = new CodaScopeNoteTransferService(
       noteSvc,
-      annotationSvc,
+      bundleSvc,
       new CodaScopeNoteUserPrefsService(root),
       new CodaScopeNoteLinkIndexService(noteSvc),
       auditSvc,
@@ -147,13 +150,13 @@ describe("CodaScope note packages", () => {
     expect(existsWithContent(movedBundle.versionsDir)).toBe(true);
     expect(existsSync(movedBundle.annotationFile)).toBe(true);
 
-    const exportSvc = new CodaScopeNoteExportService(root, noteSvc, auditSvc, annotationSvc);
+    const exportSvc = new CodaScopeNoteExportService(root, noteSvc, auditSvc, bundleSvc);
     const exportId = await exportSvc.generateExport("codascope", "private", opts, {
       notePaths: ["published"],
       includeVersions: true,
     });
     const archive = readFileSync(exportSvc.getExportFile(exportId)!);
-    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, annotationSvc);
+    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, bundleSvc);
     expect(await importSvc.executeImport(archive, "codascope", "shared", opts, "skip"))
       .toMatchObject({ imported: 1, skipped: 0, failed: [] });
     expect(await importSvc.executeImport(archive, "codascope", "shared", opts, "rename"))
@@ -179,11 +182,10 @@ describe("CodaScope note packages", () => {
       expect(importedNote!.content).toContain(`id="${rootAnnotationId}"`);
     }
 
-    const archived = await noteSvc.archiveNote("codascope", "private", opts, movedPath);
+    const archived = await bundleSvc.archiveNote("codascope", "private", opts, movedPath);
     await noteSvc.createNote("codascope", "private", opts, movedPath, "Collision placeholder.");
-    const restored = await noteSvc.restoreNote("codascope", "private", opts, archived!.noteId);
+    const restored = await bundleSvc.restoreNote("codascope", "private", opts, archived!.noteId);
     expect(restored?.restoredPath).toMatch(/^published\/decision \(restored\)\.md$/);
-    await annotationSvc.reconcileRestoredBundle("codascope", "private", opts, restored!.restoredPath);
     const restoredBundle = noteSvc.collectNoteBundle("codascope", "private", opts, restored!.restoredPath)!;
     expect(existsWithContent(restoredBundle.assetsDir)).toBe(true);
     expect(existsWithContent(restoredBundle.versionsDir)).toBe(true);
@@ -197,6 +199,7 @@ describe("CodaScope note packages", () => {
     const root = tmpDir();
     const noteSvc = new CodaScopeNoteService(root);
     const annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
+    const bundleSvc = new CodaScopeNoteBundleService(noteSvc, annotationSvc);
     const auditSvc = new CodaScopeNoteAuditService(root);
     const opts = { userId: "alan" };
 
@@ -221,7 +224,7 @@ describe("CodaScope note packages", () => {
       { path: "notes/fallback.annotations.json", content: readFileSync(bundle.annotationFile) },
     ]);
 
-    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, annotationSvc);
+    const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, bundleSvc);
     const report = await importSvc.executeImport(readFileSync(rawZip), "codascope", "shared", opts, "skip");
     expect(report).toMatchObject({ imported: 1, failed: [] });
     const annotations = await annotationSvc.listAnnotations("codascope", "shared", opts, "fallback.md");

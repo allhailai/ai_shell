@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import * as unzipper from "unzipper";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
-import type { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
+import type { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
 
 /* ── Constants ────────────────────────────────────────────────────── */
@@ -93,18 +93,18 @@ export class CodaScopeNoteImportService {
   private root: string;
   private noteSvc: CodaScopeNoteService;
   private auditSvc: CodaScopeNoteAuditService;
-  private annotationSvc: CodaScopeNoteAnnotationService;
+  private bundleSvc: CodaScopeNoteBundleService;
 
   constructor(
     root: string,
     noteSvc: CodaScopeNoteService,
     auditSvc: CodaScopeNoteAuditService,
-    annotationSvc: CodaScopeNoteAnnotationService,
+    bundleSvc: CodaScopeNoteBundleService,
   ) {
     this.root = root;
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
-    this.annotationSvc = annotationSvc;
+    this.bundleSvc = bundleSvc;
   }
 
   setRoot(root: string): void {
@@ -114,11 +114,11 @@ export class CodaScopeNoteImportService {
   setServices(
     noteSvc: CodaScopeNoteService,
     auditSvc: CodaScopeNoteAuditService,
-    annotationSvc: CodaScopeNoteAnnotationService,
+    bundleSvc: CodaScopeNoteBundleService,
   ): void {
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
-    this.annotationSvc = annotationSvc;
+    this.bundleSvc = bundleSvc;
   }
 
   /* ── Preview ──────────────────────────────────────────────────────── */
@@ -463,7 +463,7 @@ export class CodaScopeNoteImportService {
     );
   }
 
-  /** Restore every companion in one physical note bundle and reconcile it. */
+  /** Restore a note's portable artifacts through the shared bundle service. */
   private async restoreCompanions(
     entries: Map<string, Buffer>,
     sourceNotePath: string,
@@ -473,50 +473,11 @@ export class CodaScopeNoteImportService {
     opts: NoteResolveOpts,
     warnings: string[],
   ): Promise<void> {
-    const sourceBase = sourceNotePath.replace(/\.md$/, "");
-    const assetsPrefix = `${sourceBase}.assets/`;
-    const versionsPrefix = `${sourceBase}.versions/`;
-    const annotationsPath = `${sourceBase}.annotations.json`;
-    let annotationRestored = false;
-
-    for (const [entryPath, content] of entries) {
-      const normalized = entryPath.startsWith("notes/")
-        ? entryPath.slice(6)
-        : entryPath.startsWith("versions/")
-          ? entryPath.slice(9)
-          : entryPath;
-      if (normalized.startsWith(assetsPrefix)) {
-        this.noteSvc.writeNoteBundleCompanion(
-          destScope, destVisibility, opts, targetNotePath,
-          "asset", normalized.slice(assetsPrefix.length), content,
-        );
-      } else if (normalized.startsWith(versionsPrefix)) {
-        this.noteSvc.writeNoteBundleCompanion(
-          destScope, destVisibility, opts, targetNotePath,
-          "version", normalized.slice(versionsPrefix.length), content,
-        );
-      } else if (normalized === annotationsPath) {
-        try {
-          const sidecar = JSON.parse(content.toString("utf-8"));
-          if (Array.isArray(sidecar) || Array.isArray(sidecar?.annotations)) {
-            this.annotationSvc.replaceAnnotations(
-              destScope, destVisibility, opts, targetNotePath, sidecar,
-            );
-            annotationRestored = true;
-          } else {
-            warnings.push(`${targetNotePath}: annotation sidecar was malformed and was not imported.`);
-          }
-        } catch {
-          warnings.push(`${targetNotePath}: annotation sidecar was malformed and was not imported.`);
-        }
-      }
-    }
-
-    if (!annotationRestored) this.annotationSvc.ensurePhysicalSidecar(destScope, destVisibility, opts, targetNotePath);
-    const reconciled = await this.annotationSvc.reconcileAfterNoteWrite(
-      destScope, destVisibility, opts, targetNotePath,
+    const restored = await this.bundleSvc.restoreArchiveContents(
+      destScope, destVisibility, opts, sourceNotePath, targetNotePath, entries,
     );
-    const unresolved = reconciled.filter((annotation) => !annotation.parentId && !annotation.archivedAt && (
+    if (restored.annotationWarning) warnings.push(`${targetNotePath}: ${restored.annotationWarning}`);
+    const unresolved = restored.annotations.filter((annotation) => !annotation.parentId && !annotation.archivedAt && (
       !("kind" in annotation.anchor) || annotation.anchor.attachmentState !== "attached"
     ));
     if (unresolved.length > 0) {

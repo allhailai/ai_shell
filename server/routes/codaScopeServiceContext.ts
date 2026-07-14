@@ -32,6 +32,7 @@ import { CodaScopeDirectiveService } from "../services/codaScopeDirectiveService
 import { ProjectDirResolver } from "../services/codaScopeProjectDirResolver.js";
 import { CodaScopeNoteService } from "../services/codaScopeNoteService.js";
 import { CodaScopeNoteAnnotationService } from "../services/codaScopeNoteAnnotationService.js";
+import { CodaScopeNoteBundleService } from "../services/codaScopeNoteBundleService.js";
 import { CodaScopeNoteAuditService } from "../services/codaScopeNoteAuditService.js";
 import { CodaScopeNoteUserPrefsService } from "../services/codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteLinkIndexService } from "../services/codaScopeNoteLinkIndexService.js";
@@ -83,6 +84,7 @@ export interface CodaScopeServices {
   directiveSvc: CodaScopeDirectiveService;
   noteSvc: CodaScopeNoteService;
   noteAnnotationSvc: CodaScopeNoteAnnotationService;
+  noteBundleSvc: CodaScopeNoteBundleService;
   noteAuditSvc: CodaScopeNoteAuditService;
   noteUserPrefsSvc: CodaScopeNoteUserPrefsService;
   noteLinkIndexSvc: CodaScopeNoteLinkIndexService;
@@ -137,6 +139,7 @@ let lockService: CodaScopeLockService | null = null;
 let directiveService: CodaScopeDirectiveService | null = null;
 let noteService: CodaScopeNoteService | null = null;
 let noteAnnotationService: CodaScopeNoteAnnotationService | null = null;
+let noteBundleService: CodaScopeNoteBundleService | null = null;
 let noteAuditService: CodaScopeNoteAuditService | null = null;
 let noteUserPrefsService: CodaScopeNoteUserPrefsService | null = null;
 let noteLinkIndexService: CodaScopeNoteLinkIndexService | null = null;
@@ -268,6 +271,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteAnnotationService) noteAnnotationService = new CodaScopeNoteAnnotationService(noteService);
   else noteAnnotationService.setNoteService(noteService);
 
+  if (!noteBundleService) noteBundleService = new CodaScopeNoteBundleService(noteService, noteAnnotationService);
+  else noteBundleService.setServices(noteService, noteAnnotationService);
+
   if (!noteAuditService) noteAuditService = new CodaScopeNoteAuditService(root);
   else noteAuditService.setRoot(root);
 
@@ -277,11 +283,11 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteLinkIndexService) noteLinkIndexService = new CodaScopeNoteLinkIndexService(noteService);
   else noteLinkIndexService.setNoteService(noteService);
 
-  if (!noteExportService) noteExportService = new CodaScopeNoteExportService(root, noteService, noteAuditService, noteAnnotationService);
-  else { noteExportService.setRoot(root); noteExportService.setServices(noteService, noteAuditService, noteAnnotationService); }
+  if (!noteExportService) noteExportService = new CodaScopeNoteExportService(root, noteService, noteAuditService, noteBundleService);
+  else { noteExportService.setRoot(root); noteExportService.setServices(noteService, noteAuditService, noteBundleService); }
 
-  if (!noteImportService) noteImportService = new CodaScopeNoteImportService(root, noteService, noteAuditService, noteAnnotationService);
-  else { noteImportService.setRoot(root); noteImportService.setServices(noteService, noteAuditService, noteAnnotationService); }
+  if (!noteImportService) noteImportService = new CodaScopeNoteImportService(root, noteService, noteAuditService, noteBundleService);
+  else { noteImportService.setRoot(root); noteImportService.setServices(noteService, noteAuditService, noteBundleService); }
 
   if (!noteTagSuggestionService) noteTagSuggestionService = new CodaScopeNoteTagSuggestionService(root);
   else noteTagSuggestionService.setRoot(root);
@@ -289,7 +295,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteTransferService) {
     noteTransferService = new CodaScopeNoteTransferService(
       noteService,
-      noteAnnotationService,
+      noteBundleService,
       noteUserPrefsService,
       noteLinkIndexService,
       noteAuditService,
@@ -297,7 +303,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   } else {
     noteTransferService.setServices(
       noteService,
-      noteAnnotationService,
+      noteBundleService,
       noteUserPrefsService,
       noteLinkIndexService,
       noteAuditService,
@@ -330,6 +336,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     directiveSvc: directiveService,
     noteSvc: noteService,
     noteAnnotationSvc: noteAnnotationService,
+    noteBundleSvc: noteBundleService,
     noteAuditSvc: noteAuditService,
     noteUserPrefsSvc: noteUserPrefsService,
     noteLinkIndexSvc: noteLinkIndexService,

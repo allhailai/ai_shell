@@ -13,19 +13,17 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   unlinkSync,
   statSync,
   createWriteStream,
 } from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
 import { ZipArchive } from "archiver";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
-import type { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
+import type { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
 
 /* ── Types ────────────────────────────────────────────────────────── */
@@ -71,19 +69,19 @@ export class CodaScopeNoteExportService {
   private root: string;
   private noteSvc: CodaScopeNoteService;
   private auditSvc: CodaScopeNoteAuditService;
-  private annotationSvc: CodaScopeNoteAnnotationService;
+  private bundleSvc: CodaScopeNoteBundleService;
   private exports = new Map<string, ExportRecord>();
 
   constructor(
     root: string,
     noteSvc: CodaScopeNoteService,
     auditSvc: CodaScopeNoteAuditService,
-    annotationSvc: CodaScopeNoteAnnotationService,
+    bundleSvc: CodaScopeNoteBundleService,
   ) {
     this.root = root;
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
-    this.annotationSvc = annotationSvc;
+    this.bundleSvc = bundleSvc;
   }
 
   setRoot(root: string): void {
@@ -93,11 +91,11 @@ export class CodaScopeNoteExportService {
   setServices(
     noteSvc: CodaScopeNoteService,
     auditSvc: CodaScopeNoteAuditService,
-    annotationSvc: CodaScopeNoteAnnotationService,
+    bundleSvc: CodaScopeNoteBundleService,
   ): void {
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
-    this.annotationSvc = annotationSvc;
+    this.bundleSvc = bundleSvc;
   }
 
   /* ── Export generation ────────────────────────────────────────────── */
@@ -157,60 +155,24 @@ export class CodaScopeNoteExportService {
 
     for (const noteFile of noteFiles) {
       const relativePath = path.relative(notesDir, noteFile);
-      const content = readFileSync(noteFile, "utf-8");
-      const { frontmatter } = this.noteSvc.parseFrontmatter(content);
-
-      const contentFile = `notes/${relativePath}`;
-      archive.append(content, { name: contentFile });
-
-      // Annotation state is part of a complete note bundle, never an
-      // opt-in add-on. This also migrates any legacy sidecar before export.
-      this.annotationSvc.ensurePhysicalSidecar(scope, visibility, opts, relativePath);
-      await this.annotationSvc.reconcileAfterNoteWrite(scope, visibility, opts, relativePath);
-      const bundle = this.noteSvc.collectNoteBundle(scope, visibility, opts, relativePath);
+      const bundle = await this.bundleSvc.collectArchiveContents(
+        scope, visibility, opts, relativePath, options.includeVersions === true,
+      );
       if (!bundle) throw new Error(`Could not collect note bundle: ${relativePath}`);
-
-      // Collect managed attachments through the shared note-bundle utility.
-      const attachments: Array<{ path: string; sha256: string }> = [];
-      for (const assetFile of bundle.assets) {
-          const assetRelative = path.relative(notesDir, assetFile.absolutePath);
-          const assetContent = readFileSync(assetFile.absolutePath);
-          const sha256 = crypto.createHash("sha256").update(assetContent).digest("hex");
-
-          archive.append(assetContent, { name: `notes/${assetRelative}` });
-          attachments.push({
-            path: `notes/${assetRelative}`,
-            sha256,
-          });
-      }
-
-      // Versions (optional)
-      let versionsIncluded = false;
-      if (options.includeVersions) {
-        for (const versionFile of bundle.versions) {
-          const versionRelative = path.relative(notesDir, versionFile.absolutePath);
-          archive.file(versionFile.absolutePath, { name: `versions/${versionRelative}` });
-        }
-        versionsIncluded = bundle.versions.length > 0;
-      }
-
-      const annotationPath = `notes/${relativePath.replace(/\.md$/, ".annotations.json")}`;
-      const annotationJson = bundle.annotation
-        ? readFileSync(bundle.annotation.absolutePath)
-        : Buffer.from(JSON.stringify({ annotations: [] }, null, 2));
-      archive.append(annotationJson, { name: annotationPath });
+      const { frontmatter } = this.noteSvc.parseFrontmatter(bundle.markdown.toString("utf-8"));
+      for (const entry of bundle.entries) archive.append(entry.content, { name: entry.path });
 
       items.push({
         noteId: frontmatter.id,
         path: relativePath,
-        contentFile,
+        contentFile: `notes/${relativePath}`,
         visibility,
         owner: frontmatter.owner,
-        attachments,
+        attachments: bundle.attachments,
         frontmatter: { title: frontmatter.title, tags: frontmatter.tags },
-        versionsIncluded,
-        annotationsIncluded: true,
-        annotationAnchorFormatVersion: 1,
+        versionsIncluded: bundle.versionsIncluded,
+        annotationsIncluded: bundle.annotationsIncluded,
+        annotationAnchorFormatVersion: bundle.annotationsIncluded ? 1 : undefined,
       });
     }
 

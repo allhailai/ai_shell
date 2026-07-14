@@ -1,9 +1,10 @@
 /* ── CodaScope: Note Transfer Service ────────────────────────────────
    The sole orchestration point for moving notes or folder trees.
 
-   A note move is more than a markdown rename: it carries the managed file
-   bundle, annotation sidecar, user references, link indexes, and audit trail.
-   UI routes, drag-and-drop, dialogs, and bulk operations all call here.
+   A note move is more than a markdown rename: it delegates the managed file
+   bundle to CodaScopeNoteBundleService, then updates references, indexes, and
+   audit state. UI routes, drag-and-drop, dialogs, and bulk operations call
+   here.
    ──────────────────────────────────────────────────────────────────── */
 
 import { randomUUID } from "node:crypto";
@@ -14,7 +15,7 @@ import type {
   NoteMoveOpts,
   NoteResolveOpts,
 } from "./codaScopeNoteService.js";
-import type { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
+import type { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import type { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import type { CodaScopeNoteLinkIndexService } from "./codaScopeNoteLinkIndexService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
@@ -43,7 +44,7 @@ interface TransferRecord {
 export class CodaScopeNoteTransferService {
   constructor(
     private noteSvc: CodaScopeNoteService,
-    private annotationSvc: CodaScopeNoteAnnotationService,
+    private bundleSvc: CodaScopeNoteBundleService,
     private userPrefsSvc: CodaScopeNoteUserPrefsService,
     private linkIndexSvc: CodaScopeNoteLinkIndexService,
     private auditSvc: CodaScopeNoteAuditService,
@@ -51,19 +52,19 @@ export class CodaScopeNoteTransferService {
 
   setServices(
     noteSvc: CodaScopeNoteService,
-    annotationSvc: CodaScopeNoteAnnotationService,
+    bundleSvc: CodaScopeNoteBundleService,
     userPrefsSvc: CodaScopeNoteUserPrefsService,
     linkIndexSvc: CodaScopeNoteLinkIndexService,
     auditSvc: CodaScopeNoteAuditService,
   ): void {
     this.noteSvc = noteSvc;
-    this.annotationSvc = annotationSvc;
+    this.bundleSvc = bundleSvc;
     this.userPrefsSvc = userPrefsSvc;
     this.linkIndexSvc = linkIndexSvc;
     this.auditSvc = auditSvc;
   }
 
-  /** Move one complete note bundle and all logical sidecars. */
+  /** Move one complete note bundle and update the owning note-library state. */
   async moveFile(options: NoteTransferOptions): Promise<NoteTransferResult> {
     const correlationId = options.correlationId ?? randomUUID();
     const fromPath = this.notePath(options.fromPath);
@@ -76,55 +77,8 @@ export class CodaScopeNoteTransferService {
     );
     if (!source) return { moved: false, noteIds: [], correlationId };
 
-    // Materialize legacy sidecars before the physical bundle rename. Once
-    // bundled, Markdown and its thread sidecar move as a single unit.
-    this.annotationSvc.ensurePhysicalSidecar(
-      options.fromScope, options.fromVisibility, options.fromOpts, fromPath,
-    );
-    this.annotationSvc.assertCanRelocate(
-      options.fromScope, options.fromVisibility, options.fromOpts, fromPath,
-      options.toScope, options.toVisibility, options.toOpts, toPath,
-    );
-
-    let noteMoved = false;
-    let annotationsMoved = false;
-    try {
-      noteMoved = await this.noteSvc.moveNote({ ...options, fromPath, toPath });
-      if (!noteMoved) return { moved: false, noteIds: [], correlationId };
-      annotationsMoved = this.annotationSvc.relocateAnnotations(
-        options.fromScope, options.fromVisibility, options.fromOpts, fromPath,
-        options.toScope, options.toVisibility, options.toOpts, toPath,
-      );
-      // Markdown markers travel in the note bundle. Verify the relocated
-      // sidecar against that exact content instead of trusting path metadata.
-      await this.annotationSvc.reconcileAfterNoteWrite(
-        options.toScope, options.toVisibility, options.toOpts, toPath,
-      );
-    } catch (error) {
-      if (annotationsMoved) {
-        try {
-          this.annotationSvc.relocateAnnotations(
-            options.toScope, options.toVisibility, options.toOpts, toPath,
-            options.fromScope, options.fromVisibility, options.fromOpts, fromPath,
-          );
-        } catch { /* best effort during rollback */ }
-      }
-      if (noteMoved) {
-        try {
-          await this.noteSvc.moveNote({
-            fromScope: options.toScope,
-            fromVisibility: options.toVisibility,
-            fromOpts: options.toOpts,
-            fromPath: toPath,
-            toScope: options.fromScope,
-            toVisibility: options.fromVisibility,
-            toOpts: options.fromOpts,
-            toPath: fromPath,
-          });
-        } catch { /* best effort during rollback */ }
-      }
-      throw error;
-    }
+    const moved = await this.bundleSvc.moveFile({ ...options, fromPath, toPath });
+    if (!moved) return { moved: false, noteIds: [], correlationId };
 
     const record: TransferRecord = {
       noteId: source.frontmatter.id,
@@ -147,58 +101,8 @@ export class CodaScopeNoteTransferService {
       options.toFolder,
     );
 
-    for (const record of records) {
-      this.annotationSvc.ensurePhysicalSidecar(
-        options.fromScope, options.fromVisibility, options.fromOpts, record.fromPath,
-      );
-      this.annotationSvc.assertCanRelocate(
-        options.fromScope, options.fromVisibility, options.fromOpts, record.fromPath,
-        options.toScope, options.toVisibility, options.toOpts, record.toPath,
-      );
-    }
-
-    let folderMoved = false;
-    const movedAnnotations: TransferRecord[] = [];
-    try {
-      folderMoved = await this.noteSvc.moveFolder(options);
-      if (!folderMoved) return { moved: false, noteIds: [], correlationId };
-
-      for (const record of records) {
-        if (this.annotationSvc.relocateAnnotations(
-          options.fromScope, options.fromVisibility, options.fromOpts, record.fromPath,
-          options.toScope, options.toVisibility, options.toOpts, record.toPath,
-        )) {
-          movedAnnotations.push(record);
-        }
-        await this.annotationSvc.reconcileAfterNoteWrite(
-          options.toScope, options.toVisibility, options.toOpts, record.toPath,
-        );
-      }
-    } catch (error) {
-      for (const record of movedAnnotations.reverse()) {
-        try {
-          this.annotationSvc.relocateAnnotations(
-            options.toScope, options.toVisibility, options.toOpts, record.toPath,
-            options.fromScope, options.fromVisibility, options.fromOpts, record.fromPath,
-          );
-        } catch { /* best effort during rollback */ }
-      }
-      if (folderMoved) {
-        try {
-          await this.noteSvc.moveFolder({
-            fromScope: options.toScope,
-            fromVisibility: options.toVisibility,
-            fromOpts: options.toOpts,
-            fromFolder: options.toFolder,
-            toScope: options.fromScope,
-            toVisibility: options.fromVisibility,
-            toOpts: options.fromOpts,
-            toFolder: options.fromFolder,
-          });
-        } catch { /* best effort during rollback */ }
-      }
-      throw error;
-    }
+    const moved = await this.bundleSvc.moveFolder(options);
+    if (!moved) return { moved: false, noteIds: [], correlationId };
 
     await this.finalizeTransfer(records, options, correlationId, true);
     return { moved: true, noteIds: records.map((record) => record.noteId), correlationId };

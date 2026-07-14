@@ -457,12 +457,11 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
   // Folder routes are intentionally registered before generic note paths.
   app.post("/api/codascope/notes/:scope/:visibility/folders/archive", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteAuditSvc, noteBundleSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const { folderPath, reason } = req.body as { folderPath?: string; reason?: string };
     if (!folderPath || typeof folderPath !== "string") throw httpError("folderPath is required.", 400, "invalid_input");
-    await noteAnnotationSvc.ensurePhysicalSidecarsInFolder(scope, visibility, opts, folderPath.trim());
-    const meta = await noteSvc.archiveFolder(scope, visibility, opts, folderPath.trim(), reason);
+    const meta = await noteBundleSvc.archiveFolder(scope, visibility, opts, folderPath.trim(), reason);
     if (!meta) throw httpError("Folder not found.", 404, "not_found");
     noteAuditSvc.log({
       event: "folder.archived",
@@ -843,7 +842,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Archive a Note ─────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/note/*path/archive", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteAuditSvc, noteBundleSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
 
     let notePath = extractPath(req);
@@ -852,8 +851,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
     const { reason } = req.body as { reason?: string };
 
-    noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, notePath);
-    const meta = await noteSvc.archiveNote(scope, visibility, opts, notePath, reason);
+    const meta = await noteBundleSvc.archiveNote(scope, visibility, opts, notePath, reason);
     if (!meta) throw httpError("Note not found.", 404, "not_found");
 
     // Audit log
@@ -874,15 +872,12 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Restore an Archived Note ──────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/archive/restore/:noteId", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteAuditSvc, noteBundleSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const noteId = param(req, "noteId");
 
-    const result = await noteSvc.restoreNote(scope, visibility, opts, noteId);
+    const result = await noteBundleSvc.restoreNote(scope, visibility, opts, noteId);
     if (!result) throw httpError("Archived note not found.", 404, "not_found");
-    await noteAnnotationSvc.reconcileRestoredBundle(
-      scope, visibility, opts, result.restoredPath, result.meta.kind === "folder",
-    );
 
     // Audit log
     noteAuditSvc.log({
@@ -935,7 +930,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Bulk Archive ───────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/bulk/archive", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteLinkIndexSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteAuditSvc, noteLinkIndexSvc, noteBundleSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
 
     const { noteIds, reason } = req.body as { noteIds?: string[]; reason?: string };
@@ -947,11 +942,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
 
     const correlationId = randomUUID();
-    for (const noteId of noteIds) {
-      const found = await noteSvc.findNoteById(scope, visibility, opts, noteId);
-      if (found) noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, found.path);
-    }
-    const result = await noteSvc.bulkArchive(scope, visibility, opts, noteIds, reason);
+    const result = await noteBundleSvc.bulkArchive(scope, visibility, opts, noteIds, reason);
 
     // Audit log each archived note with the same correlationId
     for (const ap of result.archivedPaths) {
@@ -1062,7 +1053,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Activity Feed ──────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/note/*path/activity", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -1320,7 +1311,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Delete Note ─────────────────────────────────────────────────────
 
   app.delete("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteBundleSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -1338,8 +1329,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       if (note) noteId = note.frontmatter.id;
     } catch { /* best effort */ }
 
-    noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, notePath);
-    const deleted = await noteSvc.deleteNote(scope, visibility, opts, notePath, permanent);
+    const deleted = await noteBundleSvc.deleteNote(scope, visibility, opts, notePath, permanent);
     if (!deleted) throw httpError("Note not found.", 404, "not_found");
 
     // Audit log

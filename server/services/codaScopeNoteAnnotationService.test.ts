@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -135,7 +135,7 @@ describe("CodaScopeNoteAnnotationService inline anchors", () => {
     expect(await annotationSvc.getRenderTargets("codascope", "private", opts, "ambiguous.md")).toEqual([]);
   });
 
-  it("migrates a legacy library-level sidecar into the physical note bundle", async () => {
+  it("stores the annotation sidecar beside its note, never in a library-wide directory", async () => {
     const noteSvc = new CodaScopeNoteService(tempRoot());
     const annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
     await noteSvc.createNote("codascope", "private", opts, "legacy-storage.md", "Keep this marker.");
@@ -147,16 +147,9 @@ describe("CodaScopeNoteAnnotationService inline anchors", () => {
     });
     if ("conflict" in created) throw new Error("unexpected conflict");
     const bundle = noteSvc.collectNoteBundle("codascope", "private", opts, "legacy-storage.md")!;
-    const legacyDir = path.join(noteSvc.resolveNotesDir("codascope", "private", opts)!, "_annotations");
-    const legacyPath = path.join(legacyDir, "legacy-storage-annotations.json");
-    mkdirSync(legacyDir, { recursive: true });
-    writeFileSync(legacyPath, readFileSync(bundle.annotationFile));
-    rmSync(bundle.annotationFile);
-
-    annotationSvc.ensurePhysicalSidecar("codascope", "private", opts, "legacy-storage.md");
-
+    const notesDir = noteSvc.resolveNotesDir("codascope", "private", opts)!;
     expect(existsSync(bundle.annotationFile)).toBe(true);
-    expect(existsSync(legacyPath)).toBe(false);
+    expect(existsSync(path.join(notesDir, "_annotations"))).toBe(false);
     expect(await annotationSvc.getRenderTargets("codascope", "private", opts, "legacy-storage.md")).toHaveLength(1);
   });
 

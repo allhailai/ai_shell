@@ -5,7 +5,7 @@
    sidecar stores thread data and recovery context, never a line-based pin.
    ──────────────────────────────────────────────────────────────────── */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {
@@ -77,25 +77,15 @@ export class CodaScopeNoteAnnotationService {
 
   /* ── Sidecar I/O ───────────────────────────────────────────────── */
 
-  private legacyAnnotationsDir(notesDir: string): string {
-    return path.join(notesDir, "_annotations");
-  }
-
-  private legacyAnnotationsPath(notesDir: string, notePath: string): string {
-    const basename = notePath.replace(/\.md$/i, "").replace(/\//g, "--");
-    return path.join(this.legacyAnnotationsDir(notesDir), `${basename}-annotations.json`);
-  }
-
-  private annotationPaths(
+  private annotationPath(
     scope: NoteScope,
     visibility: NoteVisibility,
     opts: NoteResolveOpts,
     notePath: string,
-  ): { physical: string; legacy: string } {
+  ): string {
     const bundle = this.noteSvc.resolveNoteFileBundle(scope, visibility, opts, notePath);
     if (!bundle) throw new Error("Cannot resolve note annotation storage.");
-    const notesDir = this.resolveNotesDir(scope, visibility, opts);
-    return { physical: bundle.annotationFile, legacy: this.legacyAnnotationsPath(notesDir, notePath) };
+    return bundle.annotationFile;
   }
 
   private readAnnotations(
@@ -104,8 +94,7 @@ export class CodaScopeNoteAnnotationService {
     opts: NoteResolveOpts,
     notePath: string,
   ): NoteAnnotationsFile {
-    const { physical, legacy } = this.annotationPaths(scope, visibility, opts, notePath);
-    const filePath = existsSync(physical) ? physical : legacy;
+    const filePath = this.annotationPath(scope, visibility, opts, notePath);
     if (!existsSync(filePath)) return { annotations: [] };
     try {
       const parsed = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -122,74 +111,12 @@ export class CodaScopeNoteAnnotationService {
     notePath: string,
     data: NoteAnnotationsFile,
   ): void {
-    const { physical, legacy } = this.annotationPaths(scope, visibility, opts, notePath);
+    const physical = this.annotationPath(scope, visibility, opts, notePath);
     const dir = path.dirname(physical);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const temporary = `${physical}.tmp.${crypto.randomUUID()}`;
     writeFileSync(temporary, JSON.stringify(data, null, 2), "utf-8");
     renameSync(temporary, physical);
-    try { if (legacy !== physical && existsSync(legacy)) unlinkSync(legacy); } catch { /* legacy cleanup is best effort after a durable migration */ }
-  }
-
-  private resolveNotesDir(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts): string {
-    const notesDir = this.noteSvc.resolveNotesDir(scope, visibility, opts);
-    if (!notesDir) throw new Error("Cannot resolve note annotation storage.");
-    return notesDir;
-  }
-
-  /** Migrate a legacy library-level sidecar into its physical note bundle. */
-  ensurePhysicalSidecar(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, notePath: string): void {
-    if (!this.noteSvc.getNoteFileBundle(scope, visibility, opts, notePath)) return;
-    const { physical, legacy } = this.annotationPaths(scope, visibility, opts, notePath);
-    if (existsSync(physical)) return;
-    if (existsSync(legacy)) {
-      try {
-        const parsed = JSON.parse(readFileSync(legacy, "utf-8"));
-        if (!Array.isArray(parsed?.annotations)) throw new Error("invalid shape");
-      } catch {
-        throw new Error("Legacy annotation sidecar is malformed and must be repaired before this note can move.");
-      }
-    }
-    this.writeAnnotations(scope, visibility, opts, notePath, this.readAnnotations(scope, visibility, opts, notePath));
-  }
-
-  /** Materialize every legacy sidecar before a folder-level physical move. */
-  async ensurePhysicalSidecarsInFolder(
-    scope: NoteScope,
-    visibility: NoteVisibility,
-    opts: NoteResolveOpts,
-    folderPath: string,
-  ): Promise<void> {
-    const visit = async (folder: string): Promise<void> => {
-      const entries = await this.noteSvc.listNotes(scope, visibility, opts, folder);
-      for (const entry of entries) {
-        if (entry.isFolder) await visit(entry.path);
-        else this.ensurePhysicalSidecar(scope, visibility, opts, entry.path);
-      }
-    };
-    await visit(folderPath);
-  }
-
-  /** Reconcile metadata and marker validity after a note or folder restore. */
-  async reconcileRestoredBundle(
-    scope: NoteScope,
-    visibility: NoteVisibility,
-    opts: NoteResolveOpts,
-    restoredPath: string,
-    isFolder = false,
-  ): Promise<void> {
-    if (!isFolder) {
-      await this.reconcileAfterNoteWrite(scope, visibility, opts, restoredPath);
-      return;
-    }
-    const visit = async (folder: string): Promise<void> => {
-      const entries = await this.noteSvc.listNotes(scope, visibility, opts, folder);
-      for (const entry of entries) {
-        if (entry.isFolder) await visit(entry.path);
-        else await this.reconcileAfterNoteWrite(scope, visibility, opts, entry.path);
-      }
-    };
-    await visit(restoredPath);
   }
 
   /* ── Reconciliation ────────────────────────────────────────────── */
@@ -651,35 +578,6 @@ export class CodaScopeNoteAnnotationService {
     }
     flush(sourceLines.length - 1);
     return blocks;
-  }
-
-  assertCanRelocate(
-    fromScope: NoteScope, fromVisibility: NoteVisibility, fromOpts: NoteResolveOpts, fromPath: string,
-    toScope: NoteScope, toVisibility: NoteVisibility, toOpts: NoteResolveOpts, toPath: string,
-  ): void {
-    const source = this.annotationPaths(fromScope, fromVisibility, fromOpts, fromPath);
-    const target = this.annotationPaths(toScope, toVisibility, toOpts, toPath);
-    if (
-      source.physical !== target.physical
-      && (existsSync(source.physical) || existsSync(source.legacy))
-      && (existsSync(target.physical) || existsSync(target.legacy))
-    ) throw new Error("Target note annotations already exist.");
-  }
-
-  relocateAnnotations(
-    fromScope: NoteScope, fromVisibility: NoteVisibility, fromOpts: NoteResolveOpts, fromPath: string,
-    toScope: NoteScope, toVisibility: NoteVisibility, toOpts: NoteResolveOpts, toPath: string,
-  ): boolean {
-    void fromScope;
-    void fromVisibility;
-    void fromOpts;
-    void fromPath;
-    const { physical } = this.annotationPaths(toScope, toVisibility, toOpts, toPath);
-    if (!existsSync(physical)) return false;
-    const current = this.readAnnotations(toScope, toVisibility, toOpts, toPath);
-    this.deriveAnnotationLocations(current.annotations, toScope, toVisibility, toPath);
-    this.writeAnnotations(toScope, toVisibility, toOpts, toPath, current);
-    return true;
   }
 
   replaceAnnotations(

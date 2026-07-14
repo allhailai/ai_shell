@@ -7,6 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
+import { CodaScopeNoteBundleService } from "./codaScopeNoteBundleService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteLinkIndexService } from "./codaScopeNoteLinkIndexService.js";
 import { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
@@ -22,6 +23,7 @@ describe("CodaScopeNoteTransferService", () => {
   let root: string;
   let noteSvc: CodaScopeNoteService;
   let annotationSvc: CodaScopeNoteAnnotationService;
+  let bundleSvc: CodaScopeNoteBundleService;
   let prefsSvc: CodaScopeNoteUserPrefsService;
   let transferSvc: CodaScopeNoteTransferService;
   const alan = { userId: "alan" };
@@ -30,10 +32,11 @@ describe("CodaScopeNoteTransferService", () => {
     root = tmpDir();
     noteSvc = new CodaScopeNoteService(root);
     annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
+    bundleSvc = new CodaScopeNoteBundleService(noteSvc, annotationSvc);
     prefsSvc = new CodaScopeNoteUserPrefsService(root);
     transferSvc = new CodaScopeNoteTransferService(
       noteSvc,
-      annotationSvc,
+      bundleSvc,
       prefsSvc,
       new CodaScopeNoteLinkIndexService(noteSvc),
       new CodaScopeNoteAuditService(root),
