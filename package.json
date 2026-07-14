@@ -10,8 +10,8 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:container": "concurrently \"npm:dev:server\" \"npm:dev:client:container\"",
     "dev:server": "tsx watch server/index.ts",
-    "dev:client": "vite --host 127.0.0.1",
-    "dev:client:container": "vite --host 0.0.0.0",
+    "dev:client": "wait-on http://127.0.0.1:5175/api/version && vite --host 127.0.0.1",
+    "dev:client:container": "wait-on http://127.0.0.1:5175/api/version && vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "check": "tsc -p tsconfig.app.json --noEmit",
     "test": "vitest run",
@@ -60,6 +60,7 @@
     "tsx": "^4.20.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "wait-on": "^9.0.10"
   }
 }
