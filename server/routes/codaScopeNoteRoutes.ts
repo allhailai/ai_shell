@@ -12,6 +12,7 @@ import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNote
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
+import { parseInlineAnnotationAnchors } from "../services/codaScopeNoteAnnotationAnchorService.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -35,6 +36,9 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
     if (!VALID_VISIBILITIES.includes(visibilityParam as NoteVisibility)) {
       throw httpError(`Invalid visibility: "${visibilityParam}". Must be one of: ${VALID_VISIBILITIES.join(", ")}`, 400, "invalid_visibility");
+    }
+    if (scopeParam === "epic" && visibilityParam === "private") {
+      throw httpError("Epic notes are shared with the team.", 400, "invalid_visibility");
     }
 
     const userId = principal(req).username;
@@ -86,7 +90,6 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       epicId,
       notePaths,
       includeVersions,
-      includeAnnotations,
     } = req.body as {
       scope?: string;
       visibility?: string;
@@ -94,7 +97,6 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       epicId?: string;
       notePaths?: string[];
       includeVersions?: boolean;
-      includeAnnotations?: boolean;
     };
 
     if (!scopeParam || !VALID_SCOPES.includes(scopeParam as NoteScope)) {
@@ -109,7 +111,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       scopeParam as NoteScope,
       visibilityParam as NoteVisibility,
       opts,
-      { notePaths, includeVersions, includeAnnotations },
+      { notePaths, includeVersions },
     );
 
     res.json({ exportId });
@@ -416,10 +418,28 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Tag Index ───────────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/tags", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteTagSuggestionSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const tags = await noteSvc.buildTagIndex(scope, visibility, opts);
-    res.json({ tags });
+    res.json({ tags: noteTagSuggestionSvc.filter(tags) });
+  }));
+
+  // ── Shared Tag Suggestion Management ────────────────────────────────
+
+  app.delete("/api/codascope/notes/tag-suggestions/:tag", wrap(async (req, res) => {
+    const { noteTagSuggestionSvc } = await ensureServices();
+    const tag = param(req, "tag");
+    if (!tag.trim()) throw httpError("Tag is required.", 400, "invalid_input");
+    noteTagSuggestionSvc.hide(tag);
+    res.json({ hidden: true, tag });
+  }));
+
+  app.post("/api/codascope/notes/tag-suggestions/:tag/restore", wrap(async (req, res) => {
+    const { noteTagSuggestionSvc } = await ensureServices();
+    const tag = param(req, "tag");
+    if (!tag.trim()) throw httpError("Tag is required.", 400, "invalid_input");
+    noteTagSuggestionSvc.restore(tag);
+    res.json({ restored: true, tag });
   }));
 
   // ── Create Folder ───────────────────────────────────────────────────
@@ -433,6 +453,65 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
     await noteSvc.createFolder(scope, visibility, opts, folderPath.trim());
     res.status(201).json({ created: true, folderPath: folderPath.trim() });
+  }));
+
+  // Folder routes are intentionally registered before generic note paths.
+  app.post("/api/codascope/notes/:scope/:visibility/folders/archive", wrap(async (req, res) => {
+    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const { folderPath, reason } = req.body as { folderPath?: string; reason?: string };
+    if (!folderPath || typeof folderPath !== "string") throw httpError("folderPath is required.", 400, "invalid_input");
+    await noteAnnotationSvc.ensurePhysicalSidecarsInFolder(scope, visibility, opts, folderPath.trim());
+    const meta = await noteSvc.archiveFolder(scope, visibility, opts, folderPath.trim(), reason);
+    if (!meta) throw httpError("Folder not found.", 404, "not_found");
+    noteAuditSvc.log({
+      event: "folder.archived",
+      timestamp: new Date().toISOString(),
+      actor: opts.userId ?? "default",
+      noteId: meta.noteId,
+      scope,
+      visibility,
+      path: folderPath.trim(),
+      metadata: reason ? { reason, kind: "folder" } : { kind: "folder" },
+    });
+    res.json(meta);
+  }));
+
+  app.post("/api/codascope/notes/folders/move", wrap(async (req, res) => {
+    const { noteTransferSvc } = await ensureServices();
+    const {
+      fromScope, fromVisibility, fromFolder, fromOpts,
+      toScope, toVisibility, toFolder, toOpts,
+    } = req.body as {
+      fromScope?: string; fromVisibility?: string; fromFolder?: string; fromOpts?: NoteResolveOpts;
+      toScope?: string; toVisibility?: string; toFolder?: string; toOpts?: NoteResolveOpts;
+    };
+    if (!fromScope || !fromVisibility || !fromFolder || !toScope || !toVisibility || !toFolder) {
+      throw httpError("Source and destination folders are required.", 400, "invalid_input");
+    }
+    if (!VALID_SCOPES.includes(fromScope as NoteScope) || !VALID_SCOPES.includes(toScope as NoteScope)) {
+      throw httpError("Invalid scope.", 400, "invalid_scope");
+    }
+    if (!VALID_VISIBILITIES.includes(fromVisibility as NoteVisibility) || !VALID_VISIBILITIES.includes(toVisibility as NoteVisibility)) {
+      throw httpError("Invalid visibility.", 400, "invalid_visibility");
+    }
+    if (toScope === "epic" && toVisibility === "private") {
+      throw httpError("Epic notes are shared with the team.", 400, "invalid_visibility");
+    }
+
+    const userId = principal(req).username;
+    const result = await noteTransferSvc.moveFolder({
+      fromScope: fromScope as NoteScope,
+      fromVisibility: fromVisibility as NoteVisibility,
+      fromOpts: { ...fromOpts, userId },
+      fromFolder,
+      toScope: toScope as NoteScope,
+      toVisibility: toVisibility as NoteVisibility,
+      toOpts: { ...toOpts, userId },
+      toFolder,
+    });
+    if (!result.moved) throw httpError("Folder not found.", 404, "not_found");
+    res.json({ moved: true, noteIds: result.noteIds, correlationId: result.correlationId });
   }));
 
   // ══════════════════════════════════════════════════════════════════════
@@ -508,25 +587,6 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── List Annotations ────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/note/*path/annotations", wrap(async (req, res) => {
-    const { noteSvc, noteAnnotationSvc } = await ensureServices();
-    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
-
-    let notePath = extractPath(req);
-    notePath = stripSuffix(notePath, "/annotations");
-    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
-
-    // Optionally read current content for re-anchoring
-    let content: string | undefined;
-    const noteData = await noteSvc.readNote(scope, visibility, opts, notePath);
-    if (noteData) content = noteSvc.parseFrontmatter(noteData.content).body;
-
-    const annotations = await noteAnnotationSvc.listAnnotations(scope, visibility, opts, notePath, content);
-    res.json({ annotations });
-  }));
-
-  // ── Create Annotation ──────────────────────────────────────────────
-
-  app.post("/api/codascope/notes/:scope/:visibility/note/*path/annotations", wrap(async (req, res) => {
     const { noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
 
@@ -534,24 +594,126 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     notePath = stripSuffix(notePath, "/annotations");
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
-    const { anchor, body, parentId } = req.body as {
-      anchor?: any;
+    const [annotations, anchors, markerRanges] = await Promise.all([
+      noteAnnotationSvc.listAnnotations(scope, visibility, opts, notePath),
+      noteAnnotationSvc.getRenderTargets(scope, visibility, opts, notePath),
+      noteAnnotationSvc.getMarkerRanges(scope, visibility, opts, notePath),
+    ]);
+    res.json({ annotations, anchors, markerRanges });
+  }));
+
+  // ── Create Annotation ──────────────────────────────────────────────
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/annotations", wrap(async (req, res) => {
+    const { noteSvc, noteAnnotationSvc, noteAuditSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+
+    let notePath = extractPath(req);
+    notePath = stripSuffix(notePath, "/annotations");
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    const { selectionStart, selectionEnd, selectedText, expectedHash, body, parentId } = req.body as {
+      selectionStart?: number;
+      selectionEnd?: number;
+      selectedText?: string;
+      expectedHash?: string;
       body?: string;
       parentId?: string;
     };
 
-    if (!anchor || !body) {
-      throw httpError("anchor and body are required.", 400, "invalid_input");
+    if (!body || typeof body !== "string") {
+      throw httpError("body is required.", 400, "invalid_input");
     }
 
-    const annotation = await noteAnnotationSvc.createAnnotation(scope, visibility, opts, notePath, {
-      anchor,
+    if (parentId) {
+      const annotation = await noteAnnotationSvc.createAnnotation(scope, visibility, opts, notePath, {
+        author: principal(req).username,
+        body,
+        parentId,
+      });
+      res.status(201).json({ annotation });
+      return;
+    }
+
+    if (!Number.isInteger(selectionStart) || !Number.isInteger(selectionEnd) || !selectedText || !expectedHash) {
+      throw httpError("selected source positions, selectedText, and expectedHash are required.", 400, "invalid_input");
+    }
+    const outcome = await noteAnnotationSvc.createRangeAnnotation(scope, visibility, opts, notePath, {
+      from: selectionStart as number,
+      to: selectionEnd as number,
+      selectedText,
+      expectedHash,
       author: principal(req).username,
       body,
-      parentId,
     });
+    if ("conflict" in outcome) {
+      res.status(409).json({
+        error: "conflict",
+        message: "Note was modified since you loaded it. Reload and try again.",
+        currentHash: outcome.currentHash,
+        currentContent: noteSvc.parseFrontmatter(outcome.currentContent).body,
+      });
+      return;
+    }
 
-    res.status(201).json(annotation);
+    const correlationId = randomUUID();
+    const saved = await noteSvc.readNote(scope, visibility, opts, notePath);
+    if (saved) {
+      noteAuditSvc.log({
+        event: "note.annotation_created",
+        timestamp: new Date().toISOString(),
+        actor: principal(req).username,
+        noteId: saved.frontmatter.id,
+        scope,
+        visibility,
+        path: notePath,
+        correlationId,
+        metadata: { annotationId: outcome.annotation.id },
+      });
+    }
+    res.status(201).json({ ...outcome, correlationId });
+  }));
+
+  // ── Explicit Reattach (never quote-searches or picks a nearby line) ─
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/annotations/:annotationId/reattach", wrap(async (req, res) => {
+    const { noteSvc, noteAnnotationSvc, noteAuditSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const annotationId = param(req, "annotationId");
+    const suffix = `/annotations/${annotationId}/reattach`;
+    const notePath = stripSuffix(extractPath(req), suffix);
+    const { selectionStart, selectionEnd, selectedText, expectedHash } = req.body as {
+      selectionStart?: number; selectionEnd?: number; selectedText?: string; expectedHash?: string;
+    };
+    if (!notePath || !Number.isInteger(selectionStart) || !Number.isInteger(selectionEnd) || !selectedText || !expectedHash) {
+      throw httpError("selected source positions, selectedText, and expectedHash are required.", 400, "invalid_input");
+    }
+    const outcome = await noteAnnotationSvc.reattachRangeAnnotation(scope, visibility, opts, notePath, annotationId, {
+      from: selectionStart as number,
+      to: selectionEnd as number,
+      selectedText,
+      expectedHash,
+    });
+    if (!outcome) throw httpError("Annotation not found.", 404, "not_found");
+    if ("conflict" in outcome) {
+      throw httpError("Note was modified since you loaded it. Reload and try again.", 409, "conflict");
+    }
+    const correlationId = randomUUID();
+    const saved = await noteSvc.readNote(scope, visibility, opts, notePath);
+    if (saved) {
+      noteAuditSvc.log({
+        event: "note.annotation_reattached",
+        timestamp: new Date().toISOString(),
+        actor: principal(req).username,
+        noteId: saved.frontmatter.id,
+        scope,
+        visibility,
+        path: notePath,
+        correlationId,
+        metadata: { annotationId },
+      });
+    }
+    res.json({ ...outcome, correlationId });
   }));
 
   // ── Update Annotation (resolve/reopen/edit) ─────────────────────────
@@ -586,7 +748,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Delete Annotation ───────────────────────────────────────────────
 
   app.delete("/api/codascope/notes/:scope/:visibility/note/*path/annotations/:annotationId", wrap(async (req, res) => {
-    const { noteAnnotationSvc } = await ensureServices();
+    const { noteSvc, noteAnnotationSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const annotationId = param(req, "annotationId");
 
@@ -595,10 +757,28 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     notePath = stripSuffix(notePath, annSuffix);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
-    const deleted = await noteAnnotationSvc.deleteAnnotation(scope, visibility, opts, notePath, annotationId);
-    if (!deleted) throw httpError("Annotation not found.", 404, "not_found");
-
-    res.json({ deleted: true });
+    const expectedHash = typeof req.query.expectedHash === "string" ? req.query.expectedHash : undefined;
+    const outcome = await noteAnnotationSvc.archiveAnnotation(
+      scope, visibility, opts, notePath, annotationId, principal(req).username, expectedHash,
+    );
+    if (!outcome) throw httpError("Annotation not found.", 404, "not_found");
+    if ("conflict" in outcome) throw httpError("Note was modified since you loaded it. Reload and try again.", 409, "conflict");
+    const correlationId = randomUUID();
+    const saved = await noteSvc.readNote(scope, visibility, opts, notePath);
+    if (saved) {
+      noteAuditSvc.log({
+        event: "note.annotation_archived",
+        timestamp: new Date().toISOString(),
+        actor: principal(req).username,
+        noteId: saved.frontmatter.id,
+        scope,
+        visibility,
+        path: notePath,
+        correlationId,
+        metadata: { annotationId },
+      });
+    }
+    res.json({ archived: true, ...outcome, correlationId });
   }));
 
   // ── Compute Blocks ──────────────────────────────────────────────────
@@ -650,7 +830,9 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const versionData = await noteSvc.getVersion(scope, visibility, opts, notePath, version);
     if (!versionData) throw httpError("Version not found.", 404, "not_found");
 
-    res.json({ ...versionData, content: noteSvc.parseFrontmatter(versionData.content).body });
+    const content = noteSvc.parseFrontmatter(versionData.content).body;
+    const markerRanges = parseInlineAnnotationAnchors(content).markers.map((marker) => ({ from: marker.from, to: marker.to }));
+    res.json({ ...versionData, content, markerRanges });
   }));
 
   // ══════════════════════════════════════════════════════════════════════
@@ -661,7 +843,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Archive a Note ─────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/note/*path/archive", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
 
     let notePath = extractPath(req);
@@ -670,6 +852,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
     const { reason } = req.body as { reason?: string };
 
+    noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, notePath);
     const meta = await noteSvc.archiveNote(scope, visibility, opts, notePath, reason);
     if (!meta) throw httpError("Note not found.", 404, "not_found");
 
@@ -691,12 +874,15 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Restore an Archived Note ──────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/archive/restore/:noteId", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const noteId = param(req, "noteId");
 
     const result = await noteSvc.restoreNote(scope, visibility, opts, noteId);
     if (!result) throw httpError("Archived note not found.", 404, "not_found");
+    await noteAnnotationSvc.reconcileRestoredBundle(
+      scope, visibility, opts, result.restoredPath, result.meta.kind === "folder",
+    );
 
     // Audit log
     noteAuditSvc.log({
@@ -749,7 +935,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Bulk Archive ───────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/:scope/:visibility/bulk/archive", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc, noteLinkIndexSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteLinkIndexSvc, noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
 
     const { noteIds, reason } = req.body as { noteIds?: string[]; reason?: string };
@@ -761,6 +947,10 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
 
     const correlationId = randomUUID();
+    for (const noteId of noteIds) {
+      const found = await noteSvc.findNoteById(scope, visibility, opts, noteId);
+      if (found) noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, found.path);
+    }
     const result = await noteSvc.bulkArchive(scope, visibility, opts, noteIds, reason);
 
     // Audit log each archived note with the same correlationId
@@ -791,7 +981,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Bulk Move ──────────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/bulk/move", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteTransferSvc } = await ensureServices();
 
     const {
       noteIds,
@@ -840,7 +1030,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       const destPath = toFolder ? `${toFolder}/${found.path.split("/").pop()}` : found.path.split("/").pop()!;
 
       try {
-        const ok = await noteSvc.moveNote({
+        const result = await noteTransferSvc.moveFile({
           fromScope: fromScope as NoteScope,
           fromVisibility: fromVisibility as NoteVisibility,
           fromOpts: { ...fromOpts, userId },
@@ -849,35 +1039,10 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
           toVisibility: toVisibility as NoteVisibility,
           toOpts: { ...toOpts, userId },
           toPath: destPath,
+          correlationId,
         });
-        if (ok) {
+        if (result.moved) {
           moved++;
-          try {
-            noteAuditSvc.log({
-              event: "note.moved",
-              timestamp: new Date().toISOString(),
-              actor: userId,
-              noteId,
-              scope: toScope as NoteScope,
-              visibility: toVisibility as NoteVisibility,
-              path: destPath,
-              correlationId,
-              metadata: { fromScope, fromVisibility, fromPath: found.path, bulk: true },
-            });
-            if (fromVisibility !== toVisibility) {
-              noteAuditSvc.log({
-                event: "note.visibility_changed",
-                timestamp: new Date().toISOString(),
-                actor: userId,
-                noteId,
-                scope: toScope as NoteScope,
-                visibility: toVisibility as NoteVisibility,
-                path: destPath,
-                correlationId,
-                metadata: { fromVisibility, toVisibility, fromScope, toScope, bulk: true },
-              });
-            }
-          } catch { /* best effort */ }
         } else {
           failed.push(noteId);
         }
@@ -897,7 +1062,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Activity Feed ──────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/note/*path/activity", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -983,11 +1148,15 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Read Note ───────────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
+    const { noteSvc, noteAnnotationSvc, noteUserPrefsSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
+    // The initial read is the only safe place to perform the staged legacy
+    // migration: the response then includes any newly inserted markers and
+    // their current content hash together.
+    await noteAnnotationSvc.reconcileNote(scope, visibility, opts, notePath, true);
     const result = await noteSvc.readNote(scope, visibility, opts, notePath);
     if (!result) throw httpError("Note not found.", 404, "not_found");
 
@@ -1008,9 +1177,8 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     let lastEditedAt: string | undefined;
     try {
       const noteFolder = notePath.includes("/") ? notePath.slice(0, notePath.lastIndexOf("/")) : undefined;
-      const filename = notePath.split("/").pop() ?? notePath;
       const notes = await noteSvc.listNotes(scope, visibility, opts, noteFolder);
-      const entry = notes.find((n) => n.path === filename);
+      const entry = notes.find((n) => n.path === notePath);
       if (entry) {
         lastEditor = entry.lastEditor;
         lastEditedAt = entry.lastEditedAt;
@@ -1061,7 +1229,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Update Note ─────────────────────────────────────────────────────
 
   app.put("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteAnnotationSvc, noteAuditSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -1115,6 +1283,11 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       return;
     }
 
+    // A normal editor save can remove, duplicate, or damage anchor comments.
+    // Reconciliation records that state explicitly; it never guesses a new
+    // marker location from quote text or nearby lines.
+    await noteAnnotationSvc.reconcileAfterNoteWrite(scope, visibility, opts, notePath);
+
     // Fire-and-forget: update link index for backlinks
     try {
       const { noteLinkIndexSvc } = await ensureServices();
@@ -1147,7 +1320,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Delete Note ─────────────────────────────────────────────────────
 
   app.delete("/api/codascope/notes/:scope/:visibility/note/*path", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteSvc, noteAuditSvc, noteAnnotationSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const notePath = extractPath(req);
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
@@ -1165,6 +1338,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       if (note) noteId = note.frontmatter.id;
     } catch { /* best effort */ }
 
+    noteAnnotationSvc.ensurePhysicalSidecar(scope, visibility, opts, notePath);
     const deleted = await noteSvc.deleteNote(scope, visibility, opts, notePath, permanent);
     if (!deleted) throw httpError("Note not found.", 404, "not_found");
 
@@ -1186,7 +1360,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Move Note ───────────────────────────────────────────────────────
 
   app.post("/api/codascope/notes/move", wrap(async (req, res) => {
-    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const { noteTransferSvc } = await ensureServices();
 
     const {
       fromScope, fromVisibility, fromPath, fromOpts,
@@ -1212,10 +1386,13 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     if (!VALID_VISIBILITIES.includes(fromVisibility as NoteVisibility) || !VALID_VISIBILITIES.includes(toVisibility as NoteVisibility)) {
       throw httpError("Invalid visibility.", 400, "invalid_visibility");
     }
+    if (toScope === "epic" && toVisibility === "private") {
+      throw httpError("Epic notes are shared with the team.", 400, "invalid_visibility");
+    }
 
     const userId = principal(req).username;
 
-    const moved = await noteSvc.moveNote({
+    const result = await noteTransferSvc.moveFile({
       fromScope: fromScope as NoteScope,
       fromVisibility: fromVisibility as NoteVisibility,
       fromOpts: { ...fromOpts, userId },
@@ -1226,45 +1403,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       toPath,
     });
 
-    if (!moved) throw httpError("Move failed. Source note not found.", 404, "not_found");
-
-    // Audit log (best effort — read the note at the destination)
-    try {
-      const note = await noteSvc.readNote(
-        toScope as NoteScope,
-        toVisibility as NoteVisibility,
-        { ...toOpts, userId },
-        toPath!,
-      );
-      if (note) {
-        noteAuditSvc.log({
-          event: "note.moved",
-          timestamp: new Date().toISOString(),
-          actor: userId,
-          noteId: note.frontmatter.id,
-          scope: toScope as NoteScope,
-          visibility: toVisibility as NoteVisibility,
-          path: toPath!,
-          metadata: {
-            fromScope, fromVisibility, fromPath,
-            toScope, toVisibility, toPath,
-          },
-        });
-        if (fromVisibility !== toVisibility) {
-          noteAuditSvc.log({
-            event: "note.visibility_changed",
-            timestamp: new Date().toISOString(),
-            actor: userId,
-            noteId: note.frontmatter.id,
-            scope: toScope as NoteScope,
-            visibility: toVisibility as NoteVisibility,
-            path: toPath!,
-            metadata: { fromVisibility, toVisibility, fromScope, toScope },
-          });
-        }
-      }
-    } catch { /* best effort */ }
-
-    res.json({ moved: true });
+    if (!result.moved) throw httpError("Move failed. Source note not found.", 404, "not_found");
+    res.json({ moved: true, noteIds: result.noteIds, correlationId: result.correlationId });
   }));
 }

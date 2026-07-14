@@ -3,7 +3,9 @@ import { useShellStore } from "../shell/store";
 import { hydrateStoreFromUrl, startUrlSync } from "../shell/urlState";
 import { commandBus } from "../shell/commandBus";
 import { AuthProvider, useAuth } from "../shell/authContext";
+import { UserSettingsProvider } from "../shell/userSettingsContext";
 import { apps } from "../apps/registry";
+import { canAccessApp } from "../shell/appAccess";
 import { Topbar } from "./Topbar";
 import { LeftNav } from "./LeftNav";
 import { CanvasArea } from "./CanvasArea";
@@ -19,7 +21,9 @@ import { LoginPage } from "./LoginPage";
 export function Shell() {
   return (
     <AuthProvider>
-      <ShellInner />
+      <UserSettingsProvider>
+        <ShellInner />
+      </UserSettingsProvider>
     </AuthProvider>
   );
 }
@@ -108,11 +112,15 @@ function ShellInner() {
   const rightPanelId = useShellStore((s) => s.rightPanelId);
   const rightPanelWidth = useShellStore((s) => s.rightPanelWidth);
 
-  // Find the active app
-  const activeApp = useMemo(
-    () => apps.find((a) => a.id === activeAppId) ?? null,
-    [activeAppId],
-  );
+  // Main-content route resolution uses the same access decision as nav.
+  const activeApp = useMemo(() => {
+    const requested = apps.find((app) => app.id === activeAppId) ?? null;
+    return requested && canAccessApp(requested, user) ? requested : null;
+  }, [activeAppId, user]);
+
+  useEffect(() => {
+    if (activeAppId && !activeApp) useShellStore.getState().goHome();
+  }, [activeAppId, activeApp]);
 
   // Build dynamic CSS variables
   const shellStyle = useMemo((): CSSProperties => {

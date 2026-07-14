@@ -18,23 +18,17 @@ import { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensi
 import { buildClipboardImageExtension } from "./extensions/clipboardImageExtension";
 import { buildImagePreviewExtension } from "./extensions/imagePreviewExtension";
 import { buildInsertionHotzoneExtension } from "./extensions/insertionHotzoneExtension";
-import { buildAnnotationGutterExtension, type AnnotationSummaryItem } from "./extensions/annotationGutterExtension";
+import { buildInlineAnnotationExtension, type InlineAnnotationAnchorItem } from "./extensions/inlineAnnotationExtension";
 import { buildHighlightExtension } from "./extensions/highlightExtension";
 import { buildSlashCommandExtension } from "./extensions/slashCommandExtension";
 import { buildCalloutExtension } from "./extensions/calloutExtension";
 import { buildTagPillExtension } from "./extensions/tagPillExtension";
-import { buildFocusModeExtension, toggleFocusMode } from "./extensions/focusModeExtension";
 import { buildMathExtension } from "./extensions/mathExtension";
 import { buildFootnoteExtension } from "./extensions/footnoteExtension";
 import {
-  toggleBold,
-  toggleItalic,
-  toggleStrikethrough,
-  toggleInlineCode,
-  toggleHighlight,
-  insertLink,
   autoContinueList,
 } from "./extensions/formattingCommands";
+import { resolveMarkdownEditorKeymap, useKeybindingProfile } from "../keybindings";
 
 /** File reference for wiki link resolution. */
 export interface MarkdownFileRef {
@@ -78,18 +72,20 @@ interface MarkdownEditorProps {
   showTagPills?: boolean;
   /** Enable auto-continue lists on Enter key. */
   autoContinueLists?: boolean;
-  /** Enable focus mode (dim non-active blocks). Default: false. */
-  showFocusMode?: boolean;
   /** Enable math block rendering ($$...$$ and $...$). Default: false. */
   showMath?: boolean;
   /** Enable footnote rendering ([^1] and [^1]: text). Default: false. */
   showFootnotes?: boolean;
-  /** Annotation summary data — when provided, enables the annotation gutter. */
-  annotationSummary?: AnnotationSummaryItem[];
-  /** Callback when an annotation gutter badge is clicked. */
-  onAnnotationClick?: (blockId: string) => void;
+  /** Server-validated marker pairs rendered as exact inline annotation pins. */
+  inlineAnnotationAnchors?: InlineAnnotationAnchorItem[];
+  /** Valid marker token ranges to hide even when a pair is unresolved. */
+  inlineAnnotationMarkerRanges?: Array<{ from: number; to: number }>;
+  /** Callback when a validated annotation pin is clicked. */
+  onAnnotationClick?: (annotationId: string) => void;
   /** Called when the CM6 EditorView is created — enables external overlays. */
   onEditorView?: (view: EditorView) => void;
+  /** Called when the editor text selection changes — enables selection actions. */
+  onSelectionChange?: (view: EditorView) => void;
 }
 
 const darkEditorTheme = EditorView.theme({
@@ -161,13 +157,21 @@ export function MarkdownEditor({
   showCallouts = true,
   showTagPills = true,
   autoContinueLists = false,
-  showFocusMode = false,
   showMath = false,
   showFootnotes = false,
-  annotationSummary,
+  inlineAnnotationAnchors,
+  inlineAnnotationMarkerRanges,
   onAnnotationClick,
   onEditorView,
+  onSelectionChange,
 }: MarkdownEditorProps) {
+  const keybindingProfile = useKeybindingProfile();
+  // This extension is intentionally only installed on editable shared editors;
+  // MarkdownViewer and read-only history views never receive editor commands.
+  const resolvedKeymap = useMemo(
+    () => editable ? resolveMarkdownEditorKeymap(keybindingProfile) : null,
+    [editable, keybindingProfile],
+  );
   // Refs for volatile data so extensions read latest values without rebuilding
   const onOpenFileRef = useRef(onOpenFile);
   useEffect(() => { onOpenFileRef.current = onOpenFile; }, [onOpenFile]);
@@ -210,32 +214,30 @@ export function MarkdownEditor({
     [],
   );
 
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+  const stableOnSelectionChange = useCallback(
+    (view: EditorView) => onSelectionChangeRef.current?.(view),
+    [],
+  );
+
   const extensions = useMemo(
     () => {
       const wikiLinkConfig = { getFiles, selectedPath, getOnOpenFile };
       const renderCellDisplay = buildTableCellDisplayRenderer(wikiLinkConfig);
-      const formattingKeymap = keymap.of([
-        { key: "Mod-b", run: toggleBold },
-        { key: "Mod-i", run: toggleItalic },
-        { key: "Mod-Shift-x", run: toggleStrikethrough },
-        { key: "Mod-e", run: toggleInlineCode },
-        { key: "Mod-Shift-h", run: toggleHighlight },
-        { key: "Mod-k", run: insertLink },
-        ...(showFocusMode ? [{ key: "Mod-Shift-f", run: toggleFocusMode }] : []),
-      ]);
-
       const exts = [
         markdown(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         EditorView.lineWrapping,
         darkTheme ? darkEditorTheme : lightEditorTheme,
-        formattingKeymap,
         buildLivePreviewExtension({ editable }),
         buildHighlightExtension({ editable }),
         buildMermaidExtension({ editable }),
         buildMarkdownTableExtension({ editable, renderCellDisplay }),
         buildWikiLinkExtension(wikiLinkConfig),
       ];
+
+      if (resolvedKeymap) exts.push(resolvedKeymap);
 
       // Callout extension (on by default)
       if (showCallouts) {
@@ -252,11 +254,6 @@ export function MarkdownEditor({
         exts.push(keymap.of([
           { key: "Enter", run: autoContinueList },
         ]));
-      }
-
-      // Focus mode extension (opt-in)
-      if (showFocusMode) {
-        exts.push(buildFocusModeExtension());
       }
 
       // Math extension with lazy KaTeX loading (opt-in)
@@ -290,11 +287,19 @@ export function MarkdownEditor({
         }));
       }
 
-      // Conditionally add annotation gutter extension
-      if (annotationSummary) {
-        exts.push(buildAnnotationGutterExtension({
+      // Pins are drawn only from validated marker-pair offsets supplied by
+      // the annotation service. There is no client-side text or line search.
+      if (inlineAnnotationAnchors?.length || inlineAnnotationMarkerRanges?.length) {
+        exts.push(buildInlineAnnotationExtension({
           onAnnotationClick: stableOnAnnotationClick,
-          summary: annotationSummary,
+          anchors: inlineAnnotationAnchors ?? [],
+          markerRanges: inlineAnnotationMarkerRanges,
+        }));
+      }
+
+      if (onSelectionChange) {
+        exts.push(EditorView.updateListener.of((update) => {
+          if (update.selectionSet) stableOnSelectionChange(update.view);
         }));
       }
 
@@ -305,12 +310,12 @@ export function MarkdownEditor({
 
       return exts;
     },
-    [editable, darkTheme, getFiles, selectedPath, getOnOpenFile,
+    [editable, darkTheme, getFiles, selectedPath, getOnOpenFile, resolvedKeymap,
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
      showSlashCommands, showCallouts, showTagPills, autoContinueLists,
-     showFocusMode, showMath, showFootnotes,
-     annotationSummary, stableOnAnnotationClick],
+     showMath, showFootnotes,
+     inlineAnnotationAnchors, inlineAnnotationMarkerRanges, stableOnAnnotationClick, onSelectionChange, stableOnSelectionChange],
   );
 
   return (

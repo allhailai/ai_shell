@@ -15,6 +15,7 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
+  readdirSync,
 } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -39,6 +40,12 @@ export interface RecentNoteRef {
   path: string;
   title: string;
   viewedAt: string;
+}
+
+export interface NoteRefLocation {
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
 }
 
 interface StarredFile {
@@ -185,6 +192,49 @@ export class CodaScopeNoteUserPrefsService {
       file.items = file.items.slice(0, max);
     }
     this.writeRecentsFile(userId, file);
+  }
+
+  /**
+   * Repoint durable starred/recent references after the transfer pipeline
+   * moves a note. Shared references follow a shared move; when a note becomes
+   * private, references belonging to other users are removed.
+   */
+  relocateNoteRefs(
+    noteId: string,
+    destination: NoteRefLocation,
+    privateOwnerUserId?: string,
+  ): void {
+    const usersRoot = path.join(this.root, "_notes", "_user-prefs");
+    if (!existsSync(usersRoot)) return;
+
+    let userIds: string[] = [];
+    try {
+      userIds = readdirSync(usersRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      return;
+    }
+
+    for (const userId of userIds) {
+      const removeForPrivateDestination = destination.visibility === "private" && userId !== privateOwnerUserId;
+
+      const starred = this.readStarredFile(userId);
+      const nextStarred = starred.items
+        .filter((item) => !(removeForPrivateDestination && item.noteId === noteId))
+        .map((item) => item.noteId === noteId ? { ...item, ...destination } : item);
+      if (nextStarred.length !== starred.items.length || nextStarred.some((item, index) => item !== starred.items[index])) {
+        this.writeStarredFile(userId, { items: nextStarred });
+      }
+
+      const recents = this.readRecentsFile(userId);
+      const nextRecents = recents.items
+        .filter((item) => !(removeForPrivateDestination && item.noteId === noteId))
+        .map((item) => item.noteId === noteId ? { ...item, ...destination } : item);
+      if (nextRecents.length !== recents.items.length || nextRecents.some((item, index) => item !== recents.items[index])) {
+        this.writeRecentsFile(userId, { ...recents, items: nextRecents });
+      }
+    }
   }
 
   /* ── Read Status Tracking ──────────────────────────────────────────── */

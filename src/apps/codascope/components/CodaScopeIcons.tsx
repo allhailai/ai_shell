@@ -563,6 +563,16 @@ export function IconArrowRight({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Left-pointing arrow — Back navigation */
+export function IconArrowLeft({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M13 8H3" />
+      <path d="M7 4 3 8l4 4" />
+    </svg>
+  );
+}
+
 /** Grid/compass — Map / Explore */
 export function IconMap({ size = 16, style, className }: IconProps) {
   return (
@@ -784,6 +794,15 @@ export function IconChevronDown({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Chevron up — Previous item indicator */
+export function IconChevronUp({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <polyline points="4,10 8,6 12,10" />
+    </svg>
+  );
+}
+
 /** Color palette — Highlight color picker */
 export function IconPalette({ size = 16, style, className }: IconProps) {
   return (
@@ -815,20 +834,6 @@ export function IconPlus({ size = 16, style, className }: IconProps) {
       <circle cx="8" cy="8" r="6" />
       <line x1="8" y1="5" x2="8" y2="11" />
       <line x1="5" y1="8" x2="11" y2="8" />
-    </svg>
-  );
-}
-
-/** Focus mode — crosshair/target icon */
-export function IconFocusMode({ size = 16, style, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
-      <circle cx="8" cy="8" r="5.5" />
-      <circle cx="8" cy="8" r="2" />
-      <line x1="8" y1="1" x2="8" y2="3.5" />
-      <line x1="8" y1="12.5" x2="8" y2="15" />
-      <line x1="1" y1="8" x2="3.5" y2="8" />
-      <line x1="12.5" y1="8" x2="15" y2="8" />
     </svg>
   );
 }

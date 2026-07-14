@@ -13,6 +13,7 @@ import { arcadeApp } from "./arcade/manifest";
 import { adminApp } from "./admin/manifest";
 import { dbHelperApp } from "./db-helper/manifest";
 import { codaScopeApp } from "./codascope/manifest";
+import { settingsApp } from "./settings/manifest";
 
 /** All registered applications. Add new app imports here. */
 export const apps: AppManifest[] = [
@@ -20,5 +21,6 @@ export const apps: AppManifest[] = [
   arcadeApp,
   dbHelperApp,
   codaScopeApp,
+  settingsApp,
   adminApp,
 ];

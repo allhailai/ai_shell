@@ -1,52 +1,37 @@
-/* ── CodaScope: NoteAnnotationPanel ──────────────────────────────────
-   Collapsible panel on the right side of the NoteEditor that shows
-   annotation threads grouped by section/block.
-
-   Features:
-   - Thread list grouped by section heading
-   - Each thread: root comment + replies, resolve/reopen, delete
-   - New comment input at bottom of each thread
-   - Panel scrolls to matching thread when gutter marker is clicked
-   - Reply composer with markdown support
-
-   This panel lives WITHIN the note editor layout, NOT in the shell's
-   right panel (which stays as the chat assistant).
+/* ── CodaScope: Note Annotation Panel ─────────────────────────────────
+   Thread UI for durable inline annotation anchors. Attached threads are
+   ordered by validated marker positions; unresolved threads remain visible
+   as recovery work, never as a deceptively placed in-note pin.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MarkdownViewer } from "../../../shared/markdown";
-import { IconAnnotation, IconDelete, IconClose, IconCheckmark, IconUndo, IconUser, IconReply } from "./CodaScopeIcons";
-import type { AnnotationStatus, NoteAnnotation } from "../codaScopeTypes";
-
-/* ── Props ───────────────────────────────────────────────────────────── */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MarkdownViewer, type InlineAnnotationAnchorItem } from "../../../shared/markdown";
+import { IconAnnotation, IconChevronDown, IconChevronUp, IconClose, IconCheckmark, IconDelete, IconReply, IconUndo, IconUser, IconWarning } from "./CodaScopeIcons";
+import type { AnnotationStatus, InlineAnnotationAnchor, NoteAnnotation } from "../codaScopeTypes";
+import type { NoteSelectionInfo } from "./NoteSelectionToolbar";
 
 interface NoteAnnotationPanelProps {
-  /** Note scope for API calls */
   scope: string;
-  /** Note visibility for API calls */
   visibility: string;
-  /** Note path for API calls */
   notePath: string;
-  /** Query params for API calls */
   queryParams: Record<string, string>;
-  /** Annotations fetched from server */
   annotations: NoteAnnotation[];
-  /** Called when annotations change (create, resolve, delete, reply) */
+  inlineAnnotationAnchors: InlineAnnotationAnchorItem[];
   onAnnotationsChange: () => void;
-  /** Block ID to scroll to (set when gutter marker is clicked) */
-  activeBlockId?: string | null;
-  /** Called to close the panel */
+  onAnnotationMutation: (result: { content?: string; contentHash?: string }) => void;
+  activeAnnotationId?: string | null;
+  pendingAnnotation?: NoteSelectionInfo | null;
+  currentSelection?: NoteSelectionInfo | null;
+  expectedHash: string | null;
+  onPendingAnnotationDismiss?: () => void;
+  onNavigateAnnotation?: (direction: "previous" | "next") => void;
   onClose: () => void;
 }
-
-/* ── Types ───────────────────────────────────────────────────────────── */
 
 interface AnnotationThread {
   root: NoteAnnotation;
   replies: NoteAnnotation[];
 }
-
-/* ── Component ───────────────────────────────────────────────────────── */
 
 export function NoteAnnotationPanel({
   scope,
@@ -54,305 +39,318 @@ export function NoteAnnotationPanel({
   notePath,
   queryParams,
   annotations,
+  inlineAnnotationAnchors,
   onAnnotationsChange,
-  activeBlockId,
+  onAnnotationMutation,
+  activeAnnotationId,
+  pendingAnnotation,
+  currentSelection,
+  expectedHash,
+  onPendingAnnotationDismiss,
+  onNavigateAnnotation,
   onClose,
 }: NoteAnnotationPanelProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
   const threadRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-
-  // ── Group annotations into threads ──────────────────────────────────
-  const threads = useMemo((): AnnotationThread[] => {
-    const roots = annotations.filter((a) => !a.parentId);
-    return roots.map((root) => ({
-      root,
-      replies: annotations
-        .filter((a) => a.parentId === root.id)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    }));
-  }, [annotations]);
-
-  // ── Group threads by section slug ────────────────────────────────────
-  const groupedThreads = useMemo(() => {
-    const groups = new Map<string, AnnotationThread[]>();
-    for (const thread of threads) {
-      const section = thread.root.anchor.sectionSlug ?? "root";
-      const existing = groups.get(section) ?? [];
-      existing.push(thread);
-      groups.set(section, existing);
-    }
-    return groups;
-  }, [threads]);
-
-  // ── Scroll to active block when gutter marker is clicked ────────────
-  useEffect(() => {
-    if (!activeBlockId) return;
-    // Find the thread with matching blockId
-    const thread = threads.find((t) => t.root.anchor.blockId === activeBlockId);
-    if (thread) {
-      const el = threadRefs.current.get(thread.root.id);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }
-  }, [activeBlockId, threads]);
-
-  // ── API helpers ─────────────────────────────────────────────────────
-
+  const [requestError, setRequestError] = useState<string | null>(null);
   const queryString = useMemo(() => new URLSearchParams(queryParams).toString(), [queryParams.projectId, queryParams.epicId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const apiBase = useMemo(() => `/api/codascope/notes/${scope}/${visibility}/note/${notePath}/annotations`, [scope, visibility, notePath]);
 
-  const apiBase = useMemo(() => {
-    return `/api/codascope/notes/${scope}/${visibility}/note/${notePath}/annotations`;
-  }, [scope, visibility, notePath]);
+  const threads = useMemo((): AnnotationThread[] => {
+    const order = new Map(inlineAnnotationAnchors.map((anchor, index) => [anchor.annotationId, index]));
+    return annotations
+      .filter((annotation) => !annotation.parentId && !annotation.archivedAt)
+      .map((root) => ({
+        root,
+        replies: annotations.filter((annotation) => annotation.parentId === root.id && !annotation.archivedAt)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+      }))
+      .sort((a, b) => (order.get(a.root.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.root.id) ?? Number.MAX_SAFE_INTEGER)
+        || a.root.createdAt.localeCompare(b.root.createdAt));
+  }, [annotations, inlineAnnotationAnchors]);
+
+  useEffect(() => {
+    if (!activeAnnotationId) return;
+    threadRefs.current.get(activeAnnotationId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [activeAnnotationId, threads]);
 
   const updateStatus = useCallback(async (annotationId: string, status: AnnotationStatus) => {
+    setRequestError(null);
     try {
-      await fetch(`${apiBase}/${annotationId}?${queryString}`, {
+      const response = await fetch(`${apiBase}/${annotationId}?${queryString}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
+      if (!response.ok) throw new Error("Could not update annotation status.");
       onAnnotationsChange();
-    } catch { /* ignore */ }
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not update annotation status.");
+    }
   }, [apiBase, queryString, onAnnotationsChange]);
 
-  const deleteAnnotation = useCallback(async (annotationId: string) => {
+  const archiveThread = useCallback(async (annotationId: string) => {
+    setRequestError(null);
     try {
-      await fetch(`${apiBase}/${annotationId}?${queryString}`, {
-        method: "DELETE",
+      const params = new URLSearchParams(queryString);
+      if (expectedHash) params.set("expectedHash", expectedHash);
+      const response = await fetch(`${apiBase}/${annotationId}?${params.toString()}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message ?? "Could not archive annotation.");
+      onAnnotationMutation(result);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not archive annotation.");
+    }
+  }, [apiBase, queryString, expectedHash, onAnnotationMutation]);
+
+  const submitReply = useCallback(async (parentId: string, body: string) => {
+    setRequestError(null);
+    try {
+      const response = await fetch(`${apiBase}?${queryString}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body, parentId }),
       });
+      if (!response.ok) throw new Error("Could not add reply.");
       onAnnotationsChange();
-    } catch { /* ignore */ }
+      return true;
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not add reply.");
+      return false;
+    }
   }, [apiBase, queryString, onAnnotationsChange]);
 
-  const submitReply = useCallback(async (parentAnnotation: NoteAnnotation, body: string) => {
+  const submitAnnotation = useCallback(async (selection: NoteSelectionInfo, body: string) => {
+    if (!expectedHash) return false;
+    setRequestError(null);
     try {
-      await fetch(`${apiBase}?${queryString}`, {
+      const response = await fetch(`${apiBase}?${queryString}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          anchor: parentAnnotation.anchor,
-          author: "user",
+          selectionStart: selection.from,
+          selectionEnd: selection.to,
+          selectedText: selection.text,
+          expectedHash,
           body,
-          parentId: parentAnnotation.id,
         }),
       });
-      onAnnotationsChange();
-    } catch { /* ignore */ }
-  }, [apiBase, queryString, onAnnotationsChange]);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message ?? "Could not add annotation. Reload if the note changed.");
+      onAnnotationMutation(result);
+      onPendingAnnotationDismiss?.();
+      return true;
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not add annotation.");
+      return false;
+    }
+  }, [apiBase, queryString, expectedHash, onAnnotationMutation, onPendingAnnotationDismiss]);
 
-  // ── Thread renderer ─────────────────────────────────────────────────
+  const reattach = useCallback(async (annotationId: string) => {
+    if (!currentSelection || !expectedHash) {
+      setRequestError("Select the intended text in the note before reattaching this thread.");
+      return;
+    }
+    setRequestError(null);
+    try {
+      const response = await fetch(`${apiBase}/${annotationId}/reattach?${queryString}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectionStart: currentSelection.from,
+          selectionEnd: currentSelection.to,
+          selectedText: currentSelection.text,
+          expectedHash,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message ?? "Could not reattach annotation. Reload if the note changed.");
+      onAnnotationMutation(result);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not reattach annotation.");
+    }
+  }, [apiBase, queryString, currentSelection, expectedHash, onAnnotationMutation]);
 
-  const renderThread = (thread: AnnotationThread) => {
-    const isResolved = thread.root.status === "resolved" || thread.root.status === "wontfix";
-    const totalCount = thread.replies.length + 1;
-
-    return (
-      <div
-        key={thread.root.id}
-        className={`codascope-notes-ann-thread${isResolved ? " codascope-notes-ann-thread--resolved" : ""}`}
-        ref={(el) => { if (el) threadRefs.current.set(thread.root.id, el); }}
-      >
-        {/* Thread header */}
-        <div className="codascope-notes-ann-thread-header">
-          <span className="codascope-notes-ann-thread-count">
-            <IconAnnotation size={11} /> {totalCount}
-          </span>
-          <div className="codascope-notes-ann-thread-actions">
-            {isResolved ? (
-              <button
-                className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-                onClick={() => updateStatus(thread.root.id, "open")}
-                type="button"
-                title="Reopen"
-              >
-                <IconUndo size={11} /> Reopen
-              </button>
-            ) : (
-              <button
-                className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-                onClick={() => updateStatus(thread.root.id, "resolved")}
-                type="button"
-                title="Resolve"
-              >
-                <IconCheckmark size={11} /> Resolve
-              </button>
-            )}
-          </div>
+  return (
+    <aside className="codascope-notes-annotation-panel">
+      <div className="codascope-notes-annotation-panel-header">
+        <div className="codascope-notes-annotation-panel-title">
+          <IconAnnotation size={15} />
+          <span>Annotations</span>
+          <span className="codascope-notes-ann-panel-count">{threads.length}</span>
         </div>
+        <div className="codascope-notes-annotation-panel-actions">
+          <button
+            className="codascope-notes-annotation-panel-nav"
+            disabled={inlineAnnotationAnchors.length === 0}
+            onClick={() => onNavigateAnnotation?.("previous")}
+            type="button"
+            title="Previous annotation"
+            aria-label="Previous annotation"
+          >
+            <IconChevronUp size={14} />
+          </button>
+          <button
+            className="codascope-notes-annotation-panel-nav"
+            disabled={inlineAnnotationAnchors.length === 0}
+            onClick={() => onNavigateAnnotation?.("next")}
+            type="button"
+            title="Next annotation"
+            aria-label="Next annotation"
+          >
+            <IconChevronDown size={14} />
+          </button>
+          <button className="codascope-notes-annotation-panel-close" onClick={onClose} type="button" title="Close annotations" aria-label="Close annotations">
+            <IconClose size={13} />
+          </button>
+        </div>
+      </div>
 
-        {/* Section anchor label */}
-        {thread.root.anchor.sectionSlug && thread.root.anchor.sectionSlug !== "root" && (
-          <div className="codascope-notes-ann-section-label">
-            §{" "}{thread.root.anchor.sectionSlug.replace(/-/g, " ")}
-          </div>
+      {requestError && <p className="codascope-notes-ann-recovery-error"><IconWarning size={12} /> {requestError}</p>}
+
+      <div className="codascope-notes-annotation-panel-content">
+        {pendingAnnotation && (
+          <NewAnnotationComposer
+            selectedText={pendingAnnotation.text}
+            onCancel={() => onPendingAnnotationDismiss?.()}
+            onSubmit={(body) => submitAnnotation(pendingAnnotation, body)}
+          />
         )}
 
-        {/* Root entry */}
-        <AnnotationEntry
-          annotation={thread.root}
-          isReply={false}
-          onDelete={() => deleteAnnotation(thread.root.id)}
-        />
-
-        {/* Replies */}
-        {thread.replies.map((reply) => (
-          <AnnotationEntry
-            key={reply.id}
-            annotation={reply}
-            isReply
-            onDelete={() => deleteAnnotation(reply.id)}
+        {threads.length === 0 && !pendingAnnotation ? (
+          <div className="codascope-notes-ann-empty">Select text in the note and choose Add annotation to start a thread.</div>
+        ) : threads.map((thread) => (
+          <ThreadCard
+            key={thread.root.id}
+            thread={thread}
+            active={thread.root.id === activeAnnotationId}
+            currentSelectionAvailable={Boolean(currentSelection && expectedHash)}
+            onArchive={() => archiveThread(thread.root.id)}
+            onReattach={() => reattach(thread.root.id)}
+            onStatus={(status) => updateStatus(thread.root.id, status)}
+            onReply={(body) => submitReply(thread.root.id, body)}
+            setRef={(element) => { if (element) threadRefs.current.set(thread.root.id, element); }}
           />
         ))}
-
-        {/* Reply composer */}
-        <ReplyComposer
-          onSubmit={(body) => submitReply(thread.root, body)}
-        />
       </div>
-    );
-  };
-
-  // ── Render ──────────────────────────────────────────────────────────
-
-  const openCount = threads.filter((t) => t.root.status === "open").length;
-
-  return (
-    <div className="codascope-notes-ann-panel" ref={panelRef}>
-      {/* Panel header */}
-      <div className="codascope-notes-ann-panel-header">
-        <span className="codascope-notes-ann-panel-title">
-          <IconAnnotation size={13} /> Annotations
-          {openCount > 0 && (
-            <span className="codascope-notes-ann-panel-badge">{openCount}</span>
-          )}
-        </span>
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-          onClick={onClose}
-          type="button"
-          title="Close panel"
-        >
-          <IconClose size={12} />
-        </button>
-      </div>
-
-      {/* Thread list */}
-      <div className="codascope-notes-ann-panel-body">
-        {threads.length === 0 ? (
-          <div className="codascope-notes-ann-empty">
-            <IconAnnotation size={24} />
-            <span>No annotations yet</span>
-            <span className="codascope-notes-ann-empty-hint">
-              Select text and click "Comment" to add one
-            </span>
-          </div>
-        ) : (
-          Array.from(groupedThreads.entries()).map(([section, sectionThreads]) => (
-            <div key={section} className="codascope-notes-ann-section">
-              {sectionThreads.map(renderThread)}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
+    </aside>
   );
 }
 
-/* ── Sub-components ──────────────────────────────────────────────────── */
-
-function AnnotationEntry({
-  annotation,
-  isReply,
-  onDelete,
+function ThreadCard({
+  thread,
+  active,
+  currentSelectionAvailable,
+  onArchive,
+  onReattach,
+  onStatus,
+  onReply,
+  setRef,
 }: {
-  annotation: NoteAnnotation;
-  isReply: boolean;
-  onDelete: () => void;
+  thread: AnnotationThread;
+  active: boolean;
+  currentSelectionAvailable: boolean;
+  onArchive: () => void;
+  onReattach: () => void;
+  onStatus: (status: AnnotationStatus) => void;
+  onReply: (body: string) => Promise<boolean>;
+  setRef: (element: HTMLDivElement | null) => void;
 }) {
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", {
-      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-    });
-  };
+  const resolved = thread.root.status === "resolved" || thread.root.status === "wontfix";
+  const anchor = inlineAnchor(thread.root);
+  const unresolved = !anchor || anchor.attachmentState !== "attached";
+  const stateLabel = !anchor ? "Legacy anchor needs review" : anchor.attachmentState.replace("_", " ");
 
   return (
-    <div className={`codascope-notes-ann-entry${isReply ? " codascope-notes-ann-entry--reply" : ""}`}>
-      <div className="codascope-notes-ann-entry-header">
-        <span className="codascope-notes-ann-entry-author">
-          <IconUser size={11} /> {annotation.author}
-        </span>
-        <span className="codascope-notes-ann-entry-time">{formatTime(annotation.createdAt)}</span>
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-notes-ann-entry-delete"
-          onClick={onDelete}
-          type="button"
-          title="Delete"
-        >
-          <IconDelete size={10} />
-        </button>
+    <div className={`codascope-notes-ann-thread${resolved ? " codascope-notes-ann-thread--resolved" : ""}${active ? " codascope-notes-ann-thread--active" : ""}`} ref={setRef}>
+      <div className="codascope-notes-ann-thread-header">
+        <span className="codascope-notes-ann-thread-count"><IconAnnotation size={11} /> {thread.replies.length + 1}</span>
+        <div className="codascope-notes-ann-thread-actions">
+          {resolved ? (
+            <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={() => onStatus("open")} type="button"><IconUndo size={11} /> Reopen</button>
+          ) : (
+            <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={() => onStatus("resolved")} type="button"><IconCheckmark size={11} /> Resolve</button>
+          )}
+        </div>
       </div>
-      <div className="codascope-notes-ann-entry-body">
-        <MarkdownViewer content={annotation.body} />
+
+      {anchor && <blockquote className="codascope-notes-ann-thread-quote">{anchor.quote}</blockquote>}
+      {unresolved && (
+        <div className="codascope-notes-ann-recovery">
+          <div><IconWarning size={12} /> <strong>{stateLabel}</strong></div>
+          {anchor && <p>…{anchor.prefix.slice(-60)}<mark>{anchor.quote}</mark>{anchor.suffix.slice(0, 60)}…</p>}
+          <p>{currentSelectionAvailable ? "Use the selected source text to reattach this thread." : "Select the intended source text, then choose Reattach."}</p>
+          <div className="codascope-notes-ann-recovery-actions">
+            <button className="codascope-btn codascope-btn-primary codascope-btn-xs" onClick={onReattach} type="button">Reattach</button>
+            <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={onArchive} type="button">Archive</button>
+            <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={onArchive} type="button">Delete</button>
+          </div>
+        </div>
+      )}
+
+      <AnnotationEntry annotation={thread.root} onArchive={onArchive} />
+      {thread.replies.map((reply) => <AnnotationEntry key={reply.id} annotation={reply} onArchive={onArchive} reply />)}
+      {!unresolved && <ReplyComposer onSubmit={onReply} />}
+    </div>
+  );
+}
+
+function NewAnnotationComposer({ selectedText, onCancel, onSubmit }: { selectedText: string; onCancel: () => void; onSubmit: (body: string) => Promise<boolean> }) {
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async () => {
+    if (!body.trim()) return;
+    setSubmitting(true);
+    if (await onSubmit(body.trim())) setBody("");
+    setSubmitting(false);
+  };
+  return (
+    <div className="codascope-notes-ann-new-composer">
+      <span className="codascope-notes-ann-new-composer-label">New annotation</span>
+      <blockquote className="codascope-notes-ann-new-composer-quote">{selectedText}</blockquote>
+      <textarea className="codascope-notes-ann-reply-input" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a comment…" rows={3} />
+      <div className="codascope-notes-ann-reply-actions">
+        <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={onCancel} disabled={submitting} type="button">Cancel</button>
+        <button className="codascope-btn codascope-btn-primary codascope-btn-xs" onClick={submit} disabled={submitting || !body.trim()} type="button">{submitting ? "Adding…" : "Add annotation"}</button>
       </div>
     </div>
   );
 }
 
-function ReplyComposer({ onSubmit }: { onSubmit: (body: string) => void }) {
-  const [text, setText] = useState("");
+function AnnotationEntry({ annotation, onArchive, reply = false }: { annotation: NoteAnnotation; onArchive: () => void; reply?: boolean }) {
+  return (
+    <div className={`codascope-notes-ann-entry${reply ? " codascope-notes-ann-entry--reply" : ""}`}>
+      <div className="codascope-notes-ann-entry-header">
+        <span className="codascope-notes-ann-entry-author"><IconUser size={11} /> {annotation.author}</span>
+        <span className="codascope-notes-ann-entry-time">{new Date(annotation.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+        {!reply && <button className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-notes-ann-entry-delete" onClick={onArchive} type="button" title="Archive thread"><IconDelete size={10} /></button>}
+      </div>
+      <div className="codascope-notes-ann-entry-body"><MarkdownViewer content={annotation.body} /></div>
+    </div>
+  );
+}
+
+function ReplyComposer({ onSubmit }: { onSubmit: (body: string) => Promise<boolean> }) {
   const [open, setOpen] = useState(false);
+  const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = useCallback(async () => {
-    if (!text.trim()) return;
+  const submit = async () => {
+    if (!body.trim()) return;
     setSubmitting(true);
-    await onSubmit(text.trim());
-    setText("");
-    setOpen(false);
+    if (await onSubmit(body.trim())) { setBody(""); setOpen(false); }
     setSubmitting(false);
-  }, [text, onSubmit]);
-
-  if (!open) {
-    return (
-      <button
-        className="codascope-btn codascope-btn-ghost codascope-notes-ann-reply-trigger"
-        onClick={() => setOpen(true)}
-        type="button"
-      >
-        <IconReply size={11} /> Reply
-      </button>
-    );
-  }
-
+  };
+  if (!open) return <button className="codascope-btn codascope-btn-ghost codascope-btn-xs codascope-notes-ann-reply-toggle" onClick={() => setOpen(true)} type="button"><IconReply size={11} /> Reply</button>;
   return (
     <div className="codascope-notes-ann-reply-composer">
-      <textarea
-        className="codascope-notes-ann-reply-input"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Write a reply…"
-        rows={2}
-      />
+      <textarea className="codascope-notes-ann-reply-input" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a reply…" rows={2} autoFocus />
       <div className="codascope-notes-ann-reply-actions">
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-          onClick={() => { setOpen(false); setText(""); }}
-          disabled={submitting}
-          type="button"
-        >
-          Cancel
-        </button>
-        <button
-          className="codascope-btn codascope-btn-primary codascope-btn-xs"
-          onClick={handleSubmit}
-          disabled={submitting || !text.trim()}
-          type="button"
-        >
-          {submitting ? "Sending…" : "Reply"}
-        </button>
+        <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={() => setOpen(false)} disabled={submitting} type="button">Cancel</button>
+        <button className="codascope-btn codascope-btn-primary codascope-btn-xs" onClick={submit} disabled={submitting || !body.trim()} type="button">{submitting ? "Sending…" : "Reply"}</button>
       </div>
     </div>
   );
+}
+
+function inlineAnchor(annotation: NoteAnnotation): InlineAnnotationAnchor | null {
+  return (annotation.anchor as InlineAnnotationAnchor).kind === "range" ? annotation.anchor as InlineAnnotationAnchor : null;
 }

@@ -47,6 +47,10 @@
   margin-bottom: var(--space-3);
 }
 
+.codascope-nav-section--bottom {
+  margin-top: auto;
+}
+
 .codascope-nav-section-label {
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-2xs);
@@ -8033,4 +8037,3 @@
 .codascope-pipeline-progress--deep-run .codascope-pipeline-step--running .codascope-pipeline-step-icon {
   color: hsl(40, 70%, 56%);
 }
-

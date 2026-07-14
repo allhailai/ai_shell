@@ -21,6 +21,9 @@ export interface NoteSelectionRect {
 
 export interface NoteSelectionInfo {
   text: string;
+  /** Exact CodeMirror source offsets; used to verify marker insertion server-side. */
+  from: number;
+  to: number;
   startLine: number;
   endLine: number;
   rect: NoteSelectionRect;
@@ -111,15 +114,19 @@ export function NoteSelectionToolbar({
         className="codascope-btn codascope-btn-xs codascope-notes-selection-toolbar-btn codascope-notes-selection-toolbar-btn--primary"
         onClick={handleEditWithAgent}
         type="button"
+        aria-label="Edit selected text with Agent"
+        title="Edit with Agent"
       >
-        <IconSparkle size={12} /> Edit with Agent
+        <IconSparkle size={13} />
       </button>
       <button
         className="codascope-btn codascope-btn-xs codascope-notes-selection-toolbar-btn"
         onClick={handleComment}
         type="button"
+        aria-label="Add annotation to selected text"
+        title="Add annotation"
       >
-        <IconAnnotation size={12} /> Comment
+        <IconAnnotation size={13} />
       </button>
     </div>
   );

@@ -1,5 +1,7 @@
 import type { AppManifest } from "../types/app";
 import { useShellStore } from "../shell/store";
+import { useAuth } from "../shell/authContext";
+import { canAccessApp } from "../shell/appAccess";
 import { useCallback, useMemo, type ReactNode } from "react";
 
 /**
@@ -19,13 +21,14 @@ export function LeftNav({
   apps: AppManifest[];
   activeApp: AppManifest | null;
 }) {
+  const { user } = useAuth();
   const collapsed = useShellStore((s) => s.leftNavCollapsed);
   const toggleLeftNav = useShellStore((s) => s.toggleLeftNav);
 
   const { regularApps, systemApps } = useMemo(() => {
     const regular: AppManifest[] = [];
     const system: AppManifest[] = [];
-    for (const app of apps) {
+    for (const app of apps.filter((candidate) => canAccessApp(candidate, user))) {
       if (app.system) {
         system.push(app);
       } else {
@@ -33,7 +36,7 @@ export function LeftNav({
       }
     }
     return { regularApps: regular, systemApps: system };
-  }, [apps]);
+  }, [apps, user]);
 
   if (!activeApp) {
     // Mode 1: Launcher nav — show app list

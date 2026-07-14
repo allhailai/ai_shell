@@ -1,0 +1,56 @@
+/* Validated inline annotation marker presentation. */
+
+.shared-md-inline-ann-range {
+  border-bottom: 2px solid var(--color-border-secondary);
+}
+
+.shared-md-inline-ann-range--open {
+  border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.shared-md-inline-ann-range--resolved {
+  border-bottom-color: var(--color-text-quaternary);
+  background: color-mix(in srgb, var(--color-text-quaternary) 8%, transparent);
+}
+
+.shared-md-inline-ann-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-inline: 3px;
+  padding: 0;
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.shared-md-inline-ann-pin::before {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  content: "";
+}
+
+.shared-md-inline-ann-pin--open {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.shared-md-inline-ann-pin--resolved {
+  color: var(--color-text-quaternary);
+}
+
+.shared-md-inline-ann-pin:hover {
+  background: var(--color-bg-hover);
+}
+
+.shared-md-inline-ann-pin:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}

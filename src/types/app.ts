@@ -76,6 +76,9 @@ export interface AppManifest {
    */
   system?: boolean;
 
+  /** Restrict this application to authenticated AIShell administrators. */
+  requiresAdmin?: boolean;
+
   // ── UI Region Components ──────────────────────────────────────────
 
   /**

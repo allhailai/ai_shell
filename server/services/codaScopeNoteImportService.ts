@@ -10,14 +10,13 @@
    - Audit event logging
    ──────────────────────────────────────────────────────────────────── */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import * as unzipper from "unzipper";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
+import type { CodaScopeNoteAnnotationService } from "./codaScopeNoteAnnotationService.js";
 import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
-import { resolveWithin } from "./codaScopePathSafety.js";
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
@@ -55,6 +54,7 @@ export interface ImportReport {
   skipped: number;
   renamed: number;
   failed: Array<{ path: string; error: string }>;
+  warnings: string[];
   correlationId: string;
 }
 
@@ -68,6 +68,7 @@ interface ManifestItem {
   frontmatter: { title: string; tags: string[] };
   versionsIncluded: boolean;
   annotationsIncluded: boolean;
+  annotationAnchorFormatVersion?: number;
 }
 
 interface ExportManifest {
@@ -81,30 +82,43 @@ interface ExportManifest {
   items: ManifestItem[];
 }
 
+interface ImportedNote {
+  status: "imported" | "skipped" | "renamed";
+  path: string;
+}
+
 /* ── Service ──────────────────────────────────────────────────────── */
 
 export class CodaScopeNoteImportService {
   private root: string;
   private noteSvc: CodaScopeNoteService;
   private auditSvc: CodaScopeNoteAuditService;
+  private annotationSvc: CodaScopeNoteAnnotationService;
 
   constructor(
     root: string,
     noteSvc: CodaScopeNoteService,
     auditSvc: CodaScopeNoteAuditService,
+    annotationSvc: CodaScopeNoteAnnotationService,
   ) {
     this.root = root;
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
+    this.annotationSvc = annotationSvc;
   }
 
   setRoot(root: string): void {
     this.root = root;
   }
 
-  setServices(noteSvc: CodaScopeNoteService, auditSvc: CodaScopeNoteAuditService): void {
+  setServices(
+    noteSvc: CodaScopeNoteService,
+    auditSvc: CodaScopeNoteAuditService,
+    annotationSvc: CodaScopeNoteAnnotationService,
+  ): void {
     this.noteSvc = noteSvc;
     this.auditSvc = auditSvc;
+    this.annotationSvc = annotationSvc;
   }
 
   /* ── Preview ──────────────────────────────────────────────────────── */
@@ -148,8 +162,8 @@ export class CodaScopeNoteImportService {
     if (manifest.format !== "codascope-notes") {
       warnings.push(`Unexpected format: "${manifest.format}". Expected "codascope-notes".`);
     }
-    if (manifest.formatVersion !== 1) {
-      warnings.push(`Unexpected format version: ${manifest.formatVersion}. Expected 1.`);
+    if (manifest.formatVersion !== 1 && manifest.formatVersion !== 2) {
+      warnings.push(`Unexpected format version: ${manifest.formatVersion}. Expected 1 or 2.`);
     }
 
     // Detect collisions
@@ -157,6 +171,9 @@ export class CodaScopeNoteImportService {
     const notesDir = this.noteSvc.resolveNotesDir(destScope, destVisibility, opts);
 
     for (const item of manifest.items) {
+      if (item.annotationsIncluded && manifest.formatVersion >= 2 && item.annotationAnchorFormatVersion !== 1) {
+        warnings.push(`${item.path}: unknown annotation-anchor format; annotations will require review after import.`);
+      }
       if (!notesDir) continue;
       try {
         const existing = await this.noteSvc.readNote(destScope, destVisibility, opts, item.path);
@@ -210,8 +227,7 @@ export class CodaScopeNoteImportService {
       throw new Error(`ZIP file exceeds maximum size of ${MAX_ZIP_SIZE / 1024 / 1024} MB.`);
     }
 
-    const notesDir = this.noteSvc.resolveNotesDir(destScope, destVisibility, opts);
-    if (!notesDir) {
+    if (!this.noteSvc.resolveNotesDir(destScope, destVisibility, opts)) {
       throw new Error("Cannot resolve notes directory for the given scope/visibility.");
     }
 
@@ -221,22 +237,26 @@ export class CodaScopeNoteImportService {
     let skipped = 0;
     let renamed = 0;
     const failed: Array<{ path: string; error: string }> = [];
+    const warnings: string[] = [];
 
     if (!manifest) {
       // No manifest — import raw .md files from the ZIP
       for (const [entryPath, content] of entries) {
-        if (!entryPath.endsWith(".md")) continue;
+        if (!entryPath.endsWith(".md") || entryPath.includes(".versions/")) continue;
         // Strip leading notes/ prefix if present
         let notePath = entryPath;
         if (notePath.startsWith("notes/")) notePath = notePath.slice(6);
 
         try {
           const result = await this.importSingleNote(
-            notePath, content, destScope, destVisibility, opts, notesDir, collisionStrategy,
+            notePath, content, destScope, destVisibility, opts, collisionStrategy,
           );
-          if (result === "imported") imported++;
-          else if (result === "skipped") skipped++;
-          else if (result === "renamed") { imported++; renamed++; }
+          if (result.status === "imported") imported++;
+          else if (result.status === "skipped") skipped++;
+          else { imported++; renamed++; }
+          if (result.status !== "skipped") {
+            await this.restoreCompanions(entries, notePath, result.path, destScope, destVisibility, opts, warnings);
+          }
         } catch (err: unknown) {
           failed.push({ path: notePath, error: err instanceof Error ? err.message : String(err) });
         }
@@ -258,33 +278,15 @@ export class CodaScopeNoteImportService {
 
           const result = await this.importSingleNote(
             item.path, Buffer.from(noteContent, "utf-8"),
-            destScope, destVisibility, opts, notesDir, collisionStrategy,
+            destScope, destVisibility, opts, collisionStrategy,
           );
-          if (result === "imported") imported++;
-          else if (result === "skipped") skipped++;
-          else if (result === "renamed") { imported++; renamed++; }
+          if (result.status === "imported") imported++;
+          else if (result.status === "skipped") skipped++;
+          else { imported++; renamed++; }
 
-          // Import attachments
-          for (const att of item.attachments) {
-            const attContent = entries.get(att.path);
-            if (attContent) {
-              const attNotePath = result === "renamed"
-                ? this.getRenamePath(item.path)
-                : item.path;
-              this.writeAttachment(notesDir, attNotePath, att.path, attContent);
-            }
-          }
+          if (result.status === "skipped") continue;
 
-          // Import versions (if present in the ZIP)
-          if (item.versionsIncluded) {
-            const versionPrefix = `versions/${item.path.replace(/\.md$/, ".versions/")}`;
-            for (const [entryPath, vContent] of entries) {
-              if (entryPath.startsWith(versionPrefix)) {
-                const vRelative = entryPath.slice("versions/".length);
-                this.writeVersionFile(notesDir, vRelative, vContent);
-              }
-            }
-          }
+          await this.restoreCompanions(entries, item.path, result.path, destScope, destVisibility, opts, warnings);
         } catch (err: unknown) {
           failed.push({ path: item.path, error: err instanceof Error ? err.message : String(err) });
         }
@@ -301,10 +303,10 @@ export class CodaScopeNoteImportService {
       visibility: destVisibility,
       path: "",
       correlationId,
-      metadata: { imported, skipped, renamed, failedCount: failed.length, collisionStrategy },
+      metadata: { imported, skipped, renamed, failedCount: failed.length, warningCount: warnings.length, collisionStrategy },
     });
 
-    return { imported, skipped, renamed, failed, correlationId };
+    return { imported, skipped, renamed, failed, warnings, correlationId };
   }
 
   /* ── Private: ZIP parsing ─────────────────────────────────────────── */
@@ -391,37 +393,36 @@ export class CodaScopeNoteImportService {
     destScope: NoteScope,
     destVisibility: NoteVisibility,
     opts: NoteResolveOpts,
-    notesDir: string,
     collisionStrategy: CollisionStrategy,
-  ): Promise<"imported" | "skipped" | "renamed"> {
+  ): Promise<ImportedNote> {
     // Check if note already exists
     const existing = await this.noteSvc.readNote(destScope, destVisibility, opts, notePath);
 
     if (existing) {
       switch (collisionStrategy) {
         case "skip":
-          return "skipped";
+          return { status: "skipped", path: notePath };
 
         case "rename": {
           const renamed = this.getRenamePath(notePath);
           await this.noteSvc.createNote(destScope, destVisibility, opts, renamed, content.toString("utf-8"));
-          return "renamed";
+          return { status: "renamed", path: renamed };
         }
 
         case "import-as-copy": {
           const copyPath = this.getCopyPath(notePath);
           const noteContent = this.reassignNoteId(content.toString("utf-8"), destScope, destVisibility, opts);
           await this.noteSvc.createNote(destScope, destVisibility, opts, copyPath, noteContent);
-          return "renamed";
+          return { status: "renamed", path: copyPath };
         }
 
         default:
-          return "skipped";
+          return { status: "skipped", path: notePath };
       }
     }
 
     await this.noteSvc.createNote(destScope, destVisibility, opts, notePath, content.toString("utf-8"));
-    return "imported";
+    return { status: "imported", path: notePath };
   }
 
   /* ── Private: collision path helpers ───────────────────────────────── */
@@ -462,39 +463,65 @@ export class CodaScopeNoteImportService {
     );
   }
 
-  /* ── Private: attachment writing ──────────────────────────────────── */
+  /** Restore every companion in one physical note bundle and reconcile it. */
+  private async restoreCompanions(
+    entries: Map<string, Buffer>,
+    sourceNotePath: string,
+    targetNotePath: string,
+    destScope: NoteScope,
+    destVisibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    warnings: string[],
+  ): Promise<void> {
+    const sourceBase = sourceNotePath.replace(/\.md$/, "");
+    const assetsPrefix = `${sourceBase}.assets/`;
+    const versionsPrefix = `${sourceBase}.versions/`;
+    const annotationsPath = `${sourceBase}.annotations.json`;
+    let annotationRestored = false;
 
-  private writeAttachment(
-    notesDir: string,
-    notePath: string,
-    attZipPath: string,
-    content: Buffer,
-  ): void {
-    try {
-      // Determine the on-disk path for the attachment
-      // attZipPath is like "notes/folder/note.assets/image.png"
-      // We need to strip the leading "notes/" prefix
-      let relative = attZipPath;
-      if (relative.startsWith("notes/")) relative = relative.slice(6);
+    for (const [entryPath, content] of entries) {
+      const normalized = entryPath.startsWith("notes/")
+        ? entryPath.slice(6)
+        : entryPath.startsWith("versions/")
+          ? entryPath.slice(9)
+          : entryPath;
+      if (normalized.startsWith(assetsPrefix)) {
+        this.noteSvc.writeNoteBundleCompanion(
+          destScope, destVisibility, opts, targetNotePath,
+          "asset", normalized.slice(assetsPrefix.length), content,
+        );
+      } else if (normalized.startsWith(versionsPrefix)) {
+        this.noteSvc.writeNoteBundleCompanion(
+          destScope, destVisibility, opts, targetNotePath,
+          "version", normalized.slice(versionsPrefix.length), content,
+        );
+      } else if (normalized === annotationsPath) {
+        try {
+          const sidecar = JSON.parse(content.toString("utf-8"));
+          if (Array.isArray(sidecar) || Array.isArray(sidecar?.annotations)) {
+            this.annotationSvc.replaceAnnotations(
+              destScope, destVisibility, opts, targetNotePath, sidecar,
+            );
+            annotationRestored = true;
+          } else {
+            warnings.push(`${targetNotePath}: annotation sidecar was malformed and was not imported.`);
+          }
+        } catch {
+          warnings.push(`${targetNotePath}: annotation sidecar was malformed and was not imported.`);
+        }
+      }
+    }
 
-      const targetPath = resolveWithin(notesDir, relative, "attachment path");
-      const targetDir = path.dirname(targetPath);
-
-      if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-      writeFileSync(targetPath, content);
-    } catch { /* best effort */ }
-  }
-
-  /* ── Private: version file writing ────────────────────────────────── */
-
-  private writeVersionFile(notesDir: string, vRelativePath: string, content: Buffer): void {
-    try {
-      const targetPath = resolveWithin(notesDir, vRelativePath, "version path");
-      const targetDir = path.dirname(targetPath);
-
-      if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-      writeFileSync(targetPath, content);
-    } catch { /* best effort */ }
+    if (!annotationRestored) this.annotationSvc.ensurePhysicalSidecar(destScope, destVisibility, opts, targetNotePath);
+    const reconciled = await this.annotationSvc.reconcileAfterNoteWrite(
+      destScope, destVisibility, opts, targetNotePath,
+    );
+    const unresolved = reconciled.filter((annotation) => !annotation.parentId && !annotation.archivedAt && (
+      !("kind" in annotation.anchor) || annotation.anchor.attachmentState !== "attached"
+    ));
+    if (unresolved.length > 0) {
+      warnings.push(`${targetNotePath}: ${unresolved.length} imported annotation${unresolved.length === 1 ? " requires" : "s require"} review; no marker was auto-attached.`);
+    }
   }
 
   /* ── Private: preview from raw entries (no manifest) ──────────────── */

@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { annotationEndMarker, annotationStartMarker } from "./codaScopeNoteAnnotationAnchorService.js";
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
@@ -315,6 +316,7 @@ describe("CodaScopeNoteService", () => {
       const notes = await svc.listNotes("codascope", "private", { userId: "alan" }, "meeting");
       expect(notes.length).toBe(1);
       expect(notes[0].title).toBe("standup");
+      expect(notes[0].path).toBe("meeting/standup.md");
     });
 
     it("should return empty array for empty directory", async () => {
@@ -345,6 +347,21 @@ describe("CodaScopeNoteService", () => {
     it("rejects traversal when creating folders", async () => {
       await expect(svc.createFolder("codascope", "private", { userId: "alan" }, "../../outside")).rejects.toThrow("Path traversal");
       expect(existsSync(path.join(root, "outside"))).toBe(false);
+    });
+
+    it("archives and restores a nested folder tree with note companions", async () => {
+      await svc.createNote("codascope", "private", { userId: "alan" }, "planning/2026/brief.md", "Brief");
+      await svc.uploadImage("codascope", "private", { userId: "alan" }, "planning/2026/brief.md", Buffer.from("image"), "image/png");
+
+      const archived = await svc.archiveFolder("codascope", "private", { userId: "alan" }, "planning");
+      expect(archived).toMatchObject({ kind: "folder", originalPath: "planning", title: "planning" });
+      expect(await svc.readNote("codascope", "private", { userId: "alan" }, "planning/2026/brief.md")).toBeNull();
+
+      const restored = await svc.restoreNote("codascope", "private", { userId: "alan" }, archived!.noteId);
+      expect(restored?.restoredPath).toBe("planning");
+      expect(await svc.readNote("codascope", "private", { userId: "alan" }, "planning/2026/brief.md")).not.toBeNull();
+      const notesDir = svc.resolveNotesDir("codascope", "private", { userId: "alan" })!;
+      expect(existsSync(path.join(notesDir, "planning", "2026", "brief.assets"))).toBe(true);
     });
   });
 
@@ -491,6 +508,42 @@ describe("CodaScopeNoteService", () => {
       expect(existsSync(path.join(notesDir, "source.assets"))).toBe(true);
       expect(existsSync(path.join(notesDir, "target", "source.md"))).toBe(false);
     });
+
+    it("moves an entire nested folder between visibility libraries", async () => {
+      await svc.createNote("codascope", "private", { userId: "alan" }, "research/decisions/choice.md", "Decision");
+      await svc.uploadImage("codascope", "private", { userId: "alan" }, "research/decisions/choice.md", Buffer.from("image"), "image/png");
+
+      const moved = await svc.moveFolder({
+        fromScope: "codascope",
+        fromVisibility: "private",
+        fromOpts: { userId: "alan" },
+        fromFolder: "research",
+        toScope: "codascope",
+        toVisibility: "shared",
+        toOpts: { userId: "alan" },
+        toFolder: "team/research",
+      });
+
+      expect(moved).toBe(true);
+      expect(await svc.readNote("codascope", "private", { userId: "alan" }, "research/decisions/choice.md")).toBeNull();
+      expect(await svc.readNote("codascope", "shared", {}, "team/research/decisions/choice.md")).not.toBeNull();
+      const sharedDir = svc.resolveNotesDir("codascope", "shared", {})!;
+      expect(existsSync(path.join(sharedDir, "team", "research", "decisions", "choice.assets"))).toBe(true);
+    });
+
+    it("refuses to move a folder into its own nested path", async () => {
+      await svc.createFolder("codascope", "private", { userId: "alan" }, "parent/child");
+      await expect(svc.moveFolder({
+        fromScope: "codascope",
+        fromVisibility: "private",
+        fromOpts: { userId: "alan" },
+        fromFolder: "parent",
+        toScope: "codascope",
+        toVisibility: "private",
+        toOpts: { userId: "alan" },
+        toFolder: "parent/child/parent",
+      })).rejects.toThrow("cannot be moved into itself");
+    });
   });
 
   // ── Index ─────────────────────────────────────────────────────────
@@ -559,6 +612,26 @@ describe("CodaScopeNoteService", () => {
         actor: "alex",
         details: "Changed visibility from private to shared",
       }));
+    });
+  });
+
+  // ── Annotation control syntax ─────────────────────────────────────
+
+  describe("annotation control syntax", () => {
+    it("excludes inline marker comments from note word counts and search snippets", async () => {
+      const id = "nann_abcdef123456";
+      await svc.createNote(
+        "codascope",
+        "private",
+        { userId: "alan" },
+        "anchored.md",
+        `Visible ${annotationStartMarker(id)}selected text${annotationEndMarker(id)} remains.`,
+      );
+
+      const entries = await svc.listNotes("codascope", "private", { userId: "alan" });
+      expect(entries.find((entry) => entry.path === "anchored.md")?.wordCount).toBe(4);
+      expect(await svc.searchNotes("codascope:ann-start", "codascope", { userId: "alan" })).toEqual([]);
+      expect(await svc.searchNotes("selected text", "codascope", { userId: "alan" })).toHaveLength(1);
     });
   });
 

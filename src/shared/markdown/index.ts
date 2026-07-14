@@ -13,9 +13,8 @@ export { buildWikiLinkExtension, buildTableCellDisplayRenderer } from "./extensi
 export { buildClipboardImageExtension, type ClipboardImageConfig } from "./extensions/clipboardImageExtension";
 export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConfig, type ImageRef } from "./extensions/imagePreviewExtension";
 export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
-export { buildAnnotationGutterExtension, setAnnotationSummary, type AnnotationSummaryItem, type AnnotationGutterConfig } from "./extensions/annotationGutterExtension";
+export { buildInlineAnnotationExtension, type InlineAnnotationAnchorItem, type InlineAnnotationExtensionConfig } from "./extensions/inlineAnnotationExtension";
 export { buildHighlightExtension } from "./extensions/highlightExtension";
-export { buildFocusModeExtension, toggleFocusMode, isFocusModeOn } from "./extensions/focusModeExtension";
 export { buildMathExtension } from "./extensions/mathExtension";
 export { buildFootnoteExtension } from "./extensions/footnoteExtension";
 export {

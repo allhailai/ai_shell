@@ -14,6 +14,8 @@ interface NoteExportDialogProps {
   scope: NoteScope;
   visibility: NoteVisibility;
   queryParams: Record<string, string>;
+  /** Optional library-relative paths to export instead of the whole library. */
+  notePaths?: string[];
   onClose: () => void;
 }
 
@@ -24,10 +26,10 @@ export function NoteExportDialog({
   scope,
   visibility,
   queryParams,
+  notePaths,
   onClose,
 }: NoteExportDialogProps) {
   const [includeVersions, setIncludeVersions] = useState(false);
-  const [includeAnnotations, setIncludeAnnotations] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportId, setExportId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +48,8 @@ export function NoteExportDialog({
           visibility,
           projectId: queryParams.projectId,
           epicId: queryParams.epicId,
+          notePaths,
           includeVersions,
-          includeAnnotations,
         }),
       });
 
@@ -67,7 +69,7 @@ export function NoteExportDialog({
       setError(err instanceof Error ? err.message : "Export failed.");
     }
     setExporting(false);
-  }, [scope, visibility, queryParams, includeVersions, includeAnnotations]);
+  }, [scope, visibility, queryParams, notePaths, includeVersions]);
 
   const handleClose = useCallback(() => {
     setExportId(null);
@@ -85,7 +87,7 @@ export function NoteExportDialog({
         <div className="codascope-notes-move-dialog-header">
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
             <IconDownload size={14} />
-            <span>Export Notes</span>
+            <span>{notePaths?.length === 1 ? "Export Note" : "Export Notes"}</span>
           </div>
           <button
             className="codascope-notes-move-level-btn"
@@ -124,14 +126,10 @@ export function NoteExportDialog({
               />
               <span>Include version history</span>
             </label>
-            <label className="codascope-notes-export-checkbox">
-              <input
-                type="checkbox"
-                checked={includeAnnotations}
-                onChange={(e) => setIncludeAnnotations(e.target.checked)}
-              />
-              <span>Include annotations</span>
-            </label>
+            <div className="codascope-notes-export-info-row">
+              <span className="codascope-notes-move-label">Annotations</span>
+              <span className="codascope-notes-export-info-value">Always included</span>
+            </div>
           </div>
 
           {/* Error */}

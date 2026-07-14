@@ -37,6 +37,8 @@ import { CodaScopeNoteUserPrefsService } from "../services/codaScopeNoteUserPref
 import { CodaScopeNoteLinkIndexService } from "../services/codaScopeNoteLinkIndexService.js";
 import { CodaScopeNoteExportService } from "../services/codaScopeNoteExportService.js";
 import { CodaScopeNoteImportService } from "../services/codaScopeNoteImportService.js";
+import { CodaScopeNoteTagSuggestionService } from "../services/codaScopeNoteTagSuggestionService.js";
+import { CodaScopeNoteTransferService } from "../services/codaScopeNoteTransferService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -86,6 +88,8 @@ export interface CodaScopeServices {
   noteLinkIndexSvc: CodaScopeNoteLinkIndexService;
   noteExportSvc: CodaScopeNoteExportService;
   noteImportSvc: CodaScopeNoteImportService;
+  noteTagSuggestionSvc: CodaScopeNoteTagSuggestionService;
+  noteTransferSvc: CodaScopeNoteTransferService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -138,6 +142,8 @@ let noteUserPrefsService: CodaScopeNoteUserPrefsService | null = null;
 let noteLinkIndexService: CodaScopeNoteLinkIndexService | null = null;
 let noteExportService: CodaScopeNoteExportService | null = null;
 let noteImportService: CodaScopeNoteImportService | null = null;
+let noteTagSuggestionService: CodaScopeNoteTagSuggestionService | null = null;
+let noteTransferService: CodaScopeNoteTransferService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -274,8 +280,29 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteExportService) noteExportService = new CodaScopeNoteExportService(root, noteService, noteAuditService, noteAnnotationService);
   else { noteExportService.setRoot(root); noteExportService.setServices(noteService, noteAuditService, noteAnnotationService); }
 
-  if (!noteImportService) noteImportService = new CodaScopeNoteImportService(root, noteService, noteAuditService);
-  else { noteImportService.setRoot(root); noteImportService.setServices(noteService, noteAuditService); }
+  if (!noteImportService) noteImportService = new CodaScopeNoteImportService(root, noteService, noteAuditService, noteAnnotationService);
+  else { noteImportService.setRoot(root); noteImportService.setServices(noteService, noteAuditService, noteAnnotationService); }
+
+  if (!noteTagSuggestionService) noteTagSuggestionService = new CodaScopeNoteTagSuggestionService(root);
+  else noteTagSuggestionService.setRoot(root);
+
+  if (!noteTransferService) {
+    noteTransferService = new CodaScopeNoteTransferService(
+      noteService,
+      noteAnnotationService,
+      noteUserPrefsService,
+      noteLinkIndexService,
+      noteAuditService,
+    );
+  } else {
+    noteTransferService.setServices(
+      noteService,
+      noteAnnotationService,
+      noteUserPrefsService,
+      noteLinkIndexService,
+      noteAuditService,
+    );
+  }
 
   return {
     projectSvc: projectService,
@@ -308,6 +335,8 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     noteLinkIndexSvc: noteLinkIndexService,
     noteExportSvc: noteExportService,
     noteImportSvc: noteImportService,
+    noteTagSuggestionSvc: noteTagSuggestionService,
+    noteTransferSvc: noteTransferService,
   };
 }
 

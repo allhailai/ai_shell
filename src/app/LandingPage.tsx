@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useShellStore } from "../shell/store";
+import { useAuth } from "../shell/authContext";
+import { canAccessApp } from "../shell/appAccess";
 import type { AppManifest } from "../types/app";
 
 /**
@@ -7,6 +9,7 @@ import type { AppManifest } from "../types/app";
  * Displays a searchable card grid of all registered apps with pin and hide support.
  */
 export function LandingPage({ apps }: { apps: AppManifest[] }) {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [showHidden, setShowHidden] = useState(false);
 
@@ -21,7 +24,7 @@ export function LandingPage({ apps }: { apps: AppManifest[] }) {
     const query = searchQuery.toLowerCase().trim();
 
     // System apps are never shown on the landing page
-    const nonSystemApps = apps.filter((app) => !app.system);
+    const nonSystemApps = apps.filter((app) => !app.system && canAccessApp(app, user));
 
     const filtered = nonSystemApps.filter((app) => {
       if (!query) return true;
@@ -52,7 +55,7 @@ export function LandingPage({ apps }: { apps: AppManifest[] }) {
     });
 
     return { visibleApps: visible, hiddenAppsList: hidden };
-  }, [apps, searchQuery, pinnedApps, hiddenApps]);
+  }, [apps, searchQuery, pinnedApps, hiddenApps, user]);
 
   const handleLaunch = useCallback(
     (appId: string) => {

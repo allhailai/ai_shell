@@ -12,6 +12,7 @@ import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import type { NoteScope, NoteVisibility } from "../../../src/apps/codascope/codaScopeTypes.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 import { formatCompletedAction } from "../codaScopeActionParser.js";
+import { stripInlineAnnotationMarkers } from "../codaScopeNoteAnnotationAnchorService.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -143,7 +144,7 @@ export function buildNoteReadTools(
             `_Tags: ${result.frontmatter.tags.join(", ") || "none"} | ` +
             `Created: ${result.frontmatter.created} | ` +
             `Updated: ${result.frontmatter.updated}_\n\n` +
-            result.content;
+            stripInlineAnnotationMarkers(result.content);
         } catch {
           return `Failed to read note "${notePath}" at scope "${scope}" (${visibility}).`;
         }

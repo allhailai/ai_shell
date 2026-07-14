@@ -13,6 +13,7 @@
      /codascope/project/:id/chat                     → redirects to dashboard (chat is in right panel)
      /codascope/project/:id/notes/shared/<path>     → project shared notes
      /codascope/project/:id/notes/private/<path>    → project private notes
+     /codascope/project/:id/notes/codascope/<visibility>/<path> → CodaScope notes in project context
      /codascope/project/:id/skills                   → skills manager
      /codascope/project/:id/settings                 → project settings
      /codascope/project/:id/epics                    → epic list
@@ -27,7 +28,7 @@
      /codascope/project/:id/epic/:epicId/knowledge/failed           → failed sources
      /codascope/project/:id/epic/:epicId/design      → epic design docs
      /codascope/project/:id/epic/:epicId/notes/shared/<path> → epic shared notes
-     /codascope/project/:id/epic/:epicId/notes/private/<path> → epic private notes
+     /codascope/project/:id/epic/:epicId/notes/codascope/<visibility>/<path> → CodaScope notes in epic context
      /codascope/project/:id/epic/:epicId/history     → epic history
    ──────────────────────────────────────────────────────────────────── */
 

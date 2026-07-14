@@ -4,7 +4,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect } from "react";
-import { IconArchive, IconFile } from "../components/CodaScopeIcons";
+import { IconArchive, IconFile, IconFolder } from "../components/CodaScopeIcons";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import type { NoteScope, NoteVisibility, NoteArchiveMeta } from "../codaScopeTypes";
 
@@ -76,7 +76,7 @@ export function NoteArchiveBrowser({ scope, visibility, queryString }: NoteArchi
       });
       if (res.ok) {
         const data = await res.json();
-        setRestoreResult(`Note restored to: ${data.restoredPath}`);
+        setRestoreResult(`${confirmRestore?.kind === "folder" ? "Folder" : "Note"} restored to: ${data.restoredPath}`);
         void fetchArchived();
       }
     } catch {
@@ -84,7 +84,7 @@ export function NoteArchiveBrowser({ scope, visibility, queryString }: NoteArchi
     }
     setRestoring(null);
     setConfirmRestore(null);
-  }, [scope, visibility, queryString, fetchArchived]);
+  }, [scope, visibility, queryString, fetchArchived, confirmRestore]);
 
   // ── Render ─────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ export function NoteArchiveBrowser({ scope, visibility, queryString }: NoteArchi
     return (
       <div className="codascope-notes-archive-empty">
         <IconArchive size={20} />
-        <span>No archived notes.</span>
+        <span>No archived notes or folders.</span>
       </div>
     );
   }
@@ -122,9 +122,9 @@ export function NoteArchiveBrowser({ scope, visibility, queryString }: NoteArchi
       )}
 
       {archived.map((meta) => (
-        <div key={meta.noteId} className="codascope-notes-archive-item">
-          <div className="codascope-notes-archive-item-icon">
-            <IconFile size={14} />
+          <div key={meta.noteId} className="codascope-notes-archive-item">
+            <div className="codascope-notes-archive-item-icon">
+              {meta.kind === "folder" ? <IconFolder size={14} /> : <IconFile size={14} />}
           </div>
           <div className="codascope-notes-archive-item-content">
             <div className="codascope-notes-archive-item-title">{meta.title}</div>
@@ -160,8 +160,8 @@ export function NoteArchiveBrowser({ scope, visibility, queryString }: NoteArchi
       {/* Restore confirmation dialog */}
       <ConfirmDialog
         open={!!confirmRestore}
-        title="Restore Note?"
-        message={`Restore "${confirmRestore?.title}" to its original location? If a note already exists at that path, the restored note will be renamed.`}
+        title={`Restore ${confirmRestore?.kind === "folder" ? "Folder" : "Note"}?`}
+        message={`Restore "${confirmRestore?.title}" to its original location? If that path is occupied, the restored ${confirmRestore?.kind === "folder" ? "folder" : "note"} will be renamed.`}
         confirmLabel="Restore"
         cancelLabel="Cancel"
         onConfirm={() => confirmRestore && void handleRestore(confirmRestore.noteId)}

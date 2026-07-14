@@ -10,20 +10,19 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MarkdownEditor, type AnnotationSummaryItem } from "../../../shared/markdown";
+import { MarkdownEditor, type InlineAnnotationAnchorItem } from "../../../shared/markdown";
 import { useAuth } from "../../../shell/authContext";
-import { IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
+import { IconArrowLeft, IconChevronDown, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDownload, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
+import { NoteSelectionToolbar, type NoteSelectionInfo } from "../components/NoteSelectionToolbar";
+import { canCreateRangeAnnotation } from "../components/noteSelectionPolicy";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
+import { NoteExportDialog } from "../components/NoteExportDialog";
 import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
-import type { EditorView } from "@codemirror/view";
-
-function countWords(content: string): number {
-  const body = content.trim();
-  return body ? body.split(/\s+/).length : 0;
-}
+import { EditorView } from "@codemirror/view";
+import { EditorSelection } from "@codemirror/state";
 
 /* ── Visibility label helpers ────────────────────────────────────────── */
 
@@ -89,16 +88,24 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
 
   // Annotation state
   const [annotations, setAnnotations] = useState<NoteAnnotation[]>([]);
+  const [inlineAnnotationAnchors, setInlineAnnotationAnchors] = useState<InlineAnnotationAnchorItem[]>([]);
+  const [inlineAnnotationMarkerRanges, setInlineAnnotationMarkerRanges] = useState<Array<{ from: number; to: number }>>([]);
   const [showAnnotations, setShowAnnotations] = useState(false);
-  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+  const [selectionInfo, setSelectionInfo] = useState<NoteSelectionInfo | null>(null);
+  const [multipleSelections, setMultipleSelections] = useState(false);
+  const [pendingAnnotation, setPendingAnnotation] = useState<NoteSelectionInfo | null>(null);
 
   // Move dialog state
   const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [showExport, setShowExport] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const moreActionsRef = useRef<HTMLDivElement | null>(null);
 
   // Version history state
   const [showVersions, setShowVersions] = useState(false);
   const [versions, setVersions] = useState<VersionEntry[]>([]);
-  const [selectedVersion, setSelectedVersion] = useState<{ version: string; content: string } | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<{ version: string; content: string; markerRanges?: Array<{ from: number; to: number }> } | null>(null);
 
   // Backlinks state
   const [backlinks, setBacklinks] = useState<NoteBacklink[]>([]);
@@ -205,6 +212,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       if (res.ok) {
         const data = await res.json();
         setAnnotations(data.annotations ?? []);
+        setInlineAnnotationAnchors(data.anchors ?? []);
+        setInlineAnnotationMarkerRanges(data.markerRanges ?? []);
       }
     } catch { /* ignore */ }
   }, [apiBase, apiPath, queryString]);
@@ -223,38 +232,6 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       if (annotationFetchTimerRef.current) clearTimeout(annotationFetchTimerRef.current);
     };
   }, [content, fetchAnnotations]);
-
-  // ── Compute annotation summary for gutter ─────────────────────────
-  const annotationSummary = useMemo((): AnnotationSummaryItem[] => {
-    if (annotations.length === 0) return [];
-
-    // Group root annotations by blockId
-    const roots = annotations.filter((a) => !a.parentId);
-    const blockMap = new Map<string, { count: number; hasOpen: boolean }>();
-
-    for (const ann of roots) {
-      const blockId = ann.anchor.blockId;
-      const existing = blockMap.get(blockId);
-      const replies = annotations.filter((a) => a.parentId === ann.id);
-      const totalCount = 1 + replies.length;
-
-      if (existing) {
-        existing.count += totalCount;
-        if (ann.status === "open") existing.hasOpen = true;
-      } else {
-        blockMap.set(blockId, {
-          count: totalCount,
-          hasOpen: ann.status === "open",
-        });
-      }
-    }
-
-    return Array.from(blockMap.entries()).map(([blockId, { count, hasOpen }]) => ({
-      blockId,
-      count,
-      hasOpen,
-    }));
-  }, [annotations]);
 
   // ── Open annotation count for header badge ────────────────────────
   const openAnnotationCount = useMemo(() => {
@@ -448,9 +425,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       if (res.ok) {
         const data = await res.json();
         const relativePath = data.relativePath ?? data.filename;
-        const pos = view.state.selection.main.head;
         const insert = `![](${relativePath})`;
-        view.dispatch({ changes: { from: pos, insert } });
+        view.dispatch(view.state.changeByRange((range) => ({
+          changes: { from: range.from, to: range.to, insert },
+          range: EditorSelection.cursor(range.from + insert.length),
+        })));
       }
     } catch {
       // Silently fail
@@ -488,14 +467,86 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   }, []);
 
   // ── Annotation gutter click ────────────────────────────────────────
-  const handleAnnotationClick = useCallback((blockId: string) => {
-    setActiveBlockId(blockId);
+  const handleAnnotationClick = useCallback((annotationId: string) => {
+    setActiveAnnotationId(annotationId);
     setShowAnnotations(true);
   }, []);
 
-  // ── Comment from selection toolbar (future) ─────────────────────────
-  // NOTE: handleCommentFromSelection will be wired when
-  // NoteSelectionToolbar is rendered within this component.
+  const navigateAnnotation = useCallback((direction: "next" | "previous") => {
+    const view = editorViewRef.current;
+    if (!view || inlineAnnotationAnchors.length === 0) return;
+    const current = view.state.selection.main.head;
+    const ordered = inlineAnnotationAnchors;
+    const target = direction === "next"
+      ? ordered.find((anchor) => anchor.rangeFrom > current) ?? ordered[0]
+      : [...ordered].reverse().find((anchor) => anchor.rangeFrom < current) ?? ordered[ordered.length - 1];
+    view.dispatch({
+      selection: { anchor: target.rangeFrom },
+      effects: EditorView.scrollIntoView(target.rangeFrom, { y: "center" }),
+    });
+    view.focus();
+    setActiveAnnotationId(target.annotationId);
+    setShowAnnotations(true);
+  }, [inlineAnnotationAnchors]);
+
+  // ── Text selection and annotations ─────────────────────────────────
+  const handleSelectionChange = useCallback((view: EditorView) => {
+    if (!canCreateRangeAnnotation(view.state.selection)) {
+      // Range annotations must never infer an anchor from a primary range.
+      setMultipleSelections(view.state.selection.ranges.length > 1);
+      setSelectionInfo(null);
+      return;
+    }
+    setMultipleSelections(false);
+    const selection = view.state.selection.main;
+    if (selection.empty) {
+      setSelectionInfo(null);
+      return;
+    }
+
+    const text = view.state.doc.sliceString(selection.from, selection.to);
+    const start = view.coordsAtPos(selection.from);
+    const end = view.coordsAtPos(selection.to);
+    if (!text.trim() || !start || !end) {
+      setSelectionInfo(null);
+      return;
+    }
+
+    setSelectionInfo({
+      text,
+      from: selection.from,
+      to: selection.to,
+      startLine: view.state.doc.lineAt(selection.from).number,
+      endLine: view.state.doc.lineAt(selection.to).number,
+      rect: {
+        top: Math.min(start.top, end.top),
+        left: Math.min(start.left, end.left),
+        width: Math.max(1, Math.max(start.right, end.right) - Math.min(start.left, end.left)),
+      },
+    });
+  }, []);
+
+  const handleCommentFromSelection = useCallback((selection: NoteSelectionInfo) => {
+    if (!editorViewRef.current || !canCreateRangeAnnotation(editorViewRef.current.state.selection)) return;
+    // The source range itself, not a block hash or a quoted-text search, is
+    // sent to the server for atomic marker insertion.
+    setPendingAnnotation(selection);
+    setShowAnnotations(true);
+  }, []);
+
+  const handleAnnotationMutation = useCallback((result: { content?: string; contentHash?: string }) => {
+    if (typeof result.content === "string") {
+      setContent(result.content);
+      contentRef.current = result.content;
+    }
+    if (result.contentHash) {
+      setContentHash(result.contentHash);
+      hashRef.current = result.contentHash;
+    }
+    setSelectionInfo(null);
+    setPendingAnnotation(null);
+    void fetchAnnotations();
+  }, [fetchAnnotations]);
 
   // ── Version history ────────────────────────────────────────────────
   const fetchVersions = useCallback(async () => {
@@ -522,7 +573,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       );
       if (res.ok) {
         const data = await res.json();
-        setSelectedVersion({ version: data.version, content: data.content });
+        setSelectedVersion({ version: data.version, content: data.content, markerRanges: data.markerRanges });
       }
     } catch { /* ignore */ }
   }, [apiBase, apiPath, queryString]);
@@ -536,8 +587,32 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     void saveNote(versionContent, hashRef.current);
   }, [saveNote]);
 
-  // ── Word count ─────────────────────────────────────────────────────
-  const wordCount = useMemo(() => countWords(content), [content]);
+  const parentFolderName = useMemo(() => {
+    const pathParts = notePath.replace(/\.md$/, "").split("/").filter(Boolean);
+    return pathParts.length > 1 ? pathParts[pathParts.length - 2] : null;
+  }, [notePath]);
+  const backLabel = parentFolderName ?? "Notes";
+  const backTitle = parentFolderName ? `Back to ${parentFolderName}` : "Back to notes";
+
+  useEffect(() => {
+    if (!showMoreActions) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!moreActionsRef.current?.contains(event.target as Node)) {
+        setShowMoreActions(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowMoreActions(false);
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showMoreActions]);
 
   // ── Fetch backlinks ─────────────────────────────────────────────
   const fetchBacklinks = useCallback(async (noteId: string) => {
@@ -605,8 +680,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     return (
       <div className="codascope-notes-editor">
         <div className="codascope-notes-editor-header">
-          <button className="codascope-notes-editor-back" onClick={onBack} type="button">
-            ←
+          <button className="codascope-notes-editor-back" onClick={onBack} title={backTitle} type="button">
+            <IconArrowLeft size={15} />
+            <span>{backLabel}</span>
           </button>
           <span style={{ color: "var(--color-text-tertiary)", fontSize: "var(--text-sm)" }}>Loading…</span>
         </div>
@@ -618,8 +694,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     return (
       <div className="codascope-notes-editor">
         <div className="codascope-notes-editor-header">
-          <button className="codascope-notes-editor-back" onClick={onBack} type="button">
-            ←
+          <button className="codascope-notes-editor-back" onClick={onBack} title={backTitle} type="button">
+            <IconArrowLeft size={15} />
+            <span>{backLabel}</span>
           </button>
           <span style={{ color: "var(--color-danger)", fontSize: "var(--text-sm)" }}>{error}</span>
         </div>
@@ -635,9 +712,10 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           className="codascope-notes-editor-back"
           onClick={onBack}
           type="button"
-          title="Back to notes"
+          title={backTitle}
         >
-          ←
+          <IconArrowLeft size={15} />
+          <span>{backLabel}</span>
         </button>
 
         <input
@@ -702,6 +780,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             {noteStatus === "ready" ? <IconCheckCircle size={12} /> : <IconDraft size={12} />}
             <span>{noteStatus === "ready" ? "Ready" : "Draft"}</span>
           </button>
+
         )}
 
         {/* Read by indicator (shared notes only) */}
@@ -725,54 +804,53 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             className={`codascope-btn codascope-btn-ghost codascope-btn-sm codascope-notes-editor-ann-toggle${showAnnotations ? " codascope-notes-editor-ann-toggle--active" : ""}`}
             onClick={() => setShowAnnotations((s) => !s)}
             type="button"
-            title="Toggle annotations"
+            title="Show annotations"
+            aria-pressed={showAnnotations}
           >
-            <IconComment size={14} />{openAnnotationCount > 0 && (
+            <IconComment size={14} />
+            <span>Annotations</span>
+            {openAnnotationCount > 0 && (
               <span className="codascope-notes-editor-ann-badge">{openAnnotationCount}</span>
             )}
           </button>
 
-          {/* History */}
-          <button
-            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-            onClick={handleShowVersions}
-            type="button"
-            title="Version history"
-          >
-            <IconClock size={14} />
-          </button>
-
-          {/* Move */}
-          <button
-            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-            onClick={() => setShowMoveDialog(true)}
-            type="button"
-            title="Move note"
-          >
-            <IconMove size={14} />
-          </button>
-
-          {/* Activity */}
-          <button
-            className={`codascope-btn codascope-btn-ghost codascope-btn-sm${showActivity ? " codascope-notes-editor-ann-toggle--active" : ""}`}
-            onClick={() => { setShowActivity((s) => !s); if (!showActivity) void fetchActivity(); }}
-            type="button"
-            title="Activity feed"
-          >
-            <IconActivity size={14} />
-          </button>
-
-          {/* Archive */}
-          <button
-            className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-            onClick={() => setShowArchiveConfirm(true)}
-            disabled={archiving}
-            type="button"
-            title="Archive note"
-            style={{ color: "var(--color-warning)" }}
-          >
-            <IconArchive size={14} />
-          </button>
+          <div className="codascope-notes-editor-more-actions" ref={moreActionsRef}>
+            <button
+              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
+              onClick={() => setShowMoreActions((open) => !open)}
+              type="button"
+              title="More note actions"
+              aria-expanded={showMoreActions}
+              aria-haspopup="menu"
+            >
+              <span>More</span>
+              <IconChevronDown size={12} />
+            </button>
+            {showMoreActions && (
+              <div className="codascope-notes-editor-more-menu" role="menu">
+                <button onClick={() => { handleShowVersions(); setShowMoreActions(false); }} role="menuitem" type="button">
+                  <IconClock size={14} />
+                  <span>Version history</span>
+                </button>
+                <button onClick={() => { setShowMoveDialog(true); setShowMoreActions(false); }} role="menuitem" type="button">
+                  <IconMove size={14} />
+                  <span>Move note</span>
+                </button>
+                <button onClick={() => { setShowActivity((open) => !open); if (!showActivity) void fetchActivity(); setShowMoreActions(false); }} role="menuitem" type="button">
+                  <IconActivity size={14} />
+                  <span>{showActivity ? "Hide activity" : "View activity"}</span>
+                </button>
+                <button onClick={() => { setShowExport(true); setShowMoreActions(false); }} role="menuitem" type="button">
+                  <IconDownload size={14} />
+                  <span>Export note</span>
+                </button>
+                <button className="codascope-notes-editor-more-menu-archive" onClick={() => { setShowArchiveConfirm(true); setShowMoreActions(false); }} disabled={archiving} role="menuitem" type="button">
+                  <IconArchive size={14} />
+                  <span>Archive note</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -840,7 +918,14 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       <NoteFormattingToolbar
         editorView={editorViewRef.current}
         disabled={showVersions && !!selectedVersion}
+        multipleSelections={multipleSelections}
       />
+
+      {multipleSelections && !showVersions && (
+        <p className="codascope-notes-multi-selection-notice" role="status">
+          Multiple selections are active. Annotation and text-color actions require one selection.
+        </p>
+      )}
 
       {/* Editor body — split layout when annotation panel is open */}
       <div className={`codascope-notes-editor-body${(showAnnotations || showActivity) ? " codascope-notes-editor-body--split" : ""}`}>
@@ -873,6 +958,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
                   value={selectedVersion.content}
                   onChange={() => {}}
                   editable={false}
+                  inlineAnnotationMarkerRanges={selectedVersion.markerRanges}
                 />
               </div>
             </div>
@@ -929,13 +1015,14 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
               showInsertionHotzones
               showSlashCommands
               autoContinueLists
-              showFocusMode
               showMath
               showFootnotes
               onInsertionRequest={handleInsertionRequest}
-              annotationSummary={annotationSummary.length > 0 ? annotationSummary : undefined}
+              inlineAnnotationAnchors={inlineAnnotationAnchors.length > 0 ? inlineAnnotationAnchors : undefined}
+              inlineAnnotationMarkerRanges={inlineAnnotationMarkerRanges.length > 0 ? inlineAnnotationMarkerRanges : undefined}
               onAnnotationClick={handleAnnotationClick}
               onEditorView={(view) => { editorViewRef.current = view; }}
+              onSelectionChange={handleSelectionChange}
             />
           )}
 
@@ -962,8 +1049,15 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             notePath={apiPath}
             queryParams={queryParams}
             annotations={annotations}
+            inlineAnnotationAnchors={inlineAnnotationAnchors}
             onAnnotationsChange={fetchAnnotations}
-            activeBlockId={activeBlockId}
+            onAnnotationMutation={handleAnnotationMutation}
+            activeAnnotationId={activeAnnotationId}
+            pendingAnnotation={pendingAnnotation}
+            currentSelection={selectionInfo}
+            expectedHash={contentHash}
+            onPendingAnnotationDismiss={() => setPendingAnnotation(null)}
+            onNavigateAnnotation={navigateAnnotation}
             onClose={() => setShowAnnotations(false)}
           />
         )}
@@ -1014,10 +1108,20 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         )}
       </div>
 
-      {/* Footer */}
-      <div className="codascope-notes-editor-footer">
-        <span>{wordCount} word{wordCount !== 1 ? "s" : ""}</span>
-        {backlinks.length > 0 && (
+      {selectionInfo && !showVersions && (
+        <NoteSelectionToolbar
+          selectionInfo={selectionInfo}
+          notePath={apiPath}
+          noteScope={scope}
+          noteVisibility={visibility}
+          onDismiss={() => setSelectionInfo(null)}
+          onComment={handleCommentFromSelection}
+        />
+      )}
+
+      {/* Backlink control only appears when it has something useful to show. */}
+      {backlinks.length > 0 && (
+        <div className="codascope-notes-editor-footer">
           <button
             className={`codascope-notes-backlinks-toggle${showBacklinks ? " codascope-notes-backlinks-toggle-active" : ""}`}
             onClick={() => setShowBacklinks((v) => !v)}
@@ -1026,11 +1130,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             <IconLink size={12} />
             <span>{backlinks.length} backlink{backlinks.length !== 1 ? "s" : ""}</span>
           </button>
-        )}
-        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-quaternary)" }}>
-          Auto-save enabled
-        </span>
-      </div>
+        </div>
+      )}
 
       {/* Backlinks panel */}
       {showBacklinks && backlinks.length > 0 && (
@@ -1113,6 +1214,15 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         fromOpts={queryParams}
         onMoved={onBack}
         onClose={() => setShowMoveDialog(false)}
+      />
+
+      <NoteExportDialog
+        open={showExport}
+        scope={scope}
+        visibility={visibility}
+        queryParams={queryParams}
+        notePaths={[apiPath]}
+        onClose={() => setShowExport(false)}
       />
     </div>
   );

@@ -1,0 +1,114 @@
+.settings-page {
+  min-height: 100%;
+  padding: var(--space-8);
+  color: var(--color-text-primary);
+}
+
+.settings-page-inner {
+  width: min(100%, 980px);
+  margin: 0 auto;
+}
+
+.settings-header,
+.settings-toolbar,
+.settings-command-row,
+.settings-header-actions,
+.settings-row-actions,
+.settings-dialog-actions,
+.settings-import-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.settings-header {
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.settings-header h1,
+.settings-command-group h2,
+.settings-import-preview h2,
+.settings-dialog h2 {
+  margin: 0;
+}
+
+.settings-header p,
+.settings-command-copy span,
+.settings-default,
+.settings-muted,
+.settings-import-zone span {
+  color: var(--color-text-secondary);
+}
+
+.settings-toolbar {
+  margin-bottom: var(--space-5);
+}
+
+.settings-search {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  font: inherit;
+}
+
+.settings-btn,
+.settings-text-btn,
+.settings-capture {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-btn { padding: var(--space-2) var(--space-3); }
+.settings-text-btn { padding: var(--space-1) var(--space-2); }
+.settings-capture { min-width: 132px; padding: var(--space-2) var(--space-3); font-family: var(--font-mono); }
+.settings-btn-primary { color: var(--color-text-inverse); background: var(--color-accent); border-color: var(--color-accent); }
+.settings-btn:disabled, .settings-text-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.settings-command-group,
+.settings-import-zone,
+.settings-import-preview,
+.settings-notice {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+
+.settings-command-group { margin-top: var(--space-5); overflow: hidden; }
+.settings-command-group h2, .settings-import-preview h2 { padding: var(--space-3) var(--space-4); font-size: var(--text-sm); border-bottom: 1px solid var(--color-border-primary); }
+.settings-command-row { padding: var(--space-4); border-bottom: 1px solid var(--color-border-primary); }
+.settings-command-row:last-child { border-bottom: 0; }
+.settings-command-copy { flex: 1; min-width: 0; display: grid; gap: var(--space-1); }
+.settings-command-copy span { font-size: var(--text-sm); }
+.settings-command-shortcut { min-width: 190px; display: grid; gap: var(--space-1); }
+.settings-default, .settings-field-error { font-size: var(--text-xs); }
+.settings-field-error { color: var(--color-danger); }
+.settings-row-actions { justify-content: flex-end; }
+.settings-text-btn { font-size: var(--text-xs); }
+
+.settings-notice { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); color: var(--color-text-primary); }
+.settings-inline-action { border: 0; background: transparent; color: var(--color-accent); cursor: pointer; font: inherit; }
+.settings-import-zone, .settings-import-preview { display: grid; gap: var(--space-2); padding: var(--space-4); margin-top: var(--space-5); }
+.settings-import-mode { font-size: var(--text-sm); }
+.settings-preview-line { margin: 0; font-size: var(--text-sm); }
+.settings-dialog-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: var(--space-5); background: color-mix(in srgb, var(--color-bg-primary) 76%, transparent); }
+.settings-dialog { width: min(100%, 440px); padding: var(--space-5); border-radius: var(--radius-lg); background: var(--color-bg-secondary); border: 1px solid var(--color-border-primary); box-shadow: var(--shadow-lg); }
+.settings-dialog p { color: var(--color-text-secondary); }
+.settings-dialog-actions { justify-content: flex-end; }
+.settings-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.settings-empty-route { display: grid; gap: var(--space-3); }
+
+@media (max-width: 760px) {
+  .settings-page { padding: var(--space-4); }
+  .settings-header, .settings-toolbar, .settings-command-row { align-items: stretch; flex-direction: column; }
+  .settings-command-shortcut { min-width: 0; }
+  .settings-row-actions { justify-content: flex-start; }
+}

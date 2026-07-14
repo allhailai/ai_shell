@@ -36,7 +36,7 @@ export function AdminContent() {
 
         {/* Header */}
         <div className="admin-header">
-          <h1 className="admin-title">Settings</h1>
+          <h1 className="admin-title">Administration</h1>
           <p className="admin-subtitle">Manage secrets, users, and system configuration</p>
         </div>
 

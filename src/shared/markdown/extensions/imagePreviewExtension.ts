@@ -248,17 +248,14 @@ class ImageWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
-class EmptyImageWidget extends WidgetType {
-  toDOM() {
-    const span = document.createElement("span");
-    span.className = "shared-md-image-preview-hidden-source";
-    return span;
-  }
-}
-
 // ── Decoration builder ──────────────────────────────────────────────
 
-function buildImageDecorations(state: EditorState, config: ImagePreviewConfig): DecorationSet {
+/**
+ * Builds image decorations with a single block replacement for standalone
+ * images. Keeping the widget and its hidden source in the same block is
+ * important: CodeMirror uses block ranges to map vertical cursor movement.
+ */
+export function buildImagePreviewDecorations(state: EditorState, config: ImagePreviewConfig): DecorationSet {
   const doc = state.doc;
   const cursorLines = cursorLineNumbers(state, config.editable);
   const builder = new RangeSetBuilder<Decoration>();
@@ -275,16 +272,15 @@ function buildImageDecorations(state: EditorState, config: ImagePreviewConfig): 
 
     const resolvedUrl = resolve(ref.url);
 
-    // For block images (image is the only content on the line), replace the entire line content
+    // A standalone image must be one block replacement, rather than a block
+    // widget plus a separate inline replacement. Splitting them leaves the
+    // source line in a different vertical layout block and causes ArrowUp to
+    // resolve to the line before the image.
     if (ref.isBlockImage) {
-      builder.add(ref.from, ref.from, Decoration.widget({
+      builder.add(ref.from, ref.to, Decoration.replace({
         block: true,
-        side: -1,
         widget: new ImageWidget(ref, resolvedUrl, config.editable),
       }));
-
-      // Hide the raw markdown text (but keep the line navigable for cursor movement)
-      builder.add(ref.from, ref.to, Decoration.replace({ widget: new EmptyImageWidget() }));
     } else {
       // Inline image — replace just the image tag with a widget
       builder.add(ref.from, ref.to, Decoration.replace({
@@ -312,10 +308,10 @@ function isInsideCodeFence(doc: Text, lineNum: number): boolean {
 
 export function buildImagePreviewExtension(config: ImagePreviewConfig): Extension {
   const imageDecorations = StateField.define<DecorationSet>({
-    create(state) { return buildImageDecorations(state, config); },
+    create(state) { return buildImagePreviewDecorations(state, config); },
     update(decorations, transaction) {
       if (transaction.docChanged || transaction.selection) {
-        return buildImageDecorations(transaction.state, config);
+        return buildImagePreviewDecorations(transaction.state, config);
       }
       return decorations;
     },

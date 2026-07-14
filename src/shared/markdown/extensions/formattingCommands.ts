@@ -163,79 +163,67 @@ export function toggleInlineCode(view: EditorView): boolean {
 /** Toggle ==highlight== formatting. */
 export function toggleHighlight(view: EditorView): boolean {
   const { state } = view;
-  const range = state.selection.main;
   const documentText = state.doc.toString();
-  const clearEdit = getHighlightClearEdit(documentText, range.from, range.to);
-  const edit = clearEdit ?? getHighlightApplyEdit(documentText, range.from, range.to);
-  view.dispatch({
-    changes: { from: edit.from, to: edit.to, insert: edit.insert },
-    selection: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+  const transaction = state.changeByRange((range) => {
+    const clearEdit = getHighlightClearEdit(documentText, range.from, range.to);
+    const edit = clearEdit ?? getHighlightApplyEdit(documentText, range.from, range.to);
+    return {
+      changes: { from: edit.from, to: edit.to, insert: edit.insert },
+      range: EditorSelection.range(edit.selectionFrom, edit.selectionTo),
+    };
   });
+  view.dispatch(transaction);
   return true;
 }
 
 /** Insert a [text](url) link. */
 export function insertLink(view: EditorView): boolean {
   const { state } = view;
-  const range = state.selection.main;
-  const selectedText = state.doc.sliceString(range.from, range.to);
-
-  if (selectedText) {
-    // Wrap selected text as link
-    const link = `[${selectedText}](url)`;
-    view.dispatch({
-      changes: { from: range.from, to: range.to, insert: link },
-      selection: EditorSelection.cursor(range.from + selectedText.length + 3),
-    });
-  } else {
-    // Insert link template
+  const transaction = state.changeByRange((range) => {
+    const selectedText = state.doc.sliceString(range.from, range.to);
+    if (selectedText) {
+      const link = `[${selectedText}](url)`;
+      return {
+        changes: { from: range.from, to: range.to, insert: link },
+        range: EditorSelection.cursor(range.from + selectedText.length + 3),
+      };
+    }
     const link = "[text](url)";
-    view.dispatch({
+    return {
       changes: { from: range.from, insert: link },
-      selection: EditorSelection.range(range.from + 1, range.from + 5),
-    });
-  }
+      range: EditorSelection.range(range.from + 1, range.from + 5),
+    };
+  });
+  view.dispatch(transaction);
   return true;
 }
 
 /** Toggle heading level on the current line. */
 export function setHeadingLevel(view: EditorView, level: number): boolean {
   const { state } = view;
-  const line = state.doc.lineAt(state.selection.main.head);
-  const lineText = line.text;
-
-  // Parse existing heading level
-  const headingMatch = /^(#{1,6})\s/.exec(lineText);
-  const existingLevel = headingMatch ? headingMatch[1].length : 0;
-
-  if (level === 0) {
-    // Remove heading
-    if (existingLevel > 0) {
-      const prefixLen = existingLevel + 1; // # + space
-      view.dispatch({
-        changes: { from: line.from, to: line.from + prefixLen, insert: "" },
-      });
-    }
-  } else if (existingLevel === level) {
-    // Same level — remove heading (toggle off)
-    const prefixLen = existingLevel + 1;
-    view.dispatch({
-      changes: { from: line.from, to: line.from + prefixLen, insert: "" },
-    });
-  } else {
-    // Set to new level
-    const newPrefix = "#".repeat(level) + " ";
-    if (existingLevel > 0) {
-      const oldPrefixLen = existingLevel + 1;
-      view.dispatch({
-        changes: { from: line.from, to: line.from + oldPrefixLen, insert: newPrefix },
-      });
-    } else {
-      view.dispatch({
-        changes: { from: line.from, insert: newPrefix },
-      });
+  const processedLines = new Set<number>();
+  const changes: { from: number; to?: number; insert: string }[] = [];
+  for (const range of state.selection.ranges) {
+    const fromLine = state.doc.lineAt(range.from);
+    const toLine = state.doc.lineAt(range.to);
+    for (let lineNumber = fromLine.number; lineNumber <= toLine.number; lineNumber++) {
+      if (processedLines.has(lineNumber)) continue;
+      processedLines.add(lineNumber);
+      const line = state.doc.line(lineNumber);
+      const headingMatch = /^(#{1,6})\s/.exec(line.text);
+      const existingLevel = headingMatch ? headingMatch[1].length : 0;
+      if (existingLevel > 0 && (level === 0 || existingLevel === level)) {
+        changes.push({ from: line.from, to: line.from + existingLevel + 1, insert: "" });
+      } else if (level > 0) {
+        changes.push({
+          from: line.from,
+          to: existingLevel > 0 ? line.from + existingLevel + 1 : undefined,
+          insert: "#".repeat(level) + " ",
+        });
+      }
     }
   }
+  if (changes.length > 0) view.dispatch({ changes });
 
   return true;
 }
@@ -312,6 +300,9 @@ export function toggleChecklist(view: EditorView): boolean {
  */
 export function autoContinueList(view: EditorView): boolean {
   const { state } = view;
+  // Let CodeMirror's native Enter handling edit every range when multiple
+  // cursors are active. Auto-continuation is intentionally single-cursor.
+  if (state.selection.ranges.length !== 1) return false;
   const { head } = state.selection.main;
   const line = state.doc.lineAt(head);
   const text = line.text;

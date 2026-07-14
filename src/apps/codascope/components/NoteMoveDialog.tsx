@@ -7,6 +7,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { IconClose, IconFolder, IconWarning } from "./CodaScopeIcons";
+import { useCodaScopeStore } from "../useCodaScopeStore";
 import type { NoteScope, NoteVisibility, NoteFolderEntry } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -20,6 +21,8 @@ interface NoteMoveDialogProps {
   fromVisibility: NoteVisibility;
   /** Current note path */
   fromPath: string;
+  /** Current folder path. When present, the complete nested tree is moved. */
+  fromFolder?: string;
   /** Current resolve opts */
   fromOpts: Record<string, string>;
   /** Called after successful move */
@@ -50,13 +53,18 @@ export function NoteMoveDialog({
   fromScope,
   fromVisibility,
   fromPath,
+  fromFolder,
   fromOpts,
   onMoved,
   onClose,
   bulkNoteIds,
 }: NoteMoveDialogProps) {
+  const projects = useCodaScopeStore((state) => state.projects);
   const [targetScope, setTargetScope] = useState<NoteScope>(fromScope);
   const [targetVisibility, setTargetVisibility] = useState<NoteVisibility>(fromVisibility);
+  const [targetProjectId, setTargetProjectId] = useState(fromOpts.projectId ?? "");
+  const [targetEpicId, setTargetEpicId] = useState(fromOpts.epicId ?? "");
+  const [epics, setEpics] = useState<Array<{ id: string; title: string }>>([]);
   const [targetFolder, setTargetFolder] = useState("");
   const [folders, setFolders] = useState<NoteFolderEntry[]>([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
@@ -65,12 +73,20 @@ export function NoteMoveDialog({
 
   // Only scope identifiers belong in resolve options. User identity is always
   // derived by the server from the authenticated session.
-  const scopeOpts = useMemo((): Record<string, string> => {
+  const sourceOpts = useMemo((): Record<string, string> => {
     return {
       projectId: fromOpts.projectId,
       epicId: fromOpts.epicId,
     };
   }, [fromOpts]);
+
+  const targetOpts = useMemo((): Record<string, string> => {
+    const opts: Record<string, string> = {};
+    if (targetScope !== "codascope" && targetProjectId) opts.projectId = targetProjectId;
+    if (targetScope === "epic" && targetEpicId) opts.epicId = targetEpicId;
+    return opts;
+  }, [targetScope, targetProjectId, targetEpicId]);
+  const targetReady = targetScope === "codascope" || Boolean(targetProjectId && (targetScope !== "epic" || targetEpicId));
 
   // Cross-visibility warning
   const visibilityWarning = useMemo((): string | null => {
@@ -86,11 +102,30 @@ export function NoteMoveDialog({
 
   // Fetch folders when scope/visibility changes
   useEffect(() => {
-    if (!open) return;
+    if (!open || targetScope !== "epic" || !targetProjectId) {
+      if (targetScope !== "epic") setEpics([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/codascope/projects/${targetProjectId}/epics`);
+        if (res.ok) {
+          const data = await res.json();
+          setEpics(data.epics ?? []);
+        }
+      } catch { /* best effort */ }
+    })();
+  }, [open, targetScope, targetProjectId]);
+
+  useEffect(() => {
+    if (!open || !targetReady) {
+      setFolders([]);
+      return;
+    }
     setLoadingFolders(true);
     const params = new URLSearchParams();
-    if (scopeOpts.projectId) params.set("projectId", scopeOpts.projectId);
-    if (scopeOpts.epicId) params.set("epicId", scopeOpts.epicId);
+    if (targetOpts.projectId) params.set("projectId", targetOpts.projectId);
+    if (targetOpts.epicId) params.set("epicId", targetOpts.epicId);
 
     void (async () => {
       try {
@@ -102,23 +137,25 @@ export function NoteMoveDialog({
       } catch { /* ignore */ }
       setLoadingFolders(false);
     })();
-  }, [open, targetScope, targetVisibility, scopeOpts]);
+  }, [open, targetReady, targetScope, targetVisibility, targetOpts]);
 
   // Reset when opening
   useEffect(() => {
     if (open) {
       setTargetScope(fromScope);
-      setTargetVisibility(fromVisibility);
+      setTargetVisibility(fromScope === "epic" ? "shared" : fromVisibility);
+      setTargetProjectId(fromOpts.projectId ?? "");
+      setTargetEpicId(fromOpts.epicId ?? "");
       setTargetFolder("");
       setError(null);
     }
-  }, [open, fromScope, fromVisibility]);
+  }, [open, fromScope, fromVisibility, fromOpts]);
 
   // Compute the destination path
   const destinationPath = useMemo(() => {
-    const filename = fromPath.split("/").pop() ?? fromPath;
-    return targetFolder ? `${targetFolder}/${filename}` : filename;
-  }, [fromPath, targetFolder]);
+    const itemName = (fromFolder ?? fromPath).split("/").pop() ?? fromFolder ?? fromPath;
+    return targetFolder ? `${targetFolder}/${itemName}` : itemName;
+  }, [fromPath, fromFolder, targetFolder]);
 
   const handleMove = useCallback(async () => {
     setMoving(true);
@@ -133,10 +170,10 @@ export function NoteMoveDialog({
             noteIds: bulkNoteIds,
             fromScope,
             fromVisibility,
-            fromOpts: scopeOpts,
+            fromOpts: sourceOpts,
             toScope: targetScope,
             toVisibility: targetVisibility,
-            toOpts: scopeOpts,
+            toOpts: targetOpts,
             toFolder: targetFolder,
           }),
         });
@@ -148,6 +185,28 @@ export function NoteMoveDialog({
           const data = await res.json().catch(() => ({}));
           setError(data.message ?? "Bulk move failed.");
         }
+      } else if (fromFolder) {
+        const res = await fetch("/api/codascope/notes/folders/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fromScope,
+            fromVisibility,
+            fromFolder,
+            fromOpts: sourceOpts,
+            toScope: targetScope,
+            toVisibility: targetVisibility,
+            toFolder: destinationPath,
+            toOpts: targetOpts,
+          }),
+        });
+        if (res.ok) {
+          onMoved();
+          onClose();
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setError(data.message ?? "Folder move failed.");
+        }
       } else {
         // Single note move
         const res = await fetch("/api/codascope/notes/move", {
@@ -157,11 +216,11 @@ export function NoteMoveDialog({
             fromScope,
             fromVisibility,
             fromPath,
-            fromOpts: scopeOpts,
+            fromOpts: sourceOpts,
             toScope: targetScope,
             toVisibility: targetVisibility,
             toPath: destinationPath,
-            toOpts: scopeOpts,
+            toOpts: targetOpts,
           }),
         });
 
@@ -177,7 +236,7 @@ export function NoteMoveDialog({
       setError("Network error.");
     }
     setMoving(false);
-  }, [fromScope, fromVisibility, fromPath, scopeOpts, targetScope, targetVisibility, destinationPath, onMoved, onClose]);
+  }, [fromScope, fromVisibility, fromPath, fromFolder, sourceOpts, targetScope, targetVisibility, targetOpts, destinationPath, onMoved, onClose, bulkNoteIds]);
 
   if (!open) return null;
 
@@ -203,7 +262,7 @@ export function NoteMoveDialog({
     <div className="codascope-notes-move-overlay" onClick={onClose}>
       <div className="codascope-notes-move-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="codascope-notes-move-dialog-header">
-          <span>Move Note</span>
+          <span>Move {fromFolder ? "Folder" : bulkNoteIds?.length ? "Notes" : "Note"}</span>
           <button
             className="codascope-btn codascope-btn-ghost codascope-btn-xs"
             onClick={onClose}
@@ -222,7 +281,13 @@ export function NoteMoveDialog({
                 <button
                   key={opt.value}
                   className={`codascope-notes-move-level-btn${targetScope === opt.value ? " codascope-notes-move-level-btn--active" : ""}`}
-                  onClick={() => { setTargetScope(opt.value); setTargetFolder(""); }}
+                  onClick={() => {
+                    setTargetScope(opt.value);
+                    setTargetFolder("");
+                    if (opt.value === "codascope") { setTargetProjectId(""); setTargetEpicId(""); }
+                    if (opt.value !== "epic") setTargetEpicId("");
+                    if (opt.value === "epic") setTargetVisibility("shared");
+                  }}
                   type="button"
                 >
                   {opt.label}
@@ -231,11 +296,31 @@ export function NoteMoveDialog({
             </div>
           </div>
 
+          {(targetScope === "project" || targetScope === "epic") && (
+            <div className="codascope-notes-move-section">
+              <label className="codascope-notes-move-label" htmlFor="notes-move-project">Project</label>
+              <select id="notes-move-project" className="codascope-notes-select" value={targetProjectId} onChange={(event) => { setTargetProjectId(event.target.value); setTargetEpicId(""); setTargetFolder(""); }}>
+                <option value="">Select a project</option>
+                {projects.filter((project) => !project.archived).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          {targetScope === "epic" && (
+            <div className="codascope-notes-move-section">
+              <label className="codascope-notes-move-label" htmlFor="notes-move-epic">Epic</label>
+              <select id="notes-move-epic" className="codascope-notes-select" value={targetEpicId} onChange={(event) => { setTargetEpicId(event.target.value); setTargetFolder(""); }} disabled={!targetProjectId}>
+                <option value="">Select an epic</option>
+                {epics.map((epic) => <option key={epic.id} value={epic.id}>{epic.title}</option>)}
+              </select>
+            </div>
+          )}
+
           {/* Visibility picker */}
           <div className="codascope-notes-move-section">
             <label className="codascope-notes-move-label">Visibility</label>
             <div className="codascope-notes-move-level-picker">
-              {VISIBILITY_OPTIONS.map((opt) => (
+              {VISIBILITY_OPTIONS.filter((opt) => targetScope !== "epic" || opt.value === "shared").map((opt) => (
                 <button
                   key={opt.value}
                   className={`codascope-notes-move-level-btn${targetVisibility === opt.value ? " codascope-notes-move-level-btn--active" : ""}`}
@@ -302,7 +387,7 @@ export function NoteMoveDialog({
           <button
             className="codascope-btn codascope-btn-primary codascope-btn-sm"
             onClick={handleMove}
-            disabled={moving}
+            disabled={moving || !targetReady}
             type="button"
           >
             {moving ? "Moving…" : "Move"}

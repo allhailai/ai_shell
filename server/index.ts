@@ -30,6 +30,8 @@ import { registerCodaScopeRoutes } from "./routes/codaScopeRoutes.js";
 import { registerFilesystemRoutes } from "./routes/filesystemRoutes.js";
 import { createAiShellUpdateService } from "./services/aiShellUpdateService.js";
 import { registerAiShellUpdateRoutes } from "./routes/aiShellUpdateRoutes.js";
+import { AiShellUserSettingsService } from "./services/aiShellUserSettingsService.js";
+import { registerAiShellUserSettingsRoutes } from "./routes/aiShellUserSettingsRoutes.js";
 import { fileURLToPath } from "node:url";
 
 export type ShellMode = "standalone" | "server";
@@ -188,6 +190,11 @@ app.get("/api/version", (_req, res) => {
 // remains reachable while every subsequently registered application route
 // receives the same `req.user` contract.
 app.use("/api", authMiddleware.requireAuth);
+
+// Per-user shell preferences are separate from app-specific services and from
+// browser localStorage preferences.
+const userSettingsService = new AiShellUserSettingsService(platformInfo.dataDir);
+registerAiShellUserSettingsRoutes(app, { service: userSettingsService, httpError });
 
 // ── Secret infrastructure ───────────────────────────────────────────
 

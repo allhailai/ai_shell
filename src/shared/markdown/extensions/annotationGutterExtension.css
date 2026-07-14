@@ -57,3 +57,52 @@
 .shared-md-ann-badge--resolved:hover {
   background: hsla(220, 10%, 50%, 0.25);
 }
+
+/* Source-level pins make the exact annotation target visible in the note. */
+.shared-md-ann-anchor {
+  border-bottom: 2px solid var(--color-border-secondary);
+}
+
+.shared-md-ann-anchor--open {
+  border-bottom-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.shared-md-ann-anchor--resolved {
+  border-bottom-color: var(--color-text-quaternary);
+  background: color-mix(in srgb, var(--color-text-quaternary) 8%, transparent);
+}
+
+.shared-md-ann-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 3px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.shared-md-ann-pin--open {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.shared-md-ann-pin:hover {
+  background: var(--color-bg-hover);
+}
+
+.shared-md-ann-pin:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}

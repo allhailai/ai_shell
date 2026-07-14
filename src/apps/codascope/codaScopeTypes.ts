@@ -347,6 +347,27 @@ export interface BlockAnchor {
   lineNumber: number;         // line at time of creation
 }
 
+/**
+ * Durable note-annotation anchor stored in the per-note annotation sidecar.
+ * The marker ID is the only annotation data persisted in Markdown; quote and
+ * context are retained solely for recovery and audit, never for implicit
+ * client-side placement.
+ */
+export type AnnotationAttachmentState = "attached" | "needs_review" | "orphaned";
+
+export interface InlineAnnotationAnchor {
+  kind: "range";
+  markerId: string;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  createdAtContentHash: string;
+  attachmentState: AnnotationAttachmentState;
+  lastVerifiedAt?: string;
+  lastDetachedAt?: string;
+  detachedReason?: "marker_removed" | "malformed_markers" | "duplicate_marker" | "external_edit";
+}
+
 export interface Annotation {
   id: string;
   epicId: string;
@@ -662,10 +683,15 @@ export interface NoteFolderEntry {
  * Mirrors the server's NoteAnnotation (codaScopeNoteAnnotationService.ts)
  * but defined here to avoid cross-boundary imports that trigger node:fs errors.
  */
-export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion"> {
+export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion" | "anchor"> {
   noteScope: NoteScope;
   noteVisibility: NoteVisibility;
   notePath: string;
+  /** Inline anchors are authoritative. Block anchors remain readable only for migration/audit. */
+  anchor: InlineAnnotationAnchor | BlockAnchor;
+  legacyAnchor?: BlockAnchor;
+  archivedAt?: string;
+  archivedBy?: string;
 }
 
 /** Tag index entry returned by the tag browser endpoint. */
@@ -719,6 +745,8 @@ export interface BulkMoveRequest {
 /** Metadata stored in _archive-meta.json inside each archive envelope */
 export interface NoteArchiveMeta {
   noteId: string;
+  /** A folder archive preserves a whole nested tree in one envelope. */
+  kind?: "note" | "folder";
   archivedAt: string;
   archivedBy: string;
   originalPath: string;
@@ -805,4 +833,3 @@ export interface NoteReaderInfo {
   userId: string;
   readAt: string;
 }
-

@@ -7,8 +7,10 @@
      /codascope/notes/<visibility>                     → browser (root, codascope scope)
      /codascope/notes/<visibility>/<folder>/...        → browser (folder)
      /codascope/notes/<visibility>/<...path>           → editor (if path is a note file)
-     /codascope/project/:id/notes/<visibility>/...     → project-scope
-     /codascope/project/:id/epic/:eid/notes/<visibility>/... → epic-scope
+     /codascope/project/:id/notes[/<visibility>/...]  → project-scope
+     /codascope/project/:id/epic/:eid/notes[/shared/...] → epic-scope
+     /codascope/project/:id/notes/codascope/<visibility>/... → global notes in project context
+     /codascope/project/:id/epic/:eid/notes/codascope/<visibility>/... → global notes in epic context
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useMemo, useEffect } from "react";
@@ -30,6 +32,26 @@ interface NotesRouterProps {
   epicId?: string;
 }
 
+/**
+ * Browser URL APIs expose pathname segments in their encoded form. Notes use
+ * their relative filesystem paths in both the API and the editor, so decode
+ * those tail segments once after routing has identified the note scope.
+ *
+ * Keeping this decoding scoped to the note/folder tail leaves the route's
+ * project, epic, scope, and visibility segments untouched. A malformed
+ * hand-authored URL should simply behave as an unmatched path, rather than
+ * preventing the notes view from rendering.
+ */
+function decodeNotePathSegments(segments: string[]): string[] {
+  return segments.map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function NotesRouter({ scope: propScope, visibility: propVisibility, projectId: propProjectId, epicId: propEpicId }: NotesRouterProps = {}) {
@@ -41,7 +63,7 @@ export function NotesRouter({ scope: propScope, visibility: propVisibility, proj
     // CodaScope-level: /codascope/notes/<visibility>/...
     if (segments[0] === "notes" && segments.length >= 2) {
       const visibility = segments[1] as NoteVisibility;
-      const rest = segments.slice(2);
+      const rest = decodeNotePathSegments(segments.slice(2));
       return {
         scope: "codascope" as NoteScope,
         visibility,
@@ -51,11 +73,30 @@ export function NotesRouter({ scope: propScope, visibility: propVisibility, proj
       };
     }
 
-    // Project-level: /codascope/project/:id/notes/<visibility>/...
-    if (segments[0] === "project" && segments[2] === "notes" && segments.length >= 4) {
+    // CodaScope notes embedded in a project: preserve project navigation
+    // while deliberately reading from the CodaScope-level note library.
+    if (segments[0] === "project" && segments[2] === "notes" && segments[3] === "codascope") {
       const projectId = segments[1];
-      const visibility = segments[3] as NoteVisibility;
-      const rest = segments.slice(4);
+      const explicitVisibility = segments[4] as NoteVisibility | undefined;
+      const visibility: NoteVisibility = explicitVisibility === "private" ? "private" : "shared";
+      const rest = decodeNotePathSegments(segments.slice(explicitVisibility === "shared" || explicitVisibility === "private" ? 5 : 4));
+      return {
+        scope: "codascope" as NoteScope,
+        visibility,
+        rest,
+        urlPrefix: `project/${projectId}/notes/codascope/${visibility}`,
+        queryParams: {} as Record<string, string>,
+      };
+    }
+
+    // Project-level: /codascope/project/:id/notes[/<visibility>/...]
+    // Project navigation deliberately uses the short form and defaults shared.
+    if (segments[0] === "project" && segments[2] === "notes") {
+      const projectId = segments[1];
+      const explicitVisibility = segments[3] as NoteVisibility | undefined;
+      const hasVisibility = explicitVisibility === "shared" || explicitVisibility === "private";
+      const visibility = hasVisibility ? explicitVisibility : "shared";
+      const rest = decodeNotePathSegments(segments.slice(hasVisibility ? 4 : 3));
       return {
         scope: "project" as NoteScope,
         visibility,
@@ -65,12 +106,31 @@ export function NotesRouter({ scope: propScope, visibility: propVisibility, proj
       };
     }
 
-    // Epic-level: /codascope/project/:id/epic/:eid/notes/<visibility>/...
-    if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && segments.length >= 6) {
+    // CodaScope notes embedded in an epic: preserve the full project > epic
+    // navigation path while reading from the global note library.
+    if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && segments[5] === "codascope") {
       const projectId = segments[1];
       const epicId = segments[3];
-      const visibility = segments[5] as NoteVisibility;
-      const rest = segments.slice(6);
+      const explicitVisibility = segments[6] as NoteVisibility | undefined;
+      const visibility: NoteVisibility = explicitVisibility === "private" ? "private" : "shared";
+      const rest = decodeNotePathSegments(segments.slice(explicitVisibility === "shared" || explicitVisibility === "private" ? 7 : 6));
+      return {
+        scope: "codascope" as NoteScope,
+        visibility,
+        rest,
+        urlPrefix: `project/${projectId}/epic/${epicId}/notes/codascope/${visibility}`,
+        queryParams: {} as Record<string, string>,
+      };
+    }
+
+    // Epic-level: /codascope/project/:id/epic/:eid/notes[/shared/...]
+    if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes") {
+      const projectId = segments[1];
+      const epicId = segments[3];
+      const explicitVisibility = segments[5] as NoteVisibility | undefined;
+      const hasVisibility = explicitVisibility === "shared";
+      const visibility: NoteVisibility = "shared";
+      const rest = decodeNotePathSegments(segments.slice(hasVisibility ? 6 : 5));
       return {
         scope: "epic" as NoteScope,
         visibility,
@@ -187,6 +247,7 @@ export function NotesRouter({ scope: propScope, visibility: propVisibility, proj
       visibility={visibility}
       projectId={queryParams.projectId ?? propProjectId}
       epicId={queryParams.epicId ?? propEpicId}
+      urlPrefixOverride={routeInfo?.urlPrefix}
     />
   );
 }

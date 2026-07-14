@@ -5,7 +5,8 @@
 /* ── Image container ─────────────────────────────────────────────── */
 
 .shared-md-image-preview-wrapper {
-  margin: var(--space-2) 0;
+  /* CodeMirror measures block widget height but not vertical margins. */
+  padding: var(--space-2) 0;
   text-align: left;
 }
 
@@ -127,10 +128,4 @@
   color: var(--color-text-tertiary);
   font-size: var(--text-sm);
   font-style: italic;
-}
-
-/* ── Hidden source content ────────────────────────────────────────── */
-
-.shared-md-image-preview-hidden-source {
-  display: none;
 }

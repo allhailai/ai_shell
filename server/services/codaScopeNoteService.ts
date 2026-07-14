@@ -13,7 +13,7 @@
    - Content hashing for optimistic concurrency control
    - Index generation (_notes-index.json)
    - Full-text search (within scope, both visibilities)
-   - Atomic move of notes + assets
+   - Atomic move of complete note bundles
 
    Storage layout:
    <root>/_notes/shared/                            (codascope shared notes)
@@ -21,7 +21,6 @@
    <project-dir>/_notes/shared/                      (project shared notes)
    <project-dir>/_notes/private/<userId>/             (project private notes)
    <project-dir>/epics/<epicId>/_notes/shared/        (epic shared notes)
-   <project-dir>/epics/<epicId>/_notes/private/<userId>/ (epic private notes)
    ──────────────────────────────────────────────────────────────────── */
 
 import {
@@ -50,6 +49,14 @@ import type {
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 import { assertSafePathSegment, isSafePathSegment, resolveWithin } from "./codaScopePathSafety.js";
+import {
+  CodaScopeNoteFileService,
+  type CollectedNoteFileBundle,
+  type NoteBundleCompanionKind,
+  type NoteBundleFile,
+  type NoteFileBundle,
+} from "./codaScopeNoteFileService.js";
+import { stripInlineAnnotationMarkers } from "./codaScopeNoteAnnotationAnchorService.js";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
@@ -108,6 +115,18 @@ export interface NoteMoveOpts {
   toPath: string;
 }
 
+export interface NoteFolderMoveOpts {
+  fromScope: NoteScope;
+  fromVisibility: NoteVisibility;
+  fromOpts: NoteResolveOpts;
+  fromFolder: string;
+  toScope: NoteScope;
+  toVisibility: NoteVisibility;
+  toOpts: NoteResolveOpts;
+  /** Full relative destination path, including the folder name. */
+  toFolder: string;
+}
+
 export interface NoteVersionEntry {
   version: string;    // "v001", "v002", etc.
   savedAt: string;    // ISO timestamp
@@ -145,6 +164,7 @@ interface TagIndex {
 export class CodaScopeNoteService {
   private root: string;
   private dirResolver: ProjectDirResolver;
+  private readonly fileSvc = new CodaScopeNoteFileService();
 
   constructor(root: string, dirResolver?: ProjectDirResolver) {
     this.root = root;
@@ -190,10 +210,9 @@ export class CodaScopeNoteService {
         const projectDir = this.dirResolver.resolve(opts.projectId);
         if (!projectDir) return null;
         const epicId = assertSafePathSegment(opts.epicId, "epic ID");
-        if (visibility === "private") {
-          const userId = assertSafePathSegment(opts.userId ?? "default", "user ID");
-          return path.join(projectDir, "epics", epicId, "_notes", "private", userId);
-        }
+        // Epic notes are team artifacts. Personal working notes belong in the
+        // CodaScope or project private libraries, never in an Epic.
+        if (visibility === "private") return null;
         return path.join(projectDir, "epics", epicId, "_notes", "shared");
       }
       default:
@@ -318,7 +337,7 @@ export class CodaScopeNoteService {
 
   /** Count words in text. */
   private countWords(text: string): number {
-    const stripped = text.trim();
+    const stripped = stripInlineAnnotationMarkers(text).trim();
     if (!stripped) return 0;
     return stripped.split(/\s+/).length;
   }
@@ -328,6 +347,9 @@ export class CodaScopeNoteService {
   /**
    * List notes in a directory (optionally filtered to a subfolder).
    * Returns entries from the index if available, or by scanning the directory.
+   * Every returned path is relative to the note library root, including when
+   * the listing itself is scoped to a nested folder. This keeps open, move,
+   * star, recent, and drag-and-drop operations on one canonical path format.
    */
   async listNotes(scope: NoteScope, visibility: NoteVisibility, opts: NoteResolveOpts, folder?: string): Promise<NoteEntry[]> {
     const notesDir = this.resolveNotesDir(scope, visibility, opts);
@@ -336,12 +358,15 @@ export class CodaScopeNoteService {
     const targetDir = folder ? resolveWithin(notesDir, folder, "folder path") : notesDir;
     if (!existsSync(targetDir)) return [];
 
-    // Try reading from index first
+    // Directory indexes store paths relative to their own directory so they
+    // remain portable when a folder is moved. The public service contract is
+    // relative to the library root, so prefix nested-list entries here.
     const indexEntries = this.readIndex(targetDir);
-    if (indexEntries) return indexEntries;
+    const entries = indexEntries ?? this.scanAndIndex(targetDir);
+    if (targetDir === notesDir) return entries;
 
-    // Fall back to scanning + generating index
-    return this.scanAndIndex(targetDir);
+    const folderPrefix = path.relative(notesDir, targetDir).split(path.sep).join("/");
+    return entries.map((entry) => ({ ...entry, path: `${folderPrefix}/${entry.path}` }));
   }
 
   /**
@@ -488,20 +513,7 @@ export class CodaScopeNoteService {
     const filePath = this.resolveNotePath(notesDir, notePath);
     if (!existsSync(filePath)) return false;
 
-    // Delete the .md file
-    unlinkSync(filePath);
-
-    // Delete co-located .assets/ directory if it exists
-    const assetsDir = this.assetsDir(filePath);
-    if (existsSync(assetsDir)) {
-      rmSync(assetsDir, { recursive: true, force: true });
-    }
-
-    // Delete .versions/ directory if it exists
-    const vDir = this.versionsDir(filePath);
-    if (existsSync(vDir)) {
-      rmSync(vDir, { recursive: true, force: true });
-    }
+    this.fileSvc.deleteBundle(filePath);
 
     // Refresh index
     const parentDir = path.dirname(filePath);
@@ -553,25 +565,7 @@ export class CodaScopeNoteService {
     const envelopeDir = path.join(archiveDir, noteId);
     if (!existsSync(envelopeDir)) mkdirSync(envelopeDir, { recursive: true });
 
-    // Move .md file
     const destMd = path.join(envelopeDir, path.basename(filePath));
-    renameSync(filePath, destMd);
-
-    // Move .assets/ if present
-    const assetsPath = this.assetsDir(filePath);
-    if (existsSync(assetsPath)) {
-      const destAssets = path.join(envelopeDir, path.basename(assetsPath));
-      renameSync(assetsPath, destAssets);
-    }
-
-    // Move .versions/ if present
-    const vDir = this.versionsDir(filePath);
-    if (existsSync(vDir)) {
-      const destVersions = path.join(envelopeDir, path.basename(vDir));
-      renameSync(vDir, destVersions);
-    }
-
-    // Write _archive-meta.json
     const meta: NoteArchiveMeta = {
       noteId,
       archivedAt: new Date().toISOString(),
@@ -582,16 +576,83 @@ export class CodaScopeNoteService {
       reason,
       title: frontmatter.title,
     };
-    this.writeTextAtomically(
-      path.join(envelopeDir, "_archive-meta.json"),
-      JSON.stringify(meta, null, 2),
-    );
+    let bundleMoved = false;
+    try {
+      bundleMoved = this.fileSvc.moveFile(filePath, destMd);
+      if (!bundleMoved) return null;
+      this.writeTextAtomically(
+        path.join(envelopeDir, "_archive-meta.json"),
+        JSON.stringify(meta, null, 2),
+      );
+    } catch (error) {
+      if (bundleMoved) {
+        try { this.fileSvc.moveFile(destMd, filePath); } catch { /* best effort rollback */ }
+      }
+      throw error;
+    }
 
     // Refresh index for source directory
     const parentDir = path.dirname(filePath);
     await this.refreshIndex(parentDir);
 
     return meta;
+  }
+
+  /**
+   * Archive a folder and all of its nested notes as one recoverable tree.
+   * The directory rename keeps note IDs, attachments, and version history
+   * together without turning a folder archive into a series of partial moves.
+   */
+  async archiveFolder(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    folderPath: string,
+    reason?: string,
+  ): Promise<NoteArchiveMeta | null> {
+    if (!folderPath.trim()) throw new Error("A folder path is required.");
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+
+    const sourceDir = resolveWithin(notesDir, folderPath, "folder path");
+    if (sourceDir === notesDir || !existsSync(sourceDir) || !statSync(sourceDir).isDirectory()) return null;
+
+    const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
+    if (!archiveDir) return null;
+    const archiveId = randomUUID();
+    const envelopeDir = path.join(archiveDir, archiveId);
+    mkdirSync(envelopeDir, { recursive: true });
+
+    const meta: NoteArchiveMeta = {
+      noteId: archiveId,
+      kind: "folder",
+      archivedAt: new Date().toISOString(),
+      archivedBy: opts.userId ?? "default",
+      originalPath: folderPath,
+      originalScope: scope,
+      originalVisibility: visibility,
+      reason,
+      title: path.basename(folderPath),
+    };
+
+    let folderMoved = false;
+    const archivedFolder = path.join(envelopeDir, "content");
+    try {
+      this.writeTextAtomically(
+        path.join(envelopeDir, "_archive-meta.json"),
+        JSON.stringify(meta, null, 2),
+      );
+      renameSync(sourceDir, archivedFolder);
+      folderMoved = true;
+      await this.refreshIndex(path.dirname(sourceDir));
+      return meta;
+    } catch (error) {
+      if (folderMoved && existsSync(archivedFolder) && !existsSync(sourceDir)) {
+        renameSync(archivedFolder, sourceDir);
+      }
+      if (existsSync(envelopeDir)) rmSync(envelopeDir, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   /**
@@ -618,6 +679,32 @@ export class CodaScopeNoteService {
     const notesDir = this.resolveNotesDir(scope, visibility, opts);
     if (!notesDir) return null;
 
+    if (meta.kind === "folder") {
+      const archivedFolder = path.join(envelopeDir, "content");
+      if (!existsSync(archivedFolder) || !statSync(archivedFolder).isDirectory()) return null;
+
+      let restorePath = meta.originalPath;
+      let targetFolder = resolveWithin(notesDir, restorePath, "folder path");
+      if (existsSync(targetFolder)) {
+        const parent = path.dirname(restorePath);
+        const base = path.basename(restorePath);
+        let suffix = 1;
+        do {
+          const name = `${base} (restored${suffix === 1 ? "" : ` ${suffix}`})`;
+          restorePath = parent === "." ? name : `${parent}/${name}`;
+          targetFolder = resolveWithin(notesDir, restorePath, "folder path");
+          suffix++;
+        } while (existsSync(targetFolder));
+      }
+
+      const targetParent = path.dirname(targetFolder);
+      if (!existsSync(targetParent)) mkdirSync(targetParent, { recursive: true });
+      renameSync(archivedFolder, targetFolder);
+      rmSync(envelopeDir, { recursive: true, force: true });
+      await this.refreshIndex(targetParent);
+      return { restoredPath: restorePath, meta };
+    }
+
     // Determine restore path — append "(restored)" if original is occupied
     let restorePath = meta.originalPath;
     const targetFile = this.resolveNotePath(notesDir, restorePath);
@@ -637,22 +724,7 @@ export class CodaScopeNoteService {
     const mdFile = envelopeItems.find((f: string) => f.endsWith(".md"));
     if (!mdFile) return null;
 
-    // Move .md file back
-    renameSync(path.join(envelopeDir, mdFile), destFile);
-
-    // Move .assets/ back if present
-    const assetsItem = envelopeItems.find((f: string) => f.endsWith(".assets"));
-    if (assetsItem) {
-      const destAssets = this.assetsDir(destFile);
-      renameSync(path.join(envelopeDir, assetsItem), destAssets);
-    }
-
-    // Move .versions/ back if present
-    const versionsItem = envelopeItems.find((f: string) => f.endsWith(".versions"));
-    if (versionsItem) {
-      const destVersions = this.versionsDir(destFile);
-      renameSync(path.join(envelopeDir, versionsItem), destVersions);
-    }
+    this.fileSvc.moveFile(path.join(envelopeDir, mdFile), destFile);
 
     // Remove the envelope directory
     rmSync(envelopeDir, { recursive: true, force: true });
@@ -719,6 +791,42 @@ export class CodaScopeNoteService {
     if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
   }
 
+  /** Move an entire folder tree between folders, visibility libraries, or scopes. */
+  async moveFolder(moveOpts: NoteFolderMoveOpts): Promise<boolean> {
+    if (!moveOpts.fromFolder.trim() || !moveOpts.toFolder.trim()) {
+      throw new Error("Source and destination folders are required.");
+    }
+    const fromDir = this.resolveNotesDir(moveOpts.fromScope, moveOpts.fromVisibility, moveOpts.fromOpts);
+    const toDir = this.resolveNotesDir(moveOpts.toScope, moveOpts.toVisibility, moveOpts.toOpts);
+    if (!fromDir || !toDir) return false;
+
+    const sourceFolder = resolveWithin(fromDir, moveOpts.fromFolder, "source folder");
+    const targetFolder = resolveWithin(toDir, moveOpts.toFolder, "destination folder");
+    if (sourceFolder === fromDir || !existsSync(sourceFolder) || !statSync(sourceFolder).isDirectory()) return false;
+    if (existsSync(targetFolder)) throw new Error(`Target folder already exists: ${moveOpts.toFolder}`);
+
+    const relativeTarget = path.relative(sourceFolder, targetFolder);
+    if (fromDir === toDir && relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget)) {
+      throw new Error("A folder cannot be moved into itself.");
+    }
+
+    const targetParent = path.dirname(targetFolder);
+    if (!existsSync(targetParent)) mkdirSync(targetParent, { recursive: true });
+    let moved = false;
+    try {
+      renameSync(sourceFolder, targetFolder);
+      moved = true;
+      await this.refreshIndex(path.dirname(sourceFolder));
+      await this.refreshIndex(targetParent);
+      return true;
+    } catch (error) {
+      if (moved && existsSync(targetFolder) && !existsSync(sourceFolder)) {
+        renameSync(targetFolder, sourceFolder);
+      }
+      throw error;
+    }
+  }
+
   /* ── Image Upload ────────────────────────────────────────────────── */
 
   /**
@@ -778,6 +886,74 @@ export class CodaScopeNoteService {
     }
   }
 
+  /**
+   * Resolve the on-disk paths for a note bundle, whether or not the note has
+   * been created yet. Import uses this to restore every companion to the
+   * destination note's canonical location.
+   */
+  resolveNoteFileBundle(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+  ): NoteFileBundle | null {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+    const noteFile = this.resolveNotePath(notesDir, notePath);
+    return this.fileSvc.getBundle(noteFile);
+  }
+
+  /** Collect every physical artifact currently present for one note. */
+  collectNoteBundle(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+  ): CollectedNoteFileBundle | null {
+    const bundle = this.resolveNoteFileBundle(scope, visibility, opts, notePath);
+    if (!bundle || !existsSync(bundle.noteFile)) return null;
+    return this.fileSvc.collectNoteBundle(bundle.noteFile);
+  }
+
+  /** Backwards-compatible alias for callers that need bundle paths. */
+  getNoteFileBundle(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+  ): CollectedNoteFileBundle | null {
+    const bundle = this.collectNoteBundle(scope, visibility, opts, notePath);
+    if (!bundle) return null;
+    return bundle;
+  }
+
+  /** Write an attachment or version into a note's managed companion bundle. */
+  writeNoteBundleCompanion(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    kind: NoteBundleCompanionKind,
+    relativePath: string,
+    content: Buffer,
+  ): void {
+    const bundle = this.collectNoteBundle(scope, visibility, opts, notePath);
+    if (!bundle) throw new Error(`Note not found: ${notePath}`);
+    this.fileSvc.writeCompanionFile(bundle.noteFile, kind, relativePath, content);
+  }
+
+  /** List the managed files inside one note companion directory for export. */
+  listNoteBundleCompanions(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    kind: NoteBundleCompanionKind,
+  ): NoteBundleFile[] {
+    const bundle = this.collectNoteBundle(scope, visibility, opts, notePath);
+    return bundle ? this.fileSvc.listCompanionFiles(bundle.noteFile, kind) : [];
+  }
+
   /* ── Move ─────────────────────────────────────────────────────────── */
 
   /**
@@ -792,51 +968,15 @@ export class CodaScopeNoteService {
     const fromFile = this.resolveNotePath(fromDir, moveOpts.fromPath);
     const toFile = this.resolveNotePath(toDir, moveOpts.toPath);
 
-    if (!existsSync(fromFile)) return false;
-    if (existsSync(toFile)) throw new Error(`Target note already exists: ${moveOpts.toPath}`);
-
-    const fromAssets = this.assetsDir(fromFile);
-    const toAssets = this.assetsDir(toFile);
-    const fromVersions = this.versionsDir(fromFile);
-    const toVersions = this.versionsDir(toFile);
-
-    // Preflight every companion path before moving the note itself. A stale
-    // destination assets/versions directory would otherwise split a note from
-    // its data after the first rename succeeds.
-    if (existsSync(toAssets) || existsSync(toVersions)) {
-      throw new Error(`Target note data already exists: ${moveOpts.toPath}`);
-    }
-
-    // Ensure target directory exists
-    const toParent = path.dirname(toFile);
-    if (!existsSync(toParent)) mkdirSync(toParent, { recursive: true });
-
-    let fileMoved = false;
-    let assetsMoved = false;
-    let versionsMoved = false;
     const fromParent = path.dirname(fromFile);
+    const toParent = path.dirname(toFile);
 
     try {
-      renameSync(fromFile, toFile);
-      fileMoved = true;
-
-      if (existsSync(fromAssets)) {
-        renameSync(fromAssets, toAssets);
-        assetsMoved = true;
-      }
-      if (existsSync(fromVersions)) {
-        renameSync(fromVersions, toVersions);
-        versionsMoved = true;
-      }
-
+      const moved = this.fileSvc.moveFile(fromFile, toFile);
+      if (!moved) return false;
       await this.refreshIndex(fromParent);
       await this.refreshIndex(toParent);
     } catch (error) {
-      // Same-volume renames are atomic; reverse completed operations so a
-      // failed companion move never strands the note or its history.
-      try { if (versionsMoved && existsSync(toVersions)) renameSync(toVersions, fromVersions); } catch { /* best effort */ }
-      try { if (assetsMoved && existsSync(toAssets)) renameSync(toAssets, fromAssets); } catch { /* best effort */ }
-      try { if (fileMoved && existsSync(toFile)) renameSync(toFile, fromFile); } catch { /* best effort */ }
       try { await this.refreshIndex(fromParent); } catch { /* best effort */ }
       try { await this.refreshIndex(toParent); } catch { /* best effort */ }
       throw error;
@@ -1080,8 +1220,7 @@ export class CodaScopeNoteService {
 
   /** Get the .assets/ directory path for a note file. */
   private assetsDir(noteFilePath: string): string {
-    const basename = path.basename(noteFilePath, ".md");
-    return path.join(path.dirname(noteFilePath), `${basename}.assets`);
+    return this.fileSvc.getBundle(noteFilePath).assetsDir;
   }
 
   /** Convert MIME type to file extension. */
@@ -1165,7 +1304,7 @@ export class CodaScopeNoteService {
         // Allow _inbox as a special user-facing folder
         if (item.name.startsWith(".")) continue;
         if (item.name.startsWith("_") && item.name !== "_inbox") continue;
-        if (item.name.endsWith(".assets")) continue;
+        if (item.name.endsWith(".assets") || item.name.endsWith(".versions")) continue;
 
         if (item.isDirectory()) {
           // Count notes in subdirectory
@@ -1221,7 +1360,7 @@ export class CodaScopeNoteService {
       const items = readdirSync(dir, { withFileTypes: true });
       for (const item of items) {
         if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
-        if (item.name.endsWith(".assets")) continue;
+        if (item.name.endsWith(".assets") || item.name.endsWith(".versions")) continue;
         if (item.isDirectory()) {
           count += this.countNotesInDir(path.join(dir, item.name));
         } else if (item.name.endsWith(".md")) {
@@ -1242,7 +1381,7 @@ export class CodaScopeNoteService {
       for (const item of items) {
         if (!item.isDirectory()) continue;
         if (item.name.startsWith(".") || item.name.startsWith("_")) continue;
-        if (item.name.endsWith(".assets")) continue;
+        if (item.name.endsWith(".assets") || item.name.endsWith(".versions")) continue;
 
         const subPath = relativePath ? `${relativePath}/${item.name}` : item.name;
         const fullPath = path.join(dir, item.name);
@@ -1286,7 +1425,7 @@ export class CodaScopeNoteService {
         } else if (item.name.endsWith(".md")) {
           try {
             const content = readFileSync(fullPath, "utf-8");
-            const lines = content.split("\n");
+            const lines = stripInlineAnnotationMarkers(content).split("\n");
             const { frontmatter } = this.parseFrontmatter(content);
             const relativePath = path.relative(rootDir, fullPath);
 
@@ -1319,8 +1458,7 @@ export class CodaScopeNoteService {
 
   /** Get the versions directory for a note file. */
   private versionsDir(noteFilePath: string): string {
-    const basename = path.basename(noteFilePath, ".md");
-    return path.join(path.dirname(noteFilePath), `${basename}.versions`);
+    return this.fileSvc.getBundle(noteFilePath).versionsDir;
   }
 
   /**

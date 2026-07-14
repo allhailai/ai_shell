@@ -8,11 +8,13 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
+import { NoteCreateDialog, type NoteCreateLocation } from "../components/NoteCreateDialog";
 import { NoteExportDialog } from "../components/NoteExportDialog";
 import { NoteImportDialog } from "../components/NoteImportDialog";
+import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef, NoteTagIndexEntry } from "../codaScopeTypes";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
@@ -78,10 +80,23 @@ function parseNotesContext(
     };
   }
 
-  // Case 2: project-level: /codascope/project/:id/notes/<visibility>/...
-  if (segments[0] === "project" && segments[2] === "notes" && projectId && segments.length >= 4) {
-    const visibility = segments[3] as NoteVisibility;
-    const rest = segments.slice(4);
+  // Case 2: project-level: /codascope/project/:id/notes[/<visibility>/...]
+  if (segments[0] === "project" && segments[2] === "notes" && projectId) {
+    if (segments[3] === "codascope") {
+      const explicitVisibility = segments[4] as NoteVisibility | undefined;
+      const visibility: NoteVisibility = explicitVisibility === "private" ? "private" : "shared";
+      const folderParts = segments.slice(explicitVisibility === "shared" || explicitVisibility === "private" ? 5 : 4);
+      return {
+        scope: "codascope",
+        visibility,
+        folderParts,
+        queryParams: {},
+      };
+    }
+    const explicitVisibility = segments[3] as NoteVisibility | undefined;
+    const hasVisibility = explicitVisibility === "shared" || explicitVisibility === "private";
+    const visibility: NoteVisibility = hasVisibility ? explicitVisibility : "shared";
+    const rest = segments.slice(hasVisibility ? 4 : 3);
     return {
       scope: "project",
       visibility,
@@ -90,10 +105,22 @@ function parseNotesContext(
     };
   }
 
-  // Case 3: epic-level: /codascope/project/:id/epic/:epicId/notes/<visibility>/...
-  if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && projectId && epicId && segments.length >= 6) {
-    const visibility = segments[5] as NoteVisibility;
-    const rest = segments.slice(6);
+  // Case 3: epic-level: /codascope/project/:id/epic/:epicId/notes[/shared/...]
+  if (segments[0] === "project" && segments[2] === "epic" && segments[4] === "notes" && projectId && epicId) {
+    if (segments[5] === "codascope") {
+      const explicitVisibility = segments[6] as NoteVisibility | undefined;
+      const visibility: NoteVisibility = explicitVisibility === "private" ? "private" : "shared";
+      const folderParts = segments.slice(explicitVisibility === "shared" || explicitVisibility === "private" ? 7 : 6);
+      return {
+        scope: "codascope",
+        visibility,
+        folderParts,
+        queryParams: {},
+      };
+    }
+    const hasVisibility = segments[5] === "shared";
+    const visibility: NoteVisibility = "shared";
+    const rest = segments.slice(hasVisibility ? 6 : 5);
     return {
       scope: "epic",
       visibility,
@@ -117,6 +144,12 @@ interface SearchResult {
   lineNumber: number;
 }
 
+interface NoteDragPayload {
+  notes: Array<Pick<NoteEntry, "path" | "noteId">>;
+}
+
+const NOTE_DRAG_DATA_TYPE = "application/x-codascope-notes";
+
 /* ── Props ───────────────────────────────────────────────────────────── */
 
 interface NotesBrowserProps {
@@ -128,11 +161,13 @@ interface NotesBrowserProps {
   projectId?: string;
   /** Override epic ID */
   epicId?: string;
+  /** Preserve a project or epic URL shell while browsing CodaScope notes. */
+  urlPrefixOverride?: string;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NotesBrowser({ scope: propScope, visibility: propVisibility, projectId: propProjectId, epicId: propEpicId }: NotesBrowserProps = {}) {
+export function NotesBrowser({ scope: propScope, visibility: propVisibility, projectId: propProjectId, epicId: propEpicId, urlPrefixOverride }: NotesBrowserProps = {}) {
   const { segments, navigate } = useAppSubRoute("codascope");
   const { activeProjectId } = useCodaScopeStore();
 
@@ -159,11 +194,20 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     return params.toString();
   }, [propProjectId, propEpicId, urlContext?.queryParams?.projectId, urlContext?.queryParams?.epicId]);
 
+  const scopeQueryParams = useMemo((): Record<string, string> => {
+    const params: Record<string, string> = {};
+    if (propProjectId) params.projectId = propProjectId;
+    else if (urlContext?.queryParams?.projectId) params.projectId = urlContext.queryParams.projectId;
+    if (propEpicId) params.epicId = propEpicId;
+    else if (urlContext?.queryParams?.epicId) params.epicId = urlContext.queryParams.epicId;
+    return params;
+  }, [propProjectId, propEpicId, urlContext?.queryParams?.projectId, urlContext?.queryParams?.epicId]);
+
   // ── State ──────────────────────────────────────────────────────────
   const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [createMode, setCreateMode] = useState<"note" | "folder" | null>(null);
   const [showArchive, setShowArchive] = useState(false);
 
   // Starred & recents state
@@ -185,6 +229,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   // Tag browser state
   const [tags, setTags] = useState<NoteTagIndexEntry[]>([]);
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [hiddenTagToast, setHiddenTagToast] = useState<string | null>(null);
 
   // Bulk selection state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -193,6 +238,16 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [showBulkArchiveConfirm, setShowBulkArchiveConfirm] = useState(false);
   const [showBulkMove, setShowBulkMove] = useState(false);
   const [bulkArchiveReason, setBulkArchiveReason] = useState("");
+  const [folderToMove, setFolderToMove] = useState<string | null>(null);
+  const [folderToArchive, setFolderToArchive] = useState<string | null>(null);
+  const [folderArchiving, setFolderArchiving] = useState(false);
+
+  // Native drag state. The ref makes the complete payload available to the
+  // drop handler even when React state has not yet flushed.
+  const draggedNotesRef = useRef<NoteDragPayload | null>(null);
+  const [draggedNotePaths, setDraggedNotePaths] = useState<string[]>([]);
+  const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null);
+  const [dragMoveError, setDragMoveError] = useState<string | null>(null);
 
   // Export/Import dialog state
   const [showExport, setShowExport] = useState(false);
@@ -201,8 +256,8 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   // Read status state (shared notes)
   const [readStatus, setReadStatus] = useState<Record<string, string | null>>({});
 
-  // Visibility tabs for codascope-level notes (shared/private)
-  const showVisibilityTabs = !propVisibility && scope === "codascope";
+  // Every scope with private notes needs a visible switch. Epic is shared-only.
+  const showVisibilityTabs = scope !== "epic";
 
   // ── Fetch notes ────────────────────────────────────────────────────
   const fetchNotes = useCallback(async () => {
@@ -402,16 +457,25 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         // Navigate to the captured note
         const notePath = data.path?.replace(/\.md$/, "") ?? "";
         if (notePath) {
-          navigate(`notes/private/${notePath}`);
+          const contextualPrefix = urlPrefixOverride?.includes("/notes/codascope/")
+            ? urlPrefixOverride.replace(/\/(shared|private)$/, "/private")
+            : "notes/private";
+          navigate(`${contextualPrefix}/${notePath}`);
         }
       }
     } catch { /* best effort */ }
     setCapturing(false);
-  }, [captureText, fetchNotes, fetchRecents, navigate]);
+  }, [captureText, fetchNotes, fetchRecents, navigate, urlPrefixOverride]);
 
   // ── Navigation helpers ─────────────────────────────────────────────
 
+  const contextualCodaScopePrefix = useCallback((targetVisibility: NoteVisibility): string | null => {
+    if (!urlPrefixOverride?.includes("/notes/codascope/")) return null;
+    return urlPrefixOverride.replace(/\/(shared|private)$/, `/${targetVisibility}`);
+  }, [urlPrefixOverride]);
+
   const getNotesUrlPrefix = useCallback((): string => {
+    if (urlPrefixOverride) return urlPrefixOverride;
     if (scope === "codascope") {
       return `notes/${visibility}`;
     }
@@ -422,7 +486,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       return `project/${effectiveProjectId}/notes/${visibility}`;
     }
     return `notes/${visibility}`;
-  }, [scope, visibility, effectiveProjectId, propEpicId]);
+  }, [urlPrefixOverride, scope, visibility, effectiveProjectId, propEpicId]);
 
   const handleFolderClick = useCallback(
     (folderPath: string) => {
@@ -445,7 +509,10 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const handleRefNoteClick = useCallback(
     (ref: { scope: NoteScope; visibility: NoteVisibility; path: string }) => {
       let prefix: string;
-      if (ref.scope === "codascope") {
+      const contextualPrefix = ref.scope === "codascope" ? contextualCodaScopePrefix(ref.visibility) : null;
+      if (contextualPrefix) {
+        prefix = contextualPrefix;
+      } else if (ref.scope === "codascope") {
         prefix = `notes/${ref.visibility}`;
       } else if (ref.scope === "project" && effectiveProjectId) {
         prefix = `project/${effectiveProjectId}/notes/${ref.visibility}`;
@@ -457,7 +524,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       const cleanPath = ref.path.replace(/\.md$/, "");
       navigate(`${prefix}/${cleanPath}`);
     },
-    [navigate, effectiveProjectId, propEpicId],
+    [navigate, effectiveProjectId, propEpicId, contextualCodaScopePrefix],
   );
 
   const handleBreadcrumbClick = useCallback(
@@ -475,6 +542,11 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
   const handleVisibilitySwitch = useCallback(
     (newVisibility: NoteVisibility) => {
+      const contextualPrefix = contextualCodaScopePrefix(newVisibility);
+      if (contextualPrefix) {
+        navigate(contextualPrefix);
+        return;
+      }
       if (scope === "codascope") {
         navigate(`notes/${newVisibility}`);
       } else if (scope === "project" && effectiveProjectId) {
@@ -483,36 +555,61 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         navigate(`project/${effectiveProjectId}/epic/${propEpicId}/notes/${newVisibility}`);
       }
     },
-    [navigate, scope, effectiveProjectId, propEpicId],
+    [navigate, scope, effectiveProjectId, propEpicId, contextualCodaScopePrefix],
   );
 
-  // ── Create note ────────────────────────────────────────────────────
-  const handleCreateNote = useCallback(async () => {
-    setCreating(true);
+  const getNotesUrlPrefixFor = useCallback((targetScope: NoteScope, targetVisibility: NoteVisibility, opts: Record<string, string>) => {
+    const contextualPrefix = targetScope === "codascope" ? contextualCodaScopePrefix(targetVisibility) : null;
+    if (contextualPrefix) return contextualPrefix;
+    if (targetScope === "codascope") return `notes/${targetVisibility}`;
+    if (targetScope === "project" && opts.projectId) return `project/${opts.projectId}/notes/${targetVisibility}`;
+    if (targetScope === "epic" && opts.projectId && opts.epicId) return `project/${opts.projectId}/epic/${opts.epicId}/notes/${targetVisibility}`;
+    return `notes/${targetVisibility}`;
+  }, [contextualCodaScopePrefix]);
+
+  const handleCreated = useCallback((location: NoteCreateLocation) => {
+    setCreateMode(null);
+    const prefix = getNotesUrlPrefixFor(location.scope, location.visibility, location.queryParams);
+    const destination = location.isFolder ? location.path : location.path.replace(/\.md$/, "");
+    navigate(`${prefix}/${destination}`);
+  }, [getNotesUrlPrefixFor, navigate]);
+
+  const handleHideTag = useCallback(async (tag: string) => {
     try {
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10);
-      const filename = `Untitled ${dateStr}.md`;
-      const fullPath = currentFolder ? `${currentFolder}/${filename}` : filename;
+      const res = await fetch(`/api/codascope/notes/tag-suggestions/${encodeURIComponent(tag)}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setTags((current) => current.filter((entry) => entry.tag !== tag));
+      if (activeTag === tag) setActiveTag(null);
+      setHiddenTagToast(tag);
+    } catch { /* best effort */ }
+  }, [activeTag]);
 
-      const params = new URLSearchParams(queryString);
+  const handleRestoreTag = useCallback(async () => {
+    if (!hiddenTagToast) return;
+    try {
+      const res = await fetch(`/api/codascope/notes/tag-suggestions/${encodeURIComponent(hiddenTagToast)}/restore`, { method: "POST" });
+      if (res.ok) void fetchTags();
+    } catch { /* best effort */ }
+    setHiddenTagToast(null);
+  }, [hiddenTagToast, fetchTags]);
 
-      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${fullPath}?${params.toString()}`, {
+  const handleArchiveFolder = useCallback(async () => {
+    if (!folderToArchive) return;
+    setFolderArchiving(true);
+    try {
+      const res = await fetch(`/api/codascope/notes/${scope}/${visibility}/folders/archive?${queryString}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ folderPath: folderToArchive }),
       });
-
       if (res.ok) {
-        const data = await res.json();
-        const notePath = data.path ?? fullPath;
-        handleNoteClick(notePath);
+        void fetchNotes();
+        void fetchTags();
+        setFolderToArchive(null);
       }
-    } catch {
-      // Silently fail
-    }
-    setCreating(false);
-  }, [scope, visibility, queryString, currentFolder, handleNoteClick]);
+    } catch { /* best effort */ }
+    setFolderArchiving(false);
+  }, [folderToArchive, scope, visibility, queryString, fetchNotes, fetchTags]);
 
   // ── Bulk selection handlers ─────────────────────────────────────
   const exitSelectionMode = useCallback(() => {
@@ -563,6 +660,118 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
     setShowBulkMove(false);
     void fetchNotes();
   }, [exitSelectionMode, fetchNotes]);
+
+  // ── Drag notes into folders ────────────────────────────────────────
+  const clearNoteDrag = useCallback(() => {
+    draggedNotesRef.current = null;
+    setDraggedNotePaths([]);
+    setDropTargetFolder(null);
+  }, []);
+
+  const handleNoteDragStart = useCallback((entry: NoteEntry, event: React.DragEvent<HTMLButtonElement>) => {
+    const selectedEntries = selectionMode && entry.noteId && selectedNoteIds.has(entry.noteId)
+      ? Array.from(selectedNoteIds.entries()).map(([noteId, note]) => ({ path: note.path, noteId }))
+      : [{ path: entry.path, noteId: entry.noteId }];
+
+    draggedNotesRef.current = { notes: selectedEntries };
+    setDraggedNotePaths(selectedEntries.map((note) => note.path));
+    setDragMoveError(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", selectedEntries.map((note) => note.path).join("\n"));
+    event.dataTransfer.setData(NOTE_DRAG_DATA_TYPE, JSON.stringify({ notes: selectedEntries }));
+  }, [selectionMode, selectedNoteIds]);
+
+  const handleDropTargetDragOver = useCallback((folderPath: string, event: React.DragEvent<HTMLElement>) => {
+    if (!draggedNotesRef.current) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetFolder(folderPath);
+  }, []);
+
+  const handleDropTargetDragLeave = useCallback((folderPath: string, event: React.DragEvent<HTMLElement>) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDropTargetFolder((current) => current === folderPath ? null : current);
+  }, []);
+
+  const handleDropTargetDrop = useCallback(async (targetFolder: string, event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    let payload = draggedNotesRef.current;
+    if (!payload) {
+      try {
+        const parsed = JSON.parse(event.dataTransfer.getData(NOTE_DRAG_DATA_TYPE)) as NoteDragPayload;
+        if (Array.isArray(parsed.notes) && parsed.notes.every((note) => typeof note.path === "string")) {
+          payload = parsed;
+        }
+      } catch { /* not a CodaScope note drag */ }
+    }
+    clearNoteDrag();
+    if (!payload || payload.notes.length === 0) return;
+
+    // A note already inside the destination needs no move. This also avoids
+    // accidental duplicate-name errors if a future list view surfaces it.
+    const notesToMove = payload.notes.filter((note) => note.path.split("/").slice(0, -1).join("/") !== targetFolder);
+    if (notesToMove.length === 0) return;
+
+    try {
+      if (notesToMove.length === 1) {
+        const sourcePath = notesToMove[0].path;
+        const filename = sourcePath.split("/").pop();
+        if (!filename) return;
+
+        const res = await fetch("/api/codascope/notes/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fromScope: scope,
+            fromVisibility: visibility,
+            fromPath: sourcePath,
+            fromOpts: scopeQueryParams,
+            toScope: scope,
+            toVisibility: visibility,
+            toPath: targetFolder ? `${targetFolder}/${filename}` : filename,
+            toOpts: scopeQueryParams,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.moved) {
+          throw new Error(data.message ?? "Could not move this note.");
+        }
+      } else {
+        const noteIds = notesToMove.map((note) => note.noteId).filter((noteId): noteId is string => Boolean(noteId));
+        if (noteIds.length !== notesToMove.length) {
+          throw new Error("Could not move every selected note. Refresh the list and try again.");
+        }
+
+        const res = await fetch("/api/codascope/notes/bulk/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            noteIds,
+            fromScope: scope,
+            fromVisibility: visibility,
+            fromOpts: scopeQueryParams,
+            toScope: scope,
+            toVisibility: visibility,
+            toOpts: scopeQueryParams,
+            toFolder: targetFolder,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message ?? "Could not move the selected notes.");
+        if (data.failed?.length) {
+          throw new Error(`Moved ${data.moved ?? 0} of ${notesToMove.length} notes. Try the remaining notes again.`);
+        }
+      }
+
+      if (selectionMode && notesToMove.some((note) => note.noteId && selectedNoteIds.has(note.noteId))) {
+        exitSelectionMode();
+      }
+      void fetchNotes();
+      void fetchTags();
+    } catch (error) {
+      setDragMoveError(error instanceof Error ? error.message : "Could not move the notes.");
+    }
+  }, [clearNoteDrag, exitSelectionMode, fetchNotes, fetchTags, scope, scopeQueryParams, selectedNoteIds, selectionMode, visibility]);
 
   // ── Highlight match in text ────────────────────────────────────────
   const highlightMatch = useCallback((text: string, query: string): React.ReactNode => {
@@ -625,40 +834,76 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   // ── Render ─────────────────────────────────────────────────────────
 
   return (
-    <div className="codascope-notes-browser">
+    <div className={`codascope-notes-browser${visibility === "private" ? " codascope-notes-browser--private" : ""}`}>
       {/* Header */}
       <div className="codascope-notes-browser-header">
         <div className="codascope-notes-browser-header-left">
           <IconNotes size={16} />
           <span className="codascope-notes-browser-title">Notes</span>
 
-          {/* Visibility badge */}
-          <span className={`codascope-notes-visibility-badge codascope-notes-visibility-badge--${visibility}`}>
-            {visibility === "shared" ? "Shared" : "Private"}
-          </span>
+          {showVisibilityTabs && (
+            <div className="codascope-notes-header-visibility" role="group" aria-label="Note visibility">
+              <button
+                className={`codascope-notes-header-visibility-btn${visibility === "shared" ? " codascope-notes-header-visibility-btn--active" : ""}`}
+                onClick={() => handleVisibilitySwitch("shared")}
+                type="button"
+              >
+                Shared
+              </button>
+              <button
+                className={`codascope-notes-header-visibility-btn${visibility === "private" ? " codascope-notes-header-visibility-btn--active codascope-notes-header-visibility-btn--private" : ""}`}
+                onClick={() => handleVisibilitySwitch("private")}
+                type="button"
+              >
+                Private
+              </button>
+            </div>
+          )}
 
           {/* Breadcrumb */}
           <div className="codascope-notes-breadcrumb">
-            <span className="codascope-notes-breadcrumb-sep">/</span>
-            <button
-              className={`codascope-notes-breadcrumb-item${folderParts.length === 0 ? " codascope-notes-breadcrumb-item--current" : ""}`}
-              onClick={() => handleBreadcrumbClick(-1)}
-              type="button"
+            <span
+              className={`codascope-notes-breadcrumb-target${folderParts.length > 0 ? " codascope-notes-breadcrumb-target--droppable" : ""}${folderParts.length > 0 && dropTargetFolder === "" ? " codascope-notes-breadcrumb-target--drop-target" : ""}`}
+              onDragEnter={folderParts.length > 0 ? (event) => handleDropTargetDragOver("", event) : undefined}
+              onDragOver={folderParts.length > 0 ? (event) => handleDropTargetDragOver("", event) : undefined}
+              onDragLeave={folderParts.length > 0 ? (event) => handleDropTargetDragLeave("", event) : undefined}
+              onDrop={folderParts.length > 0 ? (event) => void handleDropTargetDrop("", event) : undefined}
+              title={folderParts.length > 0 ? "Drop notes here to move them to the root" : undefined}
             >
-              {scopeLabel(scope)}
-            </button>
-            {folderParts.map((part, i) => (
-              <span key={i}>
-                <span className="codascope-notes-breadcrumb-sep">/</span>
-                <button
-                  className={`codascope-notes-breadcrumb-item${i === folderParts.length - 1 ? " codascope-notes-breadcrumb-item--current" : ""}`}
-                  onClick={() => handleBreadcrumbClick(i)}
-                  type="button"
+              <span className="codascope-notes-breadcrumb-sep">/</span>
+              <button
+                className={`codascope-notes-breadcrumb-item${folderParts.length === 0 ? " codascope-notes-breadcrumb-item--current" : ""}`}
+                onClick={() => handleBreadcrumbClick(-1)}
+                type="button"
+              >
+                {scopeLabel(scope)}
+              </button>
+            </span>
+            {folderParts.map((part, i) => {
+              const folderPath = folderParts.slice(0, i + 1).join("/");
+              const isCurrentFolder = i === folderParts.length - 1;
+              const canReceiveDrop = !isCurrentFolder;
+              return (
+                <span
+                  key={folderPath}
+                  className={`codascope-notes-breadcrumb-target${canReceiveDrop ? " codascope-notes-breadcrumb-target--droppable" : ""}${canReceiveDrop && dropTargetFolder === folderPath ? " codascope-notes-breadcrumb-target--drop-target" : ""}`}
+                  onDragEnter={canReceiveDrop ? (event) => handleDropTargetDragOver(folderPath, event) : undefined}
+                  onDragOver={canReceiveDrop ? (event) => handleDropTargetDragOver(folderPath, event) : undefined}
+                  onDragLeave={canReceiveDrop ? (event) => handleDropTargetDragLeave(folderPath, event) : undefined}
+                  onDrop={canReceiveDrop ? (event) => void handleDropTargetDrop(folderPath, event) : undefined}
+                  title={canReceiveDrop ? `Drop notes here to move them to ${part}` : undefined}
                 >
-                  {part}
-                </button>
-              </span>
-            ))}
+                  <span className="codascope-notes-breadcrumb-sep">/</span>
+                  <button
+                    className={`codascope-notes-breadcrumb-item${isCurrentFolder ? " codascope-notes-breadcrumb-item--current" : ""}`}
+                    onClick={() => handleBreadcrumbClick(i)}
+                    type="button"
+                  >
+                    {part}
+                  </button>
+                </span>
+              );
+            })}
           </div>
         </div>
 
@@ -716,53 +961,53 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             <IconUpload size={14} />
           </button>
 
-          {/* Create note button */}
+          {/* Explicit placement makes Shared vs Private a deliberate choice. */}
+          <button
+            className="codascope-btn codascope-btn-ghost"
+            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+            onClick={() => setCreateMode("folder")}
+            type="button"
+            title="New folder"
+          >
+            <IconFolder size={14} />
+            <span>Folder</span>
+          </button>
           <button
             className="codascope-btn codascope-btn-primary"
             style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
-            onClick={() => void handleCreateNote()}
-            disabled={creating}
+            onClick={() => setCreateMode("note")}
             type="button"
           >
-            {creating ? "Creating…" : "+ Note"}
+            <IconPlus size={14} />
+            <span>Note</span>
           </button>
         </div>
       </div>
-
-      {/* Visibility tabs (for codascope-level notes) */}
-      {showVisibilityTabs && (
-        <div className="codascope-notes-level-tabs">
-          <button
-            className={`codascope-notes-level-tab${visibility === "shared" ? " codascope-notes-level-tab--active" : ""}`}
-            onClick={() => handleVisibilitySwitch("shared")}
-            type="button"
-          >
-            Shared
-          </button>
-          <button
-            className={`codascope-notes-level-tab${visibility === "private" ? " codascope-notes-level-tab--active" : ""}`}
-            onClick={() => handleVisibilitySwitch("private")}
-            type="button"
-          >
-            Private
-          </button>
-        </div>
-      )}
 
       {/* Tag browser bar */}
       {tags.length > 0 && !showSearchResults && (
         <div className="codascope-notes-tag-bar">
           <IconTag size={12} />
           {tags.map((t) => (
-            <button
-              key={t.tag}
-              className={`codascope-notes-tag-pill${activeTag === t.tag ? " codascope-notes-tag-pill-active" : ""}`}
-              onClick={() => setActiveTag((prev) => prev === t.tag ? null : t.tag)}
-              type="button"
-            >
-              <span>{t.tag}</span>
-              <span className="codascope-notes-tag-pill-count">{t.count}</span>
-            </button>
+            <span key={t.tag} className="codascope-notes-tag-suggestion">
+              <button
+                className={`codascope-notes-tag-pill${activeTag === t.tag ? " codascope-notes-tag-pill-active" : ""}`}
+                onClick={() => setActiveTag((prev) => prev === t.tag ? null : t.tag)}
+                type="button"
+              >
+                <span>{t.tag}</span>
+                <span className="codascope-notes-tag-pill-count">{t.count}</span>
+              </button>
+              <button
+                className="codascope-notes-tag-hide"
+                onClick={() => void handleHideTag(t.tag)}
+                title={`Hide ${t.tag} from shared tag suggestions`}
+                aria-label={`Hide ${t.tag} from shared tag suggestions`}
+                type="button"
+              >
+                <IconClose size={10} />
+              </button>
+            </span>
           ))}
         </div>
       )}
@@ -784,6 +1029,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           <button
             className="codascope-notes-recents-toggle"
             onClick={() => setShowRecents((v) => !v)}
+            aria-expanded={showRecents}
             type="button"
           >
             <IconClock size={13} />
@@ -859,91 +1105,108 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             </div>
             <span>
               {showStarredOnly
-                ? "No starred notes. Click the star icon on a note to bookmark it."
-                : notes.length === 0
-                  ? "No notes yet. Click + Note to create one."
+                  ? "No starred notes. Click the star icon on a note to bookmark it."
+                  : notes.length === 0
+                  ? "No notes yet. Use Note to choose where to create one."
                   : "No matching notes."}
             </span>
           </div>
         ) : (
           filteredNotes.map((entry) =>
             entry.isFolder ? (
-              <button
+              <div
                 key={`folder:${entry.path}`}
-                className={`codascope-notes-item codascope-notes-item--folder${entry.path === "_inbox" ? " codascope-notes-item--inbox" : ""}`}
-                onClick={() => handleFolderClick(entry.path)}
-                type="button"
+                className={`codascope-notes-item codascope-notes-item--folder${entry.path === "_inbox" ? " codascope-notes-item--inbox" : ""}${dropTargetFolder === entry.path ? " codascope-notes-item--drop-target" : ""}`}
+                onDragEnter={(event) => handleDropTargetDragOver(entry.path, event)}
+                onDragOver={(event) => handleDropTargetDragOver(entry.path, event)}
+                onDragLeave={(event) => handleDropTargetDragLeave(entry.path, event)}
+                onDrop={(event) => void handleDropTargetDrop(entry.path, event)}
               >
-                <div className="codascope-notes-item-icon">
-                  {entry.path === "_inbox" ? <IconInbox size={14} /> : <IconFolder size={14} />}
-                </div>
-                <div className="codascope-notes-item-content">
-                  <div className="codascope-notes-item-title">
-                    {entry.path === "_inbox" ? "Inbox" : entry.title}
+                <button className="codascope-notes-folder-open" onClick={() => handleFolderClick(entry.path)} type="button">
+                  <div className="codascope-notes-item-icon">
+                    {entry.path === "_inbox" ? <IconInbox size={14} /> : <IconFolder size={14} />}
                   </div>
-                  <div className="codascope-notes-item-meta">
-                    <span className="codascope-notes-folder-count">
-                      {entry.childCount ?? 0} note{(entry.childCount ?? 0) !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                </div>
-                {/* Inbox badge */}
-                {entry.path === "_inbox" && inboxCount > 0 && (
-                  <span className="codascope-notes-inbox-badge">{inboxCount}</span>
-                )}
-              </button>
-            ) : (
-              <button
-                key={entry.path}
-                className={`codascope-notes-item${selectionMode && entry.noteId && selectedNoteIds.has(entry.noteId) ? " codascope-notes-item-selected" : ""}`}
-                onClick={() => selectionMode ? void toggleNoteSelection(entry) : handleNoteClick(entry.path)}
-                type="button"
-              >
-                {/* Selection checkbox */}
-                {selectionMode && (
-                  <div className="codascope-notes-item-checkbox">
-                    {entry.noteId && selectedNoteIds.has(entry.noteId) ? (
-                      <IconCheckboxChecked size={14} />
-                    ) : (
-                      <IconCheckbox size={14} />
-                    )}
-                  </div>
-                )}
-                <div className="codascope-notes-item-icon">
-                  <IconFile size={14} />
-                </div>
-                <div className="codascope-notes-item-content">
-                  <div className="codascope-notes-item-title">
-                    {entry.title}
-                    {/* Unread dot (shared notes) */}
-                    {visibility === "shared" && entry.noteId && (
-                      readStatus[entry.noteId] === null || (readStatus[entry.noteId] && entry.lastEditedAt && readStatus[entry.noteId]! < entry.lastEditedAt)
-                    ) && (
-                      <span className="codascope-notes-unread-dot" title="Unread or updated" />
-                    )}
-                  </div>
-                  <div className="codascope-notes-item-meta">
-                    {/* Draft/Ready badge (shared notes only) */}
-                    {visibility === "shared" && entry.status && (
-                      <span className={`codascope-notes-${entry.status}-badge`}>
-                        {entry.status === "draft" ? <IconDraft size={10} /> : <IconCheckCircle size={10} />}
-                        <span>{entry.status === "draft" ? "Draft" : "Ready"}</span>
+                  <div className="codascope-notes-item-content">
+                    <div className="codascope-notes-item-title">
+                      {entry.path === "_inbox" ? "Inbox" : entry.title}
+                    </div>
+                    <div className="codascope-notes-item-meta">
+                      <span className="codascope-notes-folder-count">
+                        {entry.childCount ?? 0} note{(entry.childCount ?? 0) !== 1 ? "s" : ""}
                       </span>
-                    )}
-                    {entry.tags.length > 0 && (
-                      <div className="codascope-notes-tags">
-                        {entry.tags.map((tag) => (
-                          <span key={tag} className="codascope-notes-tag">
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <span className="codascope-notes-item-time">
-                      {relativeTime(entry.updated)}
-                    </span>
+                    </div>
                   </div>
+                  {entry.path === "_inbox" && inboxCount > 0 && <span className="codascope-notes-inbox-badge">{inboxCount}</span>}
+                </button>
+                <div className="codascope-notes-folder-actions">
+                  <button className="codascope-notes-folder-action" onClick={() => setFolderToMove(entry.path)} title="Move folder" type="button">
+                    <IconMove size={14} />
+                  </button>
+                  <button className="codascope-notes-folder-action" onClick={() => setFolderToArchive(entry.path)} title="Archive folder and its contents" type="button">
+                    <IconArchive size={14} />
+                  </button>
                 </div>
+              </div>
+            ) : (
+              <div
+                key={entry.path}
+                className={`codascope-notes-item${selectionMode && entry.noteId && selectedNoteIds.has(entry.noteId) ? " codascope-notes-item-selected" : ""}${draggedNotePaths.includes(entry.path) ? " codascope-notes-item--dragging" : ""}`}
+              >
+                <button
+                  className="codascope-notes-note-open"
+                  onClick={() => selectionMode ? void toggleNoteSelection(entry) : handleNoteClick(entry.path)}
+                  onDragStart={(event) => handleNoteDragStart(entry, event)}
+                  onDragEnd={clearNoteDrag}
+                  draggable
+                  title={selectionMode && entry.noteId && selectedNoteIds.has(entry.noteId) ? "Drag selected notes to a folder" : "Drag note to a folder"}
+                  type="button"
+                >
+                  {/* Selection checkbox */}
+                  {selectionMode && (
+                    <div className="codascope-notes-item-checkbox">
+                      {entry.noteId && selectedNoteIds.has(entry.noteId) ? (
+                        <IconCheckboxChecked size={14} />
+                      ) : (
+                        <IconCheckbox size={14} />
+                      )}
+                    </div>
+                  )}
+                  <div className="codascope-notes-item-icon">
+                    <IconFile size={14} />
+                  </div>
+                  <div className="codascope-notes-item-content">
+                    <div className="codascope-notes-item-title">
+                      {entry.title}
+                      {/* Unread dot (shared notes) */}
+                      {visibility === "shared" && entry.noteId && (
+                        readStatus[entry.noteId] === null || (readStatus[entry.noteId] && entry.lastEditedAt && readStatus[entry.noteId]! < entry.lastEditedAt)
+                      ) && (
+                        <span className="codascope-notes-unread-dot" title="Unread or updated" />
+                      )}
+                    </div>
+                    <div className="codascope-notes-item-meta">
+                      {/* Draft/Ready badge (shared notes only) */}
+                      {visibility === "shared" && entry.status && (
+                        <span className={`codascope-notes-${entry.status}-badge`}>
+                          {entry.status === "draft" ? <IconDraft size={10} /> : <IconCheckCircle size={10} />}
+                          <span>{entry.status === "draft" ? "Draft" : "Ready"}</span>
+                        </span>
+                      )}
+                      {entry.tags.length > 0 && (
+                        <div className="codascope-notes-tags">
+                          {entry.tags.map((tag) => (
+                            <span key={tag} className="codascope-notes-tag">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <span className="codascope-notes-item-time">
+                        {relativeTime(entry.updated)}
+                      </span>
+                    </div>
+                  </div>
+                </button>
                 {/* Star toggle */}
                 <button
                   className="codascope-notes-star-toggle"
@@ -957,7 +1220,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                     <IconStar size={14} />
                   )}
                 </button>
-              </button>
+              </div>
             ),
           )
         )}
@@ -1113,11 +1376,60 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
           fromScope={scope}
           fromVisibility={visibility}
           fromPath=""
-          fromOpts={urlContext?.queryParams ?? {}}
+          fromOpts={scopeQueryParams}
           onMoved={handleBulkMoved}
           onClose={() => setShowBulkMove(false)}
           bulkNoteIds={Array.from(selectedNoteIds.keys())}
         />
+      )}
+
+      {folderToMove && (
+        <NoteMoveDialog
+          open={!!folderToMove}
+          fromScope={scope}
+          fromVisibility={visibility}
+          fromPath=""
+          fromFolder={folderToMove}
+          fromOpts={scopeQueryParams}
+          onMoved={() => { setFolderToMove(null); void fetchNotes(); void fetchTags(); }}
+          onClose={() => setFolderToMove(null)}
+        />
+      )}
+
+      <NoteCreateDialog
+        open={createMode !== null}
+        mode={createMode ?? "note"}
+        initialScope={scope}
+        initialVisibility={visibility}
+        initialQueryParams={scopeQueryParams}
+        initialFolder={currentFolder}
+        onClose={() => setCreateMode(null)}
+        onCreated={handleCreated}
+      />
+
+      <ConfirmDialog
+        open={!!folderToArchive}
+        title="Archive folder?"
+        message={`Archive "${folderToArchive ?? ""}" and every note, nested folder, attachment, and version inside it? You can restore the full tree later.`}
+        confirmLabel={folderArchiving ? "Archiving…" : "Archive folder"}
+        cancelLabel="Cancel"
+        onConfirm={() => void handleArchiveFolder()}
+        onCancel={() => { if (!folderArchiving) setFolderToArchive(null); }}
+      />
+
+      {hiddenTagToast && (
+        <div className="codascope-notes-tag-toast" role="status">
+          <span>“{hiddenTagToast}” hidden from shared suggestions.</span>
+          <button onClick={() => void handleRestoreTag()} type="button">Undo</button>
+          <button onClick={() => setHiddenTagToast(null)} aria-label="Dismiss" type="button"><IconClose size={12} /></button>
+        </div>
+      )}
+
+      {dragMoveError && (
+        <div className="codascope-notes-drag-error" role="status">
+          <span>{dragMoveError}</span>
+          <button onClick={() => setDragMoveError(null)} aria-label="Dismiss" type="button"><IconClose size={12} /></button>
+        </div>
       )}
 
       {/* Export Dialog */}
@@ -1125,7 +1437,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         open={showExport}
         scope={scope}
         visibility={visibility}
-        queryParams={urlContext?.queryParams ?? {}}
+        queryParams={scopeQueryParams}
         onClose={() => setShowExport(false)}
       />
 
@@ -1134,7 +1446,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         open={showImport}
         scope={scope}
         visibility={visibility}
-        queryParams={urlContext?.queryParams ?? {}}
+        queryParams={scopeQueryParams}
         onClose={() => setShowImport(false)}
         onImported={() => void fetchNotes()}
       />

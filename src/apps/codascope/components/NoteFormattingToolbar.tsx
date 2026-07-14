@@ -25,7 +25,6 @@ import {
   IconChecklist,
   IconChevronDown,
   IconTextColor,
-  IconFocusMode,
 } from "./CodaScopeIcons";
 import {
   toggleBold,
@@ -38,7 +37,6 @@ import {
 } from "../../../shared/markdown/extensions/formattingCommands";
 import { detectHighlightColors } from "../../../shared/markdown/extensions/highlightExtension";
 import { getHighlightApplyEdit } from "../../../shared/markdown/extensions/highlightMarkup";
-import { toggleFocusMode, isFocusModeOn } from "../../../shared/markdown/extensions/focusModeExtension";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -47,6 +45,8 @@ interface NoteFormattingToolbarProps {
   editorView: EditorView | null;
   /** Gray out all buttons when viewing version history. */
   disabled?: boolean;
+  /** Color wrapping remains explicitly single-selection-only for now. */
+  multipleSelections?: boolean;
 }
 
 /* ── Active state detection ──────────────────────────────────────────── */
@@ -443,7 +443,7 @@ function useSettingsHighlightColors(): ColorSwatch[] {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NoteFormattingToolbar({ editorView, disabled = false }: NoteFormattingToolbarProps) {
+export function NoteFormattingToolbar({ editorView, disabled = false, multipleSelections = false }: NoteFormattingToolbarProps) {
   const [active, setActive] = useState<ActiveStates>(defaultActive);
   const [headingOpen, setHeadingOpen] = useState(false);
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
@@ -549,10 +549,10 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
   const handleStrikethrough = useCallback(() => withFocusReturn(toggleStrikethrough), [withFocusReturn]);
   const handleInlineCode = useCallback(() => withFocusReturn(toggleInlineCode), [withFocusReturn]);
   const handleHighlight = useCallback(() => {
-    if (disabled) return;
+    if (disabled || multipleSelections) return;
     setHighlightPickerOpen((open) => !open);
     setTextColorPickerOpen(false);
-  }, [disabled]);
+  }, [disabled, multipleSelections]);
   const handleLink = useCallback(() => withFocusReturn(insertLink), [withFocusReturn]);
   const handleChecklist = useCallback(() => withFocusReturn(toggleChecklist), [withFocusReturn]);
 
@@ -564,25 +564,25 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
   }, [editorView, disabled]);
 
   const handleHighlightColor = useCallback((colorName: string) => {
-    if (!editorView || disabled) return;
+    if (!editorView || disabled || multipleSelections) return;
     wrapWithHighlightColor(editorView, colorName);
     editorView.focus();
     setHighlightPickerOpen(false);
-  }, [editorView, disabled]);
+  }, [editorView, disabled, multipleSelections]);
 
   const handleTextColor = useCallback((cssColor: string) => {
-    if (!editorView || disabled) return;
+    if (!editorView || disabled || multipleSelections) return;
     wrapWithTextColor(editorView, cssColor);
     editorView.focus();
     setTextColorPickerOpen(false);
-  }, [editorView, disabled]);
+  }, [editorView, disabled, multipleSelections]);
 
   const handleClearTextColor = useCallback(() => {
-    if (!editorView || disabled) return;
+    if (!editorView || disabled || multipleSelections) return;
     clearTextColor(editorView);
     editorView.focus();
     setTextColorPickerOpen(false);
-  }, [editorView, disabled]);
+  }, [editorView, disabled, multipleSelections]);
 
   // ── Current heading label ──────────────────────────────────────────
 
@@ -669,9 +669,9 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         <button
           className={`codascope-notes-formatting-btn${active.highlight || highlightPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
           onClick={handleHighlight}
-          disabled={disabled}
+          disabled={disabled || multipleSelections}
           type="button"
-          title="Highlight (⌘⇧H)"
+          title={multipleSelections ? "Highlight colors support one selection at a time" : "Highlight (⌘⇧H)"}
         >
           <IconHighlight size={14} />
         </button>
@@ -705,9 +705,9 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
             setTextColorPickerOpen((o) => !o);
             setHighlightPickerOpen(false);
           }}
-          disabled={disabled}
+          disabled={disabled || multipleSelections}
           type="button"
-          title="Text color"
+          title={multipleSelections ? "Text colors support one selection at a time" : "Text color"}
         >
           <IconTextColor size={14} />
           <IconChevronDown size={8} />
@@ -766,24 +766,6 @@ export function NoteFormattingToolbar({ editorView, disabled = false }: NoteForm
         </button>
       </div>
 
-      <div className="codascope-notes-formatting-divider" />
-
-      {/* Focus mode toggle */}
-      <div className="codascope-notes-formatting-group">
-        <button
-          className={`codascope-notes-formatting-btn${editorView && isFocusModeOn(editorView) ? " codascope-notes-formatting-btn-active" : ""}`}
-          onClick={() => {
-            if (!editorView || disabled) return;
-            toggleFocusMode(editorView);
-            editorView.focus();
-          }}
-          disabled={disabled}
-          type="button"
-          title="Focus mode (⌘⇧F)"
-        >
-          <IconFocusMode size={14} />
-        </button>
-      </div>
     </div>
   );
 }

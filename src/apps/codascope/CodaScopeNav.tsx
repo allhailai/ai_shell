@@ -47,6 +47,18 @@ export function CodaScopeNav() {
   const section = segments[0] ?? "";
   const urlProjectId = section === "project" ? (segments[1] ?? null) : null;
   const currentView = section === "project" ? (segments[2] ?? "dashboard") : null;
+  const urlEpicId = urlProjectId && segments[2] === "epic" ? (segments[3] ?? null) : null;
+  const codaScopeNotesRoute = urlProjectId
+    ? urlEpicId
+      ? `project/${urlProjectId}/epic/${urlEpicId}/notes/codascope/shared`
+      : `project/${urlProjectId}/notes/codascope/shared`
+    : "notes/shared";
+  const isContextualCodaScopeNotes = Boolean(
+    urlProjectId && (
+      (segments[2] === "notes" && segments[3] === "codascope") ||
+      (segments[2] === "epic" && segments[4] === "notes" && segments[5] === "codascope")
+    ),
+  );
 
   const handleProjectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const projectId = e.target.value;
@@ -141,7 +153,7 @@ export function CodaScopeNav() {
           Projects
         </button>
 
-        {/* Notes — always available (personal/public when no project selected) */}
+        {/* CodaScope notes are always reachable, even while browsing a project. */}
         {!urlProjectId && (
           <button
             className={`codascope-nav-item ${section === "notes" ? "codascope-nav-item--active" : ""}`}
@@ -179,6 +191,20 @@ export function CodaScopeNav() {
           </>
         )}
       </div>
+
+      {urlProjectId && (
+        <div className="codascope-nav-section codascope-nav-section--bottom">
+          <div className="codascope-nav-section-label">CodaScope</div>
+          <button
+            className={`codascope-nav-item ${isContextualCodaScopeNotes ? "codascope-nav-item--active" : ""}`}
+            onClick={() => navigate(codaScopeNotesRoute)}
+            type="button"
+          >
+            <span className="codascope-nav-icon"><IconNotes size={14} /></span>
+            CodaScope Notes
+          </button>
+        </div>
+      )}
 
       {/* Agent status */}
       {agentRunning && (

@@ -18,7 +18,6 @@ import {
   unlinkSync,
   statSync,
   createWriteStream,
-  rmSync,
 } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -34,7 +33,6 @@ import type { NoteScope, NoteVisibility } from "../../src/apps/codascope/codaSco
 export interface ExportOptions {
   notePaths?: string[];
   includeVersions?: boolean;
-  includeAnnotations?: boolean;
 }
 
 interface ManifestItem {
@@ -47,11 +45,12 @@ interface ManifestItem {
   frontmatter: { title: string; tags: string[] };
   versionsIncluded: boolean;
   annotationsIncluded: boolean;
+  annotationAnchorFormatVersion?: number;
 }
 
 interface ExportManifest {
   format: "codascope-notes";
-  formatVersion: 1;
+  formatVersion: 2;
   exportedAt: string;
   sourceInstance?: string;
   scope: { type: string; id?: string };
@@ -164,16 +163,18 @@ export class CodaScopeNoteExportService {
       const contentFile = `notes/${relativePath}`;
       archive.append(content, { name: contentFile });
 
-      // Collect attachments
-      const attachments: Array<{ path: string; sha256: string }> = [];
-      const basename = path.basename(noteFile, ".md");
-      const assetsDir = path.join(path.dirname(noteFile), `${basename}.assets`);
+      // Annotation state is part of a complete note bundle, never an
+      // opt-in add-on. This also migrates any legacy sidecar before export.
+      this.annotationSvc.ensurePhysicalSidecar(scope, visibility, opts, relativePath);
+      await this.annotationSvc.reconcileAfterNoteWrite(scope, visibility, opts, relativePath);
+      const bundle = this.noteSvc.collectNoteBundle(scope, visibility, opts, relativePath);
+      if (!bundle) throw new Error(`Could not collect note bundle: ${relativePath}`);
 
-      if (existsSync(assetsDir)) {
-        const assetFiles = this.collectFiles(assetsDir);
-        for (const assetFile of assetFiles) {
-          const assetRelative = path.relative(notesDir, assetFile);
-          const assetContent = readFileSync(assetFile);
+      // Collect managed attachments through the shared note-bundle utility.
+      const attachments: Array<{ path: string; sha256: string }> = [];
+      for (const assetFile of bundle.assets) {
+          const assetRelative = path.relative(notesDir, assetFile.absolutePath);
+          const assetContent = readFileSync(assetFile.absolutePath);
           const sha256 = crypto.createHash("sha256").update(assetContent).digest("hex");
 
           archive.append(assetContent, { name: `notes/${assetRelative}` });
@@ -181,38 +182,23 @@ export class CodaScopeNoteExportService {
             path: `notes/${assetRelative}`,
             sha256,
           });
-        }
       }
 
       // Versions (optional)
       let versionsIncluded = false;
       if (options.includeVersions) {
-        const versionsDir = path.join(path.dirname(noteFile), `${basename}.versions`);
-        if (existsSync(versionsDir)) {
-          const versionFiles = this.collectFiles(versionsDir);
-          for (const vFile of versionFiles) {
-            const vRelative = path.relative(notesDir, vFile);
-            archive.file(vFile, { name: `versions/${vRelative}` });
-          }
-          versionsIncluded = versionFiles.length > 0;
+        for (const versionFile of bundle.versions) {
+          const versionRelative = path.relative(notesDir, versionFile.absolutePath);
+          archive.file(versionFile.absolutePath, { name: `versions/${versionRelative}` });
         }
+        versionsIncluded = bundle.versions.length > 0;
       }
 
-      // Annotations (optional — stored as JSON alongside notes)
-      let annotationsIncluded = false;
-      if (options.includeAnnotations) {
-        try {
-          const annotations = await this.annotationSvc.listAnnotations(
-            scope, visibility, opts, relativePath.replace(/\.md$/, ""),
-          );
-          if (annotations.length > 0) {
-            const annotationJson = JSON.stringify(annotations, null, 2);
-            const annotationPath = `notes/${relativePath.replace(/\.md$/, ".annotations.json")}`;
-            archive.append(annotationJson, { name: annotationPath });
-            annotationsIncluded = true;
-          }
-        } catch { /* best effort — annotations are optional */ }
-      }
+      const annotationPath = `notes/${relativePath.replace(/\.md$/, ".annotations.json")}`;
+      const annotationJson = bundle.annotation
+        ? readFileSync(bundle.annotation.absolutePath)
+        : Buffer.from(JSON.stringify({ annotations: [] }, null, 2));
+      archive.append(annotationJson, { name: annotationPath });
 
       items.push({
         noteId: frontmatter.id,
@@ -223,14 +209,15 @@ export class CodaScopeNoteExportService {
         attachments,
         frontmatter: { title: frontmatter.title, tags: frontmatter.tags },
         versionsIncluded,
-        annotationsIncluded,
+        annotationsIncluded: true,
+        annotationAnchorFormatVersion: 1,
       });
     }
 
     // Build manifest
     const manifest: ExportManifest = {
       format: "codascope-notes",
-      formatVersion: 1,
+      formatVersion: 2,
       exportedAt: new Date().toISOString(),
       scope: { type: scope, id: opts.projectId ?? opts.epicId },
       visibility,
@@ -349,24 +336,4 @@ export class CodaScopeNoteExportService {
     return results;
   }
 
-  /** Recursively collect all files in a directory. */
-  private collectFiles(dir: string): string[] {
-    const results: string[] = [];
-    if (!existsSync(dir)) return results;
-
-    try {
-      const items = readdirSync(dir, { withFileTypes: true });
-      for (const item of items) {
-        if (item.name.startsWith(".")) continue;
-        const fullPath = path.join(dir, item.name);
-        if (item.isDirectory()) {
-          results.push(...this.collectFiles(fullPath));
-        } else {
-          results.push(fullPath);
-        }
-      }
-    } catch { /* best effort */ }
-
-    return results;
-  }
 }
