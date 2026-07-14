@@ -25,6 +25,11 @@ import {
   IconChecklist,
   IconChevronDown,
   IconTextColor,
+  IconClock,
+  IconMove,
+  IconActivity,
+  IconDownload,
+  IconArchive,
 } from "./CodaScopeIcons";
 import {
   toggleBold,
@@ -47,6 +52,14 @@ interface NoteFormattingToolbarProps {
   disabled?: boolean;
   /** Color wrapping remains explicitly single-selection-only for now. */
   multipleSelections?: boolean;
+  /** Note-level commands rendered after the checklist control. */
+  onShowVersions: () => void;
+  onMoveNote: () => void;
+  onToggleActivity: () => void;
+  activityOpen: boolean;
+  onExportNote: () => void;
+  onArchiveNote: () => void;
+  archiveDisabled?: boolean;
 }
 
 /* ── Active state detection ──────────────────────────────────────────── */
@@ -443,7 +456,18 @@ function useSettingsHighlightColors(): ColorSwatch[] {
 
 /* ── Component ───────────────────────────────────────────────────────── */
 
-export function NoteFormattingToolbar({ editorView, disabled = false, multipleSelections = false }: NoteFormattingToolbarProps) {
+export function NoteFormattingToolbar({
+  editorView,
+  disabled = false,
+  multipleSelections = false,
+  onShowVersions,
+  onMoveNote,
+  onToggleActivity,
+  activityOpen,
+  onExportNote,
+  onArchiveNote,
+  archiveDisabled = false,
+}: NoteFormattingToolbarProps) {
   const [active, setActive] = useState<ActiveStates>(defaultActive);
   const [headingOpen, setHeadingOpen] = useState(false);
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
@@ -763,6 +787,35 @@ export function NoteFormattingToolbar({ editorView, disabled = false, multipleSe
           title="Checklist"
         >
           <IconChecklist size={14} />
+        </button>
+      </div>
+
+      <div className="codascope-notes-formatting-divider" />
+
+      {/* Note commands */}
+      <div className="codascope-notes-formatting-group">
+        <button className="codascope-notes-formatting-btn" onClick={onShowVersions} disabled={disabled} type="button" title="Version history" aria-label="Version history">
+          <IconClock size={14} />
+        </button>
+        <button className="codascope-notes-formatting-btn" onClick={onMoveNote} disabled={disabled} type="button" title="Move note" aria-label="Move note">
+          <IconMove size={14} />
+        </button>
+        <button
+          className={`codascope-notes-formatting-btn${activityOpen ? " codascope-notes-formatting-btn-active" : ""}`}
+          onClick={onToggleActivity}
+          disabled={disabled}
+          type="button"
+          title={activityOpen ? "Hide activity" : "View activity"}
+          aria-label={activityOpen ? "Hide activity" : "View activity"}
+          aria-pressed={activityOpen}
+        >
+          <IconActivity size={14} />
+        </button>
+        <button className="codascope-notes-formatting-btn" onClick={onExportNote} disabled={disabled} type="button" title="Export note" aria-label="Export note">
+          <IconDownload size={14} />
+        </button>
+        <button className="codascope-notes-formatting-btn codascope-notes-formatting-btn-archive" onClick={onArchiveNote} disabled={disabled || archiveDisabled} type="button" title="Archive note" aria-label="Archive note">
+          <IconArchive size={14} />
         </button>
       </div>
 

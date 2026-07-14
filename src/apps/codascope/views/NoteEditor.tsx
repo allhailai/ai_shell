@@ -14,7 +14,7 @@ import { MarkdownEditor, type InlineAnnotationAnchorItem } from "../../../shared
 import { getAnnotationAnchorById, getRelativeAnnotationAnchor } from "../annotationNavigation";
 import { useAuth } from "../../../shell/authContext";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
-import { IconArrowLeft, IconChevronDown, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDownload, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
+import { IconArrowLeft, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
 import { NoteSelectionToolbar, type NoteSelectionInfo } from "../components/NoteSelectionToolbar";
@@ -103,8 +103,6 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // Move dialog state
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [showExport, setShowExport] = useState(false);
-  const [showMoreActions, setShowMoreActions] = useState(false);
-  const moreActionsRef = useRef<HTMLDivElement | null>(null);
 
   // Version history state
   const [showVersions, setShowVersions] = useState(false);
@@ -615,26 +613,6 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const backLabel = parentFolderName ?? "Notes";
   const backTitle = parentFolderName ? `Back to ${parentFolderName}` : "Back to notes";
 
-  useEffect(() => {
-    if (!showMoreActions) return;
-
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!moreActionsRef.current?.contains(event.target as Node)) {
-        setShowMoreActions(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowMoreActions(false);
-    };
-
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [showMoreActions]);
-
   // ── Fetch backlinks ─────────────────────────────────────────────
   const fetchBacklinks = useCallback(async (noteId: string) => {
     try {
@@ -835,43 +813,6 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             )}
           </button>
 
-          <div className="codascope-notes-editor-more-actions" ref={moreActionsRef}>
-            <button
-              className="codascope-btn codascope-btn-ghost codascope-btn-sm"
-              onClick={() => setShowMoreActions((open) => !open)}
-              type="button"
-              title="More note actions"
-              aria-expanded={showMoreActions}
-              aria-haspopup="menu"
-            >
-              <span>More</span>
-              <IconChevronDown size={12} />
-            </button>
-            {showMoreActions && (
-              <div className="codascope-notes-editor-more-menu" role="menu">
-                <button onClick={() => { handleShowVersions(); setShowMoreActions(false); }} role="menuitem" type="button">
-                  <IconClock size={14} />
-                  <span>Version history</span>
-                </button>
-                <button onClick={() => { setShowMoveDialog(true); setShowMoreActions(false); }} role="menuitem" type="button">
-                  <IconMove size={14} />
-                  <span>Move note</span>
-                </button>
-                <button onClick={() => { setShowActivity((open) => !open); if (!showActivity) void fetchActivity(); setShowMoreActions(false); }} role="menuitem" type="button">
-                  <IconActivity size={14} />
-                  <span>{showActivity ? "Hide activity" : "View activity"}</span>
-                </button>
-                <button onClick={() => { setShowExport(true); setShowMoreActions(false); }} role="menuitem" type="button">
-                  <IconDownload size={14} />
-                  <span>Export note</span>
-                </button>
-                <button className="codascope-notes-editor-more-menu-archive" onClick={() => { setShowArchiveConfirm(true); setShowMoreActions(false); }} disabled={archiving} role="menuitem" type="button">
-                  <IconArchive size={14} />
-                  <span>Archive note</span>
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -940,6 +881,17 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         editorView={editorViewRef.current}
         disabled={showVersions && !!selectedVersion}
         multipleSelections={multipleSelections}
+        onShowVersions={handleShowVersions}
+        onMoveNote={() => setShowMoveDialog(true)}
+        onToggleActivity={() => {
+          const opening = !showActivity;
+          setShowActivity(opening);
+          if (opening) void fetchActivity();
+        }}
+        activityOpen={showActivity}
+        onExportNote={() => setShowExport(true)}
+        onArchiveNote={() => setShowArchiveConfirm(true)}
+        archiveDisabled={archiving}
       />
 
       {multipleSelections && !showVersions && (

@@ -613,59 +613,6 @@
   flex-shrink: 0;
 }
 
-.codascope-notes-editor-more-actions {
-  position: relative;
-}
-
-.codascope-notes-editor-more-actions > button {
-  gap: var(--space-1);
-}
-
-.codascope-notes-editor-more-menu {
-  position: absolute;
-  z-index: 10;
-  top: calc(100% + var(--space-1));
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 156px;
-  padding: var(--space-1);
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-}
-
-.codascope-notes-editor-more-menu button {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.codascope-notes-editor-more-menu button:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.codascope-notes-editor-more-menu button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.codascope-notes-editor-more-menu .codascope-notes-editor-more-menu-archive {
-  color: var(--color-warning);
-}
-
 .codascope-notes-editor-body {
   flex: 1;
   min-height: 0;
@@ -1521,6 +1468,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  overflow-x: auto;
   padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--color-border-primary);
   background: var(--color-bg-secondary);
@@ -1544,6 +1492,7 @@
   align-items: center;
   gap: 1px;
   position: relative;
+  flex-shrink: 0;
 }
 
 .codascope-notes-formatting-divider {
@@ -1584,6 +1533,11 @@
 .codascope-notes-formatting-btn-active:hover {
   background: var(--color-accent-muted);
   color: var(--color-accent-hover);
+}
+
+.codascope-notes-formatting-btn-archive,
+.codascope-notes-formatting-btn-archive:hover {
+  color: var(--color-warning);
 }
 
 .codascope-notes-formatting-btn:disabled {

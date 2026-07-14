@@ -335,7 +335,7 @@ function NewAnnotationComposer({ selectedText, onCancel, onSubmit }: { selectedT
     <div className="codascope-notes-ann-new-composer">
       <span className="codascope-notes-ann-new-composer-label">New annotation</span>
       <blockquote className="codascope-notes-ann-new-composer-quote">{selectedText}</blockquote>
-      <textarea className="codascope-notes-ann-reply-input" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a comment…" rows={3} />
+      <textarea className="codascope-notes-ann-reply-input" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a comment…" rows={3} autoFocus />
       <div className="codascope-notes-ann-reply-actions">
         <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={onCancel} disabled={submitting} type="button">Cancel</button>
         <button className="codascope-btn codascope-btn-primary codascope-btn-xs" onClick={submit} disabled={submitting || !body.trim()} type="button">{submitting ? "Adding…" : "Add annotation"}</button>
