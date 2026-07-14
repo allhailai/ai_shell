@@ -24,7 +24,6 @@
 @import "./shared/markdown/extensions/highlightExtension.css";
 @import "./shared/markdown/extensions/calloutExtension.css";
 @import "./shared/markdown/extensions/tagPillExtension.css";
-@import "./shared/markdown/extensions/mathExtension.css";
 @import "./shared/markdown/extensions/footnoteExtension.css";
 @import "./shared/folder-picker/FolderPicker.css";
 @import "./shared/confirm-dialog/ConfirmDialog.css";

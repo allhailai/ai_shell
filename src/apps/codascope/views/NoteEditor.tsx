@@ -988,7 +988,6 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
               showInsertionHotzones
               showSlashCommands
               autoContinueLists
-              showMath
               showFootnotes
               onInsertionRequest={handleInsertionRequest}
               inlineAnnotationAnchors={inlineAnnotationAnchors.length > 0 ? inlineAnnotationAnchors : undefined}

@@ -23,7 +23,6 @@ import { buildHighlightExtension } from "./extensions/highlightExtension";
 import { buildSlashCommandExtension } from "./extensions/slashCommandExtension";
 import { buildCalloutExtension } from "./extensions/calloutExtension";
 import { buildTagPillExtension } from "./extensions/tagPillExtension";
-import { buildMathExtension } from "./extensions/mathExtension";
 import { buildFootnoteExtension } from "./extensions/footnoteExtension";
 import {
   autoContinueList,
@@ -72,8 +71,6 @@ interface MarkdownEditorProps {
   showTagPills?: boolean;
   /** Enable auto-continue lists on Enter key. */
   autoContinueLists?: boolean;
-  /** Enable math block rendering ($$...$$ and $...$). Default: false. */
-  showMath?: boolean;
   /** Enable footnote rendering ([^1] and [^1]: text). Default: false. */
   showFootnotes?: boolean;
   /** Server-validated marker pairs rendered as exact inline annotation pins. */
@@ -157,7 +154,6 @@ export function MarkdownEditor({
   showCallouts = true,
   showTagPills = true,
   autoContinueLists = false,
-  showMath = false,
   showFootnotes = false,
   inlineAnnotationAnchors,
   inlineAnnotationMarkerRanges,
@@ -256,11 +252,6 @@ export function MarkdownEditor({
         ]));
       }
 
-      // Math extension with lazy KaTeX loading (opt-in)
-      if (showMath) {
-        exts.push(buildMathExtension({ editable }));
-      }
-
       // Footnote extension (opt-in)
       if (showFootnotes) {
         exts.push(buildFootnoteExtension({ editable }));
@@ -314,7 +305,7 @@ export function MarkdownEditor({
      onImagePaste, stableOnImagePaste, showImagePreview, stableResolveImageUrl,
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
      showSlashCommands, showCallouts, showTagPills, autoContinueLists,
-     showMath, showFootnotes,
+     showFootnotes,
      inlineAnnotationAnchors, inlineAnnotationMarkerRanges, stableOnAnnotationClick, onSelectionChange, stableOnSelectionChange],
   );
 

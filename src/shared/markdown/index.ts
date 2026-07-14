@@ -15,7 +15,6 @@ export { buildImagePreviewExtension, parseImageDimensions, type ImagePreviewConf
 export { buildInsertionHotzoneExtension, type InsertionHotzoneConfig } from "./extensions/insertionHotzoneExtension";
 export { buildInlineAnnotationExtension, type InlineAnnotationAnchorItem, type InlineAnnotationExtensionConfig } from "./extensions/inlineAnnotationExtension";
 export { buildHighlightExtension } from "./extensions/highlightExtension";
-export { buildMathExtension } from "./extensions/mathExtension";
 export { buildFootnoteExtension } from "./extensions/footnoteExtension";
 export {
   toggleBold,
@@ -38,5 +37,4 @@ export {
 //   @import "./shared/markdown/extensions/insertionHotzoneExtension.css";
 //   @import "./shared/markdown/extensions/annotationGutterExtension.css";
 //   @import "./shared/markdown/extensions/highlightExtension.css";
-//   @import "./shared/markdown/extensions/mathExtension.css";
 //   @import "./shared/markdown/extensions/footnoteExtension.css";
