@@ -472,9 +472,13 @@ export function NoteFormattingToolbar({
   const [headingOpen, setHeadingOpen] = useState(false);
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
   const [textColorPickerOpen, setTextColorPickerOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsMenuPosition, setActionsMenuPosition] = useState({ top: 0, left: 0 });
   const headingDropdownRef = useRef<HTMLDivElement>(null);
   const highlightDropdownRef = useRef<HTMLDivElement>(null);
   const textColorDropdownRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const actionsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Custom colors from settings
   const settingsColors = useSettingsHighlightColors();
@@ -542,9 +546,9 @@ export function NoteFormattingToolbar({
     };
   }, [editorView, disabled]);
 
-  // Close dropdowns on outside click
+  // Close pickers and the note-actions menu on outside click or Escape.
   useEffect(() => {
-    if (!headingOpen && !highlightPickerOpen && !textColorPickerOpen) return;
+    if (!headingOpen && !highlightPickerOpen && !textColorPickerOpen && !actionsOpen) return;
     const handleClick = (e: MouseEvent) => {
       if (headingOpen && headingDropdownRef.current && !headingDropdownRef.current.contains(e.target as Node)) {
         setHeadingOpen(false);
@@ -555,10 +559,72 @@ export function NoteFormattingToolbar({
       if (textColorPickerOpen && textColorDropdownRef.current && !textColorDropdownRef.current.contains(e.target as Node)) {
         setTextColorPickerOpen(false);
       }
+      if (actionsOpen && actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (actionsOpen) actionsTriggerRef.current?.focus();
+        setHeadingOpen(false);
+        setHighlightPickerOpen(false);
+        setTextColorPickerOpen(false);
+        setActionsOpen(false);
+        return;
+      }
+      if (!actionsOpen || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+
+      const items = Array.from(actionsMenuRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitem']:not(:disabled)") ?? []);
+      if (items.length === 0) return;
+      e.preventDefault();
+      const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+      if (currentIndex === -1) {
+        items[e.key === "ArrowDown" ? 0 : items.length - 1]?.focus();
+        return;
+      }
+      const nextIndex = e.key === "ArrowDown"
+        ? (currentIndex + 1 + items.length) % items.length
+        : (currentIndex - 1 + items.length) % items.length;
+      items[nextIndex]?.focus();
     };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [headingOpen, highlightPickerOpen, textColorPickerOpen]);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [headingOpen, highlightPickerOpen, textColorPickerOpen, actionsOpen]);
+
+  useEffect(() => {
+    if (!actionsOpen) return;
+    actionsMenuRef.current?.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")?.focus();
+  }, [actionsOpen]);
+
+  // The toolbar scrolls horizontally, so the Actions menu must be fixed to
+  // the trigger rather than clipped inside the toolbar's overflow container.
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const positionMenu = () => {
+      const trigger = actionsTriggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = 180;
+      const menuHeight = 190;
+      const gutter = 8;
+      const top = rect.bottom + gutter + menuHeight <= window.innerHeight
+        ? rect.bottom + gutter
+        : Math.max(gutter, rect.top - menuHeight - gutter);
+      const left = Math.max(gutter, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter));
+      setActionsMenuPosition({ top, left });
+    };
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [actionsOpen]);
 
   // ── Button handlers ────────────────────────────────────────────────
 
@@ -792,31 +858,63 @@ export function NoteFormattingToolbar({
 
       <div className="codascope-notes-formatting-divider" />
 
-      {/* Note commands */}
-      <div className="codascope-notes-formatting-group">
-        <button className="codascope-notes-formatting-btn" onClick={onShowVersions} disabled={disabled} type="button" title="Version history" aria-label="Version history">
-          <IconClock size={14} />
-        </button>
-        <button className="codascope-notes-formatting-btn" onClick={onMoveNote} disabled={disabled} type="button" title="Move note" aria-label="Move note">
-          <IconMove size={14} />
-        </button>
+      {/* Less-frequent note commands remain visible through one labeled menu. */}
+      <div className="codascope-notes-formatting-group" ref={actionsMenuRef}>
         <button
-          className={`codascope-notes-formatting-btn${activityOpen ? " codascope-notes-formatting-btn-active" : ""}`}
-          onClick={onToggleActivity}
+          ref={actionsTriggerRef}
+          className={`codascope-notes-formatting-btn codascope-notes-formatting-actions-trigger${actionsOpen ? " codascope-notes-formatting-btn-active" : ""}`}
+          onClick={() => {
+            setActionsOpen((open) => !open);
+            setHeadingOpen(false);
+            setHighlightPickerOpen(false);
+            setTextColorPickerOpen(false);
+          }}
           disabled={disabled}
           type="button"
-          title={activityOpen ? "Hide activity" : "View activity"}
-          aria-label={activityOpen ? "Hide activity" : "View activity"}
-          aria-pressed={activityOpen}
+          aria-haspopup="menu"
+          aria-expanded={actionsOpen}
+          aria-controls="codascope-note-actions-menu"
         >
-          <IconActivity size={14} />
+          Actions <IconChevronDown size={10} />
         </button>
-        <button className="codascope-notes-formatting-btn" onClick={onExportNote} disabled={disabled} type="button" title="Export note" aria-label="Export note">
-          <IconDownload size={14} />
-        </button>
-        <button className="codascope-notes-formatting-btn codascope-notes-formatting-btn-archive" onClick={onArchiveNote} disabled={disabled || archiveDisabled} type="button" title="Archive note" aria-label="Archive note">
-          <IconArchive size={14} />
-        </button>
+
+        {actionsOpen && (
+          <div
+            id="codascope-note-actions-menu"
+            className="codascope-notes-formatting-actions-menu"
+            role="menu"
+            aria-label="Note actions"
+            style={actionsMenuPosition}
+          >
+            <button className="codascope-notes-formatting-actions-menu-item" onClick={() => { setActionsOpen(false); onShowVersions(); }} role="menuitem" type="button">
+              <IconClock size={14} /> Version history
+            </button>
+            <button className="codascope-notes-formatting-actions-menu-item" onClick={() => { setActionsOpen(false); onMoveNote(); }} role="menuitem" type="button">
+              <IconMove size={14} /> Move note
+            </button>
+            <button
+              className={`codascope-notes-formatting-actions-menu-item${activityOpen ? " codascope-notes-formatting-actions-menu-item-active" : ""}`}
+              onClick={() => { setActionsOpen(false); onToggleActivity(); }}
+              role="menuitem"
+              type="button"
+            >
+              <IconActivity size={14} /> {activityOpen ? "Hide activity" : "View activity"}
+            </button>
+            <button className="codascope-notes-formatting-actions-menu-item" onClick={() => { setActionsOpen(false); onExportNote(); }} role="menuitem" type="button">
+              <IconDownload size={14} /> Export note
+            </button>
+            <div className="codascope-notes-formatting-actions-menu-divider" role="separator" />
+            <button
+              className="codascope-notes-formatting-actions-menu-item codascope-notes-formatting-actions-menu-item-archive"
+              onClick={() => { setActionsOpen(false); onArchiveNote(); }}
+              disabled={archiveDisabled}
+              role="menuitem"
+              type="button"
+            >
+              <IconArchive size={14} /> Archive note
+            </button>
+          </div>
+        )}
       </div>
 
     </div>
