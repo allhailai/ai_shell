@@ -18,6 +18,26 @@ npm run dev:container
 
 The API runs on port **5175** and is proxied through Vite at `/api`.
 
+### GitHub authentication (dev container)
+
+After the first build (or any rebuild), authenticate once so `git push` and `gh` work inside the container:
+
+```bash
+gh auth login
+gh auth setup-git
+```
+
+Use **GitHub.com**, **HTTPS**, and **Login with a web browser** when prompted. This works the same on macOS and Windows hosts.
+
+Verify:
+
+```bash
+gh auth status
+git ls-remote origin HEAD
+```
+
+Credentials are stored in the container. If you rebuild the dev container, run the two commands again.
+
 ### Local (non-container)
 
 Requires Node.js **22.13+**.
