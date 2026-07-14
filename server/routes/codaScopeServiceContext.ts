@@ -4,6 +4,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
+import path from "node:path";
 import type { SecretService } from "../services/secretService.js";
 import type { User } from "../services/authService.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
@@ -56,6 +57,8 @@ export interface CodaScopeRoutesDeps {
   secretService: SecretService;
   authMiddleware: Record<string, unknown>;
   httpError: HttpErrorFn;
+  /** AIShell's checkout. Mutable CodaScope project data must not be stored below it. */
+  repoRoot: string;
 }
 
 export interface CodaScopeServices {
@@ -99,6 +102,7 @@ export interface CodaScopeRouteContext {
   app: Express;
   secretService: SecretService;
   httpError: HttpErrorFn;
+  repoRoot: string;
   ensureServices: () => Promise<CodaScopeServices>;
   wrap: (fn: (req: Request, res: Response) => Promise<void>) => RequestHandler;
   param: (req: Request, name: string) => string;
@@ -166,6 +170,23 @@ export async function setProjectsRoot(secretService: SecretService, value: strin
   return secretService.setAppSecret(APP_ID, CONFIG_KEY, value);
 }
 
+/** True when candidate is the AIShell checkout itself or a descendant of it. */
+export function isInsideInstallDirectory(candidate: string, repoRoot: string): boolean {
+  const relative = path.relative(path.resolve(repoRoot), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+/** Prevent mutable CodaScope project data from being written into AIShell source. */
+export function assertProjectsRootOutsideInstall(root: string, repoRoot: string, httpError: HttpErrorFn): void {
+  if (isInsideInstallDirectory(root, repoRoot)) {
+    throw httpError(
+      "CodaScope projects root must be outside the AIShell installation directory.",
+      400,
+      "projects_root_inside_install",
+    );
+  }
+}
+
 // ── Param Helper ────────────────────────────────────────────────────
 
 /** Safely extract a string route param. */
@@ -189,9 +210,11 @@ export function principal(req: Request, httpError: HttpErrorFn): CodaScopePrinci
 
 // ── Service Initialization ──────────────────────────────────────────
 
-async function ensureServicesImpl(secretService: SecretService, httpError: HttpErrorFn): Promise<CodaScopeServices> {
-  const root = await getProjectsRoot(secretService);
-  if (!root) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
+async function ensureServicesImpl(secretService: SecretService, httpError: HttpErrorFn, repoRoot: string): Promise<CodaScopeServices> {
+  const configuredRoot = await getProjectsRoot(secretService);
+  if (!configuredRoot) throw httpError("CodaScope is not configured. Set the projects root first.", 400, "not_configured");
+  assertProjectsRootOutsideInstall(configuredRoot, repoRoot, httpError);
+  const root = path.resolve(configuredRoot);
 
   if (!projectService) projectService = new CodaScopeProjectService(root);
   else projectService.setRoot(root);
@@ -357,7 +380,7 @@ export function getAgentServiceSingleton(): CodaScopeAgentService | null {
 
 /** Build a CodaScopeRouteContext from the raw deps — called once in the hub. */
 export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): CodaScopeRouteContext {
-  const { secretService, httpError } = deps;
+  const { secretService, httpError, repoRoot } = deps;
 
   const wrap = (fn: (req: Request, res: Response) => Promise<void>): RequestHandler => {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -369,7 +392,8 @@ export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): Cod
     app,
     secretService,
     httpError,
-    ensureServices: () => ensureServicesImpl(secretService, httpError),
+    repoRoot,
+    ensureServices: () => ensureServicesImpl(secretService, httpError, repoRoot),
     wrap,
     param,
     principal: (req) => principal(req, httpError),

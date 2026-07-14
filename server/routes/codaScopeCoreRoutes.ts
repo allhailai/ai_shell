@@ -4,7 +4,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
-import { getProjectsRoot, setProjectsRoot, getAgentServiceSingleton } from "./codaScopeServiceContext.js";
+import { assertProjectsRootOutsideInstall, getProjectsRoot, setProjectsRoot, getAgentServiceSingleton } from "./codaScopeServiceContext.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
 import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
 // archiver v8 exports class constructors, not a factory function.
@@ -48,7 +48,7 @@ export async function ensureReposMapped(
 }
 
 export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, secretService, httpError, ensureServices, wrap, param, upload } = ctx;
+  const { app, secretService, httpError, repoRoot, ensureServices, wrap, param, upload } = ctx;
 
   // ── Config ──────────────────────────────────────────────────────
 
@@ -62,11 +62,13 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     if (!newRoot || typeof newRoot !== "string" || !newRoot.trim()) {
       throw httpError("projectsRoot is required.", 400, "invalid_input");
     }
-    await setProjectsRoot(secretService, newRoot.trim());
+    const resolvedRoot = path.resolve(newRoot.trim());
+    assertProjectsRootOutsideInstall(resolvedRoot, repoRoot, httpError);
+    await setProjectsRoot(secretService, resolvedRoot);
     // Ensure the directory exists
-    const svc = new CodaScopeProjectService(newRoot.trim());
+    const svc = new CodaScopeProjectService(resolvedRoot);
     await svc.ensureRootExists();
-    res.json({ projectsRoot: newRoot.trim(), configured: true });
+    res.json({ projectsRoot: resolvedRoot, configured: true });
   }));
 
   // ── Projects ────────────────────────────────────────────────────
@@ -367,4 +369,3 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.json(result);
   }));
 }
-

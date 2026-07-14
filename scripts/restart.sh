@@ -2,7 +2,7 @@
 # restart.sh — Detached process that restarts the AIShell dev server.
 #
 # Usage (called by the Node.js server, not manually):
-#   bash restart.sh <REPO_ROOT> <API_PORT> <OLD_PID>
+#   bash restart.sh <REPO_ROOT> <RUNTIME_DIR> <API_PORT> <OLD_PID>
 #
 # The script:
 #   1. Waits for the old server process to exit
@@ -13,11 +13,11 @@
 
 set -euo pipefail
 
-REPO_ROOT="${1:?Usage: restart.sh <REPO_ROOT> <API_PORT> <OLD_PID>}"
-API_PORT="${2:?Usage: restart.sh <REPO_ROOT> <API_PORT> <OLD_PID>}"
-OLD_PID="${3:-}"
+REPO_ROOT="${1:?Usage: restart.sh <REPO_ROOT> <RUNTIME_DIR> <API_PORT> <OLD_PID>}"
+RUNTIME_DIR="${2:?Usage: restart.sh <REPO_ROOT> <RUNTIME_DIR> <API_PORT> <OLD_PID>}"
+API_PORT="${3:?Usage: restart.sh <REPO_ROOT> <RUNTIME_DIR> <API_PORT> <OLD_PID>}"
+OLD_PID="${4:-}"
 
-RUNTIME_DIR="$REPO_ROOT/.runtime"
 LOG_FILE="$RUNTIME_DIR/restart.log"
 PID_FILE="$RUNTIME_DIR/dev.pid"
 mkdir -p "$RUNTIME_DIR"

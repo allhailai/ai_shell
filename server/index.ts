@@ -116,6 +116,8 @@ export function httpError(message: string, status: number, code: string): HttpEr
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 // ── Auth infrastructure ─────────────────────────────────────────────
 
 const localStrategy = createLocalAuthStrategy({
@@ -217,21 +219,24 @@ const secretService = createSecretService({
 registerSecretRoutes(app, { secretService, authMiddleware, httpError, mode: SHELL_MODE });
 registerDbHelperRoutes(app, { secretService, authMiddleware, httpError });
 registerDbExplorerRoutes(app, { secretService, authMiddleware, httpError });
-registerCodaScopeRoutes(app, { secretService, authMiddleware, httpError });
+registerCodaScopeRoutes(app, { secretService, authMiddleware, httpError, repoRoot: REPO_ROOT });
 registerFilesystemRoutes(app, { authMiddleware, httpError });
 
 // ── Self-update infrastructure ──────────────────────────────────────
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
 const updateService = createAiShellUpdateService({
   REPO_ROOT,
+  DATA_DIR: platformInfo.dataDir,
   PORT,
   httpError,
 });
 
 registerAiShellUpdateRoutes(app, {
   checkUpdate: updateService.checkUpdate,
+  getWorktreeStatus: updateService.getWorktreeStatus,
+  listRecoveryStashes: updateService.listRecoveryStashes,
+  stashWorkingTree: updateService.stashWorkingTree,
+  restoreRecoveryStash: updateService.restoreRecoveryStash,
   updateAndRestart: updateService.updateAndRestart,
   authMiddleware,
   httpError,

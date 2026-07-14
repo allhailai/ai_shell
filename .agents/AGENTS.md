@@ -121,6 +121,21 @@ Services follow **single responsibility** — one domain per file. They are modu
 
 The Express server entry point is `server/index.ts`. All routes are mounted there.
 
+### 7. Runtime Data Must Stay Outside the Checkout
+
+The AIShell Git checkout is deployable source code, not mutable application
+storage. Store logs, audit trails, runtime PID files, configuration, secrets,
+and user preferences below `AISHELL_DATA_DIR` (normally `~/.aishell`), never
+under the repository root. CodaScope's configured projects root must likewise
+be outside the AIShell installation directory.
+
+Before adding a filesystem write, verify that its destination is either
+external persistent storage, an OS temporary directory, or intentionally
+versioned project content. If a third-party tool or legacy process must write
+inside the checkout, isolate it in a dedicated directory and add that
+directory to `.gitignore` in the same change. Do not rely on update recovery
+stashes to hide runtime output.
+
 ---
 
 ## Creating a New Application

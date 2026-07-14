@@ -687,6 +687,132 @@
   align-self: flex-start;
 }
 
+/* ── Local change recovery ── */
+
+.admin-update-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.admin-update-change-list,
+.admin-update-stash-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-update-change-item,
+.admin-update-stash-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.admin-update-change-item code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-update-change-kind {
+  flex: 0 0 118px;
+  color: var(--color-text-secondary);
+}
+
+.admin-update-change-from,
+.admin-update-change-note {
+  color: var(--color-text-tertiary);
+}
+
+.admin-update-change-note {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.admin-update-stashes,
+.admin-update-confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+}
+
+.admin-update-recovery-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.admin-update-recovery-copy {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.admin-update-stash-item {
+  justify-content: space-between;
+}
+
+.admin-update-stash-item > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.admin-update-stash-item span {
+  color: var(--color-text-tertiary);
+}
+
+.admin-update-confirmation-field {
+  min-width: 0;
+}
+
+.admin-update-danger-btn {
+  background: var(--color-danger-muted);
+  border: 1px solid var(--color-danger);
+  color: var(--color-text-primary);
+}
+
+.admin-update-danger-btn:hover:not(:disabled) {
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+}
+
+@media (max-width: 600px) {
+  .admin-update-change-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .admin-update-change-kind {
+    flex-basis: auto;
+  }
+
+  .admin-update-change-note {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
 /* ── Restarting state ── */
 
 .admin-update-restarting {
@@ -748,4 +874,3 @@
   animation: admin-update-spin 0.8s linear infinite;
   opacity: 0.7;
 }
-

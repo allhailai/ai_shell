@@ -1,6 +1,10 @@
 /* ── AIShell Update Routes ────────────────────────────────────────────
-   POST /api/system/update/check        — Check for available updates
-   POST /api/system/update-and-restart  — Pull + restart
+   POST /api/system/update/check                    — Check for available updates
+   POST /api/system/update-and-restart              — Pull + restart
+   GET  /api/system/update/worktree                 — Inspect local changes (admin only)
+   GET  /api/system/update/stashes                  — List AIShell recovery stashes (admin only)
+   POST /api/system/update/stash                    — Stash local changes (admin only)
+   POST /api/system/update/stashes/:stashId/restore — Restore a recovery stash (admin only)
 
    Access control:
    - `update_access` in aishell.config.json: "admin" (default) or "any"
@@ -15,6 +19,10 @@ import type { Request, Response, NextFunction, Express } from "express";
 
 interface UpdateRoutesDeps {
   checkUpdate: () => Promise<unknown>;
+  getWorktreeStatus: () => Promise<unknown>;
+  listRecoveryStashes: () => Promise<unknown>;
+  stashWorkingTree: (input: { actor: string; confirmation: unknown; statusFingerprint: unknown }) => Promise<unknown>;
+  restoreRecoveryStash: (input: { actor: string; confirmation: unknown; stashId: unknown }) => Promise<unknown>;
   updateAndRestart: () => Promise<unknown>;
   authMiddleware: {
     requireAdmin: (req: Request, res: Response, next: NextFunction) => void;
@@ -41,6 +49,10 @@ export function registerAiShellUpdateRoutes(
   app: Express,
   {
     checkUpdate,
+    getWorktreeStatus,
+    listRecoveryStashes,
+    stashWorkingTree,
+    restoreRecoveryStash,
     updateAndRestart,
     authMiddleware,
     mode,
@@ -61,6 +73,67 @@ export function registerAiShellUpdateRoutes(
   }
 
   const gate = resolveGate();
+  // Recovery operations reveal and modify the server checkout. They must never
+  // inherit the optional update_access="any" relaxation.
+  const admin = authMiddleware.requireAdmin;
+
+  app.get(
+    "/api/system/update/worktree",
+    admin,
+    async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        res.json(await getWorktreeStatus());
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.get(
+    "/api/system/update/stashes",
+    admin,
+    async (_req: Request, res: Response, next: NextFunction) => {
+      try {
+        res.json({ stashes: await listRecoveryStashes() });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    "/api/system/update/stash",
+    admin,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const body = (req.body ?? {}) as { confirmation?: unknown; statusFingerprint?: unknown };
+        res.json(await stashWorkingTree({
+          actor: req.user!.username,
+          confirmation: body.confirmation,
+          statusFingerprint: body.statusFingerprint,
+        }));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    "/api/system/update/stashes/:stashId/restore",
+    admin,
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const body = (req.body ?? {}) as { confirmation?: unknown };
+        res.json(await restoreRecoveryStash({
+          actor: req.user!.username,
+          confirmation: body.confirmation,
+          stashId: req.params.stashId,
+        }));
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   app.post(
     "/api/system/update/check",
