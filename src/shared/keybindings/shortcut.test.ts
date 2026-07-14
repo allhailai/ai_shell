@@ -15,6 +15,7 @@ describe("keybinding shortcut normalization", () => {
   it("rejects bare printable and browser-reserved shortcuts", () => {
     expect(normalizeStroke("d").error).toMatch(/modifier/i);
     expect(normalizeStroke("Mod-r").reserved).toBe(true);
+    expect(normalizeStroke("Mod-f").shortcut).toEqual({ strokes: ["Mod-f"] });
   });
 
   it("captures platform-aware primary modifiers and formats displays", () => {

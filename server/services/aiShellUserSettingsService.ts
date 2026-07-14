@@ -26,13 +26,14 @@ const COMMAND_ID = /^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)?(?:\.[a-z][a-zA-Z0-9]*)+$/
 const KNOWN_COMMAND_IDS = new Set([
   "markdown.addCursorAbove", "markdown.addCursorBelow", "markdown.selectNextOccurrence",
   "markdown.selectAllOccurrences", "markdown.selectAllSearchMatches", "markdown.exitMultipleSelections",
+  "markdown.openSearch", "markdown.findNext", "markdown.findPrevious",
   "markdown.format.bold", "markdown.format.italic", "markdown.format.strikethrough",
   "markdown.format.inlineCode", "markdown.format.highlight", "markdown.format.link",
 ]);
 const STROKE = /^(?:(?:Mod|Ctrl|Alt|Shift)-)*(?:[a-z]|F(?:[1-9]|1[0-2])|Escape|Space|Arrow(?:Up|Down|Left|Right)|Enter|Backspace|Delete|Tab|Home|End|PageUp|PageDown)$/;
 const MODIFIER_ORDER = ["Mod", "Ctrl", "Alt", "Shift"];
 const RESERVED = new Set([
-  "Mod-a", "Mod-c", "Mod-v", "Mod-x", "Mod-z", "Mod-Shift-z", "Mod-f", "Mod-g", "Mod-Shift-g",
+  "Mod-a", "Mod-c", "Mod-v", "Mod-x", "Mod-z", "Mod-Shift-z",
   "Mod-r", "Mod-l", "Mod-t", "Mod-w", "Mod-n", "Mod-q", "Mod-p", "Mod-s", "Mod-o", "Mod-Shift-n",
   "Mod-Shift-t", "Mod-Tab", "Mod-Space", "Mod-Alt-Escape", "Alt-Tab", "Alt-F4", "Ctrl-Alt-Delete",
   "Alt-ArrowLeft", "Alt-ArrowRight", "F5", "Mod-Shift-i", "Mod-Alt-i", "Mod-Alt-j",
@@ -147,6 +148,9 @@ function defaultShortcutByCommand(commandId: string): string[] {
     "markdown.addCursorBelow": ["Mod-Alt-ArrowDown"],
     "markdown.selectNextOccurrence": ["Mod-d"],
     "markdown.selectAllOccurrences": ["Mod-Shift-l"],
+    "markdown.openSearch": ["Mod-f"],
+    "markdown.findNext": ["F3", "Mod-g"],
+    "markdown.findPrevious": ["Shift-F3", "Mod-Shift-g"],
     "markdown.exitMultipleSelections": ["Escape"],
     "markdown.format.bold": ["Mod-b"],
     "markdown.format.italic": ["Mod-i"],

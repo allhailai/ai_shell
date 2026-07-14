@@ -71,6 +71,7 @@ describe("AiShellUserSettingsService", () => {
     expect(exported.bindings["future.editor.command"]).toEqual({ mode: "disabled" });
     expect(() => validateKeybindingProfile({ schemaVersion: 1, bindings: { invalid: { mode: "disabled" } } })).toThrow(UserSettingsError);
     expect(() => validateKeybindingProfile({ schemaVersion: 1, bindings: { "markdown.addCursorAbove": { mode: "custom", shortcuts: [{ strokes: ["Alt-Mod-d"] }] } } })).toThrow(UserSettingsError);
+    expect(validateKeybindingProfile({ schemaVersion: 1, bindings: { "markdown.openSearch": { mode: "custom", shortcuts: [{ strokes: ["Mod-f"] }] } } }).bindings["markdown.openSearch"]).toEqual({ mode: "custom", shortcuts: [{ strokes: ["Mod-f"] }] });
   });
 
   it("previews merge without writing invalid or unavailable entries away", async () => {

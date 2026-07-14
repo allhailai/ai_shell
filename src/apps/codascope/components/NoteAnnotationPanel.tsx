@@ -25,6 +25,7 @@ interface NoteAnnotationPanelProps {
   expectedHash: string | null;
   onPendingAnnotationDismiss?: () => void;
   onNavigateAnnotation?: (direction: "previous" | "next") => void;
+  onNavigateToAnnotation?: (annotationId: string) => void;
   onClose: () => void;
 }
 
@@ -48,12 +49,14 @@ export function NoteAnnotationPanel({
   expectedHash,
   onPendingAnnotationDismiss,
   onNavigateAnnotation,
+  onNavigateToAnnotation,
   onClose,
 }: NoteAnnotationPanelProps) {
   const threadRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [requestError, setRequestError] = useState<string | null>(null);
   const queryString = useMemo(() => new URLSearchParams(queryParams).toString(), [queryParams.projectId, queryParams.epicId]); // eslint-disable-line react-hooks/exhaustive-deps
   const apiBase = useMemo(() => `/api/codascope/notes/${scope}/${visibility}/note/${notePath}/annotations`, [scope, visibility, notePath]);
+  const attachedAnnotationIds = useMemo(() => new Set(inlineAnnotationAnchors.map((anchor) => anchor.annotationId)), [inlineAnnotationAnchors]);
 
   const threads = useMemo((): AnnotationThread[] => {
     const order = new Map(inlineAnnotationAnchors.map((anchor, index) => [anchor.annotationId, index]));
@@ -224,10 +227,12 @@ export function NoteAnnotationPanel({
             thread={thread}
             active={thread.root.id === activeAnnotationId}
             currentSelectionAvailable={Boolean(currentSelection && expectedHash)}
+            canNavigate={attachedAnnotationIds.has(thread.root.id) && Boolean(onNavigateToAnnotation)}
             onArchive={() => archiveThread(thread.root.id)}
             onReattach={() => reattach(thread.root.id)}
             onStatus={(status) => updateStatus(thread.root.id, status)}
             onReply={(body) => submitReply(thread.root.id, body)}
+            onNavigate={() => onNavigateToAnnotation?.(thread.root.id)}
             setRef={(element) => { if (element) threadRefs.current.set(thread.root.id, element); }}
           />
         ))}
@@ -240,30 +245,54 @@ function ThreadCard({
   thread,
   active,
   currentSelectionAvailable,
+  canNavigate,
   onArchive,
   onReattach,
   onStatus,
   onReply,
+  onNavigate,
   setRef,
 }: {
   thread: AnnotationThread;
   active: boolean;
   currentSelectionAvailable: boolean;
+  canNavigate: boolean;
   onArchive: () => void;
   onReattach: () => void;
   onStatus: (status: AnnotationStatus) => void;
   onReply: (body: string) => Promise<boolean>;
+  onNavigate: () => void;
   setRef: (element: HTMLDivElement | null) => void;
 }) {
   const resolved = thread.root.status === "resolved" || thread.root.status === "wontfix";
   const anchor = inlineAnchor(thread.root);
-  const unresolved = !anchor || anchor.attachmentState !== "attached";
-  const stateLabel = !anchor ? "Legacy anchor needs review" : anchor.attachmentState.replace("_", " ");
+  const unresolved = !anchor || anchor.attachmentState !== "attached" || !canNavigate;
+  const stateLabel = !anchor
+    ? "Legacy anchor needs review"
+    : !canNavigate
+      ? "Inline marker needs review"
+      : anchor.attachmentState.replace("_", " ");
 
   return (
     <div className={`codascope-notes-ann-thread${resolved ? " codascope-notes-ann-thread--resolved" : ""}${active ? " codascope-notes-ann-thread--active" : ""}`} ref={setRef}>
       <div className="codascope-notes-ann-thread-header">
-        <span className="codascope-notes-ann-thread-count"><IconAnnotation size={11} /> {thread.replies.length + 1}</span>
+        {canNavigate ? (
+          <button
+            className="codascope-notes-ann-thread-jump"
+            onClick={onNavigate}
+            type="button"
+            title="Jump to annotated text"
+            aria-label="Jump to annotated text"
+          >
+            <IconAnnotation size={11} />
+            <span>{thread.replies.length + 1}</span>
+          </button>
+        ) : (
+          <span className="codascope-notes-ann-thread-jump codascope-notes-ann-thread-jump--static">
+            <IconAnnotation size={11} />
+            <span>{thread.replies.length + 1}</span>
+          </span>
+        )}
         <div className="codascope-notes-ann-thread-actions">
           {resolved ? (
             <button className="codascope-btn codascope-btn-ghost codascope-btn-xs" onClick={() => onStatus("open")} type="button"><IconUndo size={11} /> Reopen</button>
@@ -273,7 +302,6 @@ function ThreadCard({
         </div>
       </div>
 
-      {anchor && <blockquote className="codascope-notes-ann-thread-quote">{anchor.quote}</blockquote>}
       {unresolved && (
         <div className="codascope-notes-ann-recovery">
           <div><IconWarning size={12} /> <strong>{stateLabel}</strong></div>

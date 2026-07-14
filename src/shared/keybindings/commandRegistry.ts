@@ -2,7 +2,14 @@ import { Prec } from "@codemirror/state";
 import type { Command, KeyBinding } from "@codemirror/view";
 import { keymap } from "@codemirror/view";
 import { addCursorAbove, addCursorBelow, simplifySelection } from "@codemirror/commands";
-import { selectMatches, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
+import {
+  findNext,
+  findPrevious,
+  openSearchPanel,
+  selectMatches,
+  selectNextOccurrence,
+  selectSelectionMatches,
+} from "@codemirror/search";
 import {
   insertLink,
   toggleBold,
@@ -74,10 +81,40 @@ export const markdownKeybindingCommands: KeybindingCommand[] = [
     id: "markdown.selectAllSearchMatches",
     label: "Select all search matches",
     description: "Turn current search matches into multiple selections.",
-    category: "Multi-cursor",
+    category: "Search",
     editableOnly: true,
     defaultShortcuts: [],
     run: selectMatches,
+    settingsVisible: true,
+  },
+  {
+    id: "markdown.openSearch",
+    label: "Open search",
+    description: "Open the in-note search panel.",
+    category: "Search",
+    editableOnly: true,
+    defaultShortcuts: [shortcut("Mod-f")],
+    run: openSearchPanel,
+    settingsVisible: true,
+  },
+  {
+    id: "markdown.findNext",
+    label: "Find next",
+    description: "Move to the next in-note search result.",
+    category: "Search",
+    editableOnly: true,
+    defaultShortcuts: [shortcut("F3"), shortcut("Mod-g")],
+    run: findNext,
+    settingsVisible: true,
+  },
+  {
+    id: "markdown.findPrevious",
+    label: "Find previous",
+    description: "Move to the previous in-note search result.",
+    category: "Search",
+    editableOnly: true,
+    defaultShortcuts: [shortcut("Shift-F3"), shortcut("Mod-Shift-g")],
+    run: findPrevious,
     settingsVisible: true,
   },
   {

@@ -40,7 +40,7 @@ const NAMED_KEYS = new Set([
 
 /** Browser and OS combinations that must never be claimed by editor keymaps. */
 const RESERVED_SHORTCUTS = new Set([
-  "Mod-a", "Mod-c", "Mod-v", "Mod-x", "Mod-z", "Mod-Shift-z", "Mod-f", "Mod-g", "Mod-Shift-g",
+  "Mod-a", "Mod-c", "Mod-v", "Mod-x", "Mod-z", "Mod-Shift-z",
   "Mod-r", "Mod-l", "Mod-t", "Mod-w", "Mod-n", "Mod-q", "Mod-p", "Mod-s", "Mod-o", "Mod-Shift-n",
   "Mod-Shift-t", "Mod-Tab", "Mod-Space", "Mod-Alt-Escape", "Alt-Tab", "Alt-F4", "Ctrl-Alt-Delete",
   "Alt-ArrowLeft", "Alt-ArrowRight", "F5", "Mod-Shift-i", "Mod-Alt-i", "Mod-Alt-j",

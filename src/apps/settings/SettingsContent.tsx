@@ -79,6 +79,7 @@ function KeybindingsSection() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>("merge");
+  const [importDocument, setImportDocument] = useState<PortableKeybindingProfile | null>(null);
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -184,6 +185,7 @@ function KeybindingsSection() {
   const previewFile = useCallback(async (file: File) => {
     setImportError(null);
     setImportPreview(null);
+    setImportDocument(null);
     try {
       if (file.size > 100_000) throw new Error("The keybinding file is too large.");
       const document = JSON.parse(await file.text()) as PortableKeybindingProfile;
@@ -195,54 +197,45 @@ function KeybindingsSection() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error ?? "The keybinding file is invalid.");
       setImportPreview(payload as ImportPreview);
+      setImportDocument(document);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Could not read that keybinding file.");
     }
   }, [importMode]);
 
   const executeImport = useCallback(async () => {
-    if (!importPreview) return;
+    if (!importPreview || !importDocument) return;
     if (importPreview.conflicting.length > 0) {
       setImportError("Resolve the listed conflicts before importing.");
       return;
     }
     try {
-      const document = JSON.parse((inputRef.current?.dataset.document ?? "{}")) as PortableKeybindingProfile;
-      // The latest parsed document is placed in the data attribute only after a
-      // server preview succeeds, keeping invalid files from ever being saved.
       const response = await fetch("/api/user-settings/keybindings/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document, mode: importMode, confirmReplace: importMode === "replace", expectedRevision: revision }),
+        body: JSON.stringify({ document: importDocument, mode: importMode, confirmReplace: importMode === "replace", expectedRevision: revision }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error ?? "Could not import keybindings.");
       setImportPreview(null);
+      setImportDocument(null);
       await reload();
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Could not import keybindings.");
     }
-  }, [importMode, importPreview, reload, revision]);
-
-  // Keep the portable document out of component routing state while still
-  // avoiding a second file read when the user confirms the preview.
-  const persistPreviewDocument = useCallback(async (file: File) => {
-    const raw = await file.text();
-    if (inputRef.current) inputRef.current.dataset.document = raw;
-    await previewFile(new File([raw], file.name, { type: file.type }));
-  }, [previewFile]);
+  }, [importDocument, importMode, importPreview, reload, revision]);
 
   const onStoredFileChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) void persistPreviewDocument(file);
+    if (file) void previewFile(file);
     event.target.value = "";
-  }, [persistPreviewDocument]);
+  }, [previewFile]);
 
   const onStoredDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const file = event.dataTransfer.files?.[0];
-    if (file) void persistPreviewDocument(file);
-  }, [persistPreviewDocument]);
+    if (file) void previewFile(file);
+  }, [previewFile]);
 
   return (
     <div className="settings-page">
@@ -302,8 +295,8 @@ function KeybindingsSection() {
           <strong>Import profile</strong>
           <span>Drop a `.aishell-keybindings.json` file here, or choose Import.</span>
           <div className="settings-import-mode" role="group" aria-label="Import mode">
-            <label><input type="radio" checked={importMode === "merge"} onChange={() => setImportMode("merge")} /> Merge</label>
-            <label><input type="radio" checked={importMode === "replace"} onChange={() => setImportMode("replace")} /> Replace All</label>
+            <label><input type="radio" checked={importMode === "merge"} onChange={() => { setImportMode("merge"); setImportPreview(null); setImportDocument(null); setImportError(null); }} /> Merge</label>
+            <label><input type="radio" checked={importMode === "replace"} onChange={() => { setImportMode("replace"); setImportPreview(null); setImportDocument(null); setImportError(null); }} /> Replace All</label>
           </div>
         </section>
 
@@ -378,7 +371,9 @@ function KeybindingRow({
           {capturing ? "Press shortcut…" : override?.mode === "disabled" ? "Disabled" : shortcut ? formatShortcut(shortcut, platform) : "Unassigned"}
         </button>
         {captureError || validation?.error ? <span className="settings-field-error">{captureError ?? validation?.error}</span> : null}
-        <span className="settings-default">Default: {command.defaultShortcuts[0] ? formatShortcut(command.defaultShortcuts[0], platform) : "Unassigned"}</span>
+        <span className="settings-default">Default: {command.defaultShortcuts.length > 0
+          ? command.defaultShortcuts.map((candidate) => formatShortcut(candidate, platform)).join(" or ")
+          : "Unassigned"}</span>
       </div>
       <div className="settings-row-actions">
         <button className="settings-text-btn" onClick={onDisable} disabled={override?.mode === "disabled"} type="button">Disable</button>

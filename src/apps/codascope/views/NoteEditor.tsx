@@ -11,7 +11,9 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { MarkdownEditor, type InlineAnnotationAnchorItem } from "../../../shared/markdown";
+import { getAnnotationAnchorById, getRelativeAnnotationAnchor } from "../annotationNavigation";
 import { useAuth } from "../../../shell/authContext";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { IconArrowLeft, IconChevronDown, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDownload, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
@@ -59,6 +61,8 @@ interface NoteEditorProps {
 
 export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }: NoteEditorProps) {
   const { user } = useAuth();
+  const { getParam, setParam } = useAppSubRoute("codascope");
+  const annotationsOpenFromUrl = getParam("annotations") === "open";
   // ── State ──────────────────────────────────────────────────────────
   const [content, setContent] = useState("");
   const [contentHash, setContentHash] = useState<string | null>(null);
@@ -90,7 +94,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [annotations, setAnnotations] = useState<NoteAnnotation[]>([]);
   const [inlineAnnotationAnchors, setInlineAnnotationAnchors] = useState<InlineAnnotationAnchorItem[]>([]);
   const [inlineAnnotationMarkerRanges, setInlineAnnotationMarkerRanges] = useState<Array<{ from: number; to: number }>>([]);
-  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(annotationsOpenFromUrl);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<NoteSelectionInfo | null>(null);
   const [multipleSelections, setMultipleSelections] = useState(false);
@@ -118,6 +122,15 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // Activity feed state
   const [activityEntries, setActivityEntries] = useState<NoteActivityEntry[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+
+  useEffect(() => {
+    setShowAnnotations(annotationsOpenFromUrl);
+  }, [annotationsOpenFromUrl]);
+
+  const setAnnotationsPanelOpen = useCallback((open: boolean) => {
+    setShowAnnotations(open);
+    setParam("annotations", open ? "open" : null);
+  }, [setParam]);
 
   // Read indicator state (shared notes only)
   const [readers, setReaders] = useState<NoteReaderInfo[]>([]);
@@ -469,25 +482,33 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // ── Annotation gutter click ────────────────────────────────────────
   const handleAnnotationClick = useCallback((annotationId: string) => {
     setActiveAnnotationId(annotationId);
-    setShowAnnotations(true);
-  }, []);
+    setAnnotationsPanelOpen(true);
+  }, [setAnnotationsPanelOpen]);
 
-  const navigateAnnotation = useCallback((direction: "next" | "previous") => {
+  const focusAnnotationAnchor = useCallback((target: InlineAnnotationAnchorItem) => {
     const view = editorViewRef.current;
-    if (!view || inlineAnnotationAnchors.length === 0) return;
-    const current = view.state.selection.main.head;
-    const ordered = inlineAnnotationAnchors;
-    const target = direction === "next"
-      ? ordered.find((anchor) => anchor.rangeFrom > current) ?? ordered[0]
-      : [...ordered].reverse().find((anchor) => anchor.rangeFrom < current) ?? ordered[ordered.length - 1];
+    if (!view) return;
     view.dispatch({
       selection: { anchor: target.rangeFrom },
       effects: EditorView.scrollIntoView(target.rangeFrom, { y: "center" }),
     });
     view.focus();
     setActiveAnnotationId(target.annotationId);
-    setShowAnnotations(true);
-  }, [inlineAnnotationAnchors]);
+    setAnnotationsPanelOpen(true);
+  }, [setAnnotationsPanelOpen]);
+
+  const navigateToAnnotation = useCallback((annotationId: string) => {
+    const target = getAnnotationAnchorById(inlineAnnotationAnchors, annotationId);
+    if (!target) return;
+    focusAnnotationAnchor(target);
+  }, [focusAnnotationAnchor, inlineAnnotationAnchors]);
+
+  const navigateAnnotation = useCallback((direction: "next" | "previous") => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const target = getRelativeAnnotationAnchor(inlineAnnotationAnchors, view.state.selection.main.head, direction);
+    if (target) focusAnnotationAnchor(target);
+  }, [focusAnnotationAnchor, inlineAnnotationAnchors]);
 
   // ── Text selection and annotations ─────────────────────────────────
   const handleSelectionChange = useCallback((view: EditorView) => {
@@ -531,8 +552,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     // The source range itself, not a block hash or a quoted-text search, is
     // sent to the server for atomic marker insertion.
     setPendingAnnotation(selection);
-    setShowAnnotations(true);
-  }, []);
+    setAnnotationsPanelOpen(true);
+  }, [setAnnotationsPanelOpen]);
 
   const handleAnnotationMutation = useCallback((result: { content?: string; contentHash?: string }) => {
     if (typeof result.content === "string") {
@@ -802,9 +823,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           {/* Annotations toggle */}
           <button
             className={`codascope-btn codascope-btn-ghost codascope-btn-sm codascope-notes-editor-ann-toggle${showAnnotations ? " codascope-notes-editor-ann-toggle--active" : ""}`}
-            onClick={() => setShowAnnotations((s) => !s)}
+            onClick={() => setAnnotationsPanelOpen(!showAnnotations)}
             type="button"
-            title="Show annotations"
+            title={showAnnotations ? "Hide annotations" : "Show annotations"}
             aria-pressed={showAnnotations}
           >
             <IconComment size={14} />
@@ -1058,7 +1079,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             expectedHash={contentHash}
             onPendingAnnotationDismiss={() => setPendingAnnotation(null)}
             onNavigateAnnotation={navigateAnnotation}
-            onClose={() => setShowAnnotations(false)}
+            onNavigateToAnnotation={navigateToAnnotation}
+            onClose={() => setAnnotationsPanelOpen(false)}
           />
         )}
 
