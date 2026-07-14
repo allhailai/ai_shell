@@ -10,7 +10,7 @@
    Window 2: Added highlight color picker and text color picker dropdowns.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { useCallback, useEffect, useState, useRef, useMemo, type RefObject } from "react";
 import { syntaxTree } from "@codemirror/language";
 import { EditorSelection } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
@@ -83,6 +83,49 @@ const defaultActive: ActiveStates = {
   headingLevel: 0,
   checklist: false,
 };
+
+interface FixedMenuPosition {
+  top: number;
+  left: number;
+}
+
+function getFixedMenuPosition(
+  trigger: HTMLButtonElement | null,
+  menuWidth: number,
+  menuHeight: number,
+  align: "start" | "end" = "start",
+): FixedMenuPosition {
+  if (!trigger) return { top: 0, left: 0 };
+  const rect = trigger.getBoundingClientRect();
+  const gutter = 8;
+  const top = rect.bottom + gutter + menuHeight <= window.innerHeight
+    ? rect.bottom + gutter
+    : Math.max(gutter, rect.top - menuHeight - gutter);
+  const desiredLeft = align === "end" ? rect.right - menuWidth : rect.left;
+  const left = Math.max(gutter, Math.min(desiredLeft, window.innerWidth - menuWidth - gutter));
+  return { top, left };
+}
+
+function useFixedMenuPosition(
+  open: boolean,
+  triggerRef: RefObject<HTMLButtonElement | null>,
+  setPosition: (position: FixedMenuPosition) => void,
+  menuWidth: number,
+  menuHeight: number,
+  align: "start" | "end" = "start",
+): void {
+  useEffect(() => {
+    if (!open) return;
+    const positionMenu = () => setPosition(getFixedMenuPosition(triggerRef.current, menuWidth, menuHeight, align));
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [open, triggerRef, setPosition, menuWidth, menuHeight, align]);
+}
 
 function detectActiveStates(view: EditorView): ActiveStates {
   const { state } = view;
@@ -473,11 +516,17 @@ export function NoteFormattingToolbar({
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
   const [textColorPickerOpen, setTextColorPickerOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
-  const [actionsMenuPosition, setActionsMenuPosition] = useState({ top: 0, left: 0 });
+  const [headingMenuPosition, setHeadingMenuPosition] = useState<FixedMenuPosition>({ top: 0, left: 0 });
+  const [highlightPickerPosition, setHighlightPickerPosition] = useState<FixedMenuPosition>({ top: 0, left: 0 });
+  const [textColorPickerPosition, setTextColorPickerPosition] = useState<FixedMenuPosition>({ top: 0, left: 0 });
+  const [actionsMenuPosition, setActionsMenuPosition] = useState<FixedMenuPosition>({ top: 0, left: 0 });
   const headingDropdownRef = useRef<HTMLDivElement>(null);
   const highlightDropdownRef = useRef<HTMLDivElement>(null);
   const textColorDropdownRef = useRef<HTMLDivElement>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const headingTriggerRef = useRef<HTMLButtonElement>(null);
+  const highlightTriggerRef = useRef<HTMLButtonElement>(null);
+  const textColorTriggerRef = useRef<HTMLButtonElement>(null);
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Custom colors from settings
@@ -600,22 +649,16 @@ export function NoteFormattingToolbar({
     actionsMenuRef.current?.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")?.focus();
   }, [actionsOpen]);
 
+  useFixedMenuPosition(headingOpen, headingTriggerRef, setHeadingMenuPosition, 140, 240);
+  useFixedMenuPosition(highlightPickerOpen, highlightTriggerRef, setHighlightPickerPosition, 180, 150);
+  useFixedMenuPosition(textColorPickerOpen, textColorTriggerRef, setTextColorPickerPosition, 180, 250);
+
   // The toolbar scrolls horizontally, so the Actions menu must be fixed to
   // the trigger rather than clipped inside the toolbar's overflow container.
   useEffect(() => {
     if (!actionsOpen) return;
     const positionMenu = () => {
-      const trigger = actionsTriggerRef.current;
-      if (!trigger) return;
-      const rect = trigger.getBoundingClientRect();
-      const menuWidth = 180;
-      const menuHeight = 190;
-      const gutter = 8;
-      const top = rect.bottom + gutter + menuHeight <= window.innerHeight
-        ? rect.bottom + gutter
-        : Math.max(gutter, rect.top - menuHeight - gutter);
-      const left = Math.max(gutter, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter));
-      setActionsMenuPosition({ top, left });
+      setActionsMenuPosition(getFixedMenuPosition(actionsTriggerRef.current, 180, 190, "end"));
     };
     positionMenu();
     window.addEventListener("resize", positionMenu);
@@ -630,6 +673,7 @@ export function NoteFormattingToolbar({
 
   const withFocusReturn = useCallback((action: (view: EditorView) => boolean) => {
     if (!editorView || disabled) return;
+    setActionsOpen(false);
     action(editorView);
     editorView.focus();
   }, [editorView, disabled]);
@@ -640,6 +684,8 @@ export function NoteFormattingToolbar({
   const handleInlineCode = useCallback(() => withFocusReturn(toggleInlineCode), [withFocusReturn]);
   const handleHighlight = useCallback(() => {
     if (disabled || multipleSelections) return;
+    setActionsOpen(false);
+    setHeadingOpen(false);
     setHighlightPickerOpen((open) => !open);
     setTextColorPickerOpen(false);
   }, [disabled, multipleSelections]);
@@ -685,8 +731,14 @@ export function NoteFormattingToolbar({
       {/* Heading dropdown */}
       <div className="codascope-notes-formatting-group" ref={headingDropdownRef}>
         <button
+          ref={headingTriggerRef}
           className={`codascope-notes-formatting-btn codascope-notes-formatting-btn-heading${active.headingLevel > 0 ? " codascope-notes-formatting-btn-active" : ""}`}
-          onClick={() => setHeadingOpen((o) => !o)}
+          onClick={() => {
+            setActionsOpen(false);
+            setHighlightPickerOpen(false);
+            setTextColorPickerOpen(false);
+            setHeadingOpen((o) => !o);
+          }}
           disabled={disabled}
           type="button"
           title="Heading level"
@@ -697,7 +749,7 @@ export function NoteFormattingToolbar({
         </button>
 
         {headingOpen && (
-          <div className="codascope-notes-formatting-dropdown">
+          <div className="codascope-notes-formatting-dropdown" style={headingMenuPosition}>
             {HEADING_OPTIONS.map(({ level, label }) => (
               <button
                 key={level}
@@ -757,6 +809,7 @@ export function NoteFormattingToolbar({
         </button>
 
         <button
+          ref={highlightTriggerRef}
           className={`codascope-notes-formatting-btn${active.highlight || highlightPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
           onClick={handleHighlight}
           disabled={disabled || multipleSelections}
@@ -767,7 +820,7 @@ export function NoteFormattingToolbar({
         </button>
 
         {highlightPickerOpen && (
-          <div className="codascope-notes-formatting-color-picker">
+          <div className="codascope-notes-formatting-color-picker" style={highlightPickerPosition}>
             <div className="codascope-notes-formatting-color-picker-label">Highlight Color</div>
             <div className="codascope-notes-formatting-color-grid">
               {allHighlightColors.map((color) => (
@@ -790,8 +843,11 @@ export function NoteFormattingToolbar({
       {/* Color pickers group */}
       <div className="codascope-notes-formatting-group" ref={textColorDropdownRef}>
         <button
+          ref={textColorTriggerRef}
           className={`codascope-notes-formatting-btn${textColorPickerOpen ? " codascope-notes-formatting-btn-active" : ""}`}
           onClick={() => {
+            setActionsOpen(false);
+            setHeadingOpen(false);
             setTextColorPickerOpen((o) => !o);
             setHighlightPickerOpen(false);
           }}
@@ -804,7 +860,7 @@ export function NoteFormattingToolbar({
         </button>
 
         {textColorPickerOpen && (
-          <div className="codascope-notes-formatting-color-picker">
+          <div className="codascope-notes-formatting-color-picker" style={textColorPickerPosition}>
             <div className="codascope-notes-formatting-color-picker-label">Text Color</div>
             <button
               className="codascope-notes-formatting-color-default"

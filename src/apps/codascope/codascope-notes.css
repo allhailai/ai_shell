@@ -1622,9 +1622,7 @@
 
 /* Heading dropdown */
 .codascope-notes-formatting-dropdown {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
+  position: fixed;
   z-index: var(--z-overlay);
   min-width: 140px;
   padding: var(--space-1);
@@ -1664,9 +1662,7 @@
 /* ── Color Picker Dropdown ───────────────────────────────────────────── */
 
 .codascope-notes-formatting-color-picker {
-  position: absolute;
-  top: calc(100% + var(--space-1));
-  left: 0;
+  position: fixed;
   z-index: var(--z-overlay);
   min-width: 180px;
   padding: var(--space-2);
