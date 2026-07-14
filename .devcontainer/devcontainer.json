@@ -1,0 +1,35 @@
+{
+  "name": "AIShell",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/ai_shell",
+  "forwardPorts": [5174, 5175],
+  "portsAttributes": {
+    "5174": {
+      "label": "AIShell UI",
+      "onAutoForward": "openBrowser"
+    },
+    "5175": {
+      "label": "AIShell API"
+    }
+  },
+  "postCreateCommand": "npm ci",
+  "remoteEnv": {
+    "AISHELL_MODE": "standalone",
+    "AISHELL_DATA_DIR": "/home/node/.aishell"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  }
+}
