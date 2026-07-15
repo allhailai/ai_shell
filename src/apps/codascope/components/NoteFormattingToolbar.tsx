@@ -468,24 +468,17 @@ function useSettingsHighlightColors(): ColorSwatch[] {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/secrets/app/codascope/highlight_colors");
+        const res = await fetch("/api/codascope/settings/highlight-colors");
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (data.value && !cancelled) {
-          try {
-            const parsed = JSON.parse(data.value);
-            if (Array.isArray(parsed)) {
-              setCustomColors(
-                parsed.map((c: { name: string; label: string; cssColor: string }) => ({
-                  name: c.name,
-                  label: c.label,
-                  cssColor: c.cssColor,
-                })),
-              );
-            }
-          } catch {
-            // Invalid JSON — ignore
-          }
+        if (Array.isArray(data.colors) && !cancelled) {
+          setCustomColors(
+            data.colors.map((c: { name: string; label: string; cssColor: string }) => ({
+              name: c.name,
+              label: c.label,
+              cssColor: c.cssColor,
+            })),
+          );
         }
       } catch {
         // Network error — ignore

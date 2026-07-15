@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus, IconPin } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import { NoteCreateDialog, type NoteCreateLocation } from "../components/NoteCreateDialog";
@@ -248,6 +248,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [draggedNotePaths, setDraggedNotePaths] = useState<string[]>([]);
   const [dropTargetFolder, setDropTargetFolder] = useState<string | null>(null);
   const [dragMoveError, setDragMoveError] = useState<string | null>(null);
+  const [noteActionError, setNoteActionError] = useState<string | null>(null);
 
   // Export/Import dialog state
   const [showExport, setShowExport] = useState(false);
@@ -353,11 +354,11 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       await fetch(`/api/codascope/notes/starred/${noteId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: noteScope, visibility: noteVisibility, path: notePath, title }),
+        body: JSON.stringify({ scope: noteScope, visibility: noteVisibility, path: notePath, title, ...scopeQueryParams }),
       });
       void fetchStarred();
     } catch { /* best effort */ }
-  }, [fetchStarred]);
+  }, [fetchStarred, scopeQueryParams]);
 
   const handleUnstar = useCallback(async (noteId: string) => {
     try {
@@ -398,7 +399,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
   // ── Filtered notes (local filter for short queries) ─────────────────
   const filteredNotes = useMemo(() => {
-    let result = notes;
+    let result = [...notes];
 
     // Apply starred filter
     if (showStarredOnly) {
@@ -422,16 +423,32 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       result = result.filter(
         (n) => n.isFolder || n.tags.some((t) => t.toLowerCase().includes(tagQuery)),
       );
-      return result;
+      return result.sort((left, right) => {
+        if (left.isFolder || right.isFolder) return 0;
+        if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
+        const leftStarred = Boolean(left.starred) || starredNotes.some((item) => item.noteId === left.noteId);
+        const rightStarred = Boolean(right.starred) || starredNotes.some((item) => item.noteId === right.noteId);
+        if (leftStarred !== rightStarred) return leftStarred ? -1 : 1;
+        return (right.updated || "").localeCompare(left.updated || "");
+      });
     }
 
-    if (!search.trim() || search.trim().length >= 3) return result;
+    const orderByPriority = (entries: NoteEntry[]) => entries.sort((left, right) => {
+      if (left.isFolder || right.isFolder) return 0;
+      if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
+      const leftStarred = Boolean(left.starred) || starredNotes.some((item) => item.noteId === left.noteId);
+      const rightStarred = Boolean(right.starred) || starredNotes.some((item) => item.noteId === right.noteId);
+      if (leftStarred !== rightStarred) return leftStarred ? -1 : 1;
+      return (right.updated || "").localeCompare(left.updated || "");
+    });
+
+    if (!search.trim() || search.trim().length >= 3) return orderByPriority(result);
     const q = search.toLowerCase();
-    return result.filter(
+    return orderByPriority(result.filter(
       (n) =>
         n.title.toLowerCase().includes(q) ||
         n.tags.some((t) => t.toLowerCase().includes(q)),
-    );
+    ));
   }, [notes, search, showStarredOnly, starredNotes, scope, visibility, activeTag]);
 
   // Are we showing search results?
@@ -789,7 +806,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
   // ── Check if a note entry is starred by path ──────────────────────
   const isNoteStarred = useCallback((entry: NoteEntry): boolean => {
-    return starredNotes.some(
+    return Boolean(entry.starred) || starredNotes.some(
       (s) => s.path === entry.path && s.scope === scope && s.visibility === visibility,
     );
   }, [starredNotes, scope, visibility]);
@@ -824,6 +841,30 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       } catch { /* best effort */ }
     }
   }, [getStarredId, handleUnstar, handleStar, scope, visibility, queryString]);
+
+  const handlePinToggle = useCallback(async (entry: NoteEntry, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!entry.noteId) return;
+    const priorPinned = Boolean(entry.pinned);
+    setNoteActionError(null);
+    setNotes((current) => current.map((item) => item.noteId === entry.noteId ? { ...item, pinned: !priorPinned } : item));
+    try {
+      const response = await fetch(`/api/codascope/notes/${scope}/${visibility}/note/${entry.path}/pin?${queryString}`, {
+        method: priorPinned ? "DELETE" : "PUT",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Unable to update shared pin.");
+      setNotes((current) => current.map((item) => item.noteId === entry.noteId ? {
+        ...item,
+        pinned: Boolean(payload.pinned),
+        pinnedAt: payload.note?.pinnedAt,
+        pinnedBy: payload.note?.pinnedBy,
+      } : item));
+    } catch (cause) {
+      setNotes((current) => current.map((item) => item.noteId === entry.noteId ? { ...item, pinned: priorPinned } : item));
+      setNoteActionError(cause instanceof Error ? cause.message : "Unable to update shared pin.");
+    }
+  }, [scope, visibility, queryString]);
 
   // ── Inbox note count (for badge) ──────────────────────────────────
   const inboxCount = useMemo(() => {
@@ -1177,6 +1218,7 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                   <div className="codascope-notes-item-content">
                     <div className="codascope-notes-item-title">
                       {entry.title}
+                      {entry.pinned && <IconPin size={12} className="codascope-notes-note-pin-indicator" aria-label="Pinned for everyone" />}
                       {/* Unread dot (shared notes) */}
                       {visibility === "shared" && entry.noteId && (
                         readStatus[entry.noteId] === null || (readStatus[entry.noteId] && entry.lastEditedAt && readStatus[entry.noteId]! < entry.lastEditedAt)
@@ -1206,6 +1248,15 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                       </span>
                     </div>
                   </div>
+                </button>
+                <button
+                  className={`codascope-notes-star-toggle${entry.pinned ? " codascope-notes-note-pin-active" : ""}`}
+                  onClick={(event) => void handlePinToggle(entry, event)}
+                  title={entry.pinned ? "Unpin for everyone" : "Pin for everyone"}
+                  aria-label={entry.pinned ? "Unpin note for everyone" : "Pin note for everyone"}
+                  type="button"
+                >
+                  <IconPin size={14} />
                 </button>
                 {/* Star toggle */}
                 <button
@@ -1429,6 +1480,12 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
         <div className="codascope-notes-drag-error" role="status">
           <span>{dragMoveError}</span>
           <button onClick={() => setDragMoveError(null)} aria-label="Dismiss" type="button"><IconClose size={12} /></button>
+        </div>
+      )}
+      {noteActionError && (
+        <div className="codascope-notes-drag-error" role="alert">
+          <span>{noteActionError}</span>
+          <button onClick={() => setNoteActionError(null)} aria-label="Dismiss" type="button"><IconClose size={12} /></button>
         </div>
       )}
 

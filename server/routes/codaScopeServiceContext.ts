@@ -42,6 +42,7 @@ import { CodaScopeNoteExportService } from "../services/codaScopeNoteExportServi
 import { CodaScopeNoteImportService } from "../services/codaScopeNoteImportService.js";
 import { CodaScopeNoteTagSuggestionService } from "../services/codaScopeNoteTagSuggestionService.js";
 import { CodaScopeNoteTransferService } from "../services/codaScopeNoteTransferService.js";
+import { CodaScopeNoteDocumentService } from "../services/codaScopeNoteDocumentService.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ export interface CodaScopeServices {
   noteImportSvc: CodaScopeNoteImportService;
   noteTagSuggestionSvc: CodaScopeNoteTagSuggestionService;
   noteTransferSvc: CodaScopeNoteTransferService;
+  noteDocumentSvc: CodaScopeNoteDocumentService;
 }
 
 /** Everything a sub-route file needs to register its endpoints. */
@@ -154,6 +156,7 @@ let noteExportService: CodaScopeNoteExportService | null = null;
 let noteImportService: CodaScopeNoteImportService | null = null;
 let noteTagSuggestionService: CodaScopeNoteTagSuggestionService | null = null;
 let noteTransferService: CodaScopeNoteTransferService | null = null;
+let noteDocumentService: CodaScopeNoteDocumentService | null = null;
 
 // ── Multer ──────────────────────────────────────────────────────────
 
@@ -308,6 +311,9 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
   if (!noteUserPrefsService) noteUserPrefsService = new CodaScopeNoteUserPrefsService(root);
   else noteUserPrefsService.setRoot(root);
 
+  if (!noteDocumentService) noteDocumentService = new CodaScopeNoteDocumentService(noteService, noteUserPrefsService);
+  else noteDocumentService.setServices(noteService, noteUserPrefsService);
+
   if (!noteLinkIndexService) noteLinkIndexService = new CodaScopeNoteLinkIndexService(noteService);
   else noteLinkIndexService.setNoteService(noteService);
 
@@ -373,6 +379,7 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
     noteImportSvc: noteImportService,
     noteTagSuggestionSvc: noteTagSuggestionService,
     noteTransferSvc: noteTransferService,
+    noteDocumentSvc: noteDocumentService,
   };
 }
 

@@ -125,6 +125,7 @@ export function buildAssistantPrompt(
  */
 export async function streamAssistantResponse(options: {
   projectId: string;
+  actorId: string;
   message: string;
   modelId: string;
   systemPrompt: string;
@@ -132,7 +133,7 @@ export async function streamAssistantResponse(options: {
   images?: Array<{ data: string; mimeType: string }>;
   onMessage: (msg: unknown) => void;
 }): Promise<StreamResult> {
-  const { projectId, message, modelId, systemPrompt, agentSvc, images, onMessage } = options;
+  const { projectId, actorId, message, modelId, systemPrompt, agentSvc, images, onMessage } = options;
 
   let fullResponse = "";
   let toolResultText = "";
@@ -140,6 +141,7 @@ export async function streamAssistantResponse(options: {
   return new Promise<StreamResult>((resolve, reject) => {
     agentSvc.send({
       projectId,
+      actorId,
       message,
       modelId,
       systemPrompt,

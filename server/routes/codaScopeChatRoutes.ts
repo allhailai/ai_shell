@@ -28,11 +28,14 @@ function parseMessageContext(value: Record<string, unknown> | undefined): Messag
     ...(typeof value.topicId === "string" || value.topicId === null ? { topicId: value.topicId } : {}),
     ...(typeof value.projectName === "string" ? { projectName: value.projectName } : {}),
     ...(typeof value.projectId === "string" ? { projectId: value.projectId } : {}),
+    ...(typeof value.noteScope === "string" || value.noteScope === null ? { noteScope: value.noteScope } : {}),
+    ...(typeof value.noteVisibility === "string" || value.noteVisibility === null ? { noteVisibility: value.noteVisibility } : {}),
+    ...(typeof value.notePath === "string" || value.notePath === null ? { notePath: value.notePath } : {}),
   };
 }
 
 export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
 
   // ── Conversations — CRUD ─────────────────────────────────────────
 
@@ -93,6 +96,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       const svcs = await ensureServices();
       const { agentSvc, chatSvc, epicSvc, imageSvc } = svcs;
       const id = param(req, "id");
+      const actorId = principal(req).username;
       const convId = param(req, "convId");
       const { message, modelId, context, attachments, references, selectionContext } = req.body as {
         message?: string;
@@ -192,6 +196,9 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
             epicId: (ctxRecord.epicId as string) ?? null,
             epicTitle: (ctxRecord.epicTitle as string) ?? null,
             epicTab: (ctxRecord.epicTab as string) ?? null,
+            noteScope: (ctxRecord.noteScope as string) ?? null,
+            noteVisibility: (ctxRecord.noteVisibility as string) ?? null,
+            notePath: (ctxRecord.notePath as string) ?? null,
           }
         : null;
       const viewStr = formatViewContext(viewCtx);
@@ -277,6 +284,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
           projectId: id,
+          actorId,
           message: message.trim(),
           modelId,
           systemPrompt,
@@ -354,6 +362,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       const svcs = await ensureServices();
       const { agentSvc, chatSvc } = svcs;
       const id = param(req, "id");
+      const actorId = principal(req).username;
       const { message, modelId, context, conversationId } = req.body as {
         message?: string;
         modelId?: string;
@@ -416,6 +425,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
           projectId: id,
+          actorId,
           message: message.trim(),
           modelId,
           systemPrompt,
@@ -463,7 +473,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   app.post("/api/codascope/projects/:id/assistant/cancel", wrap(async (req, res) => {
     const { agentSvc } = await ensureServices();
     const id = param(req, "id");
-    const cancelled = agentSvc.cancelAgent(id);
+    const cancelled = agentSvc.cancelAgent(id, principal(req).username);
     res.json({ cancelled });
   }));
 

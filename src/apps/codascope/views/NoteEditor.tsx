@@ -14,9 +14,10 @@ import { MarkdownEditor, type InlineAnnotationAnchorItem } from "../../../shared
 import { getAnnotationAnchorById, getRelativeAnnotationAnchor } from "../annotationNavigation";
 import { useAuth } from "../../../shell/authContext";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
-import { IconArrowLeft, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy } from "../components/CodaScopeIcons";
+import { IconArrowLeft, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy, IconFile } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
+import { NoteDocumentPanel } from "../components/NoteDocumentPanel";
 import { NoteSelectionToolbar, type NoteSelectionInfo } from "../components/NoteSelectionToolbar";
 import { canCreateRangeAnnotation } from "../components/noteSelectionPolicy";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
@@ -63,6 +64,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const { user } = useAuth();
   const { getParam, setParam } = useAppSubRoute("codascope");
   const annotationsOpenFromUrl = getParam("annotations") === "open";
+  const documentsOpenFromUrl = getParam("documents") === "open";
   // ── State ──────────────────────────────────────────────────────────
   const [content, setContent] = useState("");
   const [contentHash, setContentHash] = useState<string | null>(null);
@@ -95,6 +97,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [inlineAnnotationAnchors, setInlineAnnotationAnchors] = useState<InlineAnnotationAnchorItem[]>([]);
   const [inlineAnnotationMarkerRanges, setInlineAnnotationMarkerRanges] = useState<Array<{ from: number; to: number }>>([]);
   const [showAnnotations, setShowAnnotations] = useState(annotationsOpenFromUrl);
+  const [showDocuments, setShowDocuments] = useState(documentsOpenFromUrl);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<NoteSelectionInfo | null>(null);
   const [multipleSelections, setMultipleSelections] = useState(false);
@@ -125,9 +128,28 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     setShowAnnotations(annotationsOpenFromUrl);
   }, [annotationsOpenFromUrl]);
 
+  useEffect(() => {
+    setShowDocuments(documentsOpenFromUrl);
+  }, [documentsOpenFromUrl]);
+
   const setAnnotationsPanelOpen = useCallback((open: boolean) => {
     setShowAnnotations(open);
     setParam("annotations", open ? "open" : null);
+    if (open) {
+      setShowDocuments(false);
+      setParam("documents", null);
+      setShowActivity(false);
+    }
+  }, [setParam]);
+
+  const setDocumentsPanelOpen = useCallback((open: boolean) => {
+    setShowDocuments(open);
+    setParam("documents", open ? "open" : null);
+    if (open) {
+      setShowAnnotations(false);
+      setParam("annotations", null);
+      setShowActivity(false);
+    }
   }, [setParam]);
 
   // Read indicator state (shared notes only)
@@ -813,6 +835,17 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             )}
           </button>
 
+          <button
+            className={`codascope-btn codascope-btn-ghost codascope-btn-sm codascope-notes-editor-documents-toggle${showDocuments ? " codascope-notes-editor-documents-toggle--active" : ""}`}
+            onClick={() => setDocumentsPanelOpen(!showDocuments)}
+            type="button"
+            title={showDocuments ? "Hide documents" : "Show documents"}
+            aria-pressed={showDocuments}
+          >
+            <IconFile size={14} />
+            <span>Documents</span>
+          </button>
+
         </div>
       </div>
 
@@ -886,7 +919,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         onToggleActivity={() => {
           const opening = !showActivity;
           setShowActivity(opening);
-          if (opening) void fetchActivity();
+          if (opening) {
+            setAnnotationsPanelOpen(false);
+            setDocumentsPanelOpen(false);
+            void fetchActivity();
+          }
         }}
         activityOpen={showActivity}
         onExportNote={() => setShowExport(true)}
@@ -901,7 +938,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       )}
 
       {/* Editor body — split layout when annotation panel is open */}
-      <div className={`codascope-notes-editor-body${(showAnnotations || showActivity) ? " codascope-notes-editor-body--split" : ""}`}>
+      <div className={`codascope-notes-editor-body${(showAnnotations || showActivity || showDocuments) ? " codascope-notes-editor-body--split" : ""}`}>
         {/* Editor pane */}
         <div className="codascope-notes-editor-pane">
           {showVersions && selectedVersion ? (
@@ -1035,8 +1072,17 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           />
         )}
 
+        {showDocuments && !showAnnotations && (
+          <NoteDocumentPanel
+            notePath={apiPath}
+            apiBase={apiBase}
+            queryString={queryString}
+            onClose={() => setDocumentsPanelOpen(false)}
+          />
+        )}
+
         {/* Activity panel (right split) */}
-        {showActivity && !showAnnotations && (
+        {showActivity && !showAnnotations && !showDocuments && (
           <div className="codascope-notes-activity-panel">
             <div className="codascope-notes-activity-panel-header">
               <IconActivity size={14} />

@@ -237,6 +237,7 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
         lines.push(
           `The user is viewing a note at scope "${noteScope}" (${noteVisibility}): "${notePath}"${project}.`,
           `Use read_note(scope="${noteScope}", visibility="${noteVisibility}", path="${notePath}") to see the full content.`,
+          `When associated files matter, call list_note_documents for this note; request one path with get_note_document_path only when needed.`,
           `The user may ask you to help edit, expand, or reorganize this note.`,
         );
       } else {

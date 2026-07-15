@@ -235,6 +235,28 @@ Backend API routes are split into domain-specific sub-modules under `server/rout
 
 New endpoints should be added to the appropriate domain route file, not to the hub.
 
+### Notes Storage and Lifecycle
+
+Each note is a managed bundle: `<note>.md`, `<note>.assets/`, versions, and
+annotation sidecars move, archive, restore, export, import, and delete as one
+unit. Associated documents are opaque bytes inside
+`<note>.assets/documents/`, with a versioned atomic `index.json` manifest and
+an immutable `documents/<document-id>/blob` path. Documents have no preview,
+extraction, execution, or search pipeline in v1.
+
+Documents are capped at 100 MB each and 500 MB total per note, including
+archived documents. Downloads require the authenticated actor to resolve the
+parent note and are attachment-only with `X-Content-Type-Options: nosniff`.
+`CodaScopeNoteTransferService` is the only note/folder move path; document
+files and per-user document-star references follow through that pipeline with
+the rest of the bundle.
+
+Priority has two deliberately separate models: a star is a private per-user
+shortcut in `_user-prefs`, while a pin is shared durable metadata (note
+frontmatter or document manifest) with an audit event. Active lists sort
+shared pins first, then the current user's stars, then their stable normal
+order. Client note saves cannot author the server-owned pin fields.
+
 ### Agent Pipeline
 
 Analysis runs through a multi-step pipeline orchestrated by the `analyze` endpoint:

@@ -88,6 +88,22 @@ Do not duplicate the SSE parsing logic — always import from `codaScopeSseClien
 Each service file has one clear domain:
 - Don't add unrelated functionality to an existing service
 - Services are instantiated per-import (module singletons), not dependency-injected
+
+### Notes Documents and Priority
+
+- A personal star belongs only in that user's `_notes/_user-prefs` data. Never
+  write a star into shared note frontmatter or a document manifest.
+- A shared pin is durable, portable metadata and every pin/unpin must carry an
+  authenticated actor into the note audit log. Client content saves may not
+  author pin fields.
+- Document blobs live only inside the owning note's existing `.assets`
+  bundle. Do not add direct filesystem move/rename endpoints or a competing
+  document transfer flow; `CodaScopeNoteTransferService` remains the external
+  note/folder move pipeline.
+- Every document route and agent tool resolves the parent note using the
+  authenticated principal. Do not accept an effective user ID from a client,
+  prompt, or tool argument. Agent pool/tool closures must be actor-scoped
+  before a private document path is returned.
 - Use `registerProjectDir(id, path)` pattern when the service needs to resolve project directories
 
 ### 6. Agent Prompt Templates

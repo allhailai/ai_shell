@@ -42,6 +42,17 @@ export interface RecentNoteRef {
   viewedAt: string;
 }
 
+/** A private shortcut to one document inside a note. Never stored in index.json. */
+export interface StarredNoteDocumentRef {
+  documentId: string;
+  noteId: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
+  displayName: string;
+  starredAt: string;
+}
+
 export interface NoteRefLocation {
   scope: NoteScope;
   visibility: NoteVisibility;
@@ -55,6 +66,10 @@ interface StarredFile {
 interface RecentsFile {
   items: RecentNoteRef[];
   maxSize: number;
+}
+
+interface DocumentStarsFile {
+  items: StarredNoteDocumentRef[];
 }
 
 /* ── Service ──────────────────────────────────────────────────────── */
@@ -83,6 +98,10 @@ export class CodaScopeNoteUserPrefsService {
 
   private recentsPath(userId: string): string {
     return path.join(this.prefsDir(userId), "recents.json");
+  }
+
+  private documentStarsPath(userId: string): string {
+    return path.join(this.prefsDir(userId), "document-stars.json");
   }
 
   private ensureDir(userId: string): void {
@@ -146,6 +165,72 @@ export class CodaScopeNoteUserPrefsService {
   /** Check if a note is starred. */
   isStarred(userId: string, noteId: string): boolean {
     return this.readStarredFile(userId).items.some((s) => s.noteId === noteId);
+  }
+
+  /* ── Document stars ──────────────────────────────────────────────── */
+
+  private readDocumentStarsFile(userId: string): DocumentStarsFile {
+    const p = this.documentStarsPath(userId);
+    if (!existsSync(p)) return { items: [] };
+    try {
+      const parsed = JSON.parse(readFileSync(p, "utf-8")) as DocumentStarsFile;
+      return Array.isArray(parsed.items) ? { items: parsed.items } : { items: [] };
+    } catch {
+      return { items: [] };
+    }
+  }
+
+  private writeDocumentStarsFile(userId: string, data: DocumentStarsFile): void {
+    this.ensureDir(userId);
+    this.writeJsonAtomically(this.documentStarsPath(userId), data);
+  }
+
+  getDocumentStars(userId: string): StarredNoteDocumentRef[] {
+    return this.readDocumentStarsFile(userId).items;
+  }
+
+  isDocumentStarred(userId: string, documentId: string): boolean {
+    return this.readDocumentStarsFile(userId).items.some((item) => item.documentId === documentId);
+  }
+
+  starDocument(userId: string, ref: Omit<StarredNoteDocumentRef, "starredAt">): void {
+    const file = this.readDocumentStarsFile(userId);
+    file.items = file.items.filter((item) => item.documentId !== ref.documentId);
+    file.items.unshift({ ...ref, starredAt: new Date().toISOString() });
+    this.writeDocumentStarsFile(userId, file);
+  }
+
+  unstarDocument(userId: string, documentId: string): boolean {
+    const file = this.readDocumentStarsFile(userId);
+    const before = file.items.length;
+    file.items = file.items.filter((item) => item.documentId !== documentId);
+    if (before === file.items.length) return false;
+    this.writeDocumentStarsFile(userId, file);
+    return true;
+  }
+
+  /** Keep the snapshot useful after a shared display-name-only rename. */
+  updateDocumentStarDisplayName(documentId: string, displayName: string): void {
+    const usersRoot = path.join(this.root, "_notes", "_user-prefs");
+    if (!existsSync(usersRoot)) return;
+    let userIds: string[] = [];
+    try {
+      userIds = readdirSync(usersRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      return;
+    }
+    for (const userId of userIds) {
+      const file = this.readDocumentStarsFile(userId);
+      let changed = false;
+      const items = file.items.map((item) => {
+        if (item.documentId !== documentId || item.displayName === displayName) return item;
+        changed = true;
+        return { ...item, displayName };
+      });
+      if (changed) this.writeDocumentStarsFile(userId, { items });
+    }
   }
 
   /* ── Recents ──────────────────────────────────────────────────────── */
@@ -233,6 +318,14 @@ export class CodaScopeNoteUserPrefsService {
         .map((item) => item.noteId === noteId ? { ...item, ...destination } : item);
       if (nextRecents.length !== recents.items.length || nextRecents.some((item, index) => item !== recents.items[index])) {
         this.writeRecentsFile(userId, { ...recents, items: nextRecents });
+      }
+
+      const documentStars = this.readDocumentStarsFile(userId);
+      const nextDocumentStars = documentStars.items
+        .filter((item) => !(removeForPrivateDestination && item.noteId === noteId))
+        .map((item) => item.noteId === noteId ? { ...item, ...destination } : item);
+      if (nextDocumentStars.length !== documentStars.items.length || nextDocumentStars.some((item, index) => item !== documentStars.items[index])) {
+        this.writeDocumentStarsFile(userId, { items: nextDocumentStars });
       }
     }
   }

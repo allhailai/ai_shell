@@ -91,11 +91,12 @@ export function getToolsForPurpose(
   projectsRoot: string,
   purpose: AgentPurpose | string,
   collectorHolder?: ToolResultCollectorHolder,
+  actorId?: string,
 ): Record<string, SDKCustomTool> {
   const services = createToolServices(projectsRoot);
 
   const readOnly = buildReadOnlyTools(projectId, services);
-  const noteRead = buildNoteReadTools(projectId, services);
+  const noteRead = buildNoteReadTools(projectId, services, actorId);
 
   if (purpose === "wiki-build") {
     const write = buildWriteTools(projectId, services);
@@ -117,6 +118,6 @@ export function getToolsForPurpose(
   const epicTools = buildEpicTools(projectId, services, collectorHolder);
   const write = buildWriteTools(projectId, services);
   const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-  const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder);
+  const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);
   return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
 }

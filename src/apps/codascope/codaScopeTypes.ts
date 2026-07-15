@@ -654,6 +654,10 @@ export interface NoteFrontmatter {
   updated: string;
   owner: string;        // User ID who created the note
   status?: "draft" | "ready";  // Shared notes only; private notes ignore this
+  /** Shared, server-owned priority metadata. Never written from client saves. */
+  pinned?: boolean;
+  pinnedAt?: string;
+  pinnedBy?: string;
 }
 
 export interface NoteEntry {
@@ -669,6 +673,11 @@ export interface NoteEntry {
   lastEditor?: string;         // Username of last editor
   lastEditedAt?: string;       // ISO timestamp of last edit
   status?: "draft" | "ready";  // Shared notes only
+  pinned?: boolean;
+  pinnedAt?: string;
+  pinnedBy?: string;
+  /** Current user's private preference, supplied by the authenticated list route. */
+  starred?: boolean;
 }
 
 export interface NoteFolderEntry {
@@ -789,6 +798,47 @@ export interface StarredNoteRef {
   path: string;
   title: string;
   starredAt: string;
+}
+
+/** One opaque file owned by a note. The stored path is immutable and bundle-relative. */
+export interface NoteDocument {
+  id: string;
+  storedPath: string;
+  originalFilename: string;
+  displayName: string;
+  declaredMimeType: string | null;
+  detectedMimeType: string | null;
+  sizeBytes: number;
+  sha256: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  comment: string;
+  commentUpdatedAt?: string;
+  commentUpdatedBy?: string;
+  pinnedAt?: string;
+  pinnedBy?: string;
+  archivedAt?: string;
+  archivedBy?: string;
+  /** Per-response, current-user preference; never persisted in index.json. */
+  starred?: boolean;
+}
+
+/** Current-user reference stored outside the shared note bundle. */
+export interface StarredNoteDocumentRef {
+  documentId: string;
+  noteId: string;
+  scope: NoteScope;
+  visibility: NoteVisibility;
+  path: string;
+  displayName: string;
+  starredAt: string;
+}
+
+export interface NoteDocumentListResponse {
+  active: NoteDocument[];
+  archived: NoteDocument[];
+  totalBytes: number;
+  maxBytes: number;
 }
 
 /** A recent note reference (stored per-user). */

@@ -670,12 +670,14 @@
 
 /* ── Annotation toggle in header ─────────────────────────────────────── */
 
-.codascope-notes-editor-ann-toggle {
+.codascope-notes-editor-ann-toggle,
+.codascope-notes-editor-documents-toggle {
   position: relative;
   gap: var(--space-1);
 }
 
-.codascope-notes-editor-ann-toggle--active {
+.codascope-notes-editor-ann-toggle--active,
+.codascope-notes-editor-documents-toggle--active {
   color: var(--color-accent);
   background: hsla(220, 90%, 56%, 0.08);
 }
@@ -2131,6 +2133,16 @@
   color: var(--color-warning);
 }
 
+.codascope-notes-note-pin-active,
+.codascope-notes-note-pin-indicator {
+  color: var(--accent-color, #60a5fa);
+}
+
+.codascope-notes-note-pin-indicator {
+  margin-left: 5px;
+  vertical-align: -1px;
+}
+
 .codascope-notes-item:hover .codascope-notes-star-toggle:has(.codascope-notes-star-active),
 .codascope-notes-star-toggle:has(.codascope-notes-star-active) {
   opacity: 1;
@@ -3024,6 +3036,262 @@
 }
 
 /* ── Collaboration v2: Activity Panel ────────────────────────────────── */
+
+/* ── Note documents ─────────────────────────────────────────────────── */
+
+.codascope-notes-document-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(380px, 42%);
+  min-width: 300px;
+  min-height: 0;
+  border-left: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
+  background: var(--bg-secondary, #111827);
+  overflow: hidden;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.codascope-notes-document-panel--drop-active {
+  background: color-mix(in srgb, var(--color-accent, #60a5fa) 12%, var(--bg-secondary, #111827));
+  box-shadow: inset 0 0 0 2px var(--color-accent, #60a5fa);
+}
+
+.codascope-notes-document-panel-header,
+.codascope-notes-document-panel-controls,
+.codascope-notes-document-card,
+.codascope-notes-document-meta,
+.codascope-notes-document-name-row,
+.codascope-notes-document-edit-actions {
+  display: flex;
+  align-items: center;
+}
+
+.codascope-notes-document-panel-header {
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.codascope-notes-document-panel-header > div,
+.codascope-notes-document-name-row,
+.codascope-notes-document-meta,
+.codascope-notes-document-edit-actions {
+  gap: 6px;
+}
+
+.codascope-notes-document-count,
+.codascope-notes-document-quota,
+.codascope-notes-document-original,
+.codascope-notes-document-meta,
+.codascope-notes-document-action-label {
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+}
+
+.codascope-notes-document-panel-controls {
+  gap: 8px;
+  padding: 9px 12px 4px;
+  flex-wrap: wrap;
+}
+
+.codascope-notes-document-file-input {
+  display: none;
+}
+
+.codascope-notes-document-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.codascope-notes-document-panel-footer {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, rgba(148, 163, 184, 0.2));
+}
+
+.codascope-notes-document-quota {
+  padding: 0;
+}
+
+.codascope-notes-document-drop-hint {
+  padding: 0 0 5px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+}
+
+.codascope-notes-document-panel--drop-active .codascope-notes-document-drop-hint {
+  color: var(--color-accent, #60a5fa);
+  font-weight: 600;
+}
+
+.codascope-notes-document-list {
+  padding: 0 8px 12px;
+}
+
+.codascope-notes-document-card {
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border-color, rgba(148, 163, 184, 0.16));
+}
+
+.codascope-notes-document-icon {
+  color: var(--accent-color, #60a5fa);
+  padding-top: 2px;
+}
+
+.codascope-notes-document-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.codascope-notes-document-name-row {
+  min-width: 0;
+}
+
+.codascope-notes-document-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.codascope-notes-document-action-label {
+  white-space: nowrap;
+}
+
+.codascope-notes-document-original,
+.codascope-notes-document-meta,
+.codascope-notes-document-comment {
+  margin-top: 3px;
+}
+
+.codascope-notes-document-meta {
+  flex-wrap: wrap;
+}
+
+.codascope-notes-document-comment-toggle,
+.codascope-notes-document-action {
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  font: inherit;
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.codascope-notes-document-comment-toggle {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.codascope-notes-document-comment {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.codascope-notes-document-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.codascope-notes-document-action:hover,
+.codascope-notes-document-action-active {
+  color: var(--accent-color, #60a5fa);
+}
+
+.codascope-notes-document-pin-icon-pinned {
+  display: block;
+  transform: rotate(-45deg);
+  transform-origin: center;
+}
+
+.codascope-notes-document-edit {
+  display: grid;
+  gap: 6px;
+}
+
+.codascope-notes-document-edit input,
+.codascope-notes-document-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.35));
+  background: var(--bg-primary, #0f172a);
+  color: inherit;
+  border-radius: 4px;
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.codascope-notes-document-edit textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+
+.codascope-notes-document-archived {
+  margin-top: 14px;
+}
+
+.codascope-notes-document-archived-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 4px 6px;
+  color: var(--text-muted, #94a3b8);
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.codascope-notes-document-archived-toggle:hover,
+.codascope-notes-document-archived-toggle:focus-visible {
+  color: var(--color-text-primary, #e2e8f0);
+}
+
+.codascope-notes-document-archived-toggle:focus-visible {
+  outline: 2px solid var(--color-accent, #60a5fa);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.codascope-notes-document-empty,
+.codascope-notes-document-error {
+  margin: 12px 4px;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.codascope-notes-document-error {
+  color: var(--color-danger, #f87171);
+  padding: 7px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-danger, #f87171) 12%, transparent);
+}
+
+@media (max-width: 850px) {
+  .codascope-notes-document-panel {
+    width: 100%;
+    min-width: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border-color, rgba(148, 163, 184, 0.25));
+  }
+}
 
 .codascope-notes-activity-panel {
   width: 300px;

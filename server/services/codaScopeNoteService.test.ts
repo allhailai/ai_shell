@@ -232,6 +232,20 @@ describe("CodaScopeNoteService", () => {
       expect(updated!.frontmatter.owner).toBe("alan");
     });
 
+    it("keeps shared pin metadata server-owned and indexed", async () => {
+      await svc.createNote("codascope", "shared", { userId: "alan" }, "pinned.md", "# Pinned");
+      const pinned = await svc.setNotePin("codascope", "shared", { userId: "alan" }, "pinned.md", true);
+      expect(pinned).toMatchObject({ pinned: true, pinnedBy: "alan", pinnedAt: expect.any(String) });
+
+      const current = await svc.readNote("codascope", "shared", { userId: "alan" }, "pinned.md");
+      const forged = current!.content.replace("pinned: true", "pinned: false").replace(/^pinnedBy:.*$/m, "pinnedBy: mallory");
+      await svc.updateNote("codascope", "shared", { userId: "alan" }, "pinned.md", forged, current!.contentHash);
+      const afterSave = await svc.readNote("codascope", "shared", { userId: "alan" }, "pinned.md");
+      expect(afterSave!.frontmatter).toMatchObject({ pinned: true, pinnedBy: "alan" });
+      expect((await svc.listNotes("codascope", "shared", { userId: "alan" })).find((entry) => entry.path === "pinned.md"))
+        .toMatchObject({ pinned: true, pinnedBy: "alan" });
+    });
+
     it("should reject creating duplicate note", async () => {
       await svc.createNote("codascope", "private", { userId: "alan" }, "dup.md");
       await expect(svc.createNote("codascope", "private", { userId: "alan" }, "dup.md")).rejects.toThrow("already exists");

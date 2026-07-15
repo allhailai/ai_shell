@@ -1,7 +1,7 @@
 /* ── CodaScope: Note Package Services — Integration Test ───────────── */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -15,6 +15,7 @@ import { CodaScopeNoteImportService } from "./codaScopeNoteImportService.js";
 import { CodaScopeNoteTransferService } from "./codaScopeNoteTransferService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteLinkIndexService } from "./codaScopeNoteLinkIndexService.js";
+import { CodaScopeNoteDocumentService } from "./codaScopeNoteDocumentService.js";
 
 const roots: string[] = [];
 
@@ -36,10 +37,18 @@ describe("CodaScope note packages", () => {
     const annotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
     const bundleSvc = new CodaScopeNoteBundleService(noteSvc, annotationSvc);
     const auditSvc = new CodaScopeNoteAuditService(root);
+    const documentSvc = new CodaScopeNoteDocumentService(noteSvc, new CodaScopeNoteUserPrefsService(root));
     const opts = { userId: "alan" };
 
     await noteSvc.createNote("codascope", "private", opts, "research/decision.md", "# Decision\n\nKeep the whole package.");
     await noteSvc.uploadImage("codascope", "private", opts, "research/decision.md", Buffer.from("image"), "image/png");
+    const stagedDocument = path.join(root, "decision.pdf");
+    writeFileSync(stagedDocument, "opaque document bytes");
+    const sourceDocument = await documentSvc.createDocument("codascope", "private", opts, "research/decision.md", {
+      temporaryPath: stagedDocument,
+      originalFilename: "decision.pdf",
+      declaredMimeType: "application/pdf",
+    });
     const source = await noteSvc.readNote("codascope", "private", opts, "research/decision.md");
     await noteSvc.updateNote(
       "codascope", "private", opts, "research/decision.md",
@@ -79,6 +88,8 @@ describe("CodaScope note packages", () => {
     expect(existsWithContent(bundle.assetsDir)).toBe(true);
     expect(existsWithContent(bundle.versionsDir)).toBe(true);
     expect(existsSync(bundle.annotationFile)).toBe(true);
+    const importedDocuments = await documentSvc.listDocuments("codascope", "shared", opts, "research/decision.md");
+    expect(importedDocuments.active[0]).toMatchObject({ id: sourceDocument.id, storedPath: sourceDocument.storedPath, originalFilename: "decision.pdf" });
     const annotations = await annotationSvc.listAnnotations("codascope", "shared", opts, "research/decision.md");
     expect(annotations).toHaveLength(1);
     expect(annotations[0]).toMatchObject({

@@ -10,15 +10,72 @@
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import multer from "multer";
 import { parseInlineAnnotationAnchors } from "../services/codaScopeNoteAnnotationAnchorService.js";
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
+const DOCUMENT_UPLOAD_DIR = path.join(os.tmpdir(), "codascope-note-document-uploads");
+/** Disk-backed multer storage: streams and hashes uploads without heap buffering. */
+const controlledDocumentStorage: multer.StorageEngine = {
+  _handleFile: (_req, file, callback) => {
+    try {
+      if (!existsSync(DOCUMENT_UPLOAD_DIR)) mkdirSync(DOCUMENT_UPLOAD_DIR, { recursive: true });
+      const filename = `${randomUUID()}.upload`;
+      const destination = path.join(DOCUMENT_UPLOAD_DIR, filename);
+      const output = createWriteStream(destination, { flags: "wx" });
+      const hash = createHash("sha256");
+      let size = 0;
+      let finished = false;
+      const fail = (error: Error) => {
+        if (finished) return;
+        finished = true;
+        try { unlinkSync(destination); } catch { /* best effort cleanup */ }
+        callback(error);
+      };
+      file.stream.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        hash.update(chunk);
+      });
+      file.stream.on("error", fail);
+      output.on("error", fail);
+      output.on("finish", () => {
+        if (finished) return;
+        finished = true;
+        // Hashing happens during the stream; publication re-hashes the staged
+        // file as an integrity check before it enters the note bundle.
+        hash.digest("hex");
+        callback(null, { destination: DOCUMENT_UPLOAD_DIR, filename, path: destination, size });
+      });
+      file.stream.pipe(output);
+    } catch (error) {
+      callback(error as Error);
+    }
+  },
+  _removeFile: (_req, file, callback) => {
+    try { if (file.path) unlinkSync(file.path); } catch { /* already removed */ }
+    callback(null);
+  },
+};
+const documentUpload = multer({
+  storage: controlledDocumentStorage,
+  // The service repeats this check before publication. Multer's limit keeps
+  // over-limit streams off the application heap and out of the note bundle.
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+function removeDocumentUpload(file: Express.Multer.File | undefined): void {
+  if (!file?.path) return;
+  try { unlinkSync(file.path); } catch { /* finalizer already consumed it */ }
+}
 
 export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal, secretService, upload } = ctx;
 
   /**
    * Validate :scope and :visibility params and extract resolve opts.
@@ -69,6 +126,36 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     }
     return rawPath;
   }
+
+  /** Custom highlight colors are optional CodaScope configuration, not a required secret. */
+  app.get("/api/codascope/settings/highlight-colors", wrap(async (_req, res) => {
+    const value = await secretService.getAppSecret("codascope", "highlight_colors");
+    if (!value) {
+      res.json({ colors: [] });
+      return;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      const colors = Array.isArray(parsed)
+        ? parsed.flatMap((color) => (
+          color && typeof color === "object"
+          && typeof (color as Record<string, unknown>).name === "string"
+          && typeof (color as Record<string, unknown>).label === "string"
+          && typeof (color as Record<string, unknown>).cssColor === "string"
+            ? [{
+              name: (color as Record<string, string>).name,
+              label: (color as Record<string, string>).label,
+              cssColor: (color as Record<string, string>).cssColor,
+            }]
+            : []
+        ))
+        : [];
+      res.json({ colors });
+    } catch {
+      res.json({ colors: [] });
+    }
+  }));
 
 
 
@@ -300,27 +387,34 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Star a Note ────────────────────────────────────────────────────
 
   app.put("/api/codascope/notes/starred/:noteId", wrap(async (req, res) => {
-    const { noteUserPrefsSvc } = await ensureServices();
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
     const userId = principal(req).username;
     const noteId = param(req, "noteId");
 
-    const { scope, visibility, path: notePath, title } = req.body as {
+    const { scope, visibility, path: notePath } = req.body as {
       scope?: string;
       visibility?: string;
       path?: string;
-      title?: string;
     };
 
-    if (!scope || !visibility || !notePath || !title) {
-      throw httpError("scope, visibility, path, and title are required.", 400, "invalid_input");
+    if (!scope || !visibility || !notePath || !VALID_SCOPES.includes(scope as NoteScope) || !VALID_VISIBILITIES.includes(visibility as NoteVisibility)) {
+      throw httpError("A valid scope, visibility, and path are required.", 400, "invalid_input");
     }
+
+    const opts: NoteResolveOpts = {
+      userId,
+      projectId: typeof req.body.projectId === "string" ? req.body.projectId : undefined,
+      epicId: typeof req.body.epicId === "string" ? req.body.epicId : undefined,
+    };
+    const note = await noteSvc.readNote(scope as NoteScope, visibility as NoteVisibility, opts, notePath);
+    if (!note || note.frontmatter.id !== noteId) throw httpError("Note not found.", 404, "not_found");
 
     noteUserPrefsSvc.star(userId, {
       noteId,
       scope: scope as StarredNoteRef["scope"],
       visibility: visibility as StarredNoteRef["visibility"],
       path: notePath,
-      title,
+      title: note.frontmatter.title,
     });
 
     res.json({ starred: true });
@@ -404,10 +498,18 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── List Notes ──────────────────────────────────────────────────────
 
   app.get("/api/codascope/notes/:scope/:visibility", wrap(async (req, res) => {
-    const { noteSvc } = await ensureServices();
+    const { noteSvc, noteUserPrefsSvc } = await ensureServices();
     const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
     const folder = (req.query.folder as string) ?? undefined;
-    const notes: NoteEntry[] = await noteSvc.listNotes(scope, visibility, opts, folder);
+    const starred = new Set(noteUserPrefsSvc.getStarred(opts.userId ?? "").map((item) => item.noteId));
+    const notes: NoteEntry[] = (await noteSvc.listNotes(scope, visibility, opts, folder))
+      .map((note) => ({ ...note, starred: note.noteId ? starred.has(note.noteId) || undefined : undefined }))
+      .sort((left, right) => {
+        if (left.isFolder || right.isFolder) return 0;
+        if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
+        if (Boolean(left.starred) !== Boolean(right.starred)) return left.starred ? -1 : 1;
+        return (right.updated || "").localeCompare(left.updated || "");
+      });
     res.json({ notes });
   }));
 
@@ -840,39 +942,9 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   }));
 
   // ══════════════════════════════════════════════════════════════════════
-  // ── ARCHIVE / RESTORE ROUTES ─────────────────────────────────────────
+  // ── RESTORE ROUTES ───────────────────────────────────────────────────
   // Must be registered BEFORE the generic wildcard CRUD routes.
   // ══════════════════════════════════════════════════════════════════════
-
-  // ── Archive a Note ─────────────────────────────────────────────────
-
-  app.post("/api/codascope/notes/:scope/:visibility/note/*path/archive", wrap(async (req, res) => {
-    const { noteAuditSvc, noteBundleSvc } = await ensureServices();
-    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
-
-    let notePath = extractPath(req);
-    notePath = stripSuffix(notePath, "/archive");
-    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
-
-    const { reason } = req.body as { reason?: string };
-
-    const meta = await noteBundleSvc.archiveNote(scope, visibility, opts, notePath, reason);
-    if (!meta) throw httpError("Note not found.", 404, "not_found");
-
-    // Audit log
-    noteAuditSvc.log({
-      event: "note.archived",
-      timestamp: new Date().toISOString(),
-      actor: opts.userId ?? "default",
-      noteId: meta.noteId,
-      scope,
-      visibility,
-      path: notePath,
-      metadata: reason ? { reason } : undefined,
-    });
-
-    res.json(meta);
-  }));
 
   // ── Restore an Archived Note ──────────────────────────────────────
 
@@ -1134,6 +1206,214 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
 
     const readers = noteUserPrefsSvc.getReadersForNote(noteId);
     res.json({ readers });
+  }));
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── DOCUMENT AND PIN ROUTES ──────────────────────────────────────────
+  // These must stay before the generic wildcard CRUD routes. Documents are
+  // opaque note-bundle companions, never separately movable resources.
+  // ══════════════════════════════════════════════════════════════════════
+
+  const documentFailure = (error: unknown): never => {
+    const message = error instanceof Error ? error.message : "Document operation failed.";
+    const missing = /not found|missing/i.test(message);
+    throw httpError(message, missing ? 404 : 400, missing ? "not_found" : "document_error");
+  };
+
+  const auditDocument = async (
+    req: Parameters<typeof principal>[0],
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    event: string,
+    documentId: string,
+  ): Promise<void> => {
+    const { noteSvc, noteAuditSvc } = await ensureServices();
+    const note = await noteSvc.readNote(scope, visibility, opts, notePath);
+    if (!note) return;
+    noteAuditSvc.log({
+      event,
+      timestamp: new Date().toISOString(),
+      actor: principal(req).username,
+      noteId: note.frontmatter.id,
+      scope,
+      visibility,
+      path: notePath,
+      metadata: { documentId },
+    });
+  };
+
+  app.get("/api/codascope/notes/:scope/:visibility/note/*path/documents", wrap(async (req, res) => {
+    const { noteDocumentSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const notePath = stripSuffix(extractPath(req), "/documents");
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+    try {
+      res.json(await noteDocumentSvc.listDocuments(scope, visibility, opts, notePath));
+    } catch (error) {
+      documentFailure(error);
+    }
+  }));
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/documents", documentUpload.single("file"), wrap(async (req, res) => {
+    const file = (req as unknown as { file?: Express.Multer.File }).file;
+    try {
+      if (!file) throw httpError("A document file is required.", 400, "no_file");
+      const { noteDocumentSvc } = await ensureServices();
+      const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+      const notePath = stripSuffix(extractPath(req), "/documents");
+      if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+      const document = await noteDocumentSvc.createDocument(scope, visibility, opts, notePath, {
+        temporaryPath: file.path,
+        originalFilename: file.originalname,
+        declaredMimeType: file.mimetype,
+      });
+      await auditDocument(req, scope, visibility, opts, notePath, "note.document_uploaded", document.id);
+      res.status(201).json({ document });
+    } catch (error) {
+      if ((error as { code?: string }).code) throw error;
+      documentFailure(error);
+    } finally {
+      removeDocumentUpload(file);
+    }
+  }));
+
+  app.patch("/api/codascope/notes/:scope/:visibility/note/*path/documents/:documentId", wrap(async (req, res) => {
+    const { noteDocumentSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const documentId = param(req, "documentId");
+    const notePath = stripSuffix(extractPath(req), `/documents/${documentId}`);
+    const { displayName, comment } = req.body as { displayName?: unknown; comment?: unknown };
+    if (!notePath || (displayName === undefined && comment === undefined) || (displayName !== undefined && typeof displayName !== "string") || (comment !== undefined && typeof comment !== "string")) {
+      throw httpError("A note path and a string displayName and/or comment are required.", 400, "invalid_input");
+    }
+    try {
+      const document = await noteDocumentSvc.updateDocument(scope, visibility, opts, notePath, documentId, { displayName: displayName as string | undefined, comment: comment as string | undefined });
+      await auditDocument(req, scope, visibility, opts, notePath, "note.document_updated", document.id);
+      res.json({ document });
+    } catch (error) {
+      documentFailure(error);
+    }
+  }));
+
+  for (const [operation, archived] of [["archive", true], ["restore", false]] as const) {
+    app.post(`/api/codascope/notes/:scope/:visibility/note/*path/documents/:documentId/${operation}`, wrap(async (req, res) => {
+      const { noteDocumentSvc } = await ensureServices();
+      const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+      const documentId = param(req, "documentId");
+      const notePath = stripSuffix(extractPath(req), `/documents/${documentId}/${operation}`);
+      if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+      try {
+        const document = await noteDocumentSvc.setArchived(scope, visibility, opts, notePath, documentId, archived);
+        await auditDocument(req, scope, visibility, opts, notePath, archived ? "note.document_archived" : "note.document_restored", document.id);
+        res.json({ document });
+      } catch (error) {
+        documentFailure(error);
+      }
+    }));
+  }
+
+  for (const [method, pinned] of [["put", true], ["delete", false]] as const) {
+    (app as any)[method]("/api/codascope/notes/:scope/:visibility/note/*path/documents/:documentId/pin", wrap(async (req: any, res: any) => {
+      const { noteDocumentSvc } = await ensureServices();
+      const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+      const documentId = param(req, "documentId");
+      const notePath = stripSuffix(extractPath(req), `/documents/${documentId}/pin`);
+      if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+      try {
+        const document = await noteDocumentSvc.setPinned(scope, visibility, opts, notePath, documentId, pinned);
+        await auditDocument(req, scope, visibility, opts, notePath, pinned ? "note.document_pinned" : "note.document_unpinned", document.id);
+        res.json({ document });
+      } catch (error) {
+        documentFailure(error);
+      }
+    }));
+  }
+
+  for (const [method, starred] of [["put", true], ["delete", false]] as const) {
+    (app as any)[method]("/api/codascope/notes/:scope/:visibility/note/*path/documents/:documentId/star", wrap(async (req: any, res: any) => {
+      const { noteDocumentSvc } = await ensureServices();
+      const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+      const documentId = param(req, "documentId");
+      const notePath = stripSuffix(extractPath(req), `/documents/${documentId}/star`);
+      if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+      try {
+        const document = await noteDocumentSvc.setStarred(scope, visibility, opts, notePath, documentId, starred);
+        res.json({ document });
+      } catch (error) {
+        documentFailure(error);
+      }
+    }));
+  }
+
+  app.get("/api/codascope/notes/:scope/:visibility/note/*path/documents/:documentId/download", wrap(async (req, res) => {
+    const { noteDocumentSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+    const documentId = param(req, "documentId");
+    const notePath = stripSuffix(extractPath(req), `/documents/${documentId}/download`);
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+    try {
+      const download = await noteDocumentSvc.resolveDownload(scope, visibility, opts, notePath, documentId);
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.attachment(download.filename);
+      res.sendFile(download.absolutePath);
+    } catch (error) {
+      documentFailure(error);
+    }
+  }));
+
+  for (const [method, pinned] of [["put", true], ["delete", false]] as const) {
+    (app as any)[method]("/api/codascope/notes/:scope/:visibility/note/*path/pin", wrap(async (req: any, res: any) => {
+      const { noteSvc, noteAuditSvc } = await ensureServices();
+      const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+      const notePath = stripSuffix(extractPath(req), "/pin");
+      if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+      const note = await noteSvc.setNotePin(scope, visibility, opts, notePath, pinned);
+      if (!note) throw httpError("Note not found.", 404, "not_found");
+      noteAuditSvc.log({
+        event: pinned ? "note.pinned" : "note.unpinned",
+        timestamp: new Date().toISOString(),
+        actor: principal(req).username,
+        noteId: note.id,
+        scope,
+        visibility,
+        path: notePath,
+      });
+      res.json({ pinned, note: { pinned: note.pinned, pinnedAt: note.pinnedAt, pinnedBy: note.pinnedBy } });
+    }));
+  }
+
+  // ── Archive a Note ─────────────────────────────────────────────────
+  // This follows the document routes so their `/documents/:id/archive`
+  // endpoint wins over the wildcard note archive path.
+
+  app.post("/api/codascope/notes/:scope/:visibility/note/*path/archive", wrap(async (req, res) => {
+    const { noteAuditSvc, noteBundleSvc } = await ensureServices();
+    const { scope, visibility, opts } = parseScopeAndOpts(param(req, "scope"), param(req, "visibility"), req.query as Record<string, unknown>, req);
+
+    let notePath = extractPath(req);
+    notePath = stripSuffix(notePath, "/archive");
+    if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
+
+    const { reason } = (req.body ?? {}) as { reason?: string };
+
+    const meta = await noteBundleSvc.archiveNote(scope, visibility, opts, notePath, reason);
+    if (!meta) throw httpError("Note not found.", 404, "not_found");
+
+    noteAuditSvc.log({
+      event: "note.archived",
+      timestamp: new Date().toISOString(),
+      actor: opts.userId ?? "default",
+      noteId: meta.noteId,
+      scope,
+      visibility,
+      path: notePath,
+      metadata: reason ? { reason } : undefined,
+    });
+
+    res.json(meta);
   }));
 
   // ══════════════════════════════════════════════════════════════════════

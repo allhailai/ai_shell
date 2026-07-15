@@ -665,6 +665,18 @@ export function IconArchive({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Box with up arrow — Restore from archive */
+export function IconUnarchive({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M2 4.5h12L13 2.5H3L2 4.5z" />
+      <path d="M2 4.5v8a1 1 0 001 1h10a1 1 0 001-1v-8" />
+      <line x1="8" y1="11" x2="8" y2="7" />
+      <polyline points="6,8.5 8,7 10,8.5" />
+    </svg>
+  );
+}
+
 /** Down arrow into branch — Git pull */
 export function IconGitPull({ size = 16, style, className }: IconProps) {
   return (

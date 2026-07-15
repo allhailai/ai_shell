@@ -23,8 +23,10 @@ const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
 export function buildNoteReadTools(
   projectId: string,
   services: ToolServices,
+  actorId?: string,
 ): Record<string, SDKCustomTool> {
-  const { note: noteService } = services;
+  const { note: noteService, noteDocuments: documentService } = services;
+  const noteOpts = (epicId?: string) => ({ projectId, epicId, ...(actorId ? { userId: actorId } : {}) });
 
   return {
     list_notes: {
@@ -66,10 +68,7 @@ export function buildNoteReadTools(
         if (!VALID_VISIBILITIES.includes(visibility)) return `Invalid visibility: ${visibility}`;
 
         try {
-          const notes = await noteService.listNotes(scope, visibility, {
-            projectId,
-            epicId,
-          }, folder);
+          const notes = await noteService.listNotes(scope, visibility, noteOpts(epicId), folder);
 
           if (notes.length === 0) {
             return folder
@@ -133,10 +132,7 @@ export function buildNoteReadTools(
         if (!scope || !visibility || !notePath) return "scope, visibility, and path are required.";
 
         try {
-          const result = await noteService.readNote(scope, visibility, {
-            projectId,
-            epicId,
-          }, notePath);
+          const result = await noteService.readNote(scope, visibility, noteOpts(epicId), notePath);
 
           if (!result) return `Note not found: "${notePath}" at scope "${scope}" (${visibility}).`;
 
@@ -182,10 +178,7 @@ export function buildNoteReadTools(
         if (!query) return "query is required.";
 
         try {
-          const results = await noteService.searchNotes(query, scope, {
-            projectId,
-            epicId,
-          });
+          const results = await noteService.searchNotes(query, scope, noteOpts(epicId));
 
           if (results.length === 0) return `No notes matched "${query}" in scope "${scope}".`;
 
@@ -239,16 +232,96 @@ export function buildNoteReadTools(
         if (!VALID_VISIBILITIES.includes(visibility)) return `Invalid visibility: ${visibility}`;
 
         try {
-          const folders = await noteService.listFolders(scope, visibility, {
-            projectId,
-            epicId,
-          });
+          const folders = await noteService.listFolders(scope, visibility, noteOpts(epicId));
 
           if (folders.length === 0) return `No folders found at scope "${scope}" (${visibility}).`;
 
           return JSON.stringify(folders, null, 2);
         } catch {
           return `Failed to list folders at scope "${scope}" (${visibility}).`;
+        }
+      },
+    },
+
+    list_note_documents: {
+      description:
+        "List metadata for opaque documents associated with one authorized note. " +
+        "Returns active and archived document metadata only; it never reads, previews, extracts, or exposes filesystem paths for document bytes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: VALID_SCOPES, description: "The note scope" },
+          visibility: { type: "string", enum: VALID_VISIBILITIES, description: "The note visibility" },
+          path: { type: "string", description: "The note path" },
+          epicId: { type: "string", description: "Epic ID when scope is epic" },
+        },
+        required: ["scope", "visibility", "path"],
+      },
+      execute: async (args) => {
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
+        const notePath = args.path as string;
+        const epicId = args.epicId as string | undefined;
+        if (!actorId) return "An authenticated actor context is required to inspect note documents.";
+        if (!VALID_SCOPES.includes(scope) || !VALID_VISIBILITIES.includes(visibility) || !notePath) {
+          return "scope, visibility, and path are required.";
+        }
+        try {
+          const list = await documentService.listDocuments(scope, visibility, noteOpts(epicId), notePath);
+          const metadata = (document: { id: string; displayName: string; originalFilename: string; sizeBytes: number; uploadedAt: string; uploadedBy: string; comment: string; pinnedAt?: string; pinnedBy?: string; archivedAt?: string; archivedBy?: string }) => ({
+            id: document.id,
+            displayName: document.displayName,
+            originalFilename: document.originalFilename,
+            sizeBytes: document.sizeBytes,
+            uploadedAt: document.uploadedAt,
+            uploadedBy: document.uploadedBy,
+            comment: document.comment || undefined,
+            pinnedAt: document.pinnedAt,
+            pinnedBy: document.pinnedBy,
+            archivedAt: document.archivedAt,
+            archivedBy: document.archivedBy,
+          });
+          return JSON.stringify({
+            active: list.active.map(metadata),
+            archived: list.archived.map(metadata),
+            totalBytes: list.totalBytes,
+            maxBytes: list.maxBytes,
+          }, null, 2);
+        } catch (error) {
+          return `Failed to list note documents: ${(error as Error).message}`;
+        }
+      },
+    },
+
+    get_note_document_path: {
+      description:
+        "Resolve the canonical filesystem path for one authorized associated document. " +
+        "Call list_note_documents first when you need to discover document IDs. This is best used for text files; binary understanding is not guaranteed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          scope: { type: "string", enum: VALID_SCOPES, description: "The note scope" },
+          visibility: { type: "string", enum: VALID_VISIBILITIES, description: "The note visibility" },
+          path: { type: "string", description: "The parent note path" },
+          documentId: { type: "string", description: "A document ID returned by list_note_documents" },
+          epicId: { type: "string", description: "Epic ID when scope is epic" },
+        },
+        required: ["scope", "visibility", "path", "documentId"],
+      },
+      execute: async (args) => {
+        const scope = args.scope as NoteScope;
+        const visibility = args.visibility as NoteVisibility;
+        const notePath = args.path as string;
+        const documentId = args.documentId as string;
+        const epicId = args.epicId as string | undefined;
+        if (!actorId) return "An authenticated actor context is required to resolve a note document path.";
+        if (!VALID_SCOPES.includes(scope) || !VALID_VISIBILITIES.includes(visibility) || !notePath || !documentId) {
+          return "scope, visibility, path, and documentId are required.";
+        }
+        try {
+          return await documentService.resolveAgentPath(scope, visibility, noteOpts(epicId), notePath, documentId);
+        } catch (error) {
+          return `Failed to resolve note document path: ${(error as Error).message}`;
         }
       },
     },
@@ -262,8 +335,10 @@ export function buildNoteWriteTools(
   projectId: string,
   services: ToolServices,
   collector?: ToolResultCollectorHolder,
+  actorId?: string,
 ): Record<string, SDKCustomTool> {
   const { note: noteService } = services;
+  const noteOpts = (epicId?: string) => ({ projectId, epicId, ...(actorId ? { userId: actorId } : {}) });
 
   return {
     create_note: {
@@ -308,10 +383,7 @@ export function buildNoteWriteTools(
         if (!scope || !visibility || !notePath) return "scope, visibility, and path are required.";
 
         try {
-          const result = await noteService.createNote(scope, visibility, {
-            projectId,
-            epicId,
-          }, notePath, content);
+          const result = await noteService.createNote(scope, visibility, noteOpts(epicId), notePath, content);
 
           const description = `Created note "${notePath}" at scope "${scope}" (${visibility}).`;
           const resultText = `${description}\n\n${formatCompletedAction("create_note", description, { scope, visibility, notePath, epicId })}`;
@@ -365,10 +437,7 @@ export function buildNoteWriteTools(
         if (!scope || !visibility || !notePath || !content) return "scope, visibility, path, and content are required.";
 
         try {
-          const result = await noteService.updateNote(scope, visibility, {
-            projectId,
-            epicId,
-          }, notePath, content);
+          const result = await noteService.updateNote(scope, visibility, noteOpts(epicId), notePath, content);
 
           if (!result) return `Note not found: "${notePath}" at scope "${scope}" (${visibility}).`;
           if ("conflict" in result) {

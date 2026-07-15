@@ -53,24 +53,17 @@ export function Settings() {
   const [highlightSaving, setHighlightSaving] = useState(false);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
-  // Load highlight colors from secrets API
+  // Load optional highlight colors without treating an unset palette as an error.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/secrets/app/codascope/highlight_colors");
+        const res = await fetch("/api/codascope/settings/highlight-colors");
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          if (data.value) {
-            try {
-              const parsed = JSON.parse(data.value);
-              if (Array.isArray(parsed)) {
-                setHighlightColors(parsed);
-              }
-            } catch {
-              // Invalid JSON
-            }
+          if (Array.isArray(data.colors)) {
+            setHighlightColors(data.colors);
           }
         }
       } catch {

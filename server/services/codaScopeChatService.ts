@@ -74,6 +74,9 @@ export interface MessageContext {
   topicId?: string | null;
   projectName?: string;
   projectId?: string;
+  noteScope?: string | null;
+  noteVisibility?: string | null;
+  notePath?: string | null;
 }
 
 export type MessageStatus = "complete" | "streaming" | "error";

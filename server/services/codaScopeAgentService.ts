@@ -27,6 +27,8 @@ import { getToolsForPurpose, ToolResultCollector, ToolResultCollectorHolder } fr
 
 export interface AgentSendOptions {
   projectId: string;
+  /** Authenticated actor for user-facing runs. Never taken from a tool arg. */
+  actorId?: string;
   message: string;
   modelId: string;
   systemPrompt?: string;
@@ -42,6 +44,7 @@ interface PoolEntry {
   agent: SDKAgent;
   projectId: string;
   purpose: string;
+  actorId?: string;
   lastUsed: number;
   busy: boolean;
   collectorHolder: ToolResultCollectorHolder;
@@ -65,7 +68,7 @@ export class CodaScopeAgentService {
   private modelCache: ModelCache | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Active chat AbortControllers keyed by projectId for cancel support */
+  /** Active chat AbortControllers keyed by project and authenticated actor. */
   private activeChatControllers = new Map<string, AbortController>();
 
   constructor(secretService: SecretService, projectsRoot: string) {
@@ -160,22 +163,31 @@ export class CodaScopeAgentService {
     projectId: string,
     purpose: string,
     collectorHolder?: ToolResultCollectorHolder,
+    actorId?: string,
   ): Record<string, SDKCustomTool> {
-    return getToolsForPurpose(projectId, this.projectsRoot, purpose, collectorHolder);
+    return getToolsForPurpose(projectId, this.projectsRoot, purpose, collectorHolder, actorId);
   }
 
   /* ── Agent Pool ───────────────────────────────────────────────────── */
 
-  private poolKey(projectId: string, purpose: string): string {
-    return `${projectId}::${purpose}`;
+  private poolKey(projectId: string, purpose: string, actorId?: string): string {
+    // Tool closures carry the actor into note/document authorization. Do not
+    // reuse one actor's closures for another actor, even when project/purpose
+    // match. A system run is a distinct boundary as well.
+    return `${projectId}::${purpose}::${actorId ?? "system"}`;
+  }
+
+  private activeChatKey(projectId: string, actorId?: string): string {
+    return `${projectId}::${actorId ?? "system"}`;
   }
 
   private async getOrCreateAgent(
     projectId: string,
     purpose: string,
     modelId: string,
+    actorId?: string,
   ): Promise<SDKAgent> {
-    const key = this.poolKey(projectId, purpose);
+    const key = this.poolKey(projectId, purpose, actorId);
     const existing = this.pool.get(key);
 
     if (existing && !existing.busy) {
@@ -203,7 +215,7 @@ export class CodaScopeAgentService {
       name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
       local: {
         cwd: repoPaths.length > 0 ? repoPaths : undefined,
-        customTools: this.getToolsForPurpose(projectId, purpose, collectorHolder),
+        customTools: this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId),
       },
     });
 
@@ -211,6 +223,7 @@ export class CodaScopeAgentService {
       agent,
       projectId,
       purpose,
+      actorId,
       lastUsed: Date.now(),
       busy: false,
       collectorHolder,
@@ -241,11 +254,12 @@ export class CodaScopeAgentService {
    * Cancel an active agent chat for a project.
    * Returns true if a controller was found and aborted.
    */
-  cancelAgent(projectId: string): boolean {
-    const controller = this.activeChatControllers.get(projectId);
+  cancelAgent(projectId: string, actorId?: string): boolean {
+    const key = this.activeChatKey(projectId, actorId);
+    const controller = this.activeChatControllers.get(key);
     if (controller) {
       controller.abort();
-      this.activeChatControllers.delete(projectId);
+      this.activeChatControllers.delete(key);
       return true;
     }
     return false;
@@ -254,16 +268,17 @@ export class CodaScopeAgentService {
   /* ── Send Message ─────────────────────────────────────────────────── */
 
   async send(options: AgentSendOptions): Promise<void> {
-    const { projectId, message, modelId, systemPrompt, context, images, purpose, onMessage, onDone, onError } = options;
+    const { projectId, actorId, message, modelId, systemPrompt, context, images, purpose, onMessage, onDone, onError } = options;
 
-    const key = this.poolKey(projectId, purpose);
+    const key = this.poolKey(projectId, purpose, actorId);
+    const chatKey = this.activeChatKey(projectId, actorId);
 
     // Set up AbortController for cancel support (assistant/chat only)
     const abortController = new AbortController();
     if (purpose === "assistant" || purpose === "chat") {
       // Cancel any existing controller for this project
-      this.activeChatControllers.get(projectId)?.abort();
-      this.activeChatControllers.set(projectId, abortController);
+      this.activeChatControllers.get(chatKey)?.abort();
+      this.activeChatControllers.set(chatKey, abortController);
     }
 
     // Swap to a fresh per-run collector so concurrent runs don't cross-contaminate.
@@ -272,7 +287,7 @@ export class CodaScopeAgentService {
     const runCollector = new ToolResultCollector();
 
     try {
-      const agent = await this.getOrCreateAgent(projectId, purpose, modelId);
+      const agent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
 
       const entry = this.pool.get(key);
       if (entry) {
@@ -331,7 +346,7 @@ export class CodaScopeAgentService {
       }
 
       // Clean up controller
-      this.activeChatControllers.delete(projectId);
+      this.activeChatControllers.delete(chatKey);
 
       if (abortController.signal.aborted) {
         runCollector.drain(); // discard collected results on cancel
@@ -355,7 +370,7 @@ export class CodaScopeAgentService {
       this.pool.delete(key);
 
       // Clean up controller
-      this.activeChatControllers.delete(projectId);
+      this.activeChatControllers.delete(chatKey);
 
       if (abortController.signal.aborted) {
         onError(new Error("Agent cancelled by user."));

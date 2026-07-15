@@ -253,6 +253,9 @@ export class CodaScopeNoteService {
     const ownerMatch = yamlBlock.match(/^owner:\s*(.+)$/m);
     const tagsMatch = yamlBlock.match(/^tags:\s*\[([^\]]*)\]$/m);
     const statusMatch = yamlBlock.match(/^status:\s*(.+)$/m);
+    const pinnedMatch = yamlBlock.match(/^pinned:\s*(.+)$/m);
+    const pinnedAtMatch = yamlBlock.match(/^pinnedAt:\s*(.+)$/m);
+    const pinnedByMatch = yamlBlock.match(/^pinnedBy:\s*(.+)$/m);
 
     const rawId = idMatch ? idMatch[1].trim().replace(/^["']|["']$/g, "") : "";
     const id = isSafePathSegment(rawId) ? rawId : randomUUID();
@@ -268,9 +271,12 @@ export class CodaScopeNoteService {
       : [];
     const statusRaw = statusMatch ? statusMatch[1].trim().replace(/^["']|["']$/g, "") : undefined;
     const status = (statusRaw === "draft" || statusRaw === "ready") ? statusRaw : undefined;
+    const pinned = pinnedMatch?.[1].trim().toLowerCase() === "true";
+    const pinnedAt = pinned && pinnedAtMatch ? pinnedAtMatch[1].trim().replace(/^["']|["']$/g, "") : undefined;
+    const pinnedBy = pinned && pinnedByMatch ? pinnedByMatch[1].trim().replace(/^["']|["']$/g, "") : undefined;
 
     return {
-      frontmatter: { id, title, tags, created, updated, owner, status },
+      frontmatter: { id, title, tags, created, updated, owner, status, pinned: pinned || undefined, pinnedAt, pinnedBy },
       body,
     };
   }
@@ -293,6 +299,11 @@ export class CodaScopeNoteService {
     ];
     if (fm.status) {
       lines.push(`status: ${fm.status}`);
+    }
+    if (fm.pinned) {
+      lines.push("pinned: true");
+      if (fm.pinnedAt) lines.push(`pinnedAt: ${fm.pinnedAt}`);
+      if (fm.pinnedBy) lines.push(`pinnedBy: ${fm.pinnedBy}`);
     }
     lines.push("---", "");
     return lines.join("\n");
@@ -418,6 +429,9 @@ export class CodaScopeNoteService {
       // fields belong to the server and must never be path-bearing input.
       const { frontmatter, body } = this.parseFrontmatter(content);
       frontmatter.owner = opts.userId ?? "default";
+      delete frontmatter.pinned;
+      delete frontmatter.pinnedAt;
+      delete frontmatter.pinnedBy;
       if (visibility === "private") delete frontmatter.status;
       finalContent = this.serializeFrontmatter(frontmatter) + body;
     } else {
@@ -477,6 +491,9 @@ export class CodaScopeNoteService {
     frontmatter.owner = currentFrontmatter.owner;
     frontmatter.created = currentFrontmatter.created;
     frontmatter.updated = new Date().toISOString();
+    frontmatter.pinned = currentFrontmatter.pinned;
+    frontmatter.pinnedAt = currentFrontmatter.pinnedAt;
+    frontmatter.pinnedBy = currentFrontmatter.pinnedBy;
     if (visibility === "private") delete frontmatter.status;
 
     // Reconstruct content with updated frontmatter
@@ -494,6 +511,39 @@ export class CodaScopeNoteService {
     await this.refreshIndexWithEditor(parentDir, frontmatter.id, editor);
 
     return { contentHash: this.computeHash(finalContent) };
+  }
+
+  /**
+   * Set shared server-owned pin metadata without accepting it from a client
+   * content save. Pins stay in the markdown frontmatter so bundle transfers
+   * and ZIP packaging preserve them automatically.
+   */
+  async setNotePin(
+    scope: NoteScope,
+    visibility: NoteVisibility,
+    opts: NoteResolveOpts,
+    notePath: string,
+    pinned: boolean,
+  ): Promise<NoteFrontmatter | null> {
+    const notesDir = this.resolveNotesDir(scope, visibility, opts);
+    if (!notesDir) return null;
+    const filePath = this.resolveNotePath(notesDir, notePath);
+    if (!existsSync(filePath)) return null;
+
+    const currentContent = readFileSync(filePath, "utf-8");
+    const { frontmatter, body } = this.parseFrontmatter(currentContent);
+    if (pinned) {
+      frontmatter.pinned = true;
+      frontmatter.pinnedAt = new Date().toISOString();
+      frontmatter.pinnedBy = opts.userId ?? "default";
+    } else {
+      delete frontmatter.pinned;
+      delete frontmatter.pinnedAt;
+      delete frontmatter.pinnedBy;
+    }
+    this.writeTextAtomically(filePath, this.serializeFrontmatter(frontmatter) + body);
+    await this.refreshIndexWithEditor(path.dirname(filePath), frontmatter.id, opts.userId ?? "default");
+    return frontmatter;
   }
 
   /**
@@ -1335,6 +1385,9 @@ export class CodaScopeNoteService {
               wordCount: this.countWords(body),
               noteId: frontmatter.id,
               status: frontmatter.status,
+              pinned: frontmatter.pinned,
+              pinnedAt: frontmatter.pinnedAt,
+              pinnedBy: frontmatter.pinnedBy,
             });
           } catch { /* skip unreadable files */ }
         }
