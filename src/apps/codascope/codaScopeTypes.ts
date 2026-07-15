@@ -73,11 +73,16 @@ export interface ConversationMessage {
 
 export interface Conversation {
   id: string;
+  /** Server-derived custody; clients must never supply or change it. */
+  ownerId?: string;
+  projectId?: string;
   title: string;
   messages: ConversationMessage[];
   summary?: string;
   createdAt?: string;
   updatedAt?: string;
+  defaultModelId?: string | null;
+  epicId?: string;
 }
 
 export interface ConversationSummary {

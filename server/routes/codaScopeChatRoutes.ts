@@ -35,7 +35,7 @@ function parseMessageContext(value: Record<string, unknown> | undefined): Messag
 }
 
 export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
+  const { app, authService, httpError, ensureServices, wrap, param, principal, upload } = ctx;
 
   // ── Conversations — CRUD ─────────────────────────────────────────
 
@@ -43,8 +43,41 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   app.get("/api/codascope/projects/:id/conversations", wrap(async (req, res) => {
     const { chatSvc } = await ensureServices();
     const id = param(req, "id");
-    const conversations = await chatSvc.listConversations(id);
+    const conversations = await chatSvc.listConversations(id, principal(req).username);
     res.json({ conversations });
+  }));
+
+  // Ownerless records predate per-user custody. They are visible only to an
+  // administrator performing a deliberate assignment; normal users cannot
+  // list, read, or self-claim them.
+  app.get("/api/codascope/projects/:id/conversations/legacy", wrap(async (req, res) => {
+    const actor = principal(req);
+    if (!actor.isAdmin) throw httpError("Administrator access is required.", 403, "forbidden");
+    const { chatSvc } = await ensureServices();
+    const conversations = await chatSvc.listLegacyConversations(param(req, "id"));
+    res.json({ conversations });
+  }));
+
+  app.patch("/api/codascope/projects/:id/conversations/:convId/owner", wrap(async (req, res) => {
+    const actor = principal(req);
+    if (!actor.isAdmin) throw httpError("Administrator access is required.", 403, "forbidden");
+
+    const targetUsername = typeof req.body?.targetUsername === "string" ? req.body.targetUsername.trim() : "";
+    if (!targetUsername) throw httpError("targetUsername is required.", 400, "invalid_input");
+    try {
+      await authService.getUser(targetUsername);
+    } catch {
+      throw httpError("Target user not found.", 400, "invalid_input");
+    }
+
+    const { chatSvc } = await ensureServices();
+    const conversation = await chatSvc.assignLegacyConversationOwner(
+      param(req, "id"),
+      param(req, "convId"),
+      targetUsername,
+    );
+    if (!conversation) throw httpError("Legacy conversation not found.", 404, "not_found");
+    res.json({ conversation });
   }));
 
   // Create conversation
@@ -52,7 +85,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
     const { chatSvc } = await ensureServices();
     const id = param(req, "id");
     const { title, modelId } = req.body as { title?: string; modelId?: string };
-    const conversation = await chatSvc.createConversation(id, { title, modelId });
+    const conversation = await chatSvc.createConversation(id, principal(req).username, { title, modelId });
     res.status(201).json({ conversation });
   }));
 
@@ -61,7 +94,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
     const { chatSvc } = await ensureServices();
     const id = param(req, "id");
     const convId = param(req, "convId");
-    const conversation = await chatSvc.readConversation(id, convId);
+    const conversation = await chatSvc.readConversation(id, convId, principal(req).username);
     if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
     res.json({ conversation });
   }));
@@ -72,7 +105,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const convId = param(req, "convId");
     const { title, summary } = req.body as { title?: string; summary?: string };
-    const conversation = await chatSvc.updateConversation(id, convId, { title, summary });
+    const conversation = await chatSvc.updateConversation(id, convId, principal(req).username, { title, summary });
     if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
     res.json({ conversation });
   }));
@@ -82,10 +115,14 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
     const { chatSvc, imageSvc } = await ensureServices();
     const id = param(req, "id");
     const convId = param(req, "convId");
-    const deleted = await chatSvc.deleteConversation(id, convId);
+    const actorId = principal(req).username;
+    // Authorize image cleanup before deleting the conversation record. The
+    // image service repeats this check so direct callers cannot bypass it.
+    const conversation = await chatSvc.readConversation(id, convId, actorId);
+    if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
+    await imageSvc.pruneConversationImages(id, convId, actorId);
+    const deleted = await chatSvc.deleteConversation(id, convId, actorId);
     if (!deleted) throw httpError("Conversation not found.", 404, "not_found");
-    // Clean up associated images
-    await imageSvc.pruneConversationImages(id, convId);
     res.json({ ok: true });
   }));
 
@@ -121,6 +158,12 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         throw httpError("context.view must be a non-empty string.", 400, "invalid_input");
       }
 
+      // Verify ownership before reading attachments, persisting messages, or
+      // assembling history for an agent run. An unauthorized ID deliberately
+      // looks identical to an unknown conversation.
+      const ownedConversation = await chatSvc.readConversation(id, convId, actorId);
+      if (!ownedConversation) throw httpError("Conversation not found.", 404, "not_found");
+
       // Resolve image attachments: read from disk and base64-encode for the SDK
       const imageAttachmentPaths: Array<{ path: string; filename: string }> = [];
       const sdkImages: Array<{ data: string; mimeType: string }> = [];
@@ -129,7 +172,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           if (att.type !== "image" || !att.path) continue;
           // att.path is relative like "conversations/<convId>/images/<filename>"
           const filename = path.basename(att.path);
-          const absPath = imageSvc.getImagePath(id, convId, filename);
+          const absPath = await imageSvc.getImagePath(id, convId, filename, actorId);
           if (absPath && existsSync(absPath)) {
             const buffer = readFileSync(absPath);
             const ext = path.extname(filename).toLowerCase();
@@ -148,7 +191,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
 
       // Persist user message (with image metadata if present)
       const userMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      await chatSvc.appendMessage(id, convId, {
+      const afterUserMessage = await chatSvc.appendMessage(id, convId, actorId, {
         id: userMsgId,
         role: "user",
         content: message.trim(),
@@ -157,23 +200,25 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         context: persistedContext,
         ...(imageAttachmentPaths.length > 0 ? { metadata: { images: imageAttachmentPaths } } : {}),
       });
+      if (!afterUserMessage) throw httpError("Conversation not found.", 404, "not_found");
 
       // Create a placeholder for the assistant message
       const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      await chatSvc.appendMessage(id, convId, {
+      const afterPlaceholder = await chatSvc.appendMessage(id, convId, actorId, {
         id: assistantMsgId,
         role: "assistant",
         content: "",
         modelId,
         status: "streaming",
       });
+      if (!afterPlaceholder) throw httpError("Conversation not found.", 404, "not_found");
 
       // ── Build manifest + system prompt ─────────────────────────────
       const manifest = await buildManifestFromServices(id, svcs);
       const manifestStr = buildProjectManifest(manifest);
 
       // Format conversation history (prior messages, not including current)
-      const conversation = await chatSvc.readConversation(id, convId);
+      const conversation = await chatSvc.readConversation(id, convId, actorId);
       const priorMessages = (conversation?.messages ?? [])
         .filter((m) => m.id !== userMsgId && m.id !== assistantMsgId)
         .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system")
@@ -245,7 +290,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
               definition: epicDetail.definition,
               scope: epicDetail.scope ? { entryCount: (epicDetail.scope.entries ?? []).length, lastScopedAt: epicDetail.scope.lastScopedAt } : null,
               designDocCount: (epicDetail.designDocs ?? []).length,
-              conversationId: epicDetail.conversationId,
+              conversationId: convId,
               epicWikiPageCount: epicWikiPages.length,
               epicWikiPageTitles: epicWikiPages,
               researchSources: researchSourceSummary,
@@ -298,7 +343,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
 
         // Update assistant message with final content + actions
         try {
-          const conv = await chatSvc.readConversation(id, convId);
+          const conv = await chatSvc.readConversation(id, convId, actorId);
           if (conv) {
             const updated = {
               ...conv,
@@ -317,7 +362,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
                   : m,
               ),
             };
-            await chatSvc.writeConversation(id, updated);
+            await chatSvc.writeConversation(id, actorId, updated);
           }
         } catch {
           // Best effort persistence
@@ -331,7 +376,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
         // Mark assistant message as error
         try {
-          const conv = await chatSvc.readConversation(id, convId);
+          const conv = await chatSvc.readConversation(id, convId, actorId);
           if (conv) {
             const updated = {
               ...conv,
@@ -341,7 +386,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
                   : m,
               ),
             };
-            await chatSvc.writeConversation(id, updated);
+            await chatSvc.writeConversation(id, actorId, updated);
           }
         } catch {
           // Best effort
@@ -380,23 +425,27 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       // Resolve or create conversation
       let convId = conversationId;
       if (!convId) {
-        const conv = await chatSvc.createConversation(id, { modelId });
+        const conv = await chatSvc.createConversation(id, actorId, { modelId });
         convId = conv.id;
+      } else {
+        const conversation = await chatSvc.readConversation(id, convId, actorId);
+        if (!conversation) throw httpError("Conversation not found.", 404, "not_found");
       }
 
       // Persist user message
-      await chatSvc.appendMessage(id, convId, {
+      const afterUserMessage = await chatSvc.appendMessage(id, convId, actorId, {
         role: "user",
         content: message.trim(),
         status: "complete",
       });
+      if (!afterUserMessage) throw httpError("Conversation not found.", 404, "not_found");
 
       // ── Build manifest + system prompt ─────────────────────────────
       const manifest = await buildManifestFromServices(id, svcs);
       const manifestStr = buildProjectManifest(manifest);
 
       // Format conversation history
-      const conversation = await chatSvc.readConversation(id, convId);
+      const conversation = await chatSvc.readConversation(id, convId, actorId);
       const priorMessages = (conversation?.messages ?? [])
         .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system")
         .slice(0, -1) // exclude the just-appended user message (it's the current one)
@@ -437,7 +486,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         });
 
         if (fullResponse) {
-          await chatSvc.appendMessage(id, convId!, {
+          await chatSvc.appendMessage(id, convId!, actorId, {
             role: "assistant",
             content: fullResponse,
             modelId,
@@ -453,7 +502,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         const errMsg = err instanceof Error ? err.message : String(err);
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
         if (partialResponse) {
-          await chatSvc.appendMessage(id, convId!, {
+          await chatSvc.appendMessage(id, convId!, actorId, {
             role: "assistant",
             content: partialResponse,
             modelId,
@@ -481,12 +530,16 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
 
   // Upload image for a conversation
   app.post("/api/codascope/projects/:id/conversations/:convId/images", upload.single("image"), wrap(async (req, res) => {
-    const { imageSvc } = await ensureServices();
+    const { chatSvc, imageSvc } = await ensureServices();
     const id = param(req, "id");
     const convId = param(req, "convId");
+    const actorId = principal(req).username;
     const file = (req as unknown as { file?: Express.Multer.File }).file;
     if (!file) throw httpError("No image file provided.", 400, "invalid_input");
-    const result = await imageSvc.uploadImage(id, convId, file.buffer, file.mimetype, file.originalname);
+    if (!await chatSvc.readConversation(id, convId, actorId)) {
+      throw httpError("Conversation not found.", 404, "not_found");
+    }
+    const result = await imageSvc.uploadImage(id, convId, actorId, file.buffer, file.mimetype, file.originalname);
     res.status(201).json(result);
   }));
 
@@ -496,7 +549,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const convId = param(req, "convId");
     const filename = param(req, "filename");
-    const filePath = imageSvc.getImagePath(id, convId, filename);
+    const filePath = await imageSvc.getImagePath(id, convId, filename, principal(req).username);
     if (!filePath) throw httpError("Image not found.", 404, "not_found");
 
     // Determine content type from extension

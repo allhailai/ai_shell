@@ -8,7 +8,7 @@
 
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
-import type { NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { AnnotationStatus, NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -20,6 +20,8 @@ import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.j
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
+const VALID_ANNOTATION_STATUSES: AnnotationStatus[] = ["open", "resolved", "wontfix"];
+const MAX_AUDIT_RESULTS = 1_000;
 const DOCUMENT_UPLOAD_DIR = path.join(os.tmpdir(), "codascope-note-document-uploads");
 /** Disk-backed multer storage: streams and hashes uploads without heap buffering. */
 const controlledDocumentStorage: multer.StorageEngine = {
@@ -206,7 +208,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const { noteExportSvc } = await ensureServices();
     const exportId = param(req, "id");
 
-    const zipPath = noteExportSvc.getExportFile(exportId);
+    const zipPath = noteExportSvc.getExportFile(exportId, principal(req).username);
     if (!zipPath) {
       throw httpError("Export not found or expired.", 404, "not_found");
     }
@@ -836,15 +838,42 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     if (!notePath) throw httpError("Note path is required.", 400, "invalid_input");
 
     const { status, body: annBody, reactions } = req.body as {
-      status?: any;
+      status?: unknown;
       body?: string;
       reactions?: Array<{ emoji: string; user: string }>;
     };
 
+    if (reactions !== undefined) {
+      throw httpError(
+        "Replacing annotation reactions is not supported. Reaction changes must identify the authenticated actor server-side.",
+        400,
+        "invalid_input",
+      );
+    }
+    if (status !== undefined && (!VALID_ANNOTATION_STATUSES.includes(status as AnnotationStatus))) {
+      throw httpError("status must be open, resolved, or wontfix.", 400, "invalid_input");
+    }
+    if (annBody !== undefined && (typeof annBody !== "string" || !annBody.trim())) {
+      throw httpError("body must be a non-empty string.", 400, "invalid_input");
+    }
+    if (status === undefined && annBody === undefined) {
+      throw httpError("Provide a status or body update.", 400, "invalid_input");
+    }
+
+    const existing = (await noteAnnotationSvc.listAnnotations(scope, visibility, opts, notePath))
+      .find((annotation) => annotation.id === annotationId && !annotation.archivedAt);
+    if (!existing) throw httpError("Annotation not found.", 404, "not_found");
+    const actor = principal(req).username;
+    if (annBody !== undefined && existing.author !== actor) {
+      throw httpError("Only the annotation author may edit its body.", 403, "forbidden");
+    }
+    if (status !== undefined && !isValidAnnotationStatusTransition(existing.status, status as AnnotationStatus)) {
+      throw httpError("This annotation status transition is not allowed.", 400, "invalid_status_transition");
+    }
+
     const updated = await noteAnnotationSvc.updateAnnotation(scope, visibility, opts, notePath, annotationId, {
-      status,
+      status: status as AnnotationStatus | undefined,
       body: annBody,
-      reactions,
     });
 
     if (!updated) throw httpError("Annotation not found.", 404, "not_found");
@@ -984,7 +1013,23 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ── Query Audit Log (admin only) ───────────────────────────────────
 
   app.get("/api/codascope/audit/notes", wrap(async (req, res) => {
+    const actor = principal(req);
+    if (!actor.isAdmin) {
+      throw httpError("Administrator access is required to query note audit events.", 403, "forbidden");
+    }
     const { noteAuditSvc } = await ensureServices();
+
+    let limit: number | undefined;
+    if (req.query.limit !== undefined) {
+      const rawLimit = req.query.limit;
+      if (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit)) {
+        throw httpError("limit must be a positive integer.", 400, "invalid_input");
+      }
+      limit = Number(rawLimit);
+      if (limit < 1 || limit > MAX_AUDIT_RESULTS) {
+        throw httpError(`limit must be between 1 and ${MAX_AUDIT_RESULTS}.`, 400, "invalid_input");
+      }
+    }
 
     const filters = {
       noteId: (req.query.noteId as string) ?? undefined,
@@ -992,7 +1037,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       actor: (req.query.actor as string) ?? undefined,
       from: (req.query.from as string) ?? undefined,
       to: (req.query.to as string) ?? undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+      limit,
     };
 
     const events = noteAuditSvc.query(filters);
@@ -1681,4 +1726,10 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     if (!result.moved) throw httpError("Move failed. Source note not found.", 404, "not_found");
     res.json({ moved: true, noteIds: result.noteIds, correlationId: result.correlationId });
   }));
+}
+
+function isValidAnnotationStatusTransition(current: AnnotationStatus, next: AnnotationStatus): boolean {
+  if (current === next) return true;
+  if (current === "open") return next === "resolved" || next === "wontfix";
+  return next === "open";
 }

@@ -104,6 +104,11 @@ Each service file has one clear domain:
   authenticated principal. Do not accept an effective user ID from a client,
   prompt, or tool argument. Agent pool/tool closures must be actor-scoped
   before a private document path is returned.
+- Export records are short-lived and bound to their authenticated creator;
+  never treat an export ID as a reusable download credential.
+- Annotation mutations derive the actor server-side. Validate status
+  transitions and do not accept client-supplied reaction users or arbitrary
+  whole-reaction-array replacement.
 - Use `registerProjectDir(id, path)` pattern when the service needs to resolve project directories
 
 ### 6. Agent Prompt Templates
@@ -122,6 +127,21 @@ rename:   <path>.tmp.<random> → <path>
 ```
 Always follow this pattern when adding write operations to conversation files.
 
+Conversation custody is per user. Every new conversation receives its `ownerId`
+from the authenticated route principal; never accept an owner or effective-user
+identifier from the client. Service calls for list/read/update/delete/messages
+and chat images must receive that actor and return generic absence when the
+conversation is not theirs. Ownerless records are legacy data: ordinary users
+must not see or self-claim them. Only the administrator migration endpoints may
+list them and assign a target account after validating it through AIShell auth.
+Epic conversations follow the same rule and are per-user, not project-shared.
+
+Projects, epics, and notes marked `shared` use CodaScope's current global
+shared-content policy: every authenticated CodaScope user may access them.
+This is intentional and is not a project or epic membership/role ACL. Keep
+private note data and conversations actor-custodied; do not infer a future
+shared-conversation policy from the globally shared project content.
+
 ### 8. Agent Intelligence Model
 
 The chat agent is built on a **manifest + tool use** architecture:
@@ -138,6 +158,8 @@ When extending agent capabilities:
 - New tools go in `buildReadOnlyTools()`, `buildEpicTools()`, `buildWriteTools()`, or `buildArtifactTools()` in the `tools/` subdirectory under `server/services/tools/`
 - Artifact tools (`write_artifact_html`, `read_artifact_html`, `read_epic_context`) are in `buildArtifactTools()`
 - Tool safety: assistant/chat = ALL tools (read + write + epic + artifact). Wiki-build = read + write. Curation/research = read + epic. Artifact-build/regen = read + artifact.
+- Agent purposes are an allowlist. Unknown purposes must fail closed and never
+  inherit the assistant/chat tool set.
 - Update `do_chat.md` system prompt with new tool descriptions and behavioral guidance
 
 ---

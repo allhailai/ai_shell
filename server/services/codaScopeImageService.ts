@@ -12,6 +12,7 @@ import fs from "node:fs/promises";
 import { existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { CodaScopeChatService } from "./codaScopeChatService.js";
 
 /* ── Constants ───────────────────────────────────────────────────── */
 
@@ -27,13 +28,19 @@ const ACCEPTED_TYPES: Record<string, string> = {
 
 export class CodaScopeImageService {
   private root: string;
+  private chatService: CodaScopeChatService;
 
-  constructor(root: string) {
+  constructor(root: string, chatService: CodaScopeChatService) {
     this.root = root;
+    this.chatService = chatService;
   }
 
   setRoot(root: string): void {
     this.root = root;
+  }
+
+  setChatService(chatService: CodaScopeChatService): void {
+    this.chatService = chatService;
   }
 
   /* ── Path helpers ─────────────────────────────────────────────── */
@@ -60,6 +67,19 @@ export class CodaScopeImageService {
     return path.join(projectDir, "conversations", conversationId, "images");
   }
 
+  private isSafeFilename(filename: string): boolean {
+    return Boolean(filename)
+      && filename === path.basename(filename)
+      && filename !== "."
+      && filename !== "..";
+  }
+
+  private async hasConversationAccess(projectId: string, conversationId: string, actorId: string): Promise<boolean> {
+    if (!actorId.trim()) return false;
+    const conversation = await this.chatService.readConversation(projectId, conversationId, actorId);
+    return conversation !== null;
+  }
+
   /* ── Upload ────────────────────────────────────────────────────── */
 
   /**
@@ -69,12 +89,16 @@ export class CodaScopeImageService {
   async uploadImage(
     projectId: string,
     conversationId: string,
+    actorId: string,
     buffer: Buffer,
     mimeType: string,
     _originalName?: string,
   ): Promise<{ path: string; filename: string }> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
+    if (!await this.hasConversationAccess(projectId, conversationId, actorId)) {
+      throw new Error("Conversation not found");
+    }
 
     // Validate type
     const ext = ACCEPTED_TYPES[mimeType];
@@ -106,13 +130,16 @@ export class CodaScopeImageService {
   /**
    * Get the absolute path for a conversation image.
    */
-  getImagePath(
+  async getImagePath(
     projectId: string,
     conversationId: string,
     filename: string,
-  ): string | null {
+    actorId: string,
+  ): Promise<string | null> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return null;
+    if (!this.isSafeFilename(filename)) return null;
+    if (!await this.hasConversationAccess(projectId, conversationId, actorId)) return null;
 
     const filePath = path.join(this.imagesDir(projectDir, conversationId), filename);
     if (!existsSync(filePath)) return null;
@@ -128,9 +155,11 @@ export class CodaScopeImageService {
   async pruneConversationImages(
     projectId: string,
     conversationId: string,
+    actorId: string,
   ): Promise<void> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return;
+    if (!await this.hasConversationAccess(projectId, conversationId, actorId)) return;
 
     const imgDir = this.imagesDir(projectDir, conversationId);
     if (!existsSync(imgDir)) return;

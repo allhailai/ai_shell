@@ -60,6 +60,8 @@ interface ExportManifest {
 interface ExportRecord {
   exportId: string;
   zipPath: string;
+  /** The authenticated actor who created this short-lived export. */
+  ownerId: string;
   createdAt: number;
 }
 
@@ -195,6 +197,7 @@ export class CodaScopeNoteExportService {
     this.exports.set(exportId, {
       exportId,
       zipPath,
+      ownerId: userId,
       createdAt: Date.now(),
     });
 
@@ -215,9 +218,14 @@ export class CodaScopeNoteExportService {
 
   /* ── Download ─────────────────────────────────────────────────────── */
 
-  getExportFile(exportId: string): string | null {
+  /**
+   * Resolve a short-lived export only for the actor that created it.
+   * Export IDs are opaque implementation identifiers, not download tokens.
+   */
+  getExportFile(exportId: string, actorId: string): string | null {
     const record = this.exports.get(exportId);
     if (!record) return null;
+    if (record.ownerId !== actorId) return null;
     if (!existsSync(record.zipPath)) {
       this.exports.delete(exportId);
       return null;

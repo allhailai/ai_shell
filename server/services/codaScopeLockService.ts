@@ -129,14 +129,16 @@ export class CodaScopeLockService {
     return lock;
   }
 
-  /** Release an edit lock. */
-  async releaseLock(projectId: string, epicId: string, documentId: string): Promise<boolean> {
+  /** Release an edit lock only for its holder. */
+  async releaseLock(projectId: string, epicId: string, documentId: string, actorId: string): Promise<boolean> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
     const lockFile = this.readLocks(projectDir, epicId);
     const before = lockFile.locks.length;
-    lockFile.locks = lockFile.locks.filter((l) => l.documentId !== documentId);
+    lockFile.locks = lockFile.locks.filter((lock) =>
+      lock.documentId !== documentId || lock.lockedBy !== actorId,
+    );
     this.writeLocks(projectDir, epicId, lockFile);
     return lockFile.locks.length < before;
   }

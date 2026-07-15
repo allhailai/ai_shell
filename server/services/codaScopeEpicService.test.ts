@@ -615,7 +615,7 @@ describe("CodaScopeEpicService", () => {
       expect(status).toHaveLength(1);
 
       // Release
-      const released = await svc.releaseLock("proj-lock", epic.id, "definition");
+      const released = await svc.releaseLock("proj-lock", epic.id, "definition", "user");
       expect(released).toBe(true);
 
       // Status should be empty
@@ -638,6 +638,20 @@ describe("CodaScopeEpicService", () => {
       });
 
       expect("error" in denied).toBe(true);
+    });
+
+    it("does not let another user release a held lock", async () => {
+      scaffoldProject(root, "proj-lock-release");
+      const epic = await svc.createEpic("proj-lock-release", { title: "Release boundary" });
+      await svc.acquireLock("proj-lock-release", epic.id, {
+        documentId: "definition",
+        lockedBy: "user-a",
+      });
+
+      expect(await svc.releaseLock("proj-lock-release", epic.id, "definition", "user-b")).toBe(false);
+      expect(await svc.getLockStatus("proj-lock-release", epic.id)).toMatchObject([
+        { documentId: "definition", lockedBy: "user-a" },
+      ]);
     });
 
     it("heartbeat refreshes lock TTL", async () => {

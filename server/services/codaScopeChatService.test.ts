@@ -54,18 +54,19 @@ describe("CodaScopeChatService", () => {
   describe("createConversation", () => {
     it("creates a conversation with default title", async () => {
       scaffoldProject(root, "proj1");
-      const conv = await svc.createConversation("proj1");
+      const conv = await svc.createConversation("proj1", "alice");
 
       expect(conv.id).toMatch(/^conv_/);
       expect(conv.title).toBe("New conversation");
       expect(conv.projectId).toBe("proj1");
+      expect(conv.ownerId).toBe("alice");
       expect(conv.messages).toEqual([]);
-      expect(conv.version).toBe(1);
+      expect(conv.version).toBe(2);
     });
 
     it("creates a conversation with custom title and model", async () => {
       scaffoldProject(root, "proj2");
-      const conv = await svc.createConversation("proj2", {
+      const conv = await svc.createConversation("proj2", "alice", {
         title: "Auth Discussion",
         modelId: "gpt-4",
       });
@@ -76,7 +77,7 @@ describe("CodaScopeChatService", () => {
 
     it("creates an epic-scoped conversation", async () => {
       scaffoldProject(root, "proj3");
-      const conv = await svc.createConversation("proj3", {
+      const conv = await svc.createConversation("proj3", "alice", {
         title: "Epic: Auth Flow",
         epicId: "epic_abc",
       });
@@ -86,7 +87,7 @@ describe("CodaScopeChatService", () => {
 
     it("creates the conversation file on disk", async () => {
       const projDir = scaffoldProject(root, "proj4");
-      const conv = await svc.createConversation("proj4", { title: "Persistent" });
+      const conv = await svc.createConversation("proj4", "alice", { title: "Persistent" });
 
       // Check that conversation file exists
       const convDir = path.join(projDir, "conversations");
@@ -97,8 +98,8 @@ describe("CodaScopeChatService", () => {
 
     it("updates the index", async () => {
       const projDir = scaffoldProject(root, "proj5");
-      await svc.createConversation("proj5", { title: "Conv A" });
-      await svc.createConversation("proj5", { title: "Conv B" });
+      await svc.createConversation("proj5", "alice", { title: "Conv A" });
+      await svc.createConversation("proj5", "alice", { title: "Conv B" });
 
       const indexPath = path.join(projDir, "conversations", "conversations.json");
       expect(existsSync(indexPath)).toBe(true);
@@ -108,7 +109,7 @@ describe("CodaScopeChatService", () => {
 
     it("throws when project not found", async () => {
       await expect(
-        svc.createConversation("nonexistent"),
+        svc.createConversation("nonexistent", "alice"),
       ).rejects.toThrow("Project not found");
     });
   });
@@ -118,9 +119,9 @@ describe("CodaScopeChatService", () => {
   describe("readConversation", () => {
     it("reads a created conversation with full messages", async () => {
       scaffoldProject(root, "proj-read");
-      const created = await svc.createConversation("proj-read", { title: "Readable" });
+      const created = await svc.createConversation("proj-read", "alice", { title: "Readable" });
 
-      const read = await svc.readConversation("proj-read", created.id);
+      const read = await svc.readConversation("proj-read", created.id, "alice");
       expect(read).not.toBeNull();
       expect(read!.id).toBe(created.id);
       expect(read!.title).toBe("Readable");
@@ -128,12 +129,12 @@ describe("CodaScopeChatService", () => {
 
     it("returns null for nonexistent conversation", async () => {
       scaffoldProject(root, "proj-read2");
-      const result = await svc.readConversation("proj-read2", "nonexistent");
+      const result = await svc.readConversation("proj-read2", "nonexistent", "alice");
       expect(result).toBeNull();
     });
 
     it("returns null for nonexistent project", async () => {
-      const result = await svc.readConversation("nonexistent", "conv1");
+      const result = await svc.readConversation("nonexistent", "conv1", "alice");
       expect(result).toBeNull();
     });
   });
@@ -143,11 +144,11 @@ describe("CodaScopeChatService", () => {
   describe("listConversations", () => {
     it("lists all conversations sorted by updatedAt desc", async () => {
       scaffoldProject(root, "proj-list");
-      const a = await svc.createConversation("proj-list", { title: "First" });
+      const a = await svc.createConversation("proj-list", "alice", { title: "First" });
       await new Promise((r) => setTimeout(r, 10));
-      const b = await svc.createConversation("proj-list", { title: "Second" });
+      const b = await svc.createConversation("proj-list", "alice", { title: "Second" });
 
-      const list = await svc.listConversations("proj-list");
+      const list = await svc.listConversations("proj-list", "alice");
       expect(list).toHaveLength(2);
       // Second created should be first (more recent)
       expect(list[0].title).toBe("Second");
@@ -156,13 +157,102 @@ describe("CodaScopeChatService", () => {
 
     it("returns empty array for project with no conversations", async () => {
       scaffoldProject(root, "proj-empty");
-      const list = await svc.listConversations("proj-empty");
+      const list = await svc.listConversations("proj-empty", "alice");
       expect(list).toEqual([]);
     });
 
     it("returns empty array for nonexistent project", async () => {
-      const list = await svc.listConversations("nonexistent");
+      const list = await svc.listConversations("nonexistent", "alice");
       expect(list).toEqual([]);
+    });
+  });
+
+  // ── Owner custody ─────────────────────────────────────────────
+
+  describe("owner custody", () => {
+    it("does not let a second user list, read, update, append, overwrite, or delete another user's conversation", async () => {
+      scaffoldProject(root, "proj-owner");
+      const aliceConversation = await svc.createConversation("proj-owner", "alice", { title: "Alice private" });
+      const bobConversation = await svc.createConversation("proj-owner", "bob", { title: "Bob private" });
+
+      expect((await svc.listConversations("proj-owner", "alice")).map((conversation) => conversation.id))
+        .toEqual([aliceConversation.id]);
+      expect((await svc.listConversations("proj-owner", "bob")).map((conversation) => conversation.id))
+        .toEqual([bobConversation.id]);
+      expect(await svc.readConversation("proj-owner", aliceConversation.id, "bob")).toBeNull();
+      expect(await svc.updateConversation("proj-owner", aliceConversation.id, "bob", { title: "Forged" })).toBeNull();
+      expect(await svc.appendMessage("proj-owner", aliceConversation.id, "bob", {
+        role: "user",
+        content: "Forged message",
+      })).toBeNull();
+      expect(await svc.writeConversation("proj-owner", "bob", {
+        ...aliceConversation,
+        title: "Forged overwrite",
+      })).toBeNull();
+      expect(await svc.deleteConversation("proj-owner", aliceConversation.id, "bob")).toBe(false);
+
+      const unchanged = await svc.readConversation("proj-owner", aliceConversation.id, "alice");
+      expect(unchanged).toMatchObject({ title: "Alice private", messages: [] });
+    });
+
+    it("keeps dedicated epic conversations per user", async () => {
+      scaffoldProject(root, "proj-owner-epic");
+      const alice = await svc.getOrCreateEpicConversation("proj-owner-epic", "epic_auth", "Auth", "alice");
+      const bob = await svc.getOrCreateEpicConversation("proj-owner-epic", "epic_auth", "Auth", "bob");
+
+      expect(alice.id).not.toBe(bob.id);
+      expect(await svc.readConversation("proj-owner-epic", alice.id, "bob")).toBeNull();
+    });
+
+    it("hides ownerless legacy conversations until an administrator migration assigns a validated owner", async () => {
+      const projectDir = scaffoldProject(root, "proj-legacy");
+      const conversationDir = path.join(projectDir, "conversations");
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      mkdirSync(conversationDir, { recursive: true });
+      writeFileSync(path.join(conversationDir, "legacy.json"), JSON.stringify({
+        version: 1,
+        id: "conv_legacy",
+        projectId: "proj-legacy",
+        title: "Legacy private title",
+        summary: "Legacy private summary",
+        createdAt,
+        updatedAt: createdAt,
+        defaultModelId: null,
+        messages: [{
+          id: "msg_legacy",
+          role: "user",
+          content: "Legacy private content",
+          createdAt,
+          modelId: null,
+          status: "complete",
+        }],
+      }), "utf-8");
+      writeFileSync(path.join(conversationDir, "conversations.json"), JSON.stringify({
+        version: 1,
+        conversations: [{
+          id: "conv_legacy",
+          file: "conversations/legacy.json",
+          title: "Legacy private title",
+          summary: "Legacy private summary",
+          modelId: null,
+          createdAt,
+          updatedAt: createdAt,
+          messageCount: 1,
+        }],
+      }), "utf-8");
+
+      expect(await svc.listConversations("proj-legacy", "alice")).toEqual([]);
+      expect(await svc.readConversation("proj-legacy", "conv_legacy", "alice")).toBeNull();
+      expect(await svc.listLegacyConversations("proj-legacy")).toMatchObject([
+        { id: "conv_legacy", title: "Legacy private title" },
+      ]);
+
+      const migrated = await svc.assignLegacyConversationOwner("proj-legacy", "conv_legacy", "bob");
+      expect(migrated?.ownerId).toBe("bob");
+      expect(await svc.listLegacyConversations("proj-legacy")).toEqual([]);
+      expect(await svc.readConversation("proj-legacy", "conv_legacy", "alice")).toBeNull();
+      expect((await svc.readConversation("proj-legacy", "conv_legacy", "bob"))?.messages[0]?.content)
+        .toBe("Legacy private content");
     });
   });
 
@@ -171,9 +261,9 @@ describe("CodaScopeChatService", () => {
   describe("updateConversation", () => {
     it("updates title and summary", async () => {
       scaffoldProject(root, "proj-upd");
-      const conv = await svc.createConversation("proj-upd", { title: "Old" });
+      const conv = await svc.createConversation("proj-upd", "alice", { title: "Old" });
 
-      const updated = await svc.updateConversation("proj-upd", conv.id, {
+      const updated = await svc.updateConversation("proj-upd", conv.id, "alice", {
         title: "New Title",
         summary: "A brief summary.",
       });
@@ -185,16 +275,16 @@ describe("CodaScopeChatService", () => {
 
     it("returns null for nonexistent conversation", async () => {
       scaffoldProject(root, "proj-upd2");
-      const result = await svc.updateConversation("proj-upd2", "nonexistent", { title: "X" });
+      const result = await svc.updateConversation("proj-upd2", "nonexistent", "alice", { title: "X" });
       expect(result).toBeNull();
     });
 
     it("syncs index after update", async () => {
       scaffoldProject(root, "proj-upd3");
-      const conv = await svc.createConversation("proj-upd3", { title: "Before" });
-      await svc.updateConversation("proj-upd3", conv.id, { title: "After" });
+      const conv = await svc.createConversation("proj-upd3", "alice", { title: "Before" });
+      await svc.updateConversation("proj-upd3", conv.id, "alice", { title: "After" });
 
-      const list = await svc.listConversations("proj-upd3");
+      const list = await svc.listConversations("proj-upd3", "alice");
       expect(list[0].title).toBe("After");
     });
   });
@@ -204,26 +294,26 @@ describe("CodaScopeChatService", () => {
   describe("deleteConversation", () => {
     it("deletes a conversation and removes from index", async () => {
       scaffoldProject(root, "proj-del");
-      const conv = await svc.createConversation("proj-del", { title: "Deletable" });
+      const conv = await svc.createConversation("proj-del", "alice", { title: "Deletable" });
 
-      const result = await svc.deleteConversation("proj-del", conv.id);
+      const result = await svc.deleteConversation("proj-del", conv.id, "alice");
       expect(result).toBe(true);
 
-      const list = await svc.listConversations("proj-del");
+      const list = await svc.listConversations("proj-del", "alice");
       expect(list).toHaveLength(0);
     });
 
     it("returns false for nonexistent conversation", async () => {
       scaffoldProject(root, "proj-del2");
-      const result = await svc.deleteConversation("proj-del2", "nonexistent");
+      const result = await svc.deleteConversation("proj-del2", "nonexistent", "alice");
       expect(result).toBe(false);
     });
 
     it("deletes the conversation file from disk", async () => {
       const projDir = scaffoldProject(root, "proj-del3");
-      const conv = await svc.createConversation("proj-del3", { title: "File Delete" });
+      const conv = await svc.createConversation("proj-del3", "alice", { title: "File Delete" });
 
-      await svc.deleteConversation("proj-del3", conv.id);
+      await svc.deleteConversation("proj-del3", conv.id, "alice");
 
       // Conversation file should be gone
       const convDir = path.join(projDir, "conversations");
@@ -237,9 +327,9 @@ describe("CodaScopeChatService", () => {
   describe("appendMessage", () => {
     it("appends a user message", async () => {
       scaffoldProject(root, "proj-msg");
-      const conv = await svc.createConversation("proj-msg");
+      const conv = await svc.createConversation("proj-msg", "alice");
 
-      const updated = await svc.appendMessage("proj-msg", conv.id, {
+      const updated = await svc.appendMessage("proj-msg", conv.id, "alice", {
         role: "user",
         content: "How does auth work?",
       });
@@ -253,10 +343,10 @@ describe("CodaScopeChatService", () => {
 
     it("auto-titles from first user message", async () => {
       scaffoldProject(root, "proj-autotitle");
-      const conv = await svc.createConversation("proj-autotitle");
+      const conv = await svc.createConversation("proj-autotitle", "alice");
       expect(conv.title).toBe("New conversation");
 
-      const updated = await svc.appendMessage("proj-autotitle", conv.id, {
+      const updated = await svc.appendMessage("proj-autotitle", conv.id, "alice", {
         role: "user",
         content: "Explain the authentication flow in detail",
       });
@@ -266,15 +356,15 @@ describe("CodaScopeChatService", () => {
 
     it("does not re-title on subsequent user messages", async () => {
       scaffoldProject(root, "proj-notitle");
-      const conv = await svc.createConversation("proj-notitle");
+      const conv = await svc.createConversation("proj-notitle", "alice");
 
-      const after1 = await svc.appendMessage("proj-notitle", conv.id, {
+      const after1 = await svc.appendMessage("proj-notitle", conv.id, "alice", {
         role: "user",
         content: "First question",
       });
       expect(after1!.title).toBe("First question");
 
-      const after2 = await svc.appendMessage("proj-notitle", conv.id, {
+      const after2 = await svc.appendMessage("proj-notitle", conv.id, "alice", {
         role: "user",
         content: "Second question which is different",
       });
@@ -283,14 +373,14 @@ describe("CodaScopeChatService", () => {
 
     it("auto-summarizes from first assistant response", async () => {
       scaffoldProject(root, "proj-autosum");
-      const conv = await svc.createConversation("proj-autosum");
+      const conv = await svc.createConversation("proj-autosum", "alice");
 
-      await svc.appendMessage("proj-autosum", conv.id, {
+      await svc.appendMessage("proj-autosum", conv.id, "alice", {
         role: "user",
         content: "Question",
       });
 
-      const updated = await svc.appendMessage("proj-autosum", conv.id, {
+      const updated = await svc.appendMessage("proj-autosum", conv.id, "alice", {
         role: "assistant",
         content: "The auth flow uses **JWT tokens** with refresh capability and session management.",
         modelId: "claude-3",
@@ -302,9 +392,9 @@ describe("CodaScopeChatService", () => {
 
     it("message gets normalized with defaults", async () => {
       scaffoldProject(root, "proj-norm");
-      const conv = await svc.createConversation("proj-norm");
+      const conv = await svc.createConversation("proj-norm", "alice");
 
-      const updated = await svc.appendMessage("proj-norm", conv.id, {
+      const updated = await svc.appendMessage("proj-norm", conv.id, "alice", {
         content: "Minimal message",
       });
 
@@ -317,7 +407,7 @@ describe("CodaScopeChatService", () => {
 
     it("returns null for nonexistent conversation", async () => {
       scaffoldProject(root, "proj-msg2");
-      const result = await svc.appendMessage("proj-msg2", "nonexistent", {
+      const result = await svc.appendMessage("proj-msg2", "nonexistent", "alice", {
         role: "user",
         content: "Hi",
       });
@@ -330,11 +420,11 @@ describe("CodaScopeChatService", () => {
   describe("stale streaming detection", () => {
     it("marks stale streaming messages as error", async () => {
       scaffoldProject(root, "proj-stale");
-      const conv = await svc.createConversation("proj-stale");
+      const conv = await svc.createConversation("proj-stale", "alice");
 
       // Append a message that appears to be streaming from >10 min ago
       const staleTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
-      const updated = await svc.appendMessage("proj-stale", conv.id, {
+      const updated = await svc.appendMessage("proj-stale", conv.id, "alice", {
         role: "assistant",
         content: "Partial response...",
         status: "streaming",
@@ -349,9 +439,9 @@ describe("CodaScopeChatService", () => {
 
     it("preserves recent streaming messages", async () => {
       scaffoldProject(root, "proj-fresh");
-      const conv = await svc.createConversation("proj-fresh");
+      const conv = await svc.createConversation("proj-fresh", "alice");
 
-      const updated = await svc.appendMessage("proj-fresh", conv.id, {
+      const updated = await svc.appendMessage("proj-fresh", conv.id, "alice", {
         role: "assistant",
         content: "Currently streaming...",
         status: "streaming",
@@ -365,16 +455,16 @@ describe("CodaScopeChatService", () => {
 
     it("detects stale messages on read", async () => {
       const projDir = scaffoldProject(root, "proj-stale-read");
-      const conv = await svc.createConversation("proj-stale-read");
+      const conv = await svc.createConversation("proj-stale-read", "alice");
 
       // Append a normal message first
-      await svc.appendMessage("proj-stale-read", conv.id, {
+      await svc.appendMessage("proj-stale-read", conv.id, "alice", {
         role: "user",
         content: "Question",
       });
 
       // Manually write a stale streaming message to the file
-      const read = await svc.readConversation("proj-stale-read", conv.id);
+      const read = await svc.readConversation("proj-stale-read", conv.id, "alice");
       expect(read).not.toBeNull();
 
       // Write a stale message
@@ -397,10 +487,10 @@ describe("CodaScopeChatService", () => {
         ],
       };
 
-      await svc.writeConversation("proj-stale-read", next);
+      await svc.writeConversation("proj-stale-read", "alice", next);
 
       // Re-read — stale detection should fire during normalization
-      const reread = await svc.readConversation("proj-stale-read", conv.id);
+      const reread = await svc.readConversation("proj-stale-read", conv.id, "alice");
       const staleMsg = reread!.messages.find((m) => m.id === "msg_stale_test");
       expect(staleMsg).toBeDefined();
       expect(staleMsg!.status).toBe("error");
@@ -412,7 +502,7 @@ describe("CodaScopeChatService", () => {
   describe("writeConversation", () => {
     it("writes a full conversation atomically", async () => {
       scaffoldProject(root, "proj-write");
-      const conv = await svc.createConversation("proj-write");
+      const conv = await svc.createConversation("proj-write", "alice");
 
       const updated = {
         ...conv,
@@ -431,14 +521,14 @@ describe("CodaScopeChatService", () => {
         ],
       };
 
-      const result = await svc.writeConversation("proj-write", updated);
+      const result = await svc.writeConversation("proj-write", "alice", updated);
       expect(result).not.toBeNull();
       expect(result!.messages).toHaveLength(1);
     });
 
     it("returns null for nonexistent conversation", async () => {
       scaffoldProject(root, "proj-write2");
-      const result = await svc.writeConversation("proj-write2", {
+      const result = await svc.writeConversation("proj-write2", "alice", {
         version: 1,
         id: "nonexistent",
         projectId: "proj-write2",
@@ -454,9 +544,9 @@ describe("CodaScopeChatService", () => {
 
     it("leaves no temp files on successful write", async () => {
       const projDir = scaffoldProject(root, "proj-clean");
-      const conv = await svc.createConversation("proj-clean");
+      const conv = await svc.createConversation("proj-clean", "alice");
 
-      await svc.writeConversation("proj-clean", {
+      await svc.writeConversation("proj-clean", "alice", {
         ...conv,
         title: "Updated",
       });
@@ -472,21 +562,21 @@ describe("CodaScopeChatService", () => {
   describe("epic conversations", () => {
     it("getConversationForEpic returns null when none exists", async () => {
       scaffoldProject(root, "proj-epic");
-      const result = await svc.getConversationForEpic("proj-epic", "epic_123");
+      const result = await svc.getConversationForEpic("proj-epic", "epic_123", "alice");
       expect(result).toBeNull();
     });
 
     it("getOrCreateEpicConversation creates on first call", async () => {
       scaffoldProject(root, "proj-epic2");
-      const conv = await svc.getOrCreateEpicConversation("proj-epic2", "epic_abc", "Auth Flow");
+      const conv = await svc.getOrCreateEpicConversation("proj-epic2", "epic_abc", "Auth Flow", "alice");
       expect(conv.epicId).toBe("epic_abc");
       expect(conv.title).toBe("Epic: Auth Flow");
     });
 
     it("getOrCreateEpicConversation returns existing on second call", async () => {
       scaffoldProject(root, "proj-epic3");
-      const first = await svc.getOrCreateEpicConversation("proj-epic3", "epic_def", "Payment");
-      const second = await svc.getOrCreateEpicConversation("proj-epic3", "epic_def", "Payment");
+      const first = await svc.getOrCreateEpicConversation("proj-epic3", "epic_def", "Payment", "alice");
+      const second = await svc.getOrCreateEpicConversation("proj-epic3", "epic_def", "Payment", "alice");
       expect(second.id).toBe(first.id);
     });
   });
@@ -496,11 +586,11 @@ describe("CodaScopeChatService", () => {
   describe("mutation queue", () => {
     it("serializes concurrent writes to the same project", async () => {
       scaffoldProject(root, "proj-queue");
-      const conv = await svc.createConversation("proj-queue", { title: "Queue Test" });
+      const conv = await svc.createConversation("proj-queue", "alice", { title: "Queue Test" });
 
       // Fire 5 concurrent appends
       const promises = Array.from({ length: 5 }, (_, i) =>
-        svc.appendMessage("proj-queue", conv.id, {
+        svc.appendMessage("proj-queue", conv.id, "alice", {
           role: "user",
           content: `Message ${i}`,
         }),
@@ -514,7 +604,7 @@ describe("CodaScopeChatService", () => {
       }
 
       // Final conversation should have all messages
-      const final = await svc.readConversation("proj-queue", conv.id);
+      const final = await svc.readConversation("proj-queue", conv.id, "alice");
       expect(final!.messages).toHaveLength(5);
     });
 
@@ -522,12 +612,12 @@ describe("CodaScopeChatService", () => {
       scaffoldProject(root, "proj-q1");
       scaffoldProject(root, "proj-q2");
 
-      const conv1 = await svc.createConversation("proj-q1");
-      const conv2 = await svc.createConversation("proj-q2");
+      const conv1 = await svc.createConversation("proj-q1", "alice");
+      const conv2 = await svc.createConversation("proj-q2", "alice");
 
       const [r1, r2] = await Promise.all([
-        svc.appendMessage("proj-q1", conv1.id, { role: "user", content: "A" }),
-        svc.appendMessage("proj-q2", conv2.id, { role: "user", content: "B" }),
+        svc.appendMessage("proj-q1", conv1.id, "alice", { role: "user", content: "A" }),
+        svc.appendMessage("proj-q2", conv2.id, "alice", { role: "user", content: "B" }),
       ]);
 
       expect(r1).not.toBeNull();
@@ -543,10 +633,10 @@ describe("CodaScopeChatService", () => {
 
       // Create 102 conversations
       for (let i = 0; i < 102; i++) {
-        await svc.createConversation("proj-cap", { title: `Conv ${i}` });
+        await svc.createConversation("proj-cap", "alice", { title: `Conv ${i}` });
       }
 
-      const list = await svc.listConversations("proj-cap");
+      const list = await svc.listConversations("proj-cap", "alice");
       expect(list.length).toBeLessThanOrEqual(100);
     });
 
@@ -563,7 +653,7 @@ describe("CodaScopeChatService", () => {
       );
 
       // Should return empty list, not crash
-      const list = await svc.listConversations("proj-corrupt");
+      const list = await svc.listConversations("proj-corrupt", "alice");
       expect(list).toEqual([]);
     });
 
@@ -585,10 +675,10 @@ describe("CodaScopeChatService", () => {
         "utf-8",
       );
 
-      const list = await svc.listConversations("proj-malformed");
-      // Only the valid record should survive normalization
-      expect(list).toHaveLength(1);
-      expect(list[0].id).toBe("conv_abc");
+      const list = await svc.listConversations("proj-malformed", "alice");
+      // The syntactically valid record is ownerless, so ordinary users must
+      // not receive its title or infer its existence.
+      expect(list).toEqual([]);
     });
   });
 });

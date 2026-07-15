@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useShellStore } from "../../../shell/store";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
+import { useAuth } from "../../../shell/authContext";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { IconBlocked, IconChat, IconDownload, IconRefresh, IconRewrite, IconSparkle, IconWarning } from "../components/CodaScopeIcons";
 import type { EpicDesignDetail, EditLock } from "../codaScopeTypes";
@@ -61,6 +62,7 @@ What does success look like?
 
 export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { user } = useAuth();
   const { getParam } = useAppSubRoute("codascope");
   const isNewEpic = getParam("new") === "1";
   const [editing, setEditing] = useState(false);
@@ -147,7 +149,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ documentId: "definition", lockedBy: "user" }),
+          body: JSON.stringify({ documentId: "definition" }),
         },
       );
       if (res.ok) {
@@ -322,7 +324,7 @@ export function EpicDefine({ epic, setEpic }: EpicDefineProps) {
 
   // ── View mode with rendered markdown ──────────────────────────────────
 
-  const isLockedByOther = lockInfo && lockInfo.lockedBy !== "user";
+  const isLockedByOther = lockInfo && lockInfo.lockedBy !== user?.username;
 
   return (
     <div className="codascope-epic-define-viewer">

@@ -262,9 +262,9 @@ describe("getToolsForPurpose", () => {
     expect(keys).not.toContain("create_design_doc");
   });
 
-  it("unknown purpose falls through to ALL tools (same as assistant)", () => {
-    const tools = getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "unknown-purpose");
-    expect(Object.keys(tools).length).toBe(allCount);
+  it("rejects an unknown purpose instead of granting the full tool set", () => {
+    expect(() => getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "unknown-purpose"))
+      .toThrow("Unknown CodaScope agent purpose");
   });
 
   it("tool count sanity check — each tier is meaningful", () => {

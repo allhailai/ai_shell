@@ -2,11 +2,11 @@
    Manages Cursor SDK agent lifecycle for CodaScope.
 
    Key features:
-   - Agent pool: one agent per (projectId, purpose) with idle cleanup
+   - Agent pool: one agent per (projectId, purpose, authenticated actor) with idle cleanup
    - Custom tools: purpose-based filtering (read-only vs read+write)
    - Streaming: emits SDKMessage objects via callback for SSE
    - Model listing: cached Cursor.models.list() results
-   - Cancel support: AbortController registry per project
+   - Cancel support: AbortController registry per project and authenticated actor
    ──────────────────────────────────────────────────────────────────── */
 
 import { Agent, Cursor } from "@cursor/sdk";

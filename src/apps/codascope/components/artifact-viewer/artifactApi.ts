@@ -51,7 +51,6 @@ export async function createArtifact(
   epicId: string,
   spec: {
     title: string;
-    createdBy?: string;
   },
 ): Promise<ArtifactSpec> {
   const data = await request<{ artifact: ArtifactSpec }>(

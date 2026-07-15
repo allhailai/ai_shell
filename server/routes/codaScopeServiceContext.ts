@@ -6,7 +6,7 @@
 import type { Express, Request, Response, NextFunction, RequestHandler } from "express";
 import path from "node:path";
 import type { SecretService } from "../services/secretService.js";
-import type { User } from "../services/authService.js";
+import type { AuthStrategy, User } from "../services/authService.js";
 import { CodaScopeProjectService } from "../services/codaScopeProjectService.js";
 import { CodaScopeWikiService } from "../services/codaScopeWikiService.js";
 import { CodaScopeChatService } from "../services/codaScopeChatService.js";
@@ -57,6 +57,8 @@ export interface CodaScopePrincipal {
 
 export interface CodaScopeRoutesDeps {
   secretService: SecretService;
+  /** Used only by the admin legacy-conversation migration to validate a target account. */
+  authService: Pick<AuthStrategy, "getUser">;
   authMiddleware: Record<string, unknown>;
   httpError: HttpErrorFn;
   /** AIShell's checkout. Mutable CodaScope project data must not be stored below it. */
@@ -105,6 +107,7 @@ export interface CodaScopeServices {
 export interface CodaScopeRouteContext {
   app: Express;
   secretService: SecretService;
+  authService: Pick<AuthStrategy, "getUser">;
   httpError: HttpErrorFn;
   repoRoot: string;
   ensureServices: () => Promise<CodaScopeServices>;
@@ -278,8 +281,8 @@ async function ensureServicesImpl(secretService: SecretService, httpError: HttpE
 
   if (!contentService) contentService = new CodaScopeContentService();
 
-  if (!imageService) imageService = new CodaScopeImageService(root);
-  else imageService.setRoot(root);
+  if (!imageService) imageService = new CodaScopeImageService(root, chatService);
+  else { imageService.setRoot(root); imageService.setChatService(chatService); }
 
   if (!artifactService) artifactService = new CodaScopeArtifactService(root);
   else artifactService.setRoot(root);
@@ -393,7 +396,7 @@ export function getAgentServiceSingleton(): CodaScopeAgentService | null {
 
 /** Build a CodaScopeRouteContext from the raw deps — called once in the hub. */
 export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): CodaScopeRouteContext {
-  const { secretService, httpError, repoRoot } = deps;
+  const { secretService, authService, httpError, repoRoot } = deps;
 
   const wrap = (fn: (req: Request, res: Response) => Promise<void>): RequestHandler => {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -404,6 +407,7 @@ export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): Cod
   return {
     app,
     secretService,
+    authService,
     httpError,
     repoRoot,
     ensureServices: () => ensureServicesImpl(secretService, httpError, repoRoot),

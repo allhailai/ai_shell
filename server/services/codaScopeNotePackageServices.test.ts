@@ -71,7 +71,8 @@ describe("CodaScope note packages", () => {
       notePaths: ["research"],
       includeVersions: true,
     });
-    const archivePath = exportSvc.getExportFile(exportId)!;
+    const archivePath = exportSvc.getExportFile(exportId, opts.userId)!;
+    expect(exportSvc.getExportFile(exportId, "another-user")).toBeNull();
 
     const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, bundleSvc);
     const report = await importSvc.executeImport(
@@ -166,7 +167,7 @@ describe("CodaScope note packages", () => {
       notePaths: ["published"],
       includeVersions: true,
     });
-    const archive = readFileSync(exportSvc.getExportFile(exportId)!);
+    const archive = readFileSync(exportSvc.getExportFile(exportId, opts.userId)!);
     const importSvc = new CodaScopeNoteImportService(root, noteSvc, auditSvc, bundleSvc);
     expect(await importSvc.executeImport(archive, "codascope", "shared", opts, "skip"))
       .toMatchObject({ imported: 1, skipped: 0, failed: [] });

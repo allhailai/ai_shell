@@ -210,10 +210,9 @@ server/
 /codascope/project/:id/settings  → Settings
 /codascope/project/:id/epics     → EpicList
 /codascope/project/:id/epic/:eid → EpicDetail (with tab sub-routing)
-/codascope/notes/personal/<path> → NotesRouter (personal notes)
-/codascope/notes/public/<path>   → NotesRouter (public notes)
-/codascope/project/:id/notes/<path> → NotesRouter (project notes)
-/codascope/project/:id/epic/:eid/notes/<path> → NotesRouter (epic notes)
+/codascope/notes/:visibility/<path> → NotesRouter (CodaScope shared or private notes)
+/codascope/project/:id/notes/:visibility/<path> → NotesRouter (project shared or private notes)
+/codascope/project/:id/epic/:eid/notes/shared/<path> → NotesRouter (epic shared notes)
 ```
 
 Chat is **not** a routed view — it lives in `CodaScopeAssistant.tsx` as a persistent right panel visible across all project views.
@@ -251,11 +250,25 @@ parent note and are attachment-only with `X-Content-Type-Options: nosniff`.
 files and per-user document-star references follow through that pipeline with
 the rest of the bundle.
 
+Generated note exports are ephemeral and downloadable only by the authenticated
+actor that created them. Note-audit queries are administrator-only and have a
+server-enforced result limit; export IDs are not reusable download credentials.
+
 Priority has two deliberately separate models: a star is a private per-user
 shortcut in `_user-prefs`, while a pin is shared durable metadata (note
 frontmatter or document manifest) with an audit event. Active lists sort
 shared pins first, then the current user's stars, then their stable normal
 order. Client note saves cannot author the server-owned pin fields.
+
+### Current Content-Access Policy
+
+Projects, epics, and notes with `shared` visibility are globally shared: every
+authenticated CodaScope user may access them. CodaScope deliberately has no
+per-project or per-epic membership/role ACL at present. This does not extend to
+per-user data: private notes, user preferences, exports, and conversations
+retain their respective actor-custody rules. A future shared-conversation or
+role-based content feature must define its own authorization policy rather than
+inferring one from the current global shared-content model.
 
 ### Agent Pipeline
 
@@ -314,6 +327,9 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 **Server**: `codaScopeChatService.ts` provides full conversation CRUD with:
 - Atomic writes (temp → rename) for crash-safety
 - Per-project mutation queue to serialize concurrent writes
+- Actor-scoped custody: every new conversation persists the authenticated
+  principal as `ownerId`; normal service methods require that actor and treat
+  another user's or ownerless record as absent
 - Auto-titling from first user message (truncated to 72 chars)
 - Auto-summary after AI responses (240 chars max)
 - Stale streaming detection (marks stuck conversations as complete after 10 minutes)
@@ -322,8 +338,16 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 ```
 <projectDir>/conversations/
 ├── conversations.json                    # Index (up to 100 conversations)
-└── 2026_06_30_conv_<uuid>.json           # Individual conversation files
+└── 2026_06_30_conv_<uuid>.json           # Individual files, each with ownerId
 ```
+
+New conversation owners always come from `principal(req).username`; client
+payloads never choose an owner. Images use the same service-level conversation
+check before upload, read, or cleanup, so an agent run cannot load another
+user's attachment or history. Existing ownerless records fail closed for normal
+users. Administrators can use the migration endpoints below to list and assign
+those records to an existing AIShell account; assignment is the only supported
+legacy-ownership transition.
 
 **Client**: `CodaScopeAssistant.tsx` manages:
 - `ConversationHeader` — title bar with dropdown history popover, search, and new-conversation button
@@ -342,6 +366,8 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 | `POST` | `/api/codascope/projects/:id/conversations/:convId/messages` | Append message |
 | `PATCH` | `/api/codascope/projects/:id/conversations/:convId` | Update title/metadata |
 | `DELETE` | `/api/codascope/projects/:id/conversations/:convId` | Delete conversation |
+| `GET` | `/api/codascope/projects/:id/conversations/legacy` | Admin-only list of ownerless legacy conversations |
+| `PATCH` | `/api/codascope/projects/:id/conversations/:convId/owner` | Admin-only legacy assignment (`targetUsername`) |
 
 ---
 
@@ -372,6 +398,11 @@ Purpose-based filtering:
 - **Wiki-build** → read-only + note read + write tools
 - **Curation/research** → read-only + note read + epic tools
 - **Artifact-build/regen** → read-only + note read + artifact tools
+
+The purpose is an allowlist boundary: unknown values fail closed rather than
+receiving the assistant's full tool set. User-facing agent pools and note-tool
+closures are also actor-scoped so a private note or document path cannot cross
+users through an agent reuse.
 
 The table below is a representative subset of read-only tools:
 
@@ -720,12 +751,17 @@ Design documents can be rendered as static HTML for presentation/sharing:
 
 ### Architecture
 
-Each epic gets a dedicated conversation for design discussions:
+Each user gets a dedicated conversation per epic for design discussions. Epic
+metadata does not authorize or select a project-shared conversation:
 
-- **Server**: `CodaScopeChatService.getOrCreateEpicConversation()` creates/retrieves a conversation tagged with `epicId`
-- **Indexing**: Conversations with `epicId` are stored in the standard conversations index but scoped by epic
-- **Client auto-switch**: `CodaScopeAssistant.tsx` detects epic navigation and auto-switches to the epic's conversation
+- **Server**: `CodaScopeChatService.getOrCreateEpicConversation()` scopes lookup and creation by `epicId` **and** authenticated owner
+- **Indexing**: Conversations with `epicId` remain in the standard index with the same `ownerId` custody boundary as all chats
+- **Client auto-switch**: `CodaScopeAssistant.tsx` detects epic navigation and auto-switches to the current user's epic conversation
 - **Context banner**: A "Scoped to {Epic Title}" banner appears below the context badge
+
+Historical `epic.conversationId` values are compatibility metadata only. They
+neither authorize access nor select a conversation; epic lookup uses the
+authenticated owner and `epicId` instead.
 
 ### API Endpoint
 

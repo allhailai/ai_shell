@@ -473,9 +473,9 @@ export class CodaScopeEpicService {
     return this.lockService.acquireLock(projectId, epicId, opts);
   }
 
-  /** Release an edit lock. */
-  async releaseLock(projectId: string, epicId: string, documentId: string): Promise<boolean> {
-    return this.lockService.releaseLock(projectId, epicId, documentId);
+  /** Release an edit lock only for its holder. */
+  async releaseLock(projectId: string, epicId: string, documentId: string, actorId: string): Promise<boolean> {
+    return this.lockService.releaseLock(projectId, epicId, documentId, actorId);
   }
 
   /** Check current lock status for a document. */

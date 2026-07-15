@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 
 // ── Constants ───────────────────────────────────────────────────────
 
-const CONVERSATION_VERSION = 1;
+const CONVERSATION_VERSION = 2;
 const CONVERSATION_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const MAX_TITLE_LENGTH = 72;
 const MAX_SUMMARY_LENGTH = 240;
@@ -97,6 +97,8 @@ export interface Conversation {
   version: number;
   id: string;
   projectId: string;
+  /** Server-derived owner. Undefined only for legacy records awaiting admin migration. */
+  ownerId?: string;
   title: string;
   summary: string;
   createdAt: string;
@@ -118,9 +120,14 @@ export interface ConversationSummary {
   epicId?: string;                 // if set, this is a dedicated epic conversation
 }
 
+/** Persisted index record. Owner data is used only for service authorization. */
+interface ConversationIndexRecord extends ConversationSummary {
+  ownerId?: string;
+}
+
 interface ConversationIndex {
   version: number;
-  conversations: ConversationSummary[];
+  conversations: ConversationIndexRecord[];
 }
 
 // ── Normalization ───────────────────────────────────────────────────
@@ -185,6 +192,13 @@ function normalizeConversation(projectId: string, value: unknown, fallback: Part
     messages,
   };
 
+  const ownerId = typeof source.ownerId === "string" && source.ownerId.trim()
+    ? source.ownerId.trim()
+    : typeof fallback.ownerId === "string" && fallback.ownerId.trim()
+      ? fallback.ownerId.trim()
+      : undefined;
+  if (ownerId) conv.ownerId = ownerId;
+
   // Preserve epicId if present
   if (typeof source.epicId === "string" && source.epicId.trim()) {
     conv.epicId = source.epicId.trim();
@@ -195,9 +209,9 @@ function normalizeConversation(projectId: string, value: unknown, fallback: Part
   return conv;
 }
 
-function summaryFromConversation(conversation: Conversation, file: string): ConversationSummary {
+function summaryFromConversation(conversation: Conversation, file: string): ConversationIndexRecord {
   const lastModelMsg = [...conversation.messages].reverse().find((m) => m.modelId);
-  const summary: ConversationSummary = {
+  const summary: ConversationIndexRecord = {
     id: conversation.id,
     file,
     title: conversation.title,
@@ -208,10 +222,11 @@ function summaryFromConversation(conversation: Conversation, file: string): Conv
     messageCount: conversation.messages.length,
   };
   if (conversation.epicId) summary.epicId = conversation.epicId;
+  if (conversation.ownerId) summary.ownerId = conversation.ownerId;
   return summary;
 }
 
-function normalizeIndexRecord(value: unknown): ConversationSummary | null {
+function normalizeIndexRecord(value: unknown): ConversationIndexRecord | null {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const id = typeof source.id === "string" && CONVERSATION_ID_RE.test(source.id) ? source.id : "";
   const file = typeof source.file === "string"
@@ -221,7 +236,7 @@ function normalizeIndexRecord(value: unknown): ConversationSummary | null {
     : "";
   if (!id || !file) return null;
 
-  const record: ConversationSummary = {
+  const record: ConversationIndexRecord = {
     id,
     file,
     title: trimText(source.title, MAX_TITLE_LENGTH) || "New conversation",
@@ -234,13 +249,16 @@ function normalizeIndexRecord(value: unknown): ConversationSummary | null {
   if (typeof source.epicId === "string" && source.epicId.trim()) {
     record.epicId = source.epicId.trim();
   }
+  if (typeof source.ownerId === "string" && source.ownerId.trim()) {
+    record.ownerId = source.ownerId.trim();
+  }
   return record;
 }
 
 function normalizeIndex(value: unknown): ConversationIndex {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const conversations = Array.isArray(source.conversations)
-    ? source.conversations.map(normalizeIndexRecord).filter((r): r is ConversationSummary => r !== null)
+    ? source.conversations.map(normalizeIndexRecord).filter((r): r is ConversationIndexRecord => r !== null)
     : [];
   return {
     version: CONVERSATION_VERSION,
@@ -337,23 +355,34 @@ export class CodaScopeChatService {
     await this.writeJsonAtomic(this.indexPath(projectDir), normalizeIndex(index));
   }
 
-  // ── Public API ────────────────────────────────────────────────────
-
-  /** List all conversations for a project (sorted by updatedAt desc). */
-  async listConversations(projectId: string): Promise<ConversationSummary[]> {
-    const projectDir = this.findProjectDir(projectId);
-    if (!projectDir) return [];
-    const index = await this.readIndex(projectDir);
-    return index.conversations;
+  private publicSummary(record: ConversationIndexRecord): ConversationSummary {
+    const { ownerId: _ownerId, ...summary } = record;
+    return summary;
   }
 
-  /** Create a new conversation. */
+  // ── Public API ────────────────────────────────────────────────────
+
+  /** List only conversations owned by the authenticated actor. */
+  async listConversations(projectId: string, actorId: string): Promise<ConversationSummary[]> {
+    const projectDir = this.findProjectDir(projectId);
+    const ownerId = actorId.trim();
+    if (!projectDir || !ownerId) return [];
+    const index = await this.readIndex(projectDir);
+    return index.conversations
+      .filter((conversation) => conversation.ownerId === ownerId)
+      .map((conversation) => this.publicSummary(conversation));
+  }
+
+  /** Create a new conversation for the authenticated actor. */
   async createConversation(
     projectId: string,
+    actorId: string,
     opts?: { title?: string; modelId?: string; epicId?: string },
   ): Promise<Conversation> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) throw new Error("Project not found.");
+    const ownerId = actorId.trim();
+    if (!ownerId) throw new Error("Conversation owner is required.");
 
     return this.withMutation(projectId, async () => {
       const id = createId("conv");
@@ -364,6 +393,7 @@ export class CodaScopeChatService {
       const conversation = normalizeConversation(projectId, {
         id,
         projectId,
+        ownerId,
         title: trimText(opts?.title, MAX_TITLE_LENGTH) || "New conversation",
         summary: "",
         createdAt,
@@ -371,7 +401,7 @@ export class CodaScopeChatService {
         defaultModelId: opts?.modelId?.trim() || null,
         messages: [],
         epicId: opts?.epicId?.trim() || undefined,
-      }, { id, createdAt, updatedAt: createdAt, epicId: opts?.epicId?.trim() });
+      }, { id, ownerId, createdAt, updatedAt: createdAt, epicId: opts?.epicId?.trim() });
 
       const index = await this.readIndex(projectDir);
       const conversations = [
@@ -385,53 +415,115 @@ export class CodaScopeChatService {
     });
   }
 
-  /** Get the dedicated conversation for an epic, or null. */
-  async getConversationForEpic(projectId: string, epicId: string): Promise<Conversation | null> {
+  /** Get this actor's dedicated conversation for an epic, or null. */
+  async getConversationForEpic(projectId: string, epicId: string, actorId: string): Promise<Conversation | null> {
     const projectDir = this.findProjectDir(projectId);
-    if (!projectDir) return null;
+    const ownerId = actorId.trim();
+    if (!projectDir || !ownerId) return null;
 
     const index = await this.readIndex(projectDir);
-    const record = index.conversations.find((c) => c.epicId === epicId);
+    const record = index.conversations.find((c) => c.epicId === epicId && c.ownerId === ownerId);
     if (!record) return null;
 
-    return this.readConversation(projectId, record.id);
+    return this.readConversation(projectId, record.id, ownerId);
   }
 
-  /** Get or create the dedicated conversation for an epic. */
+  /** Get or create this actor's dedicated conversation for an epic. */
   async getOrCreateEpicConversation(
     projectId: string,
     epicId: string,
     epicTitle: string,
+    actorId: string,
   ): Promise<Conversation> {
-    // Look for existing dedicated conversation
-    const existing = await this.getConversationForEpic(projectId, epicId);
+    const existing = await this.getConversationForEpic(projectId, epicId, actorId);
     if (existing) return existing;
 
-    // Create a new one
-    return this.createConversation(projectId, {
+    return this.createConversation(projectId, actorId, {
       title: `Epic: ${epicTitle}`,
       epicId,
     });
   }
 
-  /** Read a single conversation with full messages. */
-  async readConversation(projectId: string, conversationId: string): Promise<Conversation | null> {
+  /** Read a single conversation only when it belongs to the authenticated actor. */
+  async readConversation(projectId: string, conversationId: string, actorId: string): Promise<Conversation | null> {
     const projectDir = this.findProjectDir(projectId);
-    if (!projectDir) return null;
+    const ownerId = actorId.trim();
+    if (!projectDir || !ownerId) return null;
 
     const index = await this.readIndex(projectDir);
     const record = index.conversations.find((c) => c.id === conversationId);
-    if (!record) return null;
+    if (!record || record.ownerId !== ownerId) return null;
 
     const filePath = path.join(projectDir, record.file);
     const raw = await this.readJsonFile(filePath, null);
     if (!raw) return null;
 
-    return normalizeConversation(projectId, raw, {
+    const conversation = normalizeConversation(projectId, raw, {
       id: conversationId,
       title: record.title,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
+    });
+    return conversation.ownerId === ownerId ? conversation : null;
+  }
+
+  /** List ownerless conversations for the admin migration flow. */
+  async listLegacyConversations(projectId: string): Promise<ConversationSummary[]> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return [];
+
+    const index = await this.readIndex(projectDir);
+    const legacy: ConversationSummary[] = [];
+    for (const record of index.conversations) {
+      if (record.ownerId) continue;
+      const raw = await this.readJsonFile(path.join(projectDir, record.file), null);
+      if (!raw) continue;
+      const conversation = normalizeConversation(projectId, raw, {
+        id: record.id,
+        title: record.title,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      });
+      if (!conversation.ownerId) legacy.push(this.publicSummary(summaryFromConversation(conversation, record.file)));
+    }
+    return legacy;
+  }
+
+  /** Assign an owner to an ownerless conversation after route-level admin/user validation. */
+  async assignLegacyConversationOwner(
+    projectId: string,
+    conversationId: string,
+    targetUsername: string,
+  ): Promise<Conversation | null> {
+    const projectDir = this.findProjectDir(projectId);
+    const ownerId = targetUsername.trim();
+    if (!projectDir || !ownerId) return null;
+
+    return this.withMutation(projectId, async () => {
+      const index = await this.readIndex(projectDir);
+      const record = index.conversations.find((conversation) => conversation.id === conversationId);
+      if (!record || record.ownerId) return null;
+
+      const raw = await this.readJsonFile(path.join(projectDir, record.file), null);
+      if (!raw) return null;
+      const conversation = normalizeConversation(projectId, raw, {
+        id: record.id,
+        title: record.title,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      });
+      if (conversation.ownerId) return null;
+
+      const next: Conversation = { ...conversation, ownerId, updatedAt: nowIso() };
+      await this.writeJsonAtomic(path.join(projectDir, record.file), next);
+      await this.writeIndex(projectDir, {
+        ...index,
+        conversations: [
+          summaryFromConversation(next, record.file),
+          ...index.conversations.filter((candidate) => candidate.id !== conversationId),
+        ],
+      });
+      return next;
     });
   }
 
@@ -439,13 +531,14 @@ export class CodaScopeChatService {
   async updateConversation(
     projectId: string,
     conversationId: string,
+    actorId: string,
     patch: { title?: string; summary?: string },
   ): Promise<Conversation | null> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return null;
 
     return this.withMutation(projectId, async () => {
-      const conversation = await this.readConversation(projectId, conversationId);
+      const conversation = await this.readConversation(projectId, conversationId, actorId);
       if (!conversation) return null;
 
       const next: Conversation = {
@@ -476,13 +569,14 @@ export class CodaScopeChatService {
   async appendMessage(
     projectId: string,
     conversationId: string,
+    actorId: string,
     message: Partial<ConversationMessage>,
   ): Promise<Conversation | null> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return null;
 
     return this.withMutation(projectId, async () => {
-      const conversation = await this.readConversation(projectId, conversationId);
+      const conversation = await this.readConversation(projectId, conversationId, actorId);
       if (!conversation) return null;
 
       const normalized = normalizeMessage(message);
@@ -530,15 +624,20 @@ export class CodaScopeChatService {
   }
 
   /** Full atomic write of a conversation (for streaming updates). */
-  async writeConversation(projectId: string, conversation: Conversation): Promise<Conversation | null> {
+  async writeConversation(projectId: string, actorId: string, conversation: Conversation): Promise<Conversation | null> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return null;
 
     return this.withMutation(projectId, async () => {
+      const existing = await this.readConversation(projectId, conversation.id, actorId);
+      if (!existing) return null;
       const next = normalizeConversation(projectId, {
         ...conversation,
+        id: existing.id,
+        projectId,
+        ownerId: existing.ownerId,
         updatedAt: conversation.updatedAt ?? nowIso(),
-      }, { id: conversation.id });
+      }, { id: existing.id, ownerId: existing.ownerId });
 
       const index = await this.readIndex(projectDir);
       const record = index.conversations.find((c) => c.id === next.id);
@@ -558,11 +657,13 @@ export class CodaScopeChatService {
   }
 
   /** Delete a conversation by ID. Removes from index and deletes the file. */
-  async deleteConversation(projectId: string, conversationId: string): Promise<boolean> {
+  async deleteConversation(projectId: string, conversationId: string, actorId: string): Promise<boolean> {
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return false;
 
     return this.withMutation(projectId, async () => {
+      const conversation = await this.readConversation(projectId, conversationId, actorId);
+      if (!conversation) return false;
       const index = await this.readIndex(projectDir);
       const record = index.conversations.find((c) => c.id === conversationId);
       if (!record) return false;

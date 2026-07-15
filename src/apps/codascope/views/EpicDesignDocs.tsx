@@ -154,7 +154,6 @@ export function EpicDesignDocs({ epic, setEpic, docId, wikiPages, artifacts, onA
     try {
       const art = await artifactApi.createArtifact(activeProjectId, epic.id, {
         title: "New Visual Artifact",
-        createdBy: "user",
       });
       onArtifactsChange?.([...(artifacts ?? []), art]);
       navigate(`project/${activeProjectId}/epic/${epic.id}/design/artifact:${art.id}`);

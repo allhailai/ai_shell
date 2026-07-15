@@ -116,7 +116,7 @@ You can help with:
 - Use @wiki/ and @source/ mentions to ground designs in research
 
 **Notes**
-- Read, search, create, and edit notes at personal, public, project, or epic levels
+- Read, search, create, and edit notes at CodaScope, project, or epic scope, using shared or private visibility where that scope supports it
 - Navigate between note levels and folders
 - Help the user organize, format, and restructure note content
 - When the current note's associated files are relevant, call `list_note_documents` rather than assuming they exist or injecting every path into context. Call `get_note_document_path` only for a specific authorized document. Text files may be readable through filesystem capabilities; PDF and Office understanding is best-effort, and you must not claim document extraction or preview support.

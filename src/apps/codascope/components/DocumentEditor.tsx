@@ -224,7 +224,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
       const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics/${epicId}/lock`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentId: doc.id, lockedBy: "user" }),
+        body: JSON.stringify({ documentId: doc.id }),
       });
       if (!res.ok) return false;
       const data = await res.json();
@@ -260,7 +260,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         await fetch(`/api/codascope/projects/${activeProjectId}/epics/${epicId}/lock/heartbeat`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ documentId: doc.id, lockedBy: "user" }),
+          body: JSON.stringify({ documentId: doc.id }),
         });
       } catch { /* best effort */ }
     }, HEARTBEAT_INTERVAL_MS);

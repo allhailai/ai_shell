@@ -16,7 +16,7 @@ import { loadArtifactBuildPrompt, loadSectionRegenPrompt } from "../services/cod
 import type { ArtifactSpec } from "../../src/apps/codascope/codaScopeTypes.js";
 
 export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal } = ctx;
 
   // ── Artifact CRUD ────────────────────────────────────────────────
 
@@ -48,16 +48,15 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     const { artifactSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { title, createdBy } = req.body as {
+    const { title } = req.body as {
       title?: string;
-      createdBy?: string;
     };
     if (!title || typeof title !== "string" || !title.trim()) {
       throw httpError("title is required.", 400, "invalid_input");
     }
     const artifact = await artifactSvc.createArtifact(id, epicId, {
       title: title.trim(),
-      createdBy,
+      createdBy: principal(req).username,
     });
     res.status(201).json({ artifact });
   }));

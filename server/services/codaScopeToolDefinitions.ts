@@ -114,10 +114,15 @@ export function getToolsForPurpose(
     return { ...readOnly, ...noteRead, ...artifactTools };
   }
 
-  // assistant and chat get ALL tools — full agent autonomy
-  const epicTools = buildEpicTools(projectId, services, collectorHolder);
-  const write = buildWriteTools(projectId, services);
-  const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-  const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);
-  return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
+  if (purpose === "assistant" || purpose === "chat") {
+    const epicTools = buildEpicTools(projectId, services, collectorHolder);
+    const write = buildWriteTools(projectId, services);
+    const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
+    const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);
+    return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
+  }
+
+  // Purpose controls mutation capability. A typo or unexpected caller must
+  // never become an implicit request for the full privileged tool set.
+  throw new Error(`Unknown CodaScope agent purpose: ${purpose}`);
 }

@@ -14,7 +14,7 @@ import {
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, upload } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
 
   // ── Epics — CRUD ──────────────────────────────────────────────────
 
@@ -45,11 +45,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
   app.post("/api/codascope/projects/:id/epics", wrap(async (req, res) => {
     const { epicSvc } = await ensureServices();
     const id = param(req, "id");
-    const { title, createdBy } = req.body as { title?: string; createdBy?: string };
+    const { title } = req.body as { title?: string };
     if (!title || typeof title !== "string" || !title.trim()) {
       throw httpError("title is required.", 400, "invalid_input");
     }
-    const epic = await epicSvc.createEpic(id, { title: title.trim(), createdBy });
+    const epic = await epicSvc.createEpic(id, { title: title.trim(), createdBy: principal(req).username });
     res.status(201).json({ epic });
   }));
 
@@ -146,11 +146,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const { epicSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { documentId, lockedBy } = req.body as { documentId?: string; lockedBy?: string };
+    const { documentId } = req.body as { documentId?: string };
     if (!documentId) throw httpError("documentId is required.", 400, "invalid_input");
     const result = await epicSvc.acquireLock(id, epicId, {
       documentId,
-      lockedBy: lockedBy ?? "user",
+      lockedBy: principal(req).username,
     });
     if ("error" in result) {
       res.status(409).json(result);
@@ -165,7 +165,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const documentId = req.query.documentId as string ?? "definition";
-    const released = await epicSvc.releaseLock(id, epicId, documentId);
+    const released = await epicSvc.releaseLock(id, epicId, documentId, principal(req).username);
     res.json({ released });
   }));
 
@@ -419,10 +419,9 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const { designDocSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { title, content, createdBy } = req.body as {
+    const { title, content } = req.body as {
       title?: string;
       content?: string;
-      createdBy?: string;
     };
     if (!title || typeof title !== "string" || !title.trim()) {
       throw httpError("title is required.", 400, "invalid_input");
@@ -430,7 +429,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const doc = await designDocSvc.createDesignDoc(id, epicId, {
       title: title.trim(),
       content,
-      createdBy,
+      createdBy: principal(req).username,
     });
     res.status(201).json({ doc });
   }));
@@ -671,12 +670,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const { versionSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { label, note, createdBy } = req.body as {
+    const { label, note } = req.body as {
       label?: string;
       note?: string;
-      createdBy?: string;
     };
-    const version = await versionSvc.createVersion(id, epicId, { label, note, createdBy });
+    const version = await versionSvc.createVersion(id, epicId, { label, note, createdBy: principal(req).username });
     res.status(201).json({ version });
   }));
 
@@ -811,7 +809,8 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
 
   // ── Epic Conversation ─────────────────────────────────────────────
 
-  // Get or create epic conversation
+  // Get or create this actor's epic conversation. Epic metadata's historical
+  // project-wide conversation pointer is deliberately not reused.
   app.get("/api/codascope/projects/:id/epics/:epicId/conversation", wrap(async (req, res) => {
     const { chatSvc, epicSvc } = await ensureServices();
     const id = param(req, "id");
@@ -820,12 +819,7 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const epic = await epicSvc.getEpic(id, epicId);
     if (!epic) throw httpError("Epic not found.", 404, "not_found");
 
-    const conversation = await chatSvc.getOrCreateEpicConversation(id, epicId, epic.title);
-
-    // Update epic metadata with conversation ID if not set
-    if (!epic.conversationId) {
-      await epicSvc.updateEpic(id, epicId, {});
-    }
+    const conversation = await chatSvc.getOrCreateEpicConversation(id, epicId, epic.title, principal(req).username);
 
     res.json({ conversation });
   }));
@@ -836,13 +830,13 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     const { epicSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
-    const { documentId, lockedBy } = req.body as { documentId?: string; lockedBy?: string };
+    const { documentId } = req.body as { documentId?: string };
 
-    if (!documentId || !lockedBy) {
-      throw httpError("documentId and lockedBy are required.", 400, "invalid_input");
+    if (!documentId) {
+      throw httpError("documentId is required.", 400, "invalid_input");
     }
 
-    const lock = await epicSvc.heartbeatLock(id, epicId, documentId, lockedBy);
+    const lock = await epicSvc.heartbeatLock(id, epicId, documentId, principal(req).username);
     if (!lock) throw httpError("Lock not found or expired.", 404, "not_found");
     res.json({ lock });
   }));

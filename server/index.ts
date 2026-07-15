@@ -219,7 +219,7 @@ const secretService = createSecretService({
 registerSecretRoutes(app, { secretService, authMiddleware, httpError, mode: SHELL_MODE });
 registerDbHelperRoutes(app, { secretService, authMiddleware, httpError });
 registerDbExplorerRoutes(app, { secretService, authMiddleware, httpError });
-registerCodaScopeRoutes(app, { secretService, authMiddleware, httpError, repoRoot: REPO_ROOT });
+registerCodaScopeRoutes(app, { secretService, authService, authMiddleware, httpError, repoRoot: REPO_ROOT });
 registerFilesystemRoutes(app, { authMiddleware, httpError });
 
 // ── Self-update infrastructure ──────────────────────────────────────
