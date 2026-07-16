@@ -2,13 +2,13 @@
    List + folder browser for notes at any scope/visibility.
    URL-driven with breadcrumb navigation.
    Full-text search with highlighted match context.
-   Starred notes, recents section, quick capture.
+   Starred notes and recents section.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconCapture, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus, IconPin } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus, IconPin } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import { NoteCreateDialog, type NoteCreateLocation } from "../components/NoteCreateDialog";
@@ -215,11 +215,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   const [recents, setRecents] = useState<RecentNoteRef[]>([]);
   const [showRecents, setShowRecents] = useState(true);
   const [showStarredOnly, setShowStarredOnly] = useState(false);
-
-  // Quick capture state
-  const [showCapture, setShowCapture] = useState(false);
-  const [captureText, setCaptureText] = useState("");
-  const [capturing, setCapturing] = useState(false);
 
   // Search state
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -453,36 +448,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
   // Are we showing search results?
   const showSearchResults = search.trim().length >= 3;
-
-  // ── Quick Capture ──────────────────────────────────────────────────
-  const handleCapture = useCallback(async () => {
-    if (!captureText.trim()) return;
-    setCapturing(true);
-    try {
-      const res = await fetch("/api/codascope/notes/capture", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: captureText.trim() }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCaptureText("");
-        setShowCapture(false);
-        // Refresh lists
-        void fetchNotes();
-        void fetchRecents();
-        // Navigate to the captured note
-        const notePath = data.path?.replace(/\.md$/, "") ?? "";
-        if (notePath) {
-          const contextualPrefix = urlPrefixOverride?.includes("/notes/codascope/")
-            ? urlPrefixOverride.replace(/\/(shared|private)$/, "/private")
-            : "notes/private";
-          navigate(`${contextualPrefix}/${notePath}`);
-        }
-      }
-    } catch { /* best effort */ }
-    setCapturing(false);
-  }, [captureText, fetchNotes, fetchRecents, navigate, urlPrefixOverride]);
 
   // ── Navigation helpers ─────────────────────────────────────────────
 
@@ -950,17 +915,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
 
         {/* Header actions */}
         <div className="codascope-notes-header-actions">
-          {/* Quick capture button */}
-          <button
-            className="codascope-notes-capture-btn"
-            onClick={() => setShowCapture(true)}
-            title="Quick Capture"
-            type="button"
-          >
-            <IconCapture size={14} />
-            <span>Capture</span>
-          </button>
-
           {/* Starred filter toggle */}
           <button
             className={`codascope-notes-star-filter${showStarredOnly ? " codascope-notes-star-filter-active" : ""}`}
@@ -1014,9 +968,9 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
             <span>Folder</span>
           </button>
           <button
-            className="codascope-btn codascope-btn-primary"
-            style={{ fontSize: "var(--text-xs)", padding: "4px 10px" }}
+            className="codascope-notes-create-note-btn"
             onClick={() => setCreateMode("note")}
+            title="Create a new note"
             type="button"
           >
             <IconPlus size={14} />
@@ -1329,50 +1283,6 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
               queryString={queryString}
             />
           )}
-        </div>
-      )}
-
-      {/* Quick Capture Dialog */}
-      {showCapture && (
-        <div className="codascope-notes-capture-overlay" onClick={() => setShowCapture(false)}>
-          <div className="codascope-notes-capture-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="codascope-notes-capture-header">
-              <IconCapture size={16} />
-              <span>Quick Capture</span>
-              <button
-                className="codascope-notes-capture-close"
-                onClick={() => setShowCapture(false)}
-                type="button"
-              >
-                <IconClose size={14} />
-              </button>
-            </div>
-            <textarea
-              className="codascope-notes-capture-textarea"
-              placeholder="Jot down a quick note…"
-              value={captureText}
-              onChange={(e) => setCaptureText(e.target.value)}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  void handleCapture();
-                }
-              }}
-            />
-            <div className="codascope-notes-capture-footer">
-              <span className="codascope-notes-capture-hint">
-                Saves to Private / _inbox. {"\u2318"}+Enter to capture.
-              </span>
-              <button
-                className="codascope-btn codascope-btn-primary"
-                onClick={() => void handleCapture()}
-                disabled={capturing || !captureText.trim()}
-                type="button"
-              >
-                {capturing ? "Saving…" : "Capture"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

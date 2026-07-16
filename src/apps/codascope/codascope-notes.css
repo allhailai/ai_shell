@@ -2236,114 +2236,32 @@
   flex-shrink: 0;
 }
 
-/* ── Quick Capture Button ───────────────────────────────────────────── */
+/* ── Primary Create Note Action ─────────────────────────────────────── */
 
-.codascope-notes-capture-btn {
-  display: flex;
+.codascope-notes-create-note-btn {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px 10px;
-  background: none;
-  border: 1px solid var(--color-border-primary);
+  min-height: 28px;
+  padding: 4px var(--space-3);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
   border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
+  color: var(--color-text-on-accent);
   font-size: var(--text-xs);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.codascope-notes-capture-btn:hover {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: hsla(210, 80%, 50%, 0.06);
-}
-
-/* ── Quick Capture Dialog Overlay ───────────────────────────────────── */
-
-.codascope-notes-capture-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: hsla(0, 0%, 0%, 0.5);
-  backdrop-filter: blur(4px);
-}
-
-.codascope-notes-capture-dialog {
-  display: flex;
-  flex-direction: column;
-  width: 480px;
-  max-width: 90vw;
-  max-height: 400px;
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
-}
-
-.codascope-notes-capture-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--color-border-primary);
-  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.codascope-notes-capture-close {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: none;
-  border: none;
-  color: var(--color-text-tertiary);
   cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.codascope-notes-capture-close:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
+.codascope-notes-create-note-btn:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
-.codascope-notes-capture-textarea {
-  flex: 1;
-  padding: var(--space-3) var(--space-4);
-  background: transparent;
-  border: none;
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  font-family: inherit;
-  resize: none;
-  outline: none;
-  min-height: 140px;
-}
-
-.codascope-notes-capture-textarea::placeholder {
-  color: var(--color-text-quaternary);
-}
-
-.codascope-notes-capture-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4) var(--space-3);
-  border-top: 1px solid var(--color-border-primary);
-}
-
-.codascope-notes-capture-hint {
-  font-size: var(--text-2xs);
-  color: var(--color-text-quaternary);
+.codascope-notes-create-note-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* ── Inbox Badge ────────────────────────────────────────────────────── */
