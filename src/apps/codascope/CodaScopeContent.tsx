@@ -66,10 +66,8 @@ function useCodaScopeBootstrap() {
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          if (data.projectsRoot) {
-            setProjectsRoot(data.projectsRoot);
-            setConfigured(true);
-          }
+          setProjectsRoot(typeof data.projectsRoot === "string" ? data.projectsRoot : "");
+          setConfigured(data.configured === true);
         }
       } catch {
         // Not configured yet

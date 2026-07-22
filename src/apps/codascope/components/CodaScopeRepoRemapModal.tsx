@@ -104,7 +104,7 @@ export function CodaScopeRepoRemapModal({
 
         <div className="codascope-modal-body">
           <p className="codascope-remap-desc">
-            This imported project references repositories that don't exist on this machine.
+            Portable bundles do not contain source-machine repository paths.
             Map each repository to a local directory to enable full functionality.
           </p>
 
@@ -135,7 +135,7 @@ export function CodaScopeRepoRemapModal({
                     <div className="codascope-remap-item-info">
                       <div className="codascope-remap-item-name">{repo.name}</div>
                       <div className="codascope-remap-item-original">
-                        Original: <code>{repo.path}</code>
+                        {repo.path ? <>Previous path: <code>{repo.path}</code></> : "Local path required"}
                       </div>
                     </div>
                   </div>

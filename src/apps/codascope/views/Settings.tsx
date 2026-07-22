@@ -5,9 +5,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { FolderPicker } from "../../../shared/folder-picker";
-import { IconSettings, IconKey, IconPackage, IconFolderOpen, IconPalette, IconPlus, IconCheck, IconClose, IconRefresh, IconWarning } from "../components/CodaScopeIcons";
+import { useAuth } from "../../../shell/authContext";
+import { IconSettings, IconKey, IconPackage, IconFolderOpen, IconPalette, IconPlus, IconCheck, IconClose, IconRefresh, IconWarning, IconDownload } from "../components/CodaScopeIcons";
 
 export function Settings() {
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
   const {
     activeProjectId,
     projects,
@@ -421,9 +424,15 @@ export function Settings() {
           <IconFolderOpen size={14} /> Projects Root Directory
         </div>
         <div className="codascope-settings-section-desc">
-          All CodaScope project data (wiki, build logs, code maps, conversations) is stored in this directory.
+          {isAdmin
+            ? "All CodaScope project data is stored in this administrator-controlled directory. Saving a change cancels active runs and rebuilds every root-bound service."
+            : "CodaScope project storage is configured by an administrator. Its filesystem path is not visible to ordinary users."}
         </div>
-        {!editingRoot ? (
+        {!isAdmin ? (
+          <div className="codascope-settings-root-display">
+            <span className="codascope-settings-flex-1">Storage configured</span>
+          </div>
+        ) : !editingRoot ? (
           <div className="codascope-settings-root-display">
             <code className="codascope-settings-api-key-value codascope-settings-flex-1">{projectsRoot || "(not set)"}</code>
             <button
@@ -474,7 +483,8 @@ export function Settings() {
                       const data = await res.json().catch(() => ({}));
                       throw new Error(data.error ?? "Failed to update");
                     }
-                    setProjectsRoot(newRoot.trim());
+                    const data = await res.json();
+                    setProjectsRoot(typeof data.projectsRoot === "string" ? data.projectsRoot : newRoot.trim());
                     setEditingRoot(false);
                   } catch (err) {
                     setRootError(err instanceof Error ? err.message : "Failed to update");
@@ -543,10 +553,13 @@ export function Settings() {
               a.remove();
             }}
             type="button"
-            title="Download this project as a portable .zip file"
+            title="Download shared project artifacts without conversations, private notes, preferences, local repository paths, or build logs"
           >
-            ↓ Export Project
+            <IconDownload size={12} /> Export Shared Bundle
           </button>
+          <span className="codascope-settings-section-desc">
+            Portable shared artifacts only; this is not a full backup.
+          </span>
         </div>
       </div>
 
@@ -702,7 +715,7 @@ export function Settings() {
 
       {/* Folder Picker for projects root */}
       <FolderPicker
-        open={showRootFolderPicker}
+        open={isAdmin && showRootFolderPicker}
         onClose={() => setShowRootFolderPicker(false)}
         onSelect={(selectedPath: string) => {
           setNewRoot(selectedPath);

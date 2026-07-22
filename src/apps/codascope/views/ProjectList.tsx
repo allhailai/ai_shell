@@ -10,6 +10,7 @@ import { useCodaScopeStore } from "../useCodaScopeStore";
 import { IconClose, IconFolder, IconArchive, IconFolderOpen, IconRefresh, IconSettings, IconWarning } from "../components/CodaScopeIcons";
 import { CodaScopeRepoRemapModal } from "../components/CodaScopeRepoRemapModal";
 import { FolderPicker } from "../../../shared/folder-picker";
+import { useAuth } from "../../../shell/authContext";
 
 interface ImportState {
   status: "idle" | "dragging" | "uploading" | "success" | "error";
@@ -25,6 +26,8 @@ interface ImportResult {
 
 export function ProjectList() {
   const { navigate } = useAppSubRoute("codascope");
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
   const {
     configured,
     projectsRoot,
@@ -72,7 +75,8 @@ export function ProjectList() {
         body: JSON.stringify({ projectsRoot: path }),
       });
       if (res.ok) {
-        setProjectsRoot(path);
+        const data = await res.json();
+        setProjectsRoot(typeof data.projectsRoot === "string" ? data.projectsRoot : path);
         setConfigured(true);
       } else {
         const data = await res.json().catch(() => ({}));
@@ -102,7 +106,8 @@ export function ProjectList() {
         body: JSON.stringify({ projectsRoot: selectedPath }),
       });
       if (res.ok) {
-        setProjectsRoot(selectedPath);
+        const config = await res.json();
+        setProjectsRoot(typeof config.projectsRoot === "string" ? config.projectsRoot : selectedPath);
         // Refresh projects list from new root
         const listRes = await fetch("/api/codascope/projects");
         if (listRes.ok) {
@@ -266,6 +271,20 @@ export function ProjectList() {
 
   // ── Setup wizard (first launch) ───────────────────────────────────
 
+  if (!configured && !isAdmin) {
+    return (
+      <div className="codascope-page">
+        <div className="codascope-empty-state">
+          <div className="codascope-empty-state-icon"><IconWarning size={32} /></div>
+          <div className="codascope-empty-state-title">CodaScope Is Not Configured</div>
+          <div className="codascope-empty-state-text">
+            An administrator must configure project storage before CodaScope can be used.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!configured) {
     return (
       <div className="codascope-page">
@@ -340,15 +359,18 @@ export function ProjectList() {
         <div>
           <div className="codascope-page-title">Projects</div>
           <div className="codascope-page-subtitle">
-            {activeProjects.length} active{archivedProjects.length > 0 ? ` • ${archivedProjects.length} archived` : ""} • {projectsRoot}
-            <button
-              className="codascope-change-root-btn"
-              onClick={() => { setShowChangeRootModal(true); setChangeRootConfirmText(""); setChangeRootError(""); }}
-              type="button"
-              title="Change projects root directory"
-            >
-              <IconSettings size={11} />
-            </button>
+            {activeProjects.length} active{archivedProjects.length > 0 ? ` • ${archivedProjects.length} archived` : ""}
+            {isAdmin ? ` • ${projectsRoot}` : " • storage configured"}
+            {isAdmin && (
+              <button
+                className="codascope-change-root-btn"
+                onClick={() => { setShowChangeRootModal(true); setChangeRootConfirmText(""); setChangeRootError(""); }}
+                type="button"
+                title="Change projects root directory"
+              >
+                <IconSettings size={11} />
+              </button>
+            )}
           </div>
           {changeRootError && (
             <div style={{ color: "var(--color-danger)", fontSize: "var(--text-xs)", marginTop: "var(--space-1)" }}>
@@ -573,7 +595,7 @@ export function ProjectList() {
             <div className="codascope-import-dropzone-icon">↑</div>
             <div className="codascope-import-dropzone-text">Import Project</div>
             <div className="codascope-import-dropzone-hint">
-              Drop a CodaScope .zip export here, or click to browse
+              Drop a CodaScope portable shared bundle here, or click to browse
             </div>
           </>
         )}
@@ -592,7 +614,7 @@ export function ProjectList() {
       )}
 
       {/* ── Change root directory confirmation modal ──────────────────── */}
-      {showChangeRootModal && (
+      {isAdmin && showChangeRootModal && (
         <div
           className="codascope-modal-overlay"
           onClick={() => setShowChangeRootModal(false)}
@@ -673,7 +695,7 @@ export function ProjectList() {
 
       {/* Folder picker for changing root */}
       <FolderPicker
-        open={showChangeRootPicker}
+        open={isAdmin && showChangeRootPicker}
         onClose={() => setShowChangeRootPicker(false)}
         onSelect={handleChangeRootSelect}
         mode="directory"

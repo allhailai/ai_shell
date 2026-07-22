@@ -1,9 +1,29 @@
-import { describe, expect, it } from "vitest";
-import type { Request } from "express";
-import { principal, type HttpErrorFn } from "./codaScopeServiceContext.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Express, Request } from "express";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createAuthMiddleware } from "../middleware/auth.js";
+import type { SecretService } from "../services/secretService.js";
+import {
+  changeProjectsRoot,
+  createRouteContext,
+  principal,
+  shutdownCodaScopeServices,
+  type HttpErrorFn,
+} from "./codaScopeServiceContext.js";
 
 const httpError: HttpErrorFn = (message, status, code) =>
   Object.assign(new Error(message), { status, code });
+
+const temporaryRoots: string[] = [];
+
+afterEach(async () => {
+  await shutdownCodaScopeServices();
+  vi.useRealTimers();
+  for (const root of temporaryRoots.splice(0)) await rm(root, { recursive: true, force: true });
+});
 
 describe("CodaScope route principal", () => {
   it("derives the actor solely from authenticated middleware state", () => {
@@ -26,4 +46,127 @@ describe("CodaScope route principal", () => {
   it("rejects requests that did not pass through authentication middleware", () => {
     expect(() => principal({} as Request, httpError)).toThrow("Authentication required.");
   });
+
+  it("preserves an administrator-authorized setup path in standalone mode", async () => {
+    const dataDir = tempRoot();
+    const middleware = createAuthMiddleware({
+      authService: {} as never,
+      mode: "standalone",
+      osUsername: "local-user",
+      dataDir,
+    });
+    const req = { get: () => undefined } as unknown as Request;
+    await new Promise<void>((resolve) => middleware.requireAuth(req, {} as never, (() => resolve()) as never));
+    expect(principal(req, httpError)).toEqual({ username: "local-user", isAdmin: true });
+  });
 });
+
+describe("CodaScope root-bound service lifecycle", () => {
+  it("cancels old runs, closes pooled agents, and leaves one fresh graph across repeated root changes", async () => {
+    vi.useFakeTimers();
+    const rootA = path.join(tempRoot(), "root-a");
+    const rootB = path.join(tempRoot(), "root-b");
+    const rootC = path.join(tempRoot(), "root-c");
+    const secrets = mutableSecretService(rootA);
+    const context = createRouteContext({} as Express, {
+      secretService: secrets.service,
+      authService: { getUser: vi.fn() },
+      authMiddleware: {},
+      httpError,
+      repoRoot: "/opt/aishell-install",
+    });
+
+    const servicesA = await context.ensureServices();
+    const close = vi.fn();
+    const cancel = vi.fn(async () => undefined);
+    const wait = vi.fn(async () => undefined);
+    const fakeAgent = { close };
+    const fakeRun = { cancel, wait };
+    const controller = new AbortController();
+    (servicesA.agentSvc as any).pool.set("project::assistant::alice", {
+      agent: fakeAgent,
+      projectId: "project",
+      purpose: "assistant",
+      actorId: "alice",
+      lastUsed: Date.now(),
+      busy: true,
+      collectorHolder: {},
+    });
+    (servicesA.agentSvc as any).allAgents.add(fakeAgent);
+    (servicesA.agentSvc as any).activeRuns.set("project::alice", new Set([fakeRun]));
+    (servicesA.agentSvc as any).activeChatControllers.set("project::alice", controller);
+    (servicesA.buildSvc as any).activeBuilds.set("project", { status: "building" });
+    expect(vi.getTimerCount()).toBe(1);
+
+    const servicesB = await changeProjectsRoot(secrets.service, rootB, httpError, "/opt/aishell-install");
+    expect(close).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce();
+    expect(controller.signal.aborted).toBe(true);
+    expect((servicesA.agentSvc as any).cleanupTimer).toBeNull();
+    expect((servicesA.buildSvc as any).cancelledKeys.has("project")).toBe(true);
+    expect(servicesB.projectSvc.getRoot()).toBe(rootB);
+    expect((servicesB.agentSvc as any).projectsRoot).toBe(rootB);
+    expect(await context.ensureServices()).toBe(servicesB);
+    expect(vi.getTimerCount()).toBe(1);
+    const projectB = await servicesB.projectSvc.createProject("Root B Project", "fresh graph");
+    await servicesB.wikiSvc.updateTopicContent(projectB.id, "root-b", "# Root B Only");
+    const rootBTools = (servicesB.agentSvc as any).getToolsForPurpose(projectB.id, "assistant", undefined, "alice");
+    await expect(rootBTools.list_wiki_topics.execute({}, {})).resolves.toContain("Root B Only");
+
+    const servicesC = await changeProjectsRoot(secrets.service, rootC, httpError, "/opt/aishell-install");
+    expect((servicesB.agentSvc as any).cleanupTimer).toBeNull();
+    expect(servicesC.projectSvc.getRoot()).toBe(rootC);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps the old live graph when candidate configuration persistence fails", async () => {
+    vi.useFakeTimers();
+    const rootA = path.join(tempRoot(), "stable-root");
+    const rootB = path.join(tempRoot(), "failed-root");
+    const secrets = mutableSecretService(rootA);
+    const context = createRouteContext({} as Express, {
+      secretService: secrets.service,
+      authService: { getUser: vi.fn() },
+      authMiddleware: {},
+      httpError,
+      repoRoot: "/opt/aishell-install",
+    });
+    const stable = await context.ensureServices();
+    secrets.failNextSet();
+
+    await expect(changeProjectsRoot(secrets.service, rootB, httpError, "/opt/aishell-install"))
+      .rejects.toThrow("secret persistence failed");
+    expect(secrets.getValue()).toBe(rootA);
+    expect(await context.ensureServices()).toBe(stable);
+    expect(stable.projectSvc.getRoot()).toBe(rootA);
+    expect((stable.agentSvc as any).cleanupTimer).not.toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+});
+
+function mutableSecretService(initialValue: string | null) {
+  let value = initialValue;
+  let shouldFail = false;
+  const service = {
+    getAppSecret: vi.fn(async (_appId: string, key: string) => key === "codascope_projects_root" ? value : null),
+    setAppSecret: vi.fn(async (_appId: string, key: string, next: string) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("secret persistence failed");
+      }
+      if (key === "codascope_projects_root") value = next;
+    }),
+  } as unknown as SecretService;
+  return {
+    service,
+    getValue: () => value,
+    failNextSet: () => { shouldFail = true; },
+  };
+}
+
+function tempRoot(): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), "codascope-service-context-test-"));
+  temporaryRoots.push(root);
+  return root;
+}

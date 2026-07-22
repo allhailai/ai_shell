@@ -271,6 +271,16 @@ export class CodaScopeNoteExportService {
     return cleaned;
   }
 
+  /** Invalidate every root-bound, actor-owned export during a root cutover. */
+  dispose(): void {
+    for (const record of this.exports.values()) {
+      try {
+        if (existsSync(record.zipPath)) unlinkSync(record.zipPath);
+      } catch { /* best effort: the in-memory credential is still invalidated */ }
+    }
+    this.exports.clear();
+  }
+
   /* ── Private helpers ──────────────────────────────────────────────── */
 
   /** Recursively collect .md note files, optionally filtered by paths. */

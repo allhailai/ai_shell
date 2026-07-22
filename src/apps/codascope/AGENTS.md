@@ -111,6 +111,25 @@ Each service file has one clear domain:
   whole-reaction-array replacement.
 - Use `registerProjectDir(id, path)` pattern when the service needs to resolve project directories
 
+### Portable Projects and Projects-Root Custody
+
+- Ordinary project export is a versioned, allowlisted portable bundle of
+  shared artifacts. Never archive the project directory wholesale. Exclude
+  conversations and images, private notes/documents, `_user-prefs`, build
+  logs, active locks, actor-owned exports, secrets, and machine-local
+  repository paths.
+- Project import accepts only the current manifest format, rejects unexpected
+  entries, stages and validates the complete ZIP before atomic installation,
+  and leaves repository paths empty for explicit remapping. Legacy raw project
+  exports are unsupported through the ordinary import route.
+- Only administrators may read or change the absolute projects-root path.
+  Ordinary users may receive only configured/not-configured status. Standalone
+  mode remains configurable because its injected local principal is an admin.
+- A root change replaces the complete root-bound service graph. It must cancel
+  active SDK runs, close pooled agents and their tool closures, invalidate
+  build/export/cache state, and stop cleanup timers before publishing the new
+  graph. Do not restore scattered `setRoot()` cutovers.
+
 ### 6. Agent Prompt Templates
 
 Commands in `commands/` are markdown files with `{{VARIABLE}}` placeholders:

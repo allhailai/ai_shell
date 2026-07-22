@@ -105,6 +105,15 @@ export class CodaScopeBuildStateService {
     this.root = root;
   }
 
+  /** Invalidate all in-memory work before this root-bound service is discarded. */
+  dispose(): void {
+    for (const [key, state] of this.activeBuilds) {
+      if (state.status === "building") this.cancelledKeys.add(key);
+    }
+    this.projectDirs.clear();
+    this.hydratedKeys.clear();
+  }
+
   /** Compute the internal map key for a projectId + optional scope. */
   private buildKey(projectId: string, scope?: string): string {
     return scope ? `${projectId}::${scope}` : projectId;

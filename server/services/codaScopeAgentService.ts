@@ -17,6 +17,7 @@ import type {
   SDKUserMessage,
   SDKImage,
   RunResult,
+  Run,
   ModelListItem,
 } from "@cursor/sdk";
 import type { SecretService } from "./secretService.js";
@@ -142,9 +143,14 @@ export class CodaScopeAgentService {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   /** SDK sandbox support is a host capability, not a project-specific setting. */
   private wikiBuildSandboxUnsupported = false;
+  private disposed = false;
 
   /** Active chat AbortControllers keyed by project and authenticated actor. */
   private activeChatControllers = new Map<string, AbortController>();
+  /** Every SDK run, including non-chat builds, must be cancellable on cutover. */
+  private activeRuns = new Map<string, Set<Run>>();
+  /** Busy agents can temporarily fall outside the one-entry-per-pool-key map. */
+  private allAgents = new Set<SDKAgent>();
 
   constructor(secretService: SecretService, projectsRoot: string) {
     this.secretService = secretService;
@@ -152,10 +158,7 @@ export class CodaScopeAgentService {
 
     // Clean up idle agents every 2 minutes
     this.cleanupTimer = setInterval(() => this.cleanIdleAgents(), 2 * 60 * 1000);
-  }
-
-  setProjectsRoot(root: string): void {
-    this.projectsRoot = root;
+    this.cleanupTimer.unref?.();
   }
 
   /* ── API Key ──────────────────────────────────────────────────────── */
@@ -262,6 +265,7 @@ export class CodaScopeAgentService {
     modelId: string,
     actorId?: string,
   ): Promise<SDKAgent> {
+    if (this.disposed) throw new Error("CodaScope agent service has been disposed.");
     const key = this.poolKey(projectId, purpose, actorId);
     const existing = this.pool.get(key);
 
@@ -311,6 +315,11 @@ export class CodaScopeAgentService {
       createAgent,
       () => { this.wikiBuildSandboxUnsupported = true; },
     );
+    if (this.disposed) {
+      try { agent.close(); } catch { /* already unusable */ }
+      throw new Error("CodaScope agent service was disposed during agent creation.");
+    }
+    this.allAgents.add(agent);
 
     this.pool.set(key, {
       agent,
@@ -336,6 +345,7 @@ export class CodaScopeAgentService {
         } catch {
           // ignore close errors
         }
+        this.allAgents.delete(entry.agent);
         this.pool.delete(key);
       }
     }
@@ -350,18 +360,25 @@ export class CodaScopeAgentService {
   cancelAgent(projectId: string, actorId?: string): boolean {
     const key = this.activeChatKey(projectId, actorId);
     const controller = this.activeChatControllers.get(key);
+    const runs = this.activeRuns.get(key);
+    for (const run of runs ?? []) void run.cancel().catch(() => undefined);
     if (controller) {
       controller.abort();
       this.activeChatControllers.delete(key);
       return true;
     }
-    return false;
+    return Boolean(runs?.size);
   }
 
   /* ── Send Message ─────────────────────────────────────────────────── */
 
   async send(options: AgentSendOptions): Promise<void> {
     const { projectId, actorId, message, modelId, systemPrompt, context, images, purpose, onMessage, onDone, onError } = options;
+
+    if (this.disposed) {
+      onError(new Error("CodaScope agent service has been disposed."));
+      return;
+    }
 
     const key = this.poolKey(projectId, purpose, actorId);
     const chatKey = this.activeChatKey(projectId, actorId);
@@ -381,6 +398,7 @@ export class CodaScopeAgentService {
 
     try {
       const agent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
+      if (this.disposed) throw new Error("CodaScope agent service has been disposed.");
 
       let activeEntry = this.pool.get(key);
       if (activeEntry) {
@@ -454,6 +472,7 @@ export class CodaScopeAgentService {
             } catch {
               // The failed agent has no usable run; close errors are harmless.
             }
+            this.allAgents.delete(staleEntry.agent);
             this.pool.delete(key);
           }
 
@@ -467,8 +486,23 @@ export class CodaScopeAgentService {
         },
       );
 
+      // shutdown() can race an SDK send() that has not returned a Run yet.
+      // Do not let that late Run escape the old service graph after a root
+      // cutover has already completed.
+      if (this.disposed) {
+        await run.cancel().catch(() => undefined);
+        await run.wait().catch(() => undefined);
+        throw new Error("CodaScope agent service has been shut down.");
+      }
+
+      const activeRuns = this.activeRuns.get(chatKey) ?? new Set<Run>();
+      activeRuns.add(run);
+      this.activeRuns.set(chatKey, activeRuns);
+
       // Wait for completion
       const result = await run.wait();
+      activeRuns.delete(run);
+      if (activeRuns.size === 0) this.activeRuns.delete(chatKey);
 
       if (activeEntry) {
         activeEntry.busy = false;
@@ -501,6 +535,9 @@ export class CodaScopeAgentService {
 
       // Clean up controller
       this.activeChatControllers.delete(chatKey);
+      // A failed/cancelled run is removed by identity when possible; clearing
+      // this actor key is safe because user-facing sends replace each other.
+      this.activeRuns.delete(chatKey);
 
       if (abortController.signal.aborted) {
         onError(new Error("Agent cancelled by user."));
@@ -513,6 +550,7 @@ export class CodaScopeAgentService {
   /* ── Cleanup ──────────────────────────────────────────────────────── */
 
   async shutdown(): Promise<void> {
+    this.disposed = true;
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
@@ -524,13 +562,19 @@ export class CodaScopeAgentService {
     }
     this.activeChatControllers.clear();
 
-    for (const [, entry] of this.pool) {
+    const runs = [...this.activeRuns.values()].flatMap((group) => [...group]);
+    this.activeRuns.clear();
+    await Promise.allSettled(runs.map((run) => run.cancel()));
+    await Promise.allSettled(runs.map((run) => run.wait()));
+
+    for (const agent of this.allAgents) {
       try {
-        entry.agent.close();
+        agent.close();
       } catch {
         // ignore
       }
     }
+    this.allAgents.clear();
     this.pool.clear();
   }
 }

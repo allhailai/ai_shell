@@ -145,6 +145,7 @@ server/
 │   └── codaScopeNoteRoutes.ts          # Note CRUD, images, annotations, versions, templates, search, move (459 lines)
 └── services/
     ├── codaScopeProjectService.ts      # Project CRUD, repository management (394 lines)
+    ├── codaScopeProjectBundleService.ts # Allowlisted portable project ZIP export/import
     ├── codaScopeProjectDirResolver.ts  # Project directory resolution cache (134 lines)
     ├── codaScopeWikiService.ts         # Wiki topic CRUD (markdown files on disk) (211 lines)
     ├── codaScopeAgentService.ts        # Cursor SDK agent lifecycle (pool, cancel, send) (375 lines)
@@ -269,6 +270,12 @@ per-user data: private notes, user preferences, exports, and conversations
 retain their respective actor-custody rules. A future shared-conversation or
 role-based content feature must define its own authorization policy rather than
 inferring one from the current global shared-content model.
+
+Ordinary project export does not broaden that policy. It packages only shared
+project artifacts and excludes conversations/images, private notes and their
+documents, `_user-prefs`, actor-owned exports, build logs, active locks, and
+other per-user state. Absolute repository paths are removed, and imported
+repositories always require an explicit local remap.
 
 ### Agent Pipeline
 
@@ -615,6 +622,50 @@ On server restart, `getBuildState()` lazily hydrates from disk. Builds that were
 
 The service uses `registerProjectDir(id, path)` to map project IDs to their actual filesystem directories, since directory names don't necessarily match project IDs.
 
+### Projects-Root Configuration and Lifecycle
+
+The absolute projects-root path is administrator-only configuration.
+`GET /api/codascope/config` returns `{ configured, projectsRoot }` to an admin
+and only `{ configured }` to an ordinary authenticated user. `PUT` is
+admin-only. Standalone mode still supports first-launch setup because the
+authentication middleware injects the local principal with `is_admin: true`.
+
+Changing the root is a serialized service-graph cutover, not a collection of
+in-place `setRoot()` calls. CodaScope constructs and verifies a complete graph
+for the candidate root, persists the configuration, cancels every active SDK
+run, closes all pooled agents and actor-scoped tool closures, invalidates
+in-memory build/cache/export state, stops the agent cleanup timer, and only
+then publishes the new graph. Requests resolving services during a cutover
+wait for that boundary. A candidate or persistence failure leaves the previous
+graph live and does not report success.
+
+### Portable Project Import and Export
+
+`GET /api/codascope/projects/:id/export` creates a
+`codascope-project` format-version `1` ZIP. Its manifest lists every payload
+entry with byte size and SHA-256 digest, and the service builds those entries
+from an explicit shared-artifact allowlist:
+
+- sanitized `project.json` metadata with repository IDs, names, and branches,
+  but blank local paths;
+- project wiki, code maps/state, project skills, quality/version artifacts;
+- shared project note bundles; and
+- shared epic metadata, designs, annotations/directives, artifacts, knowledge,
+  curation state, versions, and shared epic note bundles.
+
+Operational and actor-custodied directories are not bundle candidates. Text
+artifacts are scrubbed of the configured root and repository paths, and
+historical per-user `conversationId` references are cleared.
+
+`POST /api/codascope/projects/import` accepts only that manifest version. ZIP
+size, entry-count, per-entry expansion, total expansion, and containment checks
+run before installation. The importer rejects undeclared or disallowed entries,
+verifies every declared digest, validates/rebases CodaScope metadata in a
+temporary staging directory, copies to a hidden directory on the destination
+filesystem, and atomically renames it into place. Validation failure leaves no
+partial project. Legacy raw project exports are rejected; there is no ordinary
+full-fidelity backup route.
+
 ### SSE Streaming
 
 Agent runs use Server-Sent Events:
@@ -637,6 +688,11 @@ Projects are stored as directories under the configured root:
 │   │   └── 2026_06_30_conv_*.json          # Individual conversation files
 │   └── skills/                             # Project-specific skill prompts
 ```
+
+The storage tree is broader than the portable-project boundary. In particular,
+`conversations/`, `build-logs/`, `_notes/private/`, `_notes/_user-prefs/`, and
+root `_exports/` remain local/actor-custodied and are never included by
+ordinary project export.
 
 ---
 
