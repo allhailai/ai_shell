@@ -7,6 +7,11 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import type { PendingWikiDeletion } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  CodaScopePathValidationError,
+  assertSafePathSegment,
+  assertStrictDescendant,
+} from "./codaScopePathSafety.js";
 
 interface WikiTopic {
   id: string;
@@ -19,8 +24,9 @@ interface WikiTopic {
 const WIKI_TOPIC_ID = /^(?:_index|index|[a-z0-9]+(?:-[a-z0-9]+)*)$/;
 
 function assertValidTopicId(topicId: string): void {
+  assertSafePathSegment(topicId, "wiki topic ID");
   if (!WIKI_TOPIC_ID.test(topicId)) {
-    throw new Error("Invalid wiki topic ID.");
+    throw new CodaScopePathValidationError("wiki topic ID");
   }
 }
 
@@ -93,7 +99,11 @@ export class CodaScopeWikiService {
     const wikiDir = this.getWikiDir(projectId);
     if (!wikiDir) return null;
 
-    const filePath = path.join(wikiDir, `${topicId}.md`);
+    const filePath = assertStrictDescendant(
+      wikiDir,
+      path.join(wikiDir, `${topicId}.md`),
+      "wiki topic path",
+    );
     if (!existsSync(filePath)) return null;
 
     return readFileSync(filePath, "utf-8");
@@ -108,7 +118,11 @@ export class CodaScopeWikiService {
 
     if (!existsSync(wikiDir)) mkdirSync(wikiDir, { recursive: true });
 
-    const filePath = path.join(wikiDir, `${topicId}.md`);
+    const filePath = assertStrictDescendant(
+      wikiDir,
+      path.join(wikiDir, `${topicId}.md`),
+      "wiki topic write target",
+    );
     writeFileSync(filePath, content, "utf-8");
   }
 
@@ -119,7 +133,11 @@ export class CodaScopeWikiService {
     const wikiDir = this.getWikiDir(projectId);
     if (!wikiDir) return;
 
-    const filePath = path.join(wikiDir, `${topicId}.md`);
+    const filePath = assertStrictDescendant(
+      wikiDir,
+      path.join(wikiDir, `${topicId}.md`),
+      "wiki topic delete target",
+    );
     if (existsSync(filePath)) {
       const { unlinkSync } = await import("node:fs");
       unlinkSync(filePath);

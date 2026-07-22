@@ -5,19 +5,15 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import crypto from "node:crypto";
 import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
-  return path.join(
-    process.cwd(),
-    ".test-tmp",
-    `design-doc-svc-${crypto.randomBytes(4).toString("hex")}`,
-  );
+  return mkdtempSync(path.join(os.tmpdir(), "codascope-design-doc-svc-"));
 }
 
 /** Scaffold a minimal project + epic with designs directory. */
@@ -347,6 +343,65 @@ describe("CodaScopeDesignDocService", () => {
       // First version should be v3 (v1 and v2 were pruned)
       expect(versions[0].number).toBe(3);
       expect(versions[9].number).toBe(12);
+    });
+
+    it("fails closed on a poisoned version index before pruning or touching sentinels", async () => {
+      const projectId = "proj-poisoned";
+      const epicId = "epic-poisoned";
+      const projDir = scaffoldProject(root, projectId, epicId);
+      const doc = await svc.createDesignDoc(projectId, epicId, {
+        title: "Poisoned versions",
+        content: "Current content must remain unchanged.",
+      });
+      const docDir = path.join(projDir, "epics", epicId, "designs", doc.id);
+      const versionsDir = path.join(docDir, "versions");
+      mkdirSync(versionsDir, { recursive: true });
+      const sentinel = path.join(docDir, "sentinel.md");
+      writeFileSync(sentinel, "sentinel-bytes", "utf-8");
+      for (let version = 1; version <= 10; version++) {
+        writeFileSync(path.join(versionsDir, `v${String(version).padStart(3, "0")}.md`), `version-${version}`, "utf-8");
+      }
+      const poisonedIndex = JSON.stringify({
+        versions: [
+          { number: "../../../sentinel", createdAt: "", author: "attacker", summary: "", wordCount: 0 },
+          ...Array.from({ length: 10 }, (_, index) => ({
+            number: index + 1,
+            createdAt: "",
+            author: "user",
+            summary: "",
+            wordCount: 1,
+          })),
+        ],
+        maxVersions: 10,
+      });
+      const indexPath = path.join(versionsDir, "versions.json");
+      writeFileSync(indexPath, poisonedIndex, "utf-8");
+      const beforeEntries = readdirSync(versionsDir).sort();
+
+      await expect(svc.createVersion(projectId, epicId, doc.id, "user", "trigger prune"))
+        .rejects.toMatchObject({
+          status: 400,
+          code: "invalid_input",
+          message: "Invalid design version number.",
+        });
+
+      expect(readFileSync(sentinel, "utf-8")).toBe("sentinel-bytes");
+      expect(readFileSync(indexPath, "utf-8")).toBe(poisonedIndex);
+      expect(readFileSync(path.join(docDir, "content.md"), "utf-8"))
+        .toBe("Current content must remain unchanged.");
+      expect(readdirSync(versionsDir).sort()).toEqual(beforeEntries);
+    });
+
+    it.each([
+      ["string", "1"],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+      ["fraction", 1.5],
+      ["zero", 0],
+      ["negative", -1],
+    ])("rejects a caller-supplied %s version number", async (_name, versionNum) => {
+      await expect(svc.getDocVersion("missing", "missing", "missing", versionNum as number))
+        .rejects.toMatchObject({ status: 400, code: "invalid_input" });
     });
 
     it("reverts to a previous version", async () => {

@@ -26,6 +26,12 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rename
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicDesignDoc } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  assertPositiveSafeInteger,
+  assertSafePathSegment,
+  assertStrictDescendant,
+  assertVersionIndex,
+} from "./codaScopePathSafety.js";
 
 /* ── Storage schema ───────────────────────────────────────────────── */
 
@@ -93,7 +99,7 @@ export class CodaScopeDesignDocService {
   }
 
   private designsDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId, "designs");
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"), "designs");
   }
 
   private indexPath(projectDir: string, epicId: string): string {
@@ -107,8 +113,9 @@ export class CodaScopeDesignDocService {
    */
   private docPath(projectDir: string, epicId: string, docId: string): string {
     const designDir = this.designsDir(projectDir, epicId);
-    const newPath = path.join(designDir, docId, "content.md");
-    const oldPath = path.join(designDir, `${docId}.md`);
+    const safeDocId = assertSafePathSegment(docId, "document ID");
+    const newPath = path.join(designDir, safeDocId, "content.md");
+    const oldPath = path.join(designDir, `${safeDocId}.md`);
 
     // New layout already exists — use it
     if (existsSync(newPath)) return newPath;
@@ -116,7 +123,7 @@ export class CodaScopeDesignDocService {
     // Old flat layout exists — migrate it
     if (existsSync(oldPath)) {
       try {
-        const docDir = path.join(designDir, docId);
+        const docDir = path.join(designDir, safeDocId);
         mkdirSync(docDir, { recursive: true });
         renameSync(oldPath, newPath);
         return newPath;
@@ -132,7 +139,7 @@ export class CodaScopeDesignDocService {
 
   /** Directory for a specific design doc */
   private docDir(projectDir: string, epicId: string, docId: string): string {
-    return path.join(this.designsDir(projectDir, epicId), docId);
+    return path.join(this.designsDir(projectDir, epicId), assertSafePathSegment(docId, "document ID"));
   }
 
   /** Versions directory for a specific design doc */
@@ -143,6 +150,12 @@ export class CodaScopeDesignDocService {
   /** Versions index path for a specific design doc */
   private versionsIndexPath(projectDir: string, epicId: string, docId: string): string {
     return path.join(this.versionsDir(projectDir, epicId, docId), "versions.json");
+  }
+
+  private versionFilePath(vDir: string, version: unknown): string {
+    const safeVersion = assertPositiveSafeInteger(version, "design version number");
+    const filename = `v${String(safeVersion).padStart(3, "0")}.md`;
+    return assertStrictDescendant(vDir, path.join(vDir, filename), "design version file");
   }
 
   /* ── Index helpers ────────────────────────────────────────────────── */
@@ -168,14 +181,18 @@ export class CodaScopeDesignDocService {
   private readVersionsIndex(projectDir: string, epicId: string, docId: string): DesignDocVersionsIndex {
     const p = this.versionsIndexPath(projectDir, epicId, docId);
     if (!existsSync(p)) return { versions: [], maxVersions: MAX_VERSIONS };
+    let parsed: unknown;
     try {
-      return JSON.parse(readFileSync(p, "utf-8"));
+      parsed = JSON.parse(readFileSync(p, "utf-8"));
     } catch {
       return { versions: [], maxVersions: MAX_VERSIONS };
     }
+    assertVersionIndex(parsed, "number", "design version number");
+    return parsed as DesignDocVersionsIndex;
   }
 
   private writeVersionsIndex(projectDir: string, epicId: string, docId: string, index: DesignDocVersionsIndex): void {
+    assertVersionIndex(index, "number", "design version number");
     const dir = this.versionsDir(projectDir, epicId, docId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(this.versionsIndexPath(projectDir, epicId, docId), JSON.stringify(index, null, 2), "utf-8");
@@ -300,6 +317,7 @@ export class CodaScopeDesignDocService {
 
   /** Get design doc content (markdown) with content hash for concurrency control. */
   async getDesignDoc(projectId: string, epicId: string, docId: string): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -327,6 +345,7 @@ export class CodaScopeDesignDocService {
     content: string,
     expectedHash?: string,
   ): Promise<{ doc: EpicDesignDoc; contentHash: string } | { conflict: true; currentHash: string; currentContent: string } | null> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -362,6 +381,7 @@ export class CodaScopeDesignDocService {
 
   /** Archive a design doc (soft delete — preserves file on disk). Also clears pin. */
   async archiveDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -377,6 +397,7 @@ export class CodaScopeDesignDocService {
 
   /** Pin a design doc. */
   async pinDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -391,6 +412,7 @@ export class CodaScopeDesignDocService {
 
   /** Unpin a design doc. */
   async unpinDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -405,6 +427,7 @@ export class CodaScopeDesignDocService {
 
   /** Unarchive a design doc (restore from soft delete). */
   async unarchiveDesignDoc(projectId: string, epicId: string, docId: string): Promise<boolean> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -432,6 +455,7 @@ export class CodaScopeDesignDocService {
     docId: string,
     resize: ResizeOp,
   ): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null> {
+    assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -640,6 +664,10 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
+    // Validate the complete persisted index before migration, directory
+    // creation, snapshot writes, or pruning can mutate the filesystem.
+    const vIndex = this.readVersionsIndex(projectDir, epicId, docId);
+
     // Ensure content file exists (triggers migration if needed)
     const contentPath = this.docPath(projectDir, epicId, docId);
     if (!existsSync(contentPath)) throw new Error("Design doc not found");
@@ -648,17 +676,13 @@ export class CodaScopeDesignDocService {
     const vDir = this.versionsDir(projectDir, epicId, docId);
     if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true });
 
-    // Read existing versions index
-    const vIndex = this.readVersionsIndex(projectDir, epicId, docId);
-
     // Determine next version number
-    const nextNum = vIndex.versions.length > 0
-      ? Math.max(...vIndex.versions.map((v) => v.number)) + 1
-      : 1;
+    let maxVersion = 0;
+    for (const version of vIndex.versions) maxVersion = Math.max(maxVersion, version.number);
+    const nextNum = assertPositiveSafeInteger(maxVersion + 1, "design version number");
 
     // Pad version number to 3 digits for consistent file sorting
-    const versionFilename = `v${String(nextNum).padStart(3, "0")}.md`;
-    writeFileSync(path.join(vDir, versionFilename), currentContent, "utf-8");
+    writeFileSync(this.versionFilePath(vDir, nextNum), currentContent, "utf-8");
 
     const version: DesignDocVersion = {
       number: nextNum,
@@ -673,8 +697,8 @@ export class CodaScopeDesignDocService {
     // Prune beyond max versions (delete oldest)
     while (vIndex.versions.length > MAX_VERSIONS) {
       const oldest = vIndex.versions.shift()!;
-      const oldFile = path.join(vDir, `v${String(oldest.number).padStart(3, "0")}.md`);
-      try { if (existsSync(oldFile)) unlinkSync(oldFile); } catch { /* best effort */ }
+      const oldFile = this.versionFilePath(vDir, oldest.number);
+      if (existsSync(oldFile)) unlinkSync(oldFile);
     }
 
     this.writeVersionsIndex(projectDir, epicId, docId, vIndex);
@@ -690,15 +714,16 @@ export class CodaScopeDesignDocService {
 
   /** Get a specific version's content. */
   async getDocVersion(projectId: string, epicId: string, docId: string, versionNum: number): Promise<{ version: DesignDocVersion; content: string } | null> {
+    const safeVersion = assertPositiveSafeInteger(versionNum, "design version number");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
     const vIndex = this.readVersionsIndex(projectDir, epicId, docId);
-    const vMeta = vIndex.versions.find((v) => v.number === versionNum);
+    const vMeta = vIndex.versions.find((v) => v.number === safeVersion);
     if (!vMeta) return null;
 
     const vDir = this.versionsDir(projectDir, epicId, docId);
-    const vFile = path.join(vDir, `v${String(versionNum).padStart(3, "0")}.md`);
+    const vFile = this.versionFilePath(vDir, safeVersion);
     if (!existsSync(vFile)) return null;
 
     return { version: vMeta, content: readFileSync(vFile, "utf-8") };
@@ -712,16 +737,17 @@ export class CodaScopeDesignDocService {
    * Returns the restored content.
    */
   async revertToVersion(projectId: string, epicId: string, docId: string, versionNum: number): Promise<{ content: string; revertVersion: DesignDocVersion } | null> {
+    const safeVersion = assertPositiveSafeInteger(versionNum, "design version number");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
     // Get the target version content
-    const target = await this.getDocVersion(projectId, epicId, docId, versionNum);
+    const target = await this.getDocVersion(projectId, epicId, docId, safeVersion);
     if (!target) return null;
 
     // Create a snapshot of the current content before reverting
     const revertVersion = await this.createVersion(
-      projectId, epicId, docId, "user", `Reverted to version ${versionNum}`,
+      projectId, epicId, docId, "user", `Reverted to version ${safeVersion}`,
     );
 
     // Write the reverted content (no expectedHash — revert always wins)
@@ -772,10 +798,8 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    // Sanitize filename to prevent directory traversal
-    const safeName = path.basename(filename);
+    const safeName = assertSafePathSegment(filename, "image filename");
     const imagePath = path.join(this.docDir(projectDir, epicId, docId), "images", safeName);
     return existsSync(imagePath) ? imagePath : null;
   }
 }
-

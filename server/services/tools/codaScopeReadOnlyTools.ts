@@ -8,6 +8,10 @@ import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import { CodaScopeCodeMapService } from "../codaScopeCodeMapService.js";
 import { existsSync, readdirSync, readFileSync, statSync, realpathSync, type Dirent } from "node:fs";
 import path from "node:path";
+import {
+  isSameOrDescendantPath,
+  resolveContainedRelativePath,
+} from "../codaScopePathSafety.js";
 
 const SOURCE_SKIP_DIRS = new Set([
   ".git", ".hg", ".svn", "node_modules", "dist", "build", "coverage",
@@ -24,16 +28,16 @@ function resolveConfiguredRepository(
 }
 
 function resolveRepositoryPath(repoPath: string, relativePath: string): string | null {
-  if (!relativePath || path.isAbsolute(relativePath)) return null;
-  const resolved = path.resolve(repoPath, relativePath);
-  const relative = path.relative(repoPath, resolved);
-  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? resolved : null;
+  try {
+    return resolveContainedRelativePath(repoPath, relativePath, "repository path");
+  } catch {
+    return null;
+  }
 }
 
 function isRealPathWithinRepository(repoPath: string, filePath: string): boolean {
   try {
-    const relative = path.relative(realpathSync(repoPath), realpathSync(filePath));
-    return !relative.startsWith("..") && !path.isAbsolute(relative);
+    return isSameOrDescendantPath(realpathSync(repoPath), realpathSync(filePath));
   } catch {
     return false;
   }

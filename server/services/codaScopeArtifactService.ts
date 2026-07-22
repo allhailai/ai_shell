@@ -35,6 +35,7 @@ import type {
   ArtifactBuildVersion,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { getAnnotationScript } from "./codaScopeArtifactAnnotationScript.js";
+import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 /* ── Storage schemas ─────────────────────────────────────────────── */
 
@@ -97,7 +98,7 @@ export class CodaScopeArtifactService {
   }
 
   private artifactsDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId, "artifacts");
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"), "artifacts");
   }
 
   private indexPath(projectDir: string, epicId: string): string {
@@ -105,7 +106,10 @@ export class CodaScopeArtifactService {
   }
 
   private artifactDir(projectDir: string, epicId: string, artifactId: string): string {
-    return path.join(this.artifactsDir(projectDir, epicId), artifactId);
+    return path.join(
+      this.artifactsDir(projectDir, epicId),
+      assertSafePathSegment(artifactId, "artifact ID"),
+    );
   }
 
   private buildsDir(projectDir: string, epicId: string, artifactId: string): string {
@@ -126,6 +130,10 @@ export class CodaScopeArtifactService {
 
   private versionsDir(projectDir: string, epicId: string, artifactId: string): string {
     return path.join(this.buildsDir(projectDir, epicId, artifactId), ".versions");
+  }
+
+  private sectionFragmentPath(fragmentDir: string, sectionId: string): string {
+    return path.join(fragmentDir, `${assertSafePathSegment(sectionId, "section ID")}.html`);
   }
 
   /* ── Index helpers ────────────────────────────────────────────────── */
@@ -169,7 +177,7 @@ export class CodaScopeArtifactService {
   /* ── Build progress key ────────────────────────────────────────── */
 
   private buildKey(projectId: string, epicId: string, artifactId: string): string {
-    return `${projectId}:${epicId}:${artifactId}`;
+    return `${projectId}:${assertSafePathSegment(epicId, "epic ID")}:${assertSafePathSegment(artifactId, "artifact ID")}`;
   }
 
   /* ── CRUD ─────────────────────────────────────────────────────────── */
@@ -210,6 +218,7 @@ export class CodaScopeArtifactService {
 
   /** Get a single artifact spec. */
   async getArtifact(projectId: string, epicId: string, artifactId: string): Promise<ArtifactSpec | null> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -230,6 +239,7 @@ export class CodaScopeArtifactService {
   async updateArtifact(projectId: string, epicId: string, artifactId: string, updates: {
     title?: string;
   }): Promise<ArtifactSpec | null> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
@@ -250,6 +260,13 @@ export class CodaScopeArtifactService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
+    const artifactsRoot = this.artifactsDir(projectDir, epicId);
+    const artDir = assertStrictDescendant(
+      artifactsRoot,
+      this.artifactDir(projectDir, epicId, artifactId),
+      "artifact delete target",
+    );
+
     const index = this.readIndex(projectDir, epicId);
     const idx = index.artifacts.findIndex((a) => a.id === artifactId);
     if (idx < 0) return false;
@@ -258,7 +275,6 @@ export class CodaScopeArtifactService {
     this.writeIndex(projectDir, epicId, index);
 
     // Remove artifact directory
-    const artDir = this.artifactDir(projectDir, epicId, artifactId);
     if (existsSync(artDir)) {
       rmSync(artDir, { recursive: true, force: true });
     }
@@ -268,6 +284,7 @@ export class CodaScopeArtifactService {
 
   /** Pin an artifact. */
   async pinArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -282,6 +299,7 @@ export class CodaScopeArtifactService {
 
   /** Unpin an artifact. */
   async unpinArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -296,6 +314,7 @@ export class CodaScopeArtifactService {
 
   /** Archive an artifact (soft delete). Also clears pin. */
   async archiveArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -311,6 +330,7 @@ export class CodaScopeArtifactService {
 
   /** Unarchive an artifact (restore from soft delete). */
   async unarchiveArtifact(projectId: string, epicId: string, artifactId: string): Promise<boolean> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
@@ -341,6 +361,7 @@ export class CodaScopeArtifactService {
     _modelId?: string,
     agentCallback?: (spec: ArtifactSpec) => Promise<string>,
   ): Promise<void> {
+    assertSafePathSegment(artifactId, "artifact ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
@@ -481,7 +502,7 @@ export class CodaScopeArtifactService {
     for (const section of sections) {
       const fragment = this.extractSectionHtml(html, section.id);
       if (fragment) {
-        writeFileSync(path.join(fragDir, `${section.id}.html`), fragment, "utf-8");
+        writeFileSync(this.sectionFragmentPath(fragDir, section.id), fragment, "utf-8");
       }
     }
 

@@ -339,7 +339,7 @@ describe("CodaScopeNoteService", () => {
     });
 
     it("rejects traversal in folder filters", async () => {
-      await expect(svc.listNotes("codascope", "private", { userId: "alan" }, "../other-user")).rejects.toThrow("Path traversal");
+      await expect(svc.listNotes("codascope", "private", { userId: "alan" }, "../other-user")).rejects.toThrow("Invalid folder path.");
     });
   });
 
@@ -359,7 +359,7 @@ describe("CodaScopeNoteService", () => {
     });
 
     it("rejects traversal when creating folders", async () => {
-      await expect(svc.createFolder("codascope", "private", { userId: "alan" }, "../../outside")).rejects.toThrow("Path traversal");
+      await expect(svc.createFolder("codascope", "private", { userId: "alan" }, "../../outside")).rejects.toThrow("Invalid folder path.");
       expect(existsSync(path.join(root, "outside"))).toBe(false);
     });
 

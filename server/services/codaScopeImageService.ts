@@ -13,6 +13,7 @@ import { existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { CodaScopeChatService } from "./codaScopeChatService.js";
+import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 /* ── Constants ───────────────────────────────────────────────────── */
 
@@ -64,14 +65,12 @@ export class CodaScopeImageService {
   }
 
   private imagesDir(projectDir: string, conversationId: string): string {
-    return path.join(projectDir, "conversations", conversationId, "images");
-  }
-
-  private isSafeFilename(filename: string): boolean {
-    return Boolean(filename)
-      && filename === path.basename(filename)
-      && filename !== "."
-      && filename !== "..";
+    return path.join(
+      projectDir,
+      "conversations",
+      assertSafePathSegment(conversationId, "conversation ID"),
+      "images",
+    );
   }
 
   private async hasConversationAccess(projectId: string, conversationId: string, actorId: string): Promise<boolean> {
@@ -94,6 +93,7 @@ export class CodaScopeImageService {
     mimeType: string,
     _originalName?: string,
   ): Promise<{ path: string; filename: string }> {
+    assertSafePathSegment(conversationId, "conversation ID");
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
     if (!await this.hasConversationAccess(projectId, conversationId, actorId)) {
@@ -136,12 +136,13 @@ export class CodaScopeImageService {
     filename: string,
     actorId: string,
   ): Promise<string | null> {
+    assertSafePathSegment(conversationId, "conversation ID");
+    const safeFilename = assertSafePathSegment(filename, "image filename");
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return null;
-    if (!this.isSafeFilename(filename)) return null;
     if (!await this.hasConversationAccess(projectId, conversationId, actorId)) return null;
 
-    const filePath = path.join(this.imagesDir(projectDir, conversationId), filename);
+    const filePath = path.join(this.imagesDir(projectDir, conversationId), safeFilename);
     if (!existsSync(filePath)) return null;
     return filePath;
   }
@@ -157,11 +158,16 @@ export class CodaScopeImageService {
     conversationId: string,
     actorId: string,
   ): Promise<void> {
+    assertSafePathSegment(conversationId, "conversation ID");
     const projectDir = this.findProjectDir(projectId);
     if (!projectDir) return;
     if (!await this.hasConversationAccess(projectId, conversationId, actorId)) return;
 
-    const imgDir = this.imagesDir(projectDir, conversationId);
+    const imgDir = assertStrictDescendant(
+      path.join(projectDir, "conversations"),
+      this.imagesDir(projectDir, conversationId),
+      "conversation image delete target",
+    );
     if (!existsSync(imgDir)) return;
 
     try {

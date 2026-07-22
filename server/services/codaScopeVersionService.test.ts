@@ -5,19 +5,15 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import crypto from "node:crypto";
 import { CodaScopeVersionService } from "./codaScopeVersionService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
-  return path.join(
-    process.cwd(),
-    ".test-tmp",
-    `version-svc-${crypto.randomBytes(4).toString("hex")}`,
-  );
+  return mkdtempSync(path.join(os.tmpdir(), "codascope-version-svc-"));
 }
 
 /** Scaffold a minimal project + epic directory the service can discover. */
@@ -164,6 +160,44 @@ describe("CodaScopeVersionService", () => {
       );
       expect(epicMeta.currentVersion).toBe(1);
     });
+
+    it("fails closed on poisoned persisted epic version metadata", async () => {
+      const projectId = "proj-poisoned";
+      const epicId = "epic-poisoned";
+      const projDir = scaffoldProject(root, projectId, epicId);
+      const epicDir = path.join(projDir, "epics", epicId);
+      const versionsDir = path.join(epicDir, "versions");
+      mkdirSync(versionsDir, { recursive: true });
+      const sentinel = path.join(epicDir, "sentinel");
+      writeFileSync(sentinel, "sentinel-bytes", "utf-8");
+      const poisonedIndex = JSON.stringify({
+        versions: [{
+          version: "../../../sentinel",
+          createdAt: "",
+          createdBy: "attacker",
+          definitionHash: "",
+          designDocHashes: {},
+          scopeHash: "",
+          status: "draft",
+        }],
+      });
+      const indexPath = path.join(versionsDir, "versions.json");
+      writeFileSync(indexPath, poisonedIndex, "utf-8");
+      const epicMetadataBefore = readFileSync(path.join(epicDir, "epic.json"), "utf-8");
+      const beforeEntries = readdirSync(versionsDir).sort();
+
+      await expect(svc.createVersion(projectId, epicId, { createdBy: "user" }))
+        .rejects.toMatchObject({
+          status: 400,
+          code: "invalid_input",
+          message: "Invalid epic version number.",
+        });
+
+      expect(readFileSync(sentinel, "utf-8")).toBe("sentinel-bytes");
+      expect(readFileSync(indexPath, "utf-8")).toBe(poisonedIndex);
+      expect(readFileSync(path.join(epicDir, "epic.json"), "utf-8")).toBe(epicMetadataBefore);
+      expect(readdirSync(versionsDir).sort()).toEqual(beforeEntries);
+    });
   });
 
   // ── listVersions ──────────────────────────────────────────────
@@ -231,6 +265,18 @@ describe("CodaScopeVersionService", () => {
     it("returns null for nonexistent project", async () => {
       const result = await svc.getVersion("nonexistent", "epic1", 1);
       expect(result).toBeNull();
+    });
+
+    it.each([
+      ["string", "1"],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+      ["fraction", 1.5],
+      ["zero", 0],
+      ["negative", -1],
+    ])("rejects a caller-supplied %s version number", async (_name, version) => {
+      await expect(svc.getVersion("missing", "missing", version as number))
+        .rejects.toMatchObject({ status: 400, code: "invalid_input" });
     });
   });
 

@@ -89,6 +89,34 @@ Each service file has one clear domain:
 - Don't add unrelated functionality to an existing service
 - Services are instantiated per-import (module singletons), not dependency-injected
 
+### Filesystem Path Safety and Destructive Operations
+
+- Treat every route parameter, tool argument, imported metadata field, and
+  persisted identifier as untrusted before it influences a filesystem path.
+  Route and tool code must call the owning service; never join an external ID
+  into a storage path directly or duplicate a weaker validator at the edge.
+- Use the shared `codaScopePathSafety.ts` contract. Values such as epic,
+  document, artifact, source, wiki-page, conversation, run, curation, skill,
+  version-directory, and filename IDs occupy exactly one safe segment. Reject
+  empty, dot, traversal, separator, encoded-separator, NUL, absolute, and
+  Windows drive-qualified forms; do not normalize them into another value.
+  Numeric design/epic version identifiers must be positive safe integers;
+  validate persisted indexes, reject duplicates, and never interpolate an
+  unvalidated version value into a file or directory name.
+- Note paths, folder paths, repository source paths, and other intentionally
+  nested values use the contained-relative-path contract. Do not replace that
+  contract with single-segment validation, and never use string-prefix checks
+  as proof of containment.
+- Delete, recursive remove, move, overwrite, and atomic publication targets
+  must be proven strict descendants of the expected storage root. Equality
+  with the root is always an error.
+- Bundle imports must validate staged entry paths and path-backed JSON IDs
+  before atomic publication. Imports and assistant tools may not bypass the
+  same service boundary used by HTTP routes.
+- Hostile path tests create isolated temporary roots and sentinel files only.
+  Never aim traversal/destructive tests at this checkout, configured CodaScope
+  data, a user's home directory, or shared fixtures.
+
 ### Notes Documents and Priority
 
 - A personal star belongs only in that user's `_notes/_user-prefs` data. Never

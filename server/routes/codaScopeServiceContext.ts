@@ -44,6 +44,10 @@ import { CodaScopeNoteImportService } from "../services/codaScopeNoteImportServi
 import { CodaScopeNoteTagSuggestionService } from "../services/codaScopeNoteTagSuggestionService.js";
 import { CodaScopeNoteTransferService } from "../services/codaScopeNoteTransferService.js";
 import { CodaScopeNoteDocumentService } from "../services/codaScopeNoteDocumentService.js";
+import {
+  isPathValidationError,
+  isSameOrDescendantPath,
+} from "../services/codaScopePathSafety.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -154,8 +158,7 @@ export async function setProjectsRoot(secretService: SecretService, value: strin
 
 /** True when candidate is the AIShell checkout itself or a descendant of it. */
 export function isInsideInstallDirectory(candidate: string, repoRoot: string): boolean {
-  const relative = path.relative(path.resolve(repoRoot), path.resolve(candidate));
-  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+  return isSameOrDescendantPath(repoRoot, candidate);
 }
 
 /** Prevent mutable CodaScope project data from being written into AIShell source. */
@@ -408,7 +411,13 @@ export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): Cod
 
   const wrap = (fn: (req: Request, res: Response) => Promise<void>): RequestHandler => {
     return (req: Request, res: Response, next: NextFunction) => {
-      fn(req, res).catch(next);
+      fn(req, res).catch((error: unknown) => {
+        if (isPathValidationError(error)) {
+          next(httpError(error.message, 400, "invalid_input"));
+          return;
+        }
+        next(error);
+      });
     };
   };
 

@@ -11,6 +11,11 @@ import fs from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  CodaScopePathValidationError,
+  assertSafePathSegment,
+  assertStrictDescendant,
+} from "./codaScopePathSafety.js";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -343,6 +348,20 @@ export class CodaScopeChatService {
     return path.join(projectDir, "conversations", "conversations.json");
   }
 
+  /** Resolve persisted conversation metadata without trusting it as a path. */
+  private conversationFilePath(projectDir: string, relativeFile: string): string {
+    const parts = relativeFile.split("/");
+    if (parts.length !== 2 || parts[0] !== "conversations" || !parts[1].endsWith(".json")) {
+      throw new CodaScopePathValidationError("conversation file");
+    }
+    const conversationsDir = path.join(projectDir, "conversations");
+    const target = path.join(
+      conversationsDir,
+      assertSafePathSegment(parts[1], "conversation filename"),
+    );
+    return assertStrictDescendant(conversationsDir, target, "conversation file");
+  }
+
   private async readIndex(projectDir: string): Promise<ConversationIndex> {
     const raw = await this.readJsonFile(
       this.indexPath(projectDir),
@@ -388,7 +407,7 @@ export class CodaScopeChatService {
       const id = createId("conv");
       const createdAt = nowIso();
       const relativeFile = `conversations/${datestamp()}_${id}.json`;
-      const absoluteFile = path.join(projectDir, relativeFile);
+      const absoluteFile = this.conversationFilePath(projectDir, relativeFile);
 
       const conversation = normalizeConversation(projectId, {
         id,
@@ -454,7 +473,7 @@ export class CodaScopeChatService {
     const record = index.conversations.find((c) => c.id === conversationId);
     if (!record || record.ownerId !== ownerId) return null;
 
-    const filePath = path.join(projectDir, record.file);
+    const filePath = this.conversationFilePath(projectDir, record.file);
     const raw = await this.readJsonFile(filePath, null);
     if (!raw) return null;
 
@@ -476,7 +495,7 @@ export class CodaScopeChatService {
     const legacy: ConversationSummary[] = [];
     for (const record of index.conversations) {
       if (record.ownerId) continue;
-      const raw = await this.readJsonFile(path.join(projectDir, record.file), null);
+      const raw = await this.readJsonFile(this.conversationFilePath(projectDir, record.file), null);
       if (!raw) continue;
       const conversation = normalizeConversation(projectId, raw, {
         id: record.id,
@@ -504,7 +523,7 @@ export class CodaScopeChatService {
       const record = index.conversations.find((conversation) => conversation.id === conversationId);
       if (!record || record.ownerId) return null;
 
-      const raw = await this.readJsonFile(path.join(projectDir, record.file), null);
+      const raw = await this.readJsonFile(this.conversationFilePath(projectDir, record.file), null);
       if (!raw) return null;
       const conversation = normalizeConversation(projectId, raw, {
         id: record.id,
@@ -515,7 +534,7 @@ export class CodaScopeChatService {
       if (conversation.ownerId) return null;
 
       const next: Conversation = { ...conversation, ownerId, updatedAt: nowIso() };
-      await this.writeJsonAtomic(path.join(projectDir, record.file), next);
+      await this.writeJsonAtomic(this.conversationFilePath(projectDir, record.file), next);
       await this.writeIndex(projectDir, {
         ...index,
         conversations: [
@@ -552,7 +571,7 @@ export class CodaScopeChatService {
       const record = index.conversations.find((c) => c.id === conversationId);
       if (!record) return null;
 
-      await this.writeJsonAtomic(path.join(projectDir, record.file), next);
+      await this.writeJsonAtomic(this.conversationFilePath(projectDir, record.file), next);
       await this.writeIndex(projectDir, {
         ...index,
         conversations: [
@@ -610,7 +629,7 @@ export class CodaScopeChatService {
       const record = index.conversations.find((c) => c.id === conversationId);
       if (!record) return null;
 
-      await this.writeJsonAtomic(path.join(projectDir, record.file), next);
+      await this.writeJsonAtomic(this.conversationFilePath(projectDir, record.file), next);
       await this.writeIndex(projectDir, {
         ...index,
         conversations: [
@@ -643,7 +662,7 @@ export class CodaScopeChatService {
       const record = index.conversations.find((c) => c.id === next.id);
       if (!record) return null;
 
-      await this.writeJsonAtomic(path.join(projectDir, record.file), next);
+      await this.writeJsonAtomic(this.conversationFilePath(projectDir, record.file), next);
       await this.writeIndex(projectDir, {
         ...index,
         conversations: [
@@ -675,7 +694,7 @@ export class CodaScopeChatService {
       });
 
       // Delete the conversation file
-      const filePath = path.join(projectDir, record.file);
+      const filePath = this.conversationFilePath(projectDir, record.file);
       try {
         await fs.unlink(filePath);
       } catch (err) {

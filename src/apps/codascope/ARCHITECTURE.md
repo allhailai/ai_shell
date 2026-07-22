@@ -639,6 +639,50 @@ then publishes the new graph. Requests resolving services during a cutover
 wait for that boundary. A candidate or persistence failure leaves the previous
 graph live and does not report success.
 
+### Filesystem Identifier Boundary
+
+All filesystem-affecting identifiers are untrusted, regardless of whether
+they arrive through an HTTP parameter, an assistant tool, imported JSON, or
+persisted metadata. `server/services/codaScopePathSafety.ts` is the shared
+contract, and validation belongs at the filesystem service boundary so every
+caller receives the same protection.
+
+The contract deliberately distinguishes two path shapes:
+
+- **single storage segments** — project fallbacks, epic/document/artifact/
+  source/wiki-page/conversation/run/curation/skill IDs, artifact version
+  directory names, section fragment IDs, and served filenames must not be
+  empty, dot segments, traversal strings, absolute or drive-qualified paths,
+  contain NUL or separators, or contain encoded separators;
+- **numeric version identifiers** — design-document `number` and epic
+  `version` values must be positive safe integers. Persisted/imported indexes
+  reject malformed values and duplicates before any version path is resolved;
+- **contained relative paths** — note/folder paths and configured-repository
+  source paths may be nested, but each segment is checked and the resolved
+  target must remain beneath its fixed root. Containment is established with
+  `path.relative`, never a string-prefix comparison.
+
+Project IDs normally resolve by comparing `project.json` data while scanning
+directories, so the ID is a lookup key rather than a directory name. When a
+service legitimately falls back to a direct project directory, it first
+applies the single-segment contract. Identifiers such as annotation,
+directive, block, and research-log entry IDs are data keys only and must stay
+out of path construction.
+
+Destructive and publication operations have a stronger invariant: the exact
+delete, recursive-remove, move, overwrite, staging, or rename target must be a
+**strict** descendant of the expected storage root. The root itself is never a
+valid destructive target. Routes translate path-validation failures to the
+stable `400 invalid_input` domain error, while tools return their normal
+controlled failure result.
+
+ZIP archives are size-limited, entry-normalized, extracted into temporary
+staging, and checked for contained paths. Staged project and epic bundles are
+then traversed to validate every path segment and path-backed metadata ID
+before any atomic publication. Hostile-path tests use temporary directories
+and sentinel files only; they never target the repository, configured project
+storage, home directories, or shared fixtures.
+
 ### Portable Project Import and Export
 
 `GET /api/codascope/projects/:id/export` creates a

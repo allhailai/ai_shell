@@ -16,6 +16,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -242,8 +243,23 @@ export class CodaScopeBuildStateService {
 
   private buildLogsDir(projectId: string): string {
     // Use the registered project directory if available, otherwise fall back to ID-based path
-    const baseDir = this.projectDirs.get(projectId) ?? path.join(this.root, projectId);
+    const baseDir = this.projectDirs.get(projectId)
+      ?? path.join(this.root, assertSafePathSegment(projectId, "project ID"));
     return path.join(baseDir, "build-logs");
+  }
+
+  private runMetadataPath(projectId: string, runId: string): string {
+    return path.join(
+      this.buildLogsDir(projectId),
+      `${assertSafePathSegment(runId, "run ID")}.json`,
+    );
+  }
+
+  private runLogPath(projectId: string, runId: string): string {
+    return path.join(
+      this.buildLogsDir(projectId),
+      `${assertSafePathSegment(runId, "run ID")}.log`,
+    );
   }
 
   private ensureBuildLogsDir(projectId: string): string {
@@ -277,7 +293,7 @@ export class CodaScopeBuildStateService {
     this.clearCancellation(projectId, scope);
 
     const runId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-    const dir = this.ensureBuildLogsDir(projectId);
+    this.ensureBuildLogsDir(projectId);
 
     const state: BuildState = {
       runId,
@@ -296,11 +312,11 @@ export class CodaScopeBuildStateService {
     this.activeBuilds.set(key, state);
 
     // Write initial metadata (include scope for disk hydration)
-    const metaPath = path.join(dir, `${runId}.json`);
+    const metaPath = this.runMetadataPath(projectId, runId);
     writeFileSync(metaPath, JSON.stringify(state, null, 2), "utf-8");
 
     // Create empty log file
-    const logPath = path.join(dir, `${runId}.log`);
+    const logPath = this.runLogPath(projectId, runId);
     writeFileSync(logPath, "", "utf-8");
 
     return runId;
@@ -308,8 +324,7 @@ export class CodaScopeBuildStateService {
 
   /** Append output text to the build log file. */
   appendOutput(projectId: string, runId: string, text: string, scope?: string): void {
-    const dir = this.buildLogsDir(projectId);
-    const logPath = path.join(dir, `${runId}.log`);
+    const logPath = this.runLogPath(projectId, runId);
     appendFileSync(logPath, text, "utf-8");
 
     const key = this.buildKey(projectId, scope);
@@ -406,8 +421,7 @@ export class CodaScopeBuildStateService {
     }
 
     // Persist updated metadata to disk
-    const dir = this.buildLogsDir(projectId);
-    const metaPath = path.join(dir, `${runId}.json`);
+    const metaPath = this.runMetadataPath(projectId, runId);
     if (existsSync(metaPath)) {
       try {
         const data = JSON.parse(readFileSync(metaPath, "utf-8"));
@@ -495,8 +509,8 @@ export class CodaScopeBuildStateService {
       syncGitHeads?: Record<string, string>;
     },
   ): void {
-    const dir = this.ensureBuildLogsDir(projectId);
-    const metaPath = path.join(dir, `${runId}.json`);
+    this.ensureBuildLogsDir(projectId);
+    const metaPath = this.runMetadataPath(projectId, runId);
 
     // Aggregate token usage from pipeline steps
     let totalTokens = 0;
@@ -571,15 +585,14 @@ export class CodaScopeBuildStateService {
 
   /** Read the output log file for a given run. Returns the text content. */
   readBuildOutput(projectId: string, runId: string): string {
-    const dir = this.buildLogsDir(projectId);
-    const logPath = path.join(dir, `${runId}.log`);
+    const logPath = this.runLogPath(projectId, runId);
     if (!existsSync(logPath)) return "";
     return readFileSync(logPath, "utf-8");
   }
 
   /** Get the output file path for a given run (for streaming tail). */
   getBuildOutputPath(projectId: string, runId: string): string {
-    return path.join(this.buildLogsDir(projectId), `${runId}.log`);
+    return this.runLogPath(projectId, runId);
   }
 
   /** List recent build logs (most recent first). */

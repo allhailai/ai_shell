@@ -32,6 +32,7 @@ import type {
 import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeLockService } from "./codaScopeLockService.js";
+import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 /* ── Storage Schema ────────────────────────────────────────────────── */
 
@@ -93,7 +94,7 @@ export class CodaScopeEpicService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(this.epicsDir(projectDir), epicId);
+    return path.join(this.epicsDir(projectDir), assertSafePathSegment(epicId, "epic ID"));
   }
 
   private epicMetaPath(projectDir: string, epicId: string): string {
@@ -114,7 +115,7 @@ export class CodaScopeEpicService {
   }
 
   private archivedEpicDir(projectDir: string, epicId: string): string {
-    return path.join(this.archiveDir(projectDir), epicId);
+    return path.join(this.archiveDir(projectDir), assertSafePathSegment(epicId, "epic ID"));
   }
 
   /* ── Index helpers ─────────────────────────────────────────────────── */
@@ -301,7 +302,12 @@ export class CodaScopeEpicService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const epicDirectory = this.epicDir(projectDir, epicId);
+    const epicsRoot = this.epicsDir(projectDir);
+    const epicDirectory = assertStrictDescendant(
+      epicsRoot,
+      this.epicDir(projectDir, epicId),
+      "epic delete target",
+    );
     if (!existsSync(epicDirectory)) return false;
 
     rmSync(epicDirectory, { recursive: true, force: true });
@@ -321,7 +327,12 @@ export class CodaScopeEpicService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const epicDirectory = this.epicDir(projectDir, epicId);
+    const epicsRoot = this.epicsDir(projectDir);
+    const epicDirectory = assertStrictDescendant(
+      epicsRoot,
+      this.epicDir(projectDir, epicId),
+      "epic archive source",
+    );
     if (!existsSync(epicDirectory)) return false;
 
     // Update status to archived before moving
@@ -337,7 +348,11 @@ export class CodaScopeEpicService {
     if (!existsSync(archiveDirectory)) mkdirSync(archiveDirectory, { recursive: true });
 
     // Move epic dir to archive
-    const destDir = this.archivedEpicDir(projectDir, epicId);
+    const destDir = assertStrictDescendant(
+      archiveDirectory,
+      this.archivedEpicDir(projectDir, epicId),
+      "epic archive target",
+    );
     try {
       renameSync(epicDirectory, destDir);
     } catch {
@@ -359,11 +374,20 @@ export class CodaScopeEpicService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const archivedDir = this.archivedEpicDir(projectDir, epicId);
+    const archiveDirectory = this.archiveDir(projectDir);
+    const archivedDir = assertStrictDescendant(
+      archiveDirectory,
+      this.archivedEpicDir(projectDir, epicId),
+      "epic restore source",
+    );
     if (!existsSync(archivedDir)) return null;
 
     // Move back to active epics
-    const destDir = this.epicDir(projectDir, epicId);
+    const destDir = assertStrictDescendant(
+      this.epicsDir(projectDir),
+      this.epicDir(projectDir, epicId),
+      "epic restore target",
+    );
     try {
       renameSync(archivedDir, destDir);
     } catch {

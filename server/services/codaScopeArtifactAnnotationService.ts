@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import path from "node:path";
 import crypto from "node:crypto";
 import type { ArtifactAnnotation, ArtifactElementContext } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
@@ -75,7 +76,15 @@ export class CodaScopeArtifactAnnotationService {
   }
 
   private annotationsPath(projectDir: string, epicId: string, artifactId: string): string {
-    return path.join(projectDir, "epics", epicId, "artifacts", artifactId, "builds", ANNOTATIONS_FILE);
+    return path.join(
+      projectDir,
+      "epics",
+      assertSafePathSegment(epicId, "epic ID"),
+      "artifacts",
+      assertSafePathSegment(artifactId, "artifact ID"),
+      "builds",
+      ANNOTATIONS_FILE,
+    );
   }
 
   private lockKey(projectId: string, epicId: string, artifactId: string): string {

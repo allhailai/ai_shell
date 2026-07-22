@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 interface SkillInfo {
   id: string;
@@ -115,7 +116,7 @@ export class CodaScopeSkillService {
     if (!projectDir) throw new Error("Project not found");
 
     const skillId = skill.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || crypto.randomUUID();
-    const skillDir = path.join(projectDir, "skills", skillId);
+    const skillDir = path.join(projectDir, "skills", assertSafePathSegment(skillId, "skill ID"));
     mkdirSync(skillDir, { recursive: true });
 
     const manifest = {

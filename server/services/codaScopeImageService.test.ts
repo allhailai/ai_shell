@@ -37,6 +37,7 @@ describe("CodaScopeImageService conversation custody", () => {
     expect(await service.getImagePath("proj", "conv_owner", uploaded.filename, "bob")).toBeNull();
     await expect(service.uploadImage("proj", "conv_owner", "bob", Buffer.from("image bytes"), "image/png"))
       .rejects.toThrow("Conversation not found");
-    expect(await service.getImagePath("proj", "conv_owner", "../project.json", "alice")).toBeNull();
+    await expect(service.getImagePath("proj", "conv_owner", "../project.json", "alice"))
+      .rejects.toMatchObject({ status: 400, code: "invalid_input", message: "Invalid image filename." });
   });
 });

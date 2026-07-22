@@ -11,6 +11,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 
 /* ── Template Variable Substitution ──────────────────────────────── */
@@ -131,7 +132,10 @@ function getCommandsDir(): string {
  */
 export function loadCommandTemplate(commandId: string): string | null {
   const commandsDir = getCommandsDir();
-  const filePath = path.join(commandsDir, `${commandId}.md`);
+  const filePath = path.join(
+    commandsDir,
+    `${assertSafePathSegment(commandId, "command ID")}.md`,
+  );
 
   if (!existsSync(filePath)) return null;
 
@@ -165,7 +169,12 @@ export function loadSkillPrompt(
   skillId: string,
   vars: Record<string, string>,
 ): string | null {
-  const promptPath = path.join(projectDir, "skills", skillId, "prompt.md");
+  const promptPath = path.join(
+    projectDir,
+    "skills",
+    assertSafePathSegment(skillId, "skill ID"),
+    "prompt.md",
+  );
 
   if (!existsSync(promptPath)) return null;
 

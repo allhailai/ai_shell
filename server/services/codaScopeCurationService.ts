@@ -19,6 +19,7 @@ import type {
   CurationReasons,
   CurationLogEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -70,7 +71,7 @@ export class CodaScopeCurationService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId);
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"));
   }
 
   private curationDir(epicDir: string): string {
@@ -86,7 +87,7 @@ export class CodaScopeCurationService {
   }
 
   private logPath(epicDir: string, curationId: string): string {
-    return path.join(this.logsDir(epicDir), `${curationId}.json`);
+    return path.join(this.logsDir(epicDir), `${assertSafePathSegment(curationId, "curation ID")}.json`);
   }
 
   /** Resolve epicDir from project ID + epic ID. Returns null if not found. */

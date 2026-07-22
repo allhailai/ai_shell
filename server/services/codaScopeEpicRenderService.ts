@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Service ──────────────────────────────────────────────────────── */
 
@@ -46,7 +47,9 @@ export class CodaScopeEpicRenderService {
   }
 
   private renderedDir(projectDir: string, epicId: string, docId: string): string {
-    return path.join(projectDir, "epics", epicId, "designs", `${docId}-rendered`);
+    const safeEpicId = assertSafePathSegment(epicId, "epic ID");
+    const safeDocId = assertSafePathSegment(docId, "document ID");
+    return path.join(projectDir, "epics", safeEpicId, "designs", `${safeDocId}-rendered`);
   }
 
   private renderedPath(projectDir: string, epicId: string, docId: string): string {

@@ -7,6 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { assertStrictDescendant } from "./codaScopePathSafety.js";
 import { execFileSync, execSync } from "node:child_process";
 import type { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
@@ -214,7 +215,10 @@ export class CodaScopeProjectService {
   async deleteProject(id: string): Promise<void> {
     const projectDir = this.findProjectDir(id);
     if (projectDir) {
-      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(assertStrictDescendant(this.root, projectDir, "project delete target"), {
+        recursive: true,
+        force: true,
+      });
     }
   }
 

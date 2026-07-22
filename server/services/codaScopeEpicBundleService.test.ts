@@ -184,4 +184,90 @@ describe("CodaScopeEpicBundleService", () => {
     const bundleSvc = new CodaScopeEpicBundleService(projectSvc);
     await expect(bundleSvc.importEpic(targetProjectId, badZipPath)).rejects.toThrow("manifest and epic metadata do not match");
   });
+
+  it.each([
+    {
+      name: "design document ID",
+      relativePath: "designs/designs.json",
+      metadata: { docs: [{ id: "../..", epicId: "epic_source_safe", title: "Unsafe design" }] },
+      message: "Invalid imported document ID.",
+    },
+    {
+      name: "artifact ID",
+      relativePath: "artifacts/artifacts.json",
+      metadata: { artifacts: [{ id: "../..", epicId: "epic_source_safe", title: "Unsafe artifact" }] },
+      message: "Invalid imported artifact ID.",
+    },
+    {
+      name: "knowledge source ID",
+      relativePath: "knowledge/sources/manifest.json",
+      metadata: { sources: [{ id: "../..", epicId: "epic_source_safe", title: "Unsafe source" }] },
+      message: "Invalid imported source ID.",
+    },
+    {
+      name: "wiki page ID",
+      relativePath: "knowledge/wiki/safe-page.meta.json",
+      metadata: { id: "../..", title: "Unsafe page" },
+      message: "Invalid imported wiki page ID.",
+    },
+    {
+      name: "note document ID",
+      relativePath: "_notes/shared/team.assets/documents/index.json",
+      metadata: { version: 1, documents: [{ id: "../..", storedPath: "documents/../../blob" }] },
+      message: "Invalid imported document ID.",
+    },
+    {
+      name: "design version number",
+      relativePath: "designs/doc-safe/versions/versions.json",
+      metadata: { versions: [{ number: "../../../target-sentinel" }], maxVersions: 10 },
+      message: "Invalid imported design version number.",
+    },
+    {
+      name: "duplicate design version number",
+      relativePath: "designs/doc-safe/versions/versions.json",
+      metadata: { versions: [{ number: 1 }, { number: 1 }], maxVersions: 10 },
+      message: "Invalid imported design version number.",
+    },
+    {
+      name: "epic version number",
+      relativePath: "versions/versions.json",
+      metadata: { versions: [{ version: "../../../target-sentinel" }] },
+      message: "Invalid imported epic version number.",
+    },
+  ])("rejects unsafe imported $name before publishing an epic", async ({ relativePath, metadata, message }) => {
+    const root = tmpDir();
+    const sourceProjectId = "project-source";
+    const targetProjectId = "project-target";
+    const sourceProjectDir = project(root, "source", sourceProjectId);
+    const targetProjectDir = project(root, "target", targetProjectId);
+    const sourceEpicId = "epic_source_safe";
+    const sourceEpicDir = path.join(sourceProjectDir, "epics", sourceEpicId);
+    mkdirSync(sourceEpicDir, { recursive: true });
+    writeJson(path.join(sourceEpicDir, "epic.json"), {
+      id: sourceEpicId,
+      projectId: sourceProjectId,
+      title: "Unsafe adjacent metadata",
+      status: "defining",
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+      createdBy: "alexa",
+      collaborators: ["alexa"],
+      currentVersion: 0,
+    });
+    writeJson(path.join(sourceEpicDir, relativePath), metadata);
+    writeFileSync(path.join(targetProjectDir, "target.sentinel"), "target-sentinel");
+
+    const projectSvc = new CodaScopeProjectService(root);
+    const bundleSvc = new CodaScopeEpicBundleService(projectSvc);
+    const zipPath = path.join(root, "unsafe-adjacent.zip");
+    await writeExport(bundleSvc, sourceProjectId, sourceEpicId, zipPath);
+
+    await expect(bundleSvc.importEpic(targetProjectId, zipPath)).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_input",
+      message,
+    });
+    expect(readFileSync(path.join(targetProjectDir, "target.sentinel"), "utf-8")).toBe("target-sentinel");
+    expect(existsSync(path.join(targetProjectDir, "epics"))).toBe(false);
+  });
 });

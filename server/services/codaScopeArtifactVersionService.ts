@@ -20,6 +20,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, cpSync } from "node:fs";
 import path from "node:path";
 import type { ArtifactBuildVersion } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 /* ── Service ──────────────────────────────────────────────────────── */
 
@@ -53,7 +54,14 @@ export class CodaScopeArtifactVersionService {
   }
 
   private buildsDir(projectDir: string, epicId: string, artifactId: string): string {
-    return path.join(projectDir, "epics", epicId, "artifacts", artifactId, "builds");
+    return path.join(
+      projectDir,
+      "epics",
+      assertSafePathSegment(epicId, "epic ID"),
+      "artifacts",
+      assertSafePathSegment(artifactId, "artifact ID"),
+      "builds",
+    );
   }
 
   private versionsDir(projectDir: string, epicId: string, artifactId: string): string {
@@ -74,19 +82,24 @@ export class CodaScopeArtifactVersionService {
   private readCurrentPointer(vDir: string): string | null {
     const jsonPath = this.currentJsonPath(vDir);
     if (!existsSync(jsonPath)) return null;
+    let currentDirName: unknown;
     try {
       const data = JSON.parse(readFileSync(jsonPath, "utf-8"));
-      return data.currentDirName ?? null;
+      currentDirName = data.currentDirName;
     } catch {
       return null;
     }
+    if (currentDirName == null) return null;
+    if (typeof currentDirName !== "string") return null;
+    return assertSafePathSegment(currentDirName, "artifact version ID");
   }
 
   /** Write the current version pointer. */
   private writeCurrentPointer(vDir: string, dirName: string): void {
+    const safeDirName = assertSafePathSegment(dirName, "artifact version ID");
     writeFileSync(
       this.currentJsonPath(vDir),
-      JSON.stringify({ currentDirName: dirName }),
+      JSON.stringify({ currentDirName: safeDirName }),
       "utf-8",
     );
   }
@@ -206,16 +219,25 @@ export class CodaScopeArtifactVersionService {
     if (!projectDir) return false;
 
     const vDir = this.versionsDir(projectDir, epicId, artifactId);
-    const snapshotHtml = path.join(vDir, dirName, "index.html");
+    const safeDirName = assertSafePathSegment(dirName, "artifact version ID");
+    const snapshotHtml = assertStrictDescendant(
+      vDir,
+      path.join(vDir, safeDirName, "index.html"),
+      "artifact version source",
+    );
     if (!existsSync(snapshotHtml)) return false;
 
     // Copy snapshot to current build — no new snapshot created
-    const targetPath = this.indexHtmlPath(projectDir, epicId, artifactId);
+    const targetPath = assertStrictDescendant(
+      this.buildsDir(projectDir, epicId, artifactId),
+      this.indexHtmlPath(projectDir, epicId, artifactId),
+      "artifact version target",
+    );
     const content = readFileSync(snapshotHtml, "utf-8");
     writeFileSync(targetPath, content, "utf-8");
 
     // Update current pointer
-    this.writeCurrentPointer(vDir, dirName);
+    this.writeCurrentPointer(vDir, safeDirName);
 
     return true;
   }
@@ -234,10 +256,18 @@ export class CodaScopeArtifactVersionService {
     const latest = versions[versions.length - 1];
 
     // Copy latest snapshot to current build
-    const snapshotHtml = path.join(vDir, latest.dirName, "index.html");
+    const snapshotHtml = assertStrictDescendant(
+      vDir,
+      path.join(vDir, assertSafePathSegment(latest.dirName, "artifact version ID"), "index.html"),
+      "artifact version source",
+    );
     if (!existsSync(snapshotHtml)) return false;
 
-    const targetPath = this.indexHtmlPath(projectDir, epicId, artifactId);
+    const targetPath = assertStrictDescendant(
+      this.buildsDir(projectDir, epicId, artifactId),
+      this.indexHtmlPath(projectDir, epicId, artifactId),
+      "artifact version target",
+    );
     const content = readFileSync(snapshotHtml, "utf-8");
     writeFileSync(targetPath, content, "utf-8");
 

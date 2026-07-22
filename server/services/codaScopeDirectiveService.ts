@@ -23,6 +23,7 @@ import type {
   DirectiveType,
   DirectiveStatus,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Storage schema ─────────────────────────────────────────────── */
 
@@ -62,7 +63,7 @@ export class CodaScopeDirectiveService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId);
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"));
   }
 
   private directivesDir(projectDir: string, epicId: string): string {
@@ -70,7 +71,8 @@ export class CodaScopeDirectiveService {
   }
 
   private directivesPath(projectDir: string, epicId: string, documentId: string): string {
-    return path.join(this.directivesDir(projectDir, epicId), `${documentId}-directives.json`);
+    const safeDocumentId = assertSafePathSegment(documentId, "document ID");
+    return path.join(this.directivesDir(projectDir, epicId), `${safeDocumentId}-directives.json`);
   }
 
   /* ── File I/O helpers ──────────────────────────────────────────── */

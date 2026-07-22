@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
+import { assertSafePathSegment, isSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -126,12 +127,14 @@ export class CodaScopeCodeMapService {
     // Projects are stored by their human-friendly directory slug, while
     // callers identify them by the stable ID in project.json. Older projects
     // can happen to use the same value for both, so preserve that fast path.
-    const direct = path.join(this.root, projectId);
-    const directProjectPath = path.join(direct, "project.json");
-    if (existsSync(directProjectPath)) {
-      try {
-        if (JSON.parse(readFileSync(directProjectPath, "utf-8")).id === projectId) return direct;
-      } catch { /* fall through to a directory scan */ }
+    if (isSafePathSegment(projectId)) {
+      const direct = path.join(this.root, projectId);
+      const directProjectPath = path.join(direct, "project.json");
+      if (existsSync(directProjectPath)) {
+        try {
+          if (JSON.parse(readFileSync(directProjectPath, "utf-8")).id === projectId) return direct;
+        } catch { /* fall through to a directory scan */ }
+      }
     }
 
     try {
@@ -148,15 +151,21 @@ export class CodaScopeCodeMapService {
 
     // Preserve the legacy behavior for callers that create a project data
     // directory before its project.json metadata has been written.
-    return direct;
+    return path.join(this.root, assertSafePathSegment(projectId, "project ID"));
   }
 
   private codeMapPath(projectId: string, repoSlug: string): string {
-    return path.join(this.projectDir(projectId), `code_map_${repoSlug}.md`);
+    return path.join(
+      this.projectDir(projectId),
+      `code_map_${assertSafePathSegment(repoSlug, "repository slug")}.md`,
+    );
   }
 
   private codeMapMetaPath(projectId: string, repoSlug: string): string {
-    return path.join(this.projectDir(projectId), `code_map_${repoSlug}.meta.json`);
+    return path.join(
+      this.projectDir(projectId),
+      `code_map_${assertSafePathSegment(repoSlug, "repository slug")}.meta.json`,
+    );
   }
 
   /** Convert a repo name/path to a filesystem-safe slug */

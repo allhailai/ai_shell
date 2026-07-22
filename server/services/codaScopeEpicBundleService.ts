@@ -19,6 +19,11 @@ import {
   extractValidatedZipFile,
   PROJECT_ARCHIVE_LIMITS,
 } from "./codaScopeZipArchiveService.js";
+import {
+  assertSafeImportedPathTree,
+  assertSafePathSegment,
+  assertStrictDescendant,
+} from "./codaScopePathSafety.js";
 
 const MANIFEST_FILENAME = "codascope-epic-manifest.json";
 const PAYLOAD_DIRECTORY = "epic";
@@ -62,7 +67,12 @@ export class CodaScopeEpicBundleService {
   createExport(projectId: string, epicId: string): EpicBundleExport | null {
     const projectDir = this.projectSvc.getProjectDir(projectId);
     if (!projectDir) return null;
-    const epicDir = path.join(projectDir, "epics", epicId);
+    const epicsRoot = path.join(projectDir, "epics");
+    const epicDir = assertStrictDescendant(
+      epicsRoot,
+      path.join(epicsRoot, assertSafePathSegment(epicId, "epic ID")),
+      "epic export source",
+    );
     const metadataPath = path.join(epicDir, "epic.json");
     if (!existsSync(metadataPath)) return null;
 
@@ -133,11 +143,16 @@ export class CodaScopeEpicBundleService {
       importedMetadata.createdAt = importedAt;
       importedMetadata.updatedAt = importedAt;
       await writeFile(sourceMetadataPath, JSON.stringify(importedMetadata, null, 2), "utf-8");
+      assertSafeImportedPathTree(sourceEpicDir, "epic");
 
       const epicsDir = path.join(projectDir, "epics");
       await mkdir(epicsDir, { recursive: true });
       await assertAvailableSpace(projectDir, archive.totalUncompressedBytes);
-      const targetEpicDir = path.join(epicsDir, newEpicId);
+      const targetEpicDir = assertStrictDescendant(
+        epicsDir,
+        path.join(epicsDir, assertSafePathSegment(newEpicId, "epic ID")),
+        "epic import target",
+      );
       await moveDirectory(sourceEpicDir, targetEpicDir);
 
       try {

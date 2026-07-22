@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import type { EditLock } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Storage Schema ───────────────────────────────────────────────── */
 
@@ -58,7 +59,7 @@ export class CodaScopeLockService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(this.epicsDir(projectDir), epicId);
+    return path.join(this.epicsDir(projectDir), assertSafePathSegment(epicId, "epic ID"));
   }
 
   private lockFilePath(projectDir: string, epicId: string): string {

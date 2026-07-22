@@ -9,6 +9,7 @@ import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import * as unzipper from "unzipper";
+import { assertStrictDescendant } from "./codaScopePathSafety.js";
 
 export interface ZipArchiveLimits {
   maxCompressedBytes: number;
@@ -198,10 +199,7 @@ function normalizeArchivePath(entryPath: string): string {
 
 function resolveArchivePath(root: string, entryPath: string): string {
   const candidate = path.resolve(root, ...entryPath.split("/"));
-  if (!candidate.startsWith(`${root}${path.sep}`)) {
-    throw new Error(`Unsafe ZIP entry path: "${entryPath}"`);
-  }
-  return candidate;
+  return assertStrictDescendant(root, candidate, "ZIP entry path");
 }
 
 function formatMiB(bytes: number): string {

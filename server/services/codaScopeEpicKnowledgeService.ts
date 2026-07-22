@@ -30,6 +30,7 @@ import type {
   ResearchQueryLog,
   ResearchQueryLogEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -85,7 +86,7 @@ export class CodaScopeEpicKnowledgeService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId);
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"));
   }
 
   private knowledgeDir(epicDir: string): string {
@@ -117,7 +118,7 @@ export class CodaScopeEpicKnowledgeService {
   }
 
   private sourceDir(epicDir: string, sourceId: string): string {
-    return path.join(this.sourcesDir(epicDir), sourceId);
+    return path.join(this.sourcesDir(epicDir), assertSafePathSegment(sourceId, "source ID"));
   }
 
   /** Resolve epicDir from project ID + epic ID. Returns null if not found. */
@@ -210,6 +211,7 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Get a single source by ID. */
   async getSource(projectId: string, epicId: string, sourceId: string): Promise<EpicKnowledgeSource | null> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) return null;
     const manifest = this.readManifest(epicDir);
@@ -218,6 +220,7 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Update a source's status and optional metadata. */
   async updateSourceStatus(projectId: string, epicId: string, sourceId: string, status: EpicKnowledgeSource["status"], meta?: Partial<EpicKnowledgeSource>): Promise<void> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
@@ -240,6 +243,7 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Get the original file and extracted markdown for a source. */
   async getSourceContent(projectId: string, epicId: string, sourceId: string): Promise<{ original: Buffer | null; markdown: string | null }> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) return { original: null, markdown: null };
 
@@ -266,18 +270,21 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Store the original file for a source. */
   async storeOriginalFile(projectId: string, epicId: string, sourceId: string, buffer: Buffer, ext: string): Promise<string> {
+    assertSafePathSegment(sourceId, "source ID");
+    const safeExtension = assertSafePathSegment(ext, "file extension");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
     const srcDir = this.sourceDir(epicDir, sourceId);
     mkdirSync(srcDir, { recursive: true });
-    const filePath = path.join(srcDir, `original.${ext}`);
+    const filePath = path.join(srcDir, `original.${safeExtension}`);
     writeFileSync(filePath, buffer);
     return filePath;
   }
 
   /** Store extracted markdown for a source. */
   async storeExtractedMarkdown(projectId: string, epicId: string, sourceId: string, markdown: string): Promise<void> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
@@ -297,10 +304,16 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Delete a source and its directory. */
   async deleteSource(projectId: string, epicId: string, sourceId: string): Promise<boolean> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) return false;
 
-    const srcDir = this.sourceDir(epicDir, sourceId);
+    const sourcesRoot = this.sourcesDir(epicDir);
+    const srcDir = assertStrictDescendant(
+      sourcesRoot,
+      this.sourceDir(epicDir, sourceId),
+      "source delete target",
+    );
     if (existsSync(srcDir)) {
       rmSync(srcDir, { recursive: true, force: true });
     }
@@ -373,6 +386,7 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Mark a blocked download as resolved, linking it to the resolving source. */
   async resolveBlockedDownload(projectId: string, epicId: string, blockId: string, sourceId: string): Promise<void> {
+    assertSafePathSegment(sourceId, "source ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
@@ -427,24 +441,26 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Read a specific epic wiki page's content. */
   async readEpicWikiPage(projectId: string, epicId: string, pageId: string): Promise<string | null> {
+    const safePageId = assertSafePathSegment(pageId, "wiki page ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) return null;
 
-    const filePath = path.join(this.wikiDir(epicDir), `${pageId}.md`);
+    const filePath = path.join(this.wikiDir(epicDir), `${safePageId}.md`);
     if (!existsSync(filePath)) return null;
     return readFileSync(filePath, "utf-8");
   }
 
   /** Create or update an epic wiki page. */
   async writeEpicWikiPage(projectId: string, epicId: string, pageId: string, title: string, content: string, sourceRefs?: string[]): Promise<EpicWikiPage> {
+    const safePageId = assertSafePathSegment(pageId, "wiki page ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) throw new Error("Epic not found");
 
     const wDir = this.wikiDir(epicDir);
     mkdirSync(wDir, { recursive: true });
 
-    const filePath = path.join(wDir, `${pageId}.md`);
-    const metaPath = path.join(wDir, `${pageId}.meta.json`);
+    const filePath = path.join(wDir, `${safePageId}.md`);
+    const metaPath = path.join(wDir, `${safePageId}.meta.json`);
 
     const now = nowIso();
     const isNew = !existsSync(filePath);
@@ -476,11 +492,21 @@ export class CodaScopeEpicKnowledgeService {
 
   /** Delete an epic wiki page. */
   async deleteEpicWikiPage(projectId: string, epicId: string, pageId: string): Promise<boolean> {
+    const safePageId = assertSafePathSegment(pageId, "wiki page ID");
     const epicDir = this.resolveEpicDir(projectId, epicId);
     if (!epicDir) return false;
 
-    const filePath = path.join(this.wikiDir(epicDir), `${pageId}.md`);
-    const metaPath = path.join(this.wikiDir(epicDir), `${pageId}.meta.json`);
+    const wikiRoot = this.wikiDir(epicDir);
+    const filePath = assertStrictDescendant(
+      wikiRoot,
+      path.join(wikiRoot, `${safePageId}.md`),
+      "wiki page delete target",
+    );
+    const metaPath = assertStrictDescendant(
+      wikiRoot,
+      path.join(wikiRoot, `${safePageId}.meta.json`),
+      "wiki page metadata delete target",
+    );
 
     if (!existsSync(filePath)) return false;
 

@@ -21,6 +21,7 @@ import {
   readZipEntry,
   type ZipArchiveLimits,
 } from "./codaScopeZipArchiveService.js";
+import { assertSafeImportedPathTree, assertStrictDescendant } from "./codaScopePathSafety.js";
 
 export const PROJECT_BUNDLE_FORMAT = "codascope-project" as const;
 export const PROJECT_BUNDLE_VERSION = 1 as const;
@@ -243,10 +244,14 @@ export class CodaScopeProjectBundleService {
       };
       writeFileSync(projectPath, JSON.stringify(importedProject, null, 2), "utf-8");
       rebaseImportedProjectIdentifiers(sourceProjectDir, manifest.source.projectId, newId);
+      assertSafeImportedPathTree(sourceProjectDir, "project");
 
       await assertAvailableSpace(hiddenTarget, opened.totalUncompressedBytes);
       await cp(sourceProjectDir, hiddenTarget, { recursive: true, errorOnExist: true });
-      await rename(hiddenTarget, targetDir);
+      await rename(
+        assertStrictDescendant(projectsRoot, hiddenTarget, "project import staging target"),
+        assertStrictDescendant(projectsRoot, targetDir, "project import target"),
+      );
       hiddenTarget = null;
 
       return {

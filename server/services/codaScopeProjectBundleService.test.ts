@@ -165,6 +165,84 @@ describe("CodaScope portable project bundles", () => {
     await expect(bundleSvc.importProject(traversalPath)).rejects.toThrow("Unsafe ZIP entry path");
     expect(visibleProjectDirectories(projectSvc.getRoot())).toEqual([]);
   });
+
+  it.each([
+    {
+      name: "epic index ID",
+      entryPath: "project/epics/epics.json",
+      metadata: { epics: [{ id: "../..", projectId: "source-project", title: "Unsafe epic" }] },
+      message: "Invalid imported epic ID.",
+    },
+    {
+      name: "project skill ID",
+      entryPath: "project/skills/safe-skill/skill.json",
+      metadata: { id: "../..", name: "Unsafe skill" },
+      message: "Invalid imported skill ID.",
+    },
+    {
+      name: "note document ID",
+      entryPath: "project/_notes/shared/team.assets/documents/index.json",
+      metadata: { version: 1, documents: [{ id: "../..", storedPath: "documents/../../blob" }] },
+      message: "Invalid imported document ID.",
+    },
+    {
+      name: "design version number",
+      entryPath: "project/epics/epic-safe/designs/doc-safe/versions/versions.json",
+      metadata: { versions: [{ number: "../../../import-sentinel" }], maxVersions: 10 },
+      message: "Invalid imported design version number.",
+    },
+    {
+      name: "duplicate design version number",
+      entryPath: "project/epics/epic-safe/designs/doc-safe/versions/versions.json",
+      metadata: { versions: [{ number: 1 }, { number: 1 }], maxVersions: 10 },
+      message: "Invalid imported design version number.",
+    },
+    {
+      name: "epic version number",
+      entryPath: "project/epics/epic-safe/versions/versions.json",
+      metadata: { versions: [{ version: "../../../import-sentinel" }] },
+      message: "Invalid imported epic version number.",
+    },
+  ])("rejects unsafe imported $name without partial installation", async ({ entryPath, metadata, message }) => {
+    const root = tempRoot();
+    const projectsRoot = path.join(root, "projects");
+    const projectSvc = new CodaScopeProjectService(projectsRoot);
+    await projectSvc.ensureRootExists();
+    writeFileSync(path.join(root, "import.sentinel"), "import-sentinel");
+
+    const projectContent = portableProjectJson("source-project");
+    const unsafeContent = Buffer.from(JSON.stringify(metadata));
+    const manifest: ProjectBundleManifest = {
+      ...validManifest("source-project", projectContent),
+      entries: [
+        {
+          path: "project/project.json",
+          size: projectContent.length,
+          sha256: createHash("sha256").update(projectContent).digest("hex"),
+        },
+        {
+          path: entryPath,
+          size: unsafeContent.length,
+          sha256: createHash("sha256").update(unsafeContent).digest("hex"),
+        },
+      ],
+    };
+    const zipPath = path.join(root, "unsafe-identifiers.zip");
+    await writeZip(zipPath, [
+      { name: PROJECT_BUNDLE_MANIFEST, content: Buffer.from(JSON.stringify(manifest)) },
+      { name: "project/project.json", content: projectContent },
+      { name: entryPath, content: unsafeContent },
+    ]);
+
+    const bundleSvc = new CodaScopeProjectBundleService(projectSvc);
+    await expect(bundleSvc.importProject(zipPath)).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_input",
+      message,
+    });
+    expect(visibleProjectDirectories(projectsRoot)).toEqual([]);
+    expect(readFileSync(path.join(root, "import.sentinel"), "utf-8")).toBe("import-sentinel");
+  });
 });
 
 async function createCustodyFixture() {

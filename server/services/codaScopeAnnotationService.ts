@@ -22,6 +22,7 @@ import type {
   BlockInfo,
   BlockAnchor,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Storage schemas ─────────────────────────────────────────────── */
 
@@ -63,7 +64,7 @@ export class CodaScopeAnnotationService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId);
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"));
   }
 
   private annotationsDir(projectDir: string, epicId: string): string {
@@ -71,7 +72,8 @@ export class CodaScopeAnnotationService {
   }
 
   private annotationsPath(projectDir: string, epicId: string, documentId: string): string {
-    return path.join(this.annotationsDir(projectDir, epicId), `${documentId}-annotations.json`);
+    const safeDocumentId = assertSafePathSegment(documentId, "document ID");
+    return path.join(this.annotationsDir(projectDir, epicId), `${safeDocumentId}-annotations.json`);
   }
 
 

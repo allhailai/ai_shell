@@ -13,6 +13,12 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, readdirSync
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicVersion } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  assertPositiveSafeInteger,
+  assertSafePathSegment,
+  assertStrictDescendant,
+  assertVersionIndex,
+} from "./codaScopePathSafety.js";
 
 /* ── Storage schema ───────────────────────────────────────────────── */
 
@@ -73,7 +79,7 @@ export class CodaScopeVersionService {
   }
 
   private epicDir(projectDir: string, epicId: string): string {
-    return path.join(projectDir, "epics", epicId);
+    return path.join(projectDir, "epics", assertSafePathSegment(epicId, "epic ID"));
   }
 
   private versionsDir(projectDir: string, epicId: string): string {
@@ -85,7 +91,13 @@ export class CodaScopeVersionService {
   }
 
   private versionDir(projectDir: string, epicId: string, version: number): string {
-    return path.join(this.versionsDir(projectDir, epicId), `v${version}`);
+    const versionsRoot = this.versionsDir(projectDir, epicId);
+    const safeVersion = assertPositiveSafeInteger(version, "epic version number");
+    return assertStrictDescendant(
+      versionsRoot,
+      path.join(versionsRoot, `v${safeVersion}`),
+      "epic version directory",
+    );
   }
 
   /* ── Index helpers ────────────────────────────────────────────────── */
@@ -93,14 +105,18 @@ export class CodaScopeVersionService {
   private readIndex(projectDir: string, epicId: string): VersionsIndex {
     const p = this.indexPath(projectDir, epicId);
     if (!existsSync(p)) return { versions: [] };
+    let parsed: unknown;
     try {
-      return JSON.parse(readFileSync(p, "utf-8"));
+      parsed = JSON.parse(readFileSync(p, "utf-8"));
     } catch {
       return { versions: [] };
     }
+    assertVersionIndex(parsed, "version", "epic version number");
+    return parsed as VersionsIndex;
   }
 
   private writeIndex(projectDir: string, epicId: string, index: VersionsIndex): void {
+    assertVersionIndex(index, "version", "epic version number");
     const dir = this.versionsDir(projectDir, epicId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(this.indexPath(projectDir, epicId), JSON.stringify(index, null, 2), "utf-8");
@@ -110,12 +126,14 @@ export class CodaScopeVersionService {
   readVersionsIndex(epicDir: string): EpicVersion[] {
     const indexPath = path.join(epicDir, "versions", "versions.json");
     if (!existsSync(indexPath)) return [];
+    let parsed: unknown;
     try {
-      const data: VersionsIndex = JSON.parse(readFileSync(indexPath, "utf-8"));
-      return data.versions;
+      parsed = JSON.parse(readFileSync(indexPath, "utf-8"));
     } catch {
       return [];
     }
+    assertVersionIndex(parsed, "version", "epic version number");
+    return (parsed as VersionsIndex).versions;
   }
 
   /* ── Hash helpers ─────────────────────────────────────────────────── */
@@ -147,9 +165,9 @@ export class CodaScopeVersionService {
 
     // Determine next version number
     const index = this.readIndex(projectDir, epicId);
-    const nextVersion = index.versions.length > 0
-      ? Math.max(...index.versions.map((v) => v.version)) + 1
-      : 1;
+    let maxVersion = 0;
+    for (const version of index.versions) maxVersion = Math.max(maxVersion, version.version);
+    const nextVersion = assertPositiveSafeInteger(maxVersion + 1, "epic version number");
 
     // Mark previous versions as superseded
     for (const v of index.versions) {
@@ -231,14 +249,15 @@ export class CodaScopeVersionService {
     scope: string;
     designDocs: Array<{ id: string; filename: string; content: string }>;
   } | null> {
+    const safeVersion = assertPositiveSafeInteger(version, "epic version number");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
     const index = this.readIndex(projectDir, epicId);
-    const versionMeta = index.versions.find((v) => v.version === version);
+    const versionMeta = index.versions.find((v) => v.version === safeVersion);
     if (!versionMeta) return null;
 
-    const vDir = this.versionDir(projectDir, epicId, version);
+    const vDir = this.versionDir(projectDir, epicId, safeVersion);
     if (!existsSync(vDir)) return null;
 
     const defPath = path.join(vDir, "definition.md");
@@ -265,8 +284,10 @@ export class CodaScopeVersionService {
 
   /** Diff two versions. Returns line-by-line diffs for definition and each design doc. */
   async diffVersions(projectId: string, epicId: string, from: number, to: number): Promise<VersionDiff | null> {
-    const fromSnap = await this.getVersion(projectId, epicId, from);
-    const toSnap = await this.getVersion(projectId, epicId, to);
+    const safeFrom = assertPositiveSafeInteger(from, "epic version number");
+    const safeTo = assertPositiveSafeInteger(to, "epic version number");
+    const fromSnap = await this.getVersion(projectId, epicId, safeFrom);
+    const toSnap = await this.getVersion(projectId, epicId, safeTo);
     if (!fromSnap || !toSnap) return null;
 
     const files: FileDiff[] = [];
@@ -289,7 +310,7 @@ export class CodaScopeVersionService {
     // Filter out files with no changes
     const changedFiles = files.filter((f) => f.addedCount > 0 || f.removedCount > 0);
 
-    return { from, to, files: changedFiles };
+    return { from: safeFrom, to: safeTo, files: changedFiles };
   }
 
   /* ── Diff algorithm ───────────────────────────────────────────────── */

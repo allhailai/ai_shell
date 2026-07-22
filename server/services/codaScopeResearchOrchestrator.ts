@@ -19,6 +19,7 @@ import type { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeServ
 import type { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeContentService, type DownloadResult } from "./codaScopeContentService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 import { synthesizeAll, type CleanedSource, type SynthesisContext } from "./codaScopeResearchSynthesizer.js";
 import type { SecretService } from "./secretService.js";
 import type {
@@ -706,7 +707,8 @@ async function getSourceDir(
   // Let's adjust: we'll download to a temp path and then store.
   // Actually, the download target dir is passed to downloadUrl.
   // We'll create a temporary download directory.
-  const tmpDir = path.join(os.tmpdir(), `codascope-download-${sourceId}`);
+  const safeSourceId = assertSafePathSegment(sourceId, "source ID");
+  const tmpDir = path.join(os.tmpdir(), `codascope-download-${safeSourceId}`);
   return tmpDir;
 }
 

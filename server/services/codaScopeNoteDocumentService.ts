@@ -22,7 +22,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { NoteDocument, NoteDocumentListResponse, NoteScope, NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { CodaScopeNoteService, NoteResolveOpts } from "./codaScopeNoteService.js";
 import type { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
-import { assertSafePathSegment, resolveWithin } from "./codaScopePathSafety.js";
+import {
+  assertSafePathSegment,
+  assertStrictDescendant,
+  resolveWithin,
+} from "./codaScopePathSafety.js";
 
 interface DocumentManifest {
   version: 1;
@@ -144,8 +148,16 @@ export class CodaScopeNoteDocumentService {
     const id = randomUUID();
     const originalFilename = safeOriginalFilename(input.originalFilename);
     const documentsRoot = this.documentsRoot(bundle.assetsDir);
-    const stagingDir = path.join(documentsRoot, `.upload-${id}`);
-    const finalDir = path.join(documentsRoot, id);
+    const stagingDir = assertStrictDescendant(
+      documentsRoot,
+      path.join(documentsRoot, `.upload-${id}`),
+      "document upload staging target",
+    );
+    const finalDir = assertStrictDescendant(
+      documentsRoot,
+      path.join(documentsRoot, id),
+      "document upload target",
+    );
     const blobPath = path.join(stagingDir, "blob");
     const now = new Date().toISOString();
     const sha256 = await hashFile(input.temporaryPath);
@@ -422,6 +434,7 @@ export class CodaScopeNoteDocumentService {
   }
 
   private findDocument(manifest: DocumentManifest, documentId: string): NoteDocument {
+    assertSafePathSegment(documentId, "document ID");
     if (!DOCUMENT_ID_RE.test(documentId)) throw new Error("Invalid document ID.");
     const document = manifest.documents.find((item) => item.id === documentId);
     if (!document) throw new Error("Document not found.");

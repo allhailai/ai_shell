@@ -17,6 +17,7 @@ import path from "node:path";
 import multer from "multer";
 import { parseInlineAnnotationAnchors } from "../services/codaScopeNoteAnnotationAnchorService.js";
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
+import { isPathValidationError } from "../services/codaScopePathSafety.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -1260,6 +1261,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   // ══════════════════════════════════════════════════════════════════════
 
   const documentFailure = (error: unknown): never => {
+    if (isPathValidationError(error)) throw error;
     const message = error instanceof Error ? error.message : "Document operation failed.";
     const missing = /not found|missing/i.test(message);
     throw httpError(message, missing ? 404 : 400, missing ? "not_found" : "document_error");

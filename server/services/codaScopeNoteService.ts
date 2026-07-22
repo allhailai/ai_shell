@@ -48,7 +48,13 @@ import type {
   NoteActivityEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
-import { assertSafePathSegment, isSafePathSegment, resolveWithin } from "./codaScopePathSafety.js";
+import {
+  assertSafePathSegment,
+  assertStrictDescendant,
+  isSameOrDescendantPath,
+  isSafePathSegment,
+  resolveWithin,
+} from "./codaScopePathSafety.js";
 import {
   CodaScopeNoteFileService,
   type CollectedNoteFileBundle,
@@ -583,9 +589,15 @@ export class CodaScopeNoteService {
     if (visibility === "private" && opts.userId) {
       // For private notes the notesDir is <root>/_notes/private/<userId>
       // Archive is <root>/_notes/_archive/private/<userId>/
-      return path.join(path.dirname(path.dirname(notesDir)), "_archive", "private", opts.userId ?? "default");
+      const userId = assertSafePathSegment(opts.userId ?? "default", "user ID");
+      return path.join(path.dirname(path.dirname(notesDir)), "_archive", "private", userId);
     }
     return path.join(notesRoot, "_archive", visibility);
+  }
+
+  private archiveEnvelopePath(archiveDir: string, noteId: string): string {
+    const target = path.join(archiveDir, assertSafePathSegment(noteId, "note ID"));
+    return assertStrictDescendant(archiveDir, target, "note archive target");
   }
 
   /**
@@ -612,7 +624,7 @@ export class CodaScopeNoteService {
     // Create archive envelope
     const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
     if (!archiveDir) return null;
-    const envelopeDir = path.join(archiveDir, noteId);
+    const envelopeDir = this.archiveEnvelopePath(archiveDir, noteId);
     if (!existsSync(envelopeDir)) mkdirSync(envelopeDir, { recursive: true });
 
     const destMd = path.join(envelopeDir, path.basename(filePath));
@@ -670,7 +682,7 @@ export class CodaScopeNoteService {
     const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
     if (!archiveDir) return null;
     const archiveId = randomUUID();
-    const envelopeDir = path.join(archiveDir, archiveId);
+    const envelopeDir = this.archiveEnvelopePath(archiveDir, archiveId);
     mkdirSync(envelopeDir, { recursive: true });
 
     const meta: NoteArchiveMeta = {
@@ -718,7 +730,7 @@ export class CodaScopeNoteService {
     const archiveDir = this.resolveArchiveDir(scope, visibility, opts);
     if (!archiveDir) return null;
 
-    const envelopeDir = path.join(archiveDir, noteId);
+    const envelopeDir = this.archiveEnvelopePath(archiveDir, noteId);
     if (!existsSync(envelopeDir)) return null;
 
     // Read archive metadata
@@ -855,8 +867,7 @@ export class CodaScopeNoteService {
     if (sourceFolder === fromDir || !existsSync(sourceFolder) || !statSync(sourceFolder).isDirectory()) return false;
     if (existsSync(targetFolder)) throw new Error(`Target folder already exists: ${moveOpts.toFolder}`);
 
-    const relativeTarget = path.relative(sourceFolder, targetFolder);
-    if (fromDir === toDir && relativeTarget && !relativeTarget.startsWith("..") && !path.isAbsolute(relativeTarget)) {
+    if (fromDir === toDir && isSameOrDescendantPath(sourceFolder, targetFolder)) {
       throw new Error("A folder cannot be moved into itself.");
     }
 

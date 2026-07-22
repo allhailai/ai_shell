@@ -320,4 +320,45 @@ describe("getToolsForPurpose", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("tool calls cannot bypass service-boundary path validation", async () => {
+    const root = path.join(os.tmpdir(), `codascope-hostile-tools-${crypto.randomBytes(6).toString("hex")}`);
+    const projectDir = path.join(root, "project");
+    const projectId = "project-tools";
+    mkdirSync(path.join(projectDir, "epics", "epic-safe"), { recursive: true });
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: projectId,
+      name: "Tool Boundary",
+      description: "",
+      repositories: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }));
+    writeFileSync(path.join(root, "root.sentinel"), "root-sentinel");
+    writeFileSync(path.join(projectDir, "project.sentinel"), "project-sentinel");
+
+    try {
+      const tools = getToolsForPurpose(projectId, root, "assistant");
+      const designResult = await tools.create_design_doc.execute({
+        epicId: "../..",
+        title: "Escaped design",
+        content: "attacker content",
+      }, {} as any);
+      const wikiResult = await tools.write_epic_wiki_page.execute({
+        epicId: "epic-safe",
+        pageId: "../escape",
+        title: "Escaped wiki",
+        content: "attacker content",
+      }, {} as any);
+
+      expect(designResult).toContain("Invalid epic ID");
+      expect(wikiResult).toContain("Invalid wiki page ID");
+      expect(readFileSync(path.join(root, "root.sentinel"), "utf-8")).toBe("root-sentinel");
+      expect(readFileSync(path.join(projectDir, "project.sentinel"), "utf-8")).toBe("project-sentinel");
+      expect(existsSync(path.join(root, "designs"))).toBe(false);
+      expect(existsSync(path.join(projectDir, "escape.md"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
