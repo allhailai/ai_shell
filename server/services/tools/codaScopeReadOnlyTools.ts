@@ -197,7 +197,7 @@ export function buildReadOnlyTools(
 
     list_repositories: {
       description:
-        "List all configured repositories for this project, including their names and filesystem paths.",
+        "List all configured repositories for this project by stable ID and name. Use the scoped source-read tools for repository contents.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -210,10 +210,9 @@ export function buildReadOnlyTools(
             return "No repositories configured for this project.";
           }
           return JSON.stringify(
-            project.repositories.map((r: { id: string; name: string; path: string }) => ({
+            project.repositories.map((r: { id: string; name: string }) => ({
               id: r.id,
               name: r.name,
-              path: r.path,
             })),
             null,
             2,

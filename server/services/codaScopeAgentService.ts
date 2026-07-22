@@ -50,6 +50,11 @@ interface PoolEntry {
   collectorHolder: ToolResultCollectorHolder;
 }
 
+export interface AgentLocalWorkspace {
+  cwd?: string | string[];
+  sandboxOptions?: { enabled: boolean };
+}
+
 /**
  * Resolve the native workspace exposed to a CodaScope agent.
  *
@@ -60,7 +65,7 @@ export function getAgentLocalWorkspace(
   purpose: string,
   projectDir: string | null,
   repoPaths: string[],
-): { cwd?: string | string[]; sandboxOptions?: { enabled: true } } {
+): AgentLocalWorkspace {
   if (purpose === "wiki-build") {
     if (!projectDir) throw new Error("CodaScope project directory not found for wiki build.");
     return {
@@ -70,6 +75,32 @@ export function getAgentLocalWorkspace(
   }
 
   return { cwd: repoPaths.length > 0 ? repoPaths : undefined };
+}
+
+/** The SDK emits this stable error when the host cannot provide its sandbox. */
+export function isLocalSandboxUnsupportedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Local SDK sandboxing was requested, but sandboxing is not supported in this environment");
+}
+
+/**
+ * Create an agent with the strongest available boundary. The retry is deliberately
+ * limited to wiki builds and to the SDK's known unsupported-host error.
+ */
+export async function createAgentWithSandboxFallback<T>(
+  purpose: string,
+  workspace: AgentLocalWorkspace,
+  create: (workspace: AgentLocalWorkspace) => Promise<T>,
+): Promise<T> {
+  try {
+    return await create(workspace);
+  } catch (error) {
+    if (purpose !== "wiki-build" || !isLocalSandboxUnsupportedError(error)) throw error;
+    console.warn("[CodaScope] SDK sandbox unavailable; running wiki-build with project cwd and scoped tools.");
+    // Be explicit: omitting the option could inherit an enabled user-level
+    // ~/.cursor/sandbox.json setting and repeat the same failure.
+    return create({ ...workspace, sandboxOptions: { enabled: false } });
+  }
 }
 
 /* ── Model Cache ────────────────────────────────────────────────────── */
@@ -232,7 +263,9 @@ export class CodaScopeAgentService {
     // holder.current to a fresh ToolResultCollector.
     const collectorHolder = new ToolResultCollectorHolder();
 
-    const agent = await Agent.create({
+    const localWorkspace = getAgentLocalWorkspace(purpose, projectDir, repoPaths);
+    const customTools = this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId);
+    const createAgent = (workspace: typeof localWorkspace) => Agent.create({
       model: { id: modelId },
       apiKey,
       name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
@@ -240,10 +273,12 @@ export class CodaScopeAgentService {
         // Source repositories remain outside the wiki-build native
         // filesystem boundary. Custom tools run in the host service and
         // enforce their own project/repository scoping.
-        ...getAgentLocalWorkspace(purpose, projectDir, repoPaths),
-        customTools: this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId),
+        ...workspace,
+        customTools,
       },
     });
+
+    const agent = await createAgentWithSandboxFallback(purpose, localWorkspace, createAgent);
 
     this.pool.set(key, {
       agent,

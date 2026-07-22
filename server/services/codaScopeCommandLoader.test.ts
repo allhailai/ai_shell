@@ -4,7 +4,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect } from "vitest";
-import { substituteVars, loadCommandTemplate, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
+import { buildBaseVars, substituteVars, loadCommandTemplate, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
 
 describe("substituteVars", () => {
   it("replaces known variables", () => {
@@ -93,5 +93,18 @@ describe("loadCommandOrSkill", () => {
   it("returns null for unknown command with no project override", () => {
     const result = loadCommandOrSkill("do_totally_unknown_xyz", "/tmp/nonexistent", {});
     expect(result).toBeNull();
+  });
+});
+
+describe("buildBaseVars", () => {
+  it("does not expose configured repository filesystem paths to build prompts", () => {
+    const vars = buildBaseVars({
+      projectName: "Core",
+      projectDir: "/tmp/codascope-project-context",
+      repositories: [{ name: "core", path: "/private/source-repositories/core" }],
+    });
+
+    expect(vars.REPOSITORIES).toContain("core");
+    expect(vars.REPOSITORIES).not.toContain("/private/source-repositories/core");
   });
 });

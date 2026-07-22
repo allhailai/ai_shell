@@ -312,6 +312,10 @@ describe("getToolsForPurpose", () => {
         .toContain("answer = 42");
       expect(await tools.read_source_file.execute({ repoName: "core", relativePath: "../core-project/project.json" }, {} as any))
         .toContain("must remain within the configured repository");
+      const listedRepositories = await tools.list_repositories.execute({}, {} as any);
+      if (typeof listedRepositories !== "string") throw new Error("Expected repository list text.");
+      expect(JSON.parse(listedRepositories)).toEqual([{ id: "repo-core", name: "core" }]);
+      expect(listedRepositories).not.toContain(repoDir);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

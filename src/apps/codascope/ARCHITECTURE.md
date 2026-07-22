@@ -405,11 +405,13 @@ closures are also actor-scoped so a private note or document path cannot cross
 users through an agent reuse.
 
 Wiki-builds have a stronger storage boundary: their Cursor SDK workspace is the
-CodaScope project directory and the SDK filesystem sandbox is enabled. They
-read repositories only through the scoped source-read tools and write project
-content only through `write_code_map` and `write_project_wiki_topic`. A wiki
-run that leaves no substantive registered topic is failed rather than reported
-as a successful zero-page build.
+CodaScope project directory and the SDK filesystem sandbox is enabled when the
+host supports it. If the SDK explicitly reports that sandboxing is unsupported,
+the service retries with sandboxing explicitly disabled but the same project cwd
+and scoped tools, never a source repository cwd. They read repositories only through the scoped source-read
+tools and write project content only through `write_code_map` and
+`write_project_wiki_topic`. A wiki run that leaves no substantive registered
+topic is failed rather than reported as a successful zero-page build.
 
 For repositories affected by the legacy behavior, the dashboard exposes a
 manual generated-wiki recovery action. It previews only dirty `wiki/**` and

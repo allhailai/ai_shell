@@ -114,7 +114,7 @@ export async function runAnalyzePipeline(
         repositories: repos,
       });
       vars.REPOSITORY_NAME = repo.name;
-      vars.REPOSITORY_PATH = repo.path;
+      vars.REPOSITORY_PATH = "(configured repository; use read_source_file rather than a filesystem path)";
       vars.REPO_SLUG = slug;
       vars.FILE_INVENTORY = inventoryMd;
       vars.EXISTING_DOCS = existingDocs;

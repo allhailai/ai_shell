@@ -46,7 +46,7 @@ export function buildBaseVars(ctx: ProjectContext): Record<string, string> {
     PROJECT_DIR: ctx.projectDir,
     TIMESTAMP: new Date().toISOString(),
     REPOSITORIES: ctx.repositories
-      .map((r) => `- **${r.name}**: \`${r.path}\``)
+      .map((r) => `- **${r.name}** (configured repository; inspect it with the scoped source-read tools)`)
       .join("\n"),
   };
 

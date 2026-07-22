@@ -166,7 +166,9 @@ When extending agent capabilities:
 
 - A `wiki-build` agent's native workspace is the CodaScope project directory,
   never a configured source repository. Keep the Cursor SDK sandbox enabled for
-  that purpose.
+  that purpose when supported; on hosts that explicitly report sandbox
+  unsupported, the service may retry with sandboxing explicitly disabled while
+  retaining the project cwd and scoped source tools.
 - Source repositories are read through `list_source_files` and
   `read_source_file`, which resolve only configured repositories and reject
   traversal. Do not restore direct native repository access to build agents.
