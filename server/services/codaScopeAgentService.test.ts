@@ -8,6 +8,7 @@ import {
   createAgentWithSandboxFallback,
   getAgentLocalWorkspace,
   isLocalSandboxUnsupportedError,
+  startRunWithSandboxFallback,
 } from "./codaScopeAgentService.js";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
@@ -70,6 +71,43 @@ describe("CodaScopeAgentService actor isolation", () => {
     ));
     await expect(createAgentWithSandboxFallback("chat", workspace, nonWikiFailure)).rejects.toThrow("sandboxing is not supported");
     expect(nonWikiFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries wiki-build run start with a fresh no-sandbox agent", async () => {
+    const sandboxedAgent = { id: "sandboxed" };
+    const fallbackAgent = { id: "fallback" };
+    const start = vi.fn()
+      .mockRejectedValueOnce(new Error(
+        "Local SDK sandboxing was requested, but sandboxing is not supported in this environment.",
+      ))
+      .mockResolvedValueOnce("run");
+    const createFallbackAgent = vi.fn().mockResolvedValue(fallbackAgent);
+
+    await expect(startRunWithSandboxFallback(
+      "wiki-build",
+      sandboxedAgent,
+      start,
+      createFallbackAgent,
+    )).resolves.toEqual({ agent: fallbackAgent, run: "run" });
+
+    expect(start.mock.calls.map(([agent]) => agent)).toEqual([sandboxedAgent, fallbackAgent]);
+    expect(createFallbackAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry non-wiki or unrelated run-start failures", async () => {
+    const agent = { id: "agent" };
+    const fallback = vi.fn().mockResolvedValue({ id: "fallback" });
+    const sandboxFailure = vi.fn().mockRejectedValue(new Error(
+      "Local SDK sandboxing was requested, but sandboxing is not supported in this environment.",
+    ));
+    await expect(startRunWithSandboxFallback("chat", agent, sandboxFailure, fallback))
+      .rejects.toThrow("sandboxing is not supported");
+    expect(fallback).not.toHaveBeenCalled();
+
+    const genericFailure = vi.fn().mockRejectedValue(new Error("network unavailable"));
+    await expect(startRunWithSandboxFallback("wiki-build", agent, genericFailure, fallback))
+      .rejects.toThrow("network unavailable");
+    expect(fallback).not.toHaveBeenCalled();
   });
 
   it("uses separate pool boundaries and actor-scoped note-document closures", async () => {

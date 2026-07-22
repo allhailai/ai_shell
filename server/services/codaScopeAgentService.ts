@@ -65,12 +65,13 @@ export function getAgentLocalWorkspace(
   purpose: string,
   projectDir: string | null,
   repoPaths: string[],
+  sandboxEnabled = true,
 ): AgentLocalWorkspace {
   if (purpose === "wiki-build") {
     if (!projectDir) throw new Error("CodaScope project directory not found for wiki build.");
     return {
       cwd: projectDir,
-      sandboxOptions: { enabled: true },
+      sandboxOptions: { enabled: sandboxEnabled },
     };
   }
 
@@ -91,15 +92,34 @@ export async function createAgentWithSandboxFallback<T>(
   purpose: string,
   workspace: AgentLocalWorkspace,
   create: (workspace: AgentLocalWorkspace) => Promise<T>,
+  onSandboxUnsupported?: () => void,
 ): Promise<T> {
   try {
     return await create(workspace);
   } catch (error) {
     if (purpose !== "wiki-build" || !isLocalSandboxUnsupportedError(error)) throw error;
+    onSandboxUnsupported?.();
     console.warn("[CodaScope] SDK sandbox unavailable; running wiki-build with project cwd and scoped tools.");
     // Be explicit: omitting the option could inherit an enabled user-level
     // ~/.cursor/sandbox.json setting and repeat the same failure.
     return create({ ...workspace, sandboxOptions: { enabled: false } });
+  }
+}
+
+/** Retry a run start when the SDK defers its sandbox capability check until send(). */
+export async function startRunWithSandboxFallback<TAgent, TRun>(
+  purpose: string,
+  agent: TAgent,
+  start: (agent: TAgent) => Promise<TRun>,
+  createFallbackAgent: () => Promise<TAgent>,
+): Promise<{ agent: TAgent; run: TRun }> {
+  try {
+    return { agent, run: await start(agent) };
+  } catch (error) {
+    if (purpose !== "wiki-build" || !isLocalSandboxUnsupportedError(error)) throw error;
+    console.warn("[CodaScope] SDK sandbox unavailable at run start; recreating wiki-build agent without sandboxing.");
+    const fallbackAgent = await createFallbackAgent();
+    return { agent: fallbackAgent, run: await start(fallbackAgent) };
   }
 }
 
@@ -120,6 +140,8 @@ export class CodaScopeAgentService {
   private pool = new Map<string, PoolEntry>();
   private modelCache: ModelCache | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /** SDK sandbox support is a host capability, not a project-specific setting. */
+  private wikiBuildSandboxUnsupported = false;
 
   /** Active chat AbortControllers keyed by project and authenticated actor. */
   private activeChatControllers = new Map<string, AbortController>();
@@ -263,7 +285,12 @@ export class CodaScopeAgentService {
     // holder.current to a fresh ToolResultCollector.
     const collectorHolder = new ToolResultCollectorHolder();
 
-    const localWorkspace = getAgentLocalWorkspace(purpose, projectDir, repoPaths);
+    const localWorkspace = getAgentLocalWorkspace(
+      purpose,
+      projectDir,
+      repoPaths,
+      purpose !== "wiki-build" || !this.wikiBuildSandboxUnsupported,
+    );
     const customTools = this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId);
     const createAgent = (workspace: typeof localWorkspace) => Agent.create({
       model: { id: modelId },
@@ -278,7 +305,12 @@ export class CodaScopeAgentService {
       },
     });
 
-    const agent = await createAgentWithSandboxFallback(purpose, localWorkspace, createAgent);
+    const agent = await createAgentWithSandboxFallback(
+      purpose,
+      localWorkspace,
+      createAgent,
+      () => { this.wikiBuildSandboxUnsupported = true; },
+    );
 
     this.pool.set(key, {
       agent,
@@ -350,10 +382,10 @@ export class CodaScopeAgentService {
     try {
       const agent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
 
-      const entry = this.pool.get(key);
-      if (entry) {
-        entry.busy = true;
-        entry.collectorHolder.current = runCollector;
+      let activeEntry = this.pool.get(key);
+      if (activeEntry) {
+        activeEntry.busy = true;
+        activeEntry.collectorHolder.current = runCollector;
       }
 
       // Build the full message with optional context
@@ -377,33 +409,70 @@ export class CodaScopeAgentService {
           }
         : fullMessage;
 
-      const run = await agent.send(messagePayload, {
-        model: { id: modelId },
-        onDelta: ({ update }) => {
-          // Check if cancelled
-          if (abortController.signal.aborted) return;
+      const startRun = async (currentAgent: SDKAgent) => {
+        // Deltas arrive after send() resolves in the SDK, but retaining the id
+        // separately also keeps the retry path free of a temporal-dead-zone
+        // reference to the pending run.
+        let runId = "";
+        const run = await currentAgent.send(messagePayload, {
+          model: { id: modelId },
+          onDelta: ({ update }) => {
+            // Check if cancelled
+            if (abortController.signal.aborted) return;
 
-          // Convert delta updates to a synthetic message for the frontend
-          if ("text" in update && update.text) {
-            onMessage({
-              type: "assistant",
-              agent_id: agent.agentId,
-              run_id: run.id,
-              message: {
-                role: "assistant",
-                content: [{ type: "text", text: update.text }],
-              },
-            } as SDKMessage);
+            // Convert delta updates to a synthetic message for the frontend
+            if ("text" in update && update.text) {
+              onMessage({
+                type: "assistant",
+                agent_id: currentAgent.agentId,
+                run_id: runId,
+                message: {
+                  role: "assistant",
+                  content: [{ type: "text", text: update.text }],
+                },
+              } as SDKMessage);
+            }
+          },
+        });
+        runId = run.id;
+        return run;
+      };
+
+      const { run } = await startRunWithSandboxFallback(
+        purpose,
+        agent,
+        startRun,
+        async () => {
+          // The SDK can defer the capability check to send(). Discard this
+          // unusable agent, remember the host capability, then create a fresh
+          // agent with sandboxing explicitly disabled.
+          this.wikiBuildSandboxUnsupported = true;
+          const staleEntry = this.pool.get(key);
+          if (staleEntry?.agent === agent) {
+            try {
+              staleEntry.agent.close();
+            } catch {
+              // The failed agent has no usable run; close errors are harmless.
+            }
+            this.pool.delete(key);
           }
+
+          const fallbackAgent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
+          activeEntry = this.pool.get(key);
+          if (activeEntry) {
+            activeEntry.busy = true;
+            activeEntry.collectorHolder.current = runCollector;
+          }
+          return fallbackAgent;
         },
-      });
+      );
 
       // Wait for completion
       const result = await run.wait();
 
-      if (entry) {
-        entry.busy = false;
-        entry.lastUsed = Date.now();
+      if (activeEntry) {
+        activeEntry.busy = false;
+        activeEntry.lastUsed = Date.now();
       }
 
       // Clean up controller
