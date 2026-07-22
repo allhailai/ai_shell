@@ -11,6 +11,15 @@ import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandL
 import { runAnalyzePipeline, runDeepRunPipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
+const WIKI_BUILD_COMMANDS = new Set([
+  "do_explore",
+  "do_build_full_wiki",
+  "do_build_wiki_page",
+  "do_build_wiki_delta",
+  "do_deep_wiki_page",
+  "do_wiki_cross_reference",
+]);
+
 export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param } = ctx;
 
@@ -87,7 +96,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
         systemPrompt:
           "You are CodaScope, an AI agent for codebase analysis and documentation. " +
           "Follow the instructions in the skill prompt precisely. " +
-          "Write all output files to the project directory.",
+          "Use CodaScope tools for all source reads and project writes; never use native filesystem write tools.",
         purpose: "wiki-build",
         onMessage: (msg) => {
           if (aborted) return;
@@ -192,7 +201,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
         modelId,
         systemPrompt:
           "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-          "Follow the instructions precisely. Write all output files to the project's wiki/ directory. " +
+          "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
           "Do NOT modify files in the source repositories.",
         purpose: "wiki-build",
         onMessage: (msg) => {
@@ -206,13 +215,27 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
         onDone: async (result) => {
           // Count wiki pages and complete the build
           let pageCount: number | undefined;
+          let substantivePageCount: number | undefined;
           try {
             const topics = await wikiSvc.listTopics(id);
             pageCount = topics.length;
+            substantivePageCount = topics.filter((topic) => topic.id !== "index" && !topic.id.startsWith("_")).length;
             if (!aborted) {
               res.write(`event: wiki-refresh\ndata: ${JSON.stringify({ topics })}\n\n`);
             }
           } catch { /* ignore refresh errors */ }
+
+          if (WIKI_BUILD_COMMANDS.has(command) && !substantivePageCount) {
+            const error = substantivePageCount === undefined
+              ? "Could not verify registered wiki output in the CodaScope project."
+              : "Wiki build finished without creating any registered topic pages in the CodaScope project.";
+            buildSvc.failBuild(id, runId, error);
+            if (!aborted) {
+              res.write(`event: error\ndata: ${JSON.stringify({ error })}\n\n`);
+              res.end();
+            }
+            return;
+          }
 
           buildSvc.completeBuild(id, runId, pageCount);
 

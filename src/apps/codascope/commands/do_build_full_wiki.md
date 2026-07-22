@@ -18,9 +18,9 @@ The following Code Map provides a pre-analyzed overview of the codebase. Use thi
 Build a comprehensive wiki for the entire codebase at **outline depth**:
 
 1. **Discover topics** — identify all major modules and architectural areas worth documenting
-2. **Create wiki index** — write `wiki/_index.md` as a structured table of contents
+2. **Create wiki index** — write `wiki/_index.md` through `write_project_wiki_topic(topicId="_index", content=...)` as a structured table of contents
 3. **Generate pages** — create individual wiki pages for each topic at outline depth
-4. **Generate human index** — write `wiki/index.md` as a navigable landing page
+4. **Generate human index** — write `wiki/index.md` through `write_project_wiki_topic(topicId="index", content=...)` as a navigable landing page
 
 ### Topic Categories
 
@@ -74,11 +74,12 @@ Use `[[wiki links]]` for **all** topic references so they are navigable in the w
 
 ## Output
 
-Write all topic pages to the `wiki/` directory. Update `wiki/_index.md` with the full table of contents. Generate `wiki/index.md` as the human-facing landing page (this must be the **last** file written, after all topic pages exist).
+For every topic, call `write_project_wiki_topic` with the topic slug and complete Markdown content. Update `_index` with the full table of contents. Generate `index` as the human-facing landing page (this must be the **last** page written, after all topic pages exist).
 
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Be thorough — cover all significant areas of the codebase
 - Aim for **outline depth**: useful and navigable, but not exhaustive. Deep dives come later.

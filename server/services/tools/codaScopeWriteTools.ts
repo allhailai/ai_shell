@@ -5,6 +5,8 @@
 import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import { CodaScopeCodeMapService } from "../codaScopeCodeMapService.js";
+import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
+import { formatCompletedAction } from "../codaScopeActionParser.js";
 
 /**
  * Build write tools available ONLY to wiki-build purpose.
@@ -13,8 +15,92 @@ import { CodaScopeCodeMapService } from "../codaScopeCodeMapService.js";
 export function buildWriteTools(
   projectId: string,
   services: ToolServices,
+  collector?: ToolResultCollectorHolder,
 ): Record<string, SDKCustomTool> {
+  const completed = (
+    operation: string,
+    description: string,
+    attributes: Record<string, string | number | undefined> = {},
+  ): string => {
+    const resultText = `${description}\n\n${formatCompletedAction(operation, description, attributes)}`;
+    collector?.collect(resultText);
+    return resultText;
+  };
+
   return {
+    write_code_map: {
+      description:
+        "Write the complete Code Map for a configured repository into the CodaScope project store. " +
+        "Use this for Code Map builds; never write code_map_*.md with filesystem tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repoName: {
+            type: "string",
+            description: "The configured repository name",
+          },
+          content: {
+            type: "string",
+            description: "Complete Markdown content of the Code Map",
+          },
+        },
+        required: ["repoName", "content"],
+      },
+      execute: async (args) => {
+        const repoName = args.repoName as string;
+        const content = args.content as string;
+        if (!repoName || !content) return "repoName and content are required.";
+
+        try {
+          const project = await services.project.getProject(projectId);
+          const repo = project?.repositories?.find((candidate: { id: string; name: string }) =>
+            candidate.name === repoName || candidate.id === repoName,
+          );
+          if (!repo) return `Repository "${repoName}" is not configured for this project.`;
+
+          const slug = CodaScopeCodeMapService.repoSlug(repo.name);
+          services.codeMap.writeCodeMap(projectId, slug, content);
+          return completed("write_code_map", `Code Map for "${repo.name}" has been written to the CodaScope project.`, {
+            repoName: repo.name,
+          });
+        } catch (err) {
+          return `Failed to write Code Map: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+
+    write_project_wiki_topic: {
+      description:
+        "Write one complete main wiki page into the CodaScope project store. " +
+        "Use this for every topic, including the special index and _index pages; never write wiki/*.md with filesystem tools.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          topicId: {
+            type: "string",
+            description: "Topic slug (kebab-case), or the special IDs index and _index",
+          },
+          content: {
+            type: "string",
+            description: "Complete Markdown content for the wiki page",
+          },
+        },
+        required: ["topicId", "content"],
+      },
+      execute: async (args) => {
+        const topicId = args.topicId as string;
+        const content = args.content as string;
+        if (!topicId || !content) return "topicId and content are required.";
+
+        try {
+          await services.wiki.updateTopicContent(projectId, topicId, content);
+          return completed("write_wiki_topic", `Wiki topic "${topicId}" has been written to the CodaScope project.`, { topicId });
+        } catch (err) {
+          return `Failed to write wiki topic "${topicId}": ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+
     update_code_map_section: {
       description:
         "Update a specific section of the Code Map by its heading. Use this to " +

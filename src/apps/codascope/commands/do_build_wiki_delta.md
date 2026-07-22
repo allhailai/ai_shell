@@ -46,13 +46,14 @@ Update the wiki page for **{{TOPIC_NAME}}** to reflect the code changes listed a
 
 ## Output
 
-Write the updated wiki page to `wiki/{{TOPIC_SLUG}}.md`. This replaces the existing file.
+Write the updated wiki page by calling `write_project_wiki_topic` with `topicId="{{TOPIC_SLUG}}"`. This replaces the existing page.
 
 If the changes are minimal or don't affect this topic, you may write the page back with only minor adjustments (e.g., updated file paths). Don't make changes for the sake of making changes.
 
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Preserve the existing structure and depth of the page
 - Only change what the code changes require

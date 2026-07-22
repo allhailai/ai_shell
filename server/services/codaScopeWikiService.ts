@@ -16,6 +16,14 @@ interface WikiTopic {
   updatedAt?: string;
 }
 
+const WIKI_TOPIC_ID = /^(?:_index|index|[a-z0-9]+(?:-[a-z0-9]+)*)$/;
+
+function assertValidTopicId(topicId: string): void {
+  if (!WIKI_TOPIC_ID.test(topicId)) {
+    throw new Error("Invalid wiki topic ID.");
+  }
+}
+
 export class CodaScopeWikiService {
   private root: string;
 
@@ -81,6 +89,7 @@ export class CodaScopeWikiService {
   // ── Get topic content ─────────────────────────────────────────────
 
   async getTopicContent(projectId: string, topicId: string): Promise<string | null> {
+    assertValidTopicId(topicId);
     const wikiDir = this.getWikiDir(projectId);
     if (!wikiDir) return null;
 
@@ -93,6 +102,7 @@ export class CodaScopeWikiService {
   // ── Update topic content ──────────────────────────────────────────
 
   async updateTopicContent(projectId: string, topicId: string, content: string): Promise<void> {
+    assertValidTopicId(topicId);
     const wikiDir = this.getWikiDir(projectId);
     if (!wikiDir) return;
 
@@ -105,6 +115,7 @@ export class CodaScopeWikiService {
   // ── Delete topic ──────────────────────────────────────────────────
 
   async deleteTopic(projectId: string, topicId: string): Promise<void> {
+    assertValidTopicId(topicId);
     const wikiDir = this.getWikiDir(projectId);
     if (!wikiDir) return;
 

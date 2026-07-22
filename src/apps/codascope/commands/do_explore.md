@@ -21,14 +21,15 @@ Perform a comprehensive exploration of the codebase:
 
 ## Output
 
-Write your findings to the project directory as structured JSON and markdown:
+Write your findings to the CodaScope project store:
 
-- `wiki/_index.md` — table of contents for future wiki pages
-- `wiki/architecture.md` — high-level architecture overview with Mermaid diagrams
+- call `write_project_wiki_topic` with `topicId="_index"` for the table of contents for future wiki pages
+- call `write_project_wiki_topic` with `topicId="architecture"` for the high-level architecture overview with Mermaid diagrams
 
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Include Mermaid diagrams for architecture and data flow
 - Be thorough but concise — focus on what matters for understanding

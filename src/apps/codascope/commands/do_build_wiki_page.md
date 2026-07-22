@@ -29,7 +29,7 @@ Create a comprehensive wiki page for the topic "{{TOPIC_NAME}}":
 
 ## Output Format
 
-Write the page as markdown to `wiki/{{TOPIC_SLUG}}.md`. Include:
+Write the complete page by calling `write_project_wiki_topic` with `topicId="{{TOPIC_SLUG}}"`. Include:
 - A single `# Title` heading
 - At least one `mermaid` fenced code block for architectural diagrams
 - `[[wiki links]]` to related topics
@@ -38,7 +38,8 @@ Write the page as markdown to `wiki/{{TOPIC_SLUG}}.md`. Include:
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Reference actual file paths and function names — be specific
 - Include Mermaid diagrams for architecture and data flow
-- After writing the topic page, update `wiki/index.md` to include this new topic under the appropriate category with a one-line description. If `wiki/index.md` doesn't exist yet, skip this step.
+- After writing the topic page, if an `index` topic already exists, read it with `read_wiki_topic` and update it through `write_project_wiki_topic` to include the new topic under the appropriate category with a one-line description.

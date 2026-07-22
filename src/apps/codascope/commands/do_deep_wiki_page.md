@@ -139,7 +139,7 @@ If you cannot meet a threshold because the source code doesn't have enough mater
 
 ## Source Reading Instructions
 
-1. **Read actual source files** — use the code map to identify relevant files, then READ them
+1. **Read actual source files** — use the code map to identify relevant files, then use `read_source_file` to read them
 2. **Quote real code** — your code examples must come from actual files, not invented examples
 3. **Reference specific lines** — use `filename.ts:L10-L30` format where possible
 4. **Follow import chains** — trace how this module connects to others by reading imports
@@ -149,14 +149,15 @@ If you cannot meet a threshold because the source code doesn't have enough mater
 
 ## Output
 
-Write the complete page to `wiki/{{TOPIC_SLUG}}.md`.
+Write the complete page by calling `write_project_wiki_topic` with `topicId="{{TOPIC_SLUG}}"`.
 
 Use a single `# Title` heading at the top. Structure all content under `##` and `###` sub-headings.
 
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Every claim must be verifiable by reading the referenced source file
 - Do NOT invent code examples — only quote real code
 - Do NOT fabricate function names or file paths — verify they exist

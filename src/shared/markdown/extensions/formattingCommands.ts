@@ -176,19 +176,24 @@ export function toggleHighlight(view: EditorView): boolean {
   return true;
 }
 
+/** Build a Markdown link, treating selected text as the URL when provided. */
+export function createMarkdownLink(selectedText: string): string {
+  return selectedText ? `[](${selectedText})` : "[text](url)";
+}
+
 /** Insert a [text](url) link. */
 export function insertLink(view: EditorView): boolean {
   const { state } = view;
   const transaction = state.changeByRange((range) => {
     const selectedText = state.doc.sliceString(range.from, range.to);
     if (selectedText) {
-      const link = `[${selectedText}](url)`;
+      const link = createMarkdownLink(selectedText);
       return {
         changes: { from: range.from, to: range.to, insert: link },
-        range: EditorSelection.cursor(range.from + selectedText.length + 3),
+        range: EditorSelection.cursor(range.from + 1),
       };
     }
-    const link = "[text](url)";
+    const link = createMarkdownLink("");
     return {
       changes: { from: range.from, insert: link },
       range: EditorSelection.range(range.from + 1, range.from + 5),

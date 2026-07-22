@@ -23,7 +23,7 @@ Build a comprehensive Code Map by reading actual source files to understand the 
 
 ### Required Output Format
 
-Write the Code Map as markdown to: `code_map_{{REPO_SLUG}}.md`
+Write the Code Map by calling `write_code_map` with `repoName="{{REPOSITORY_NAME}}"` and the complete Markdown as `content`.
 
 The file MUST follow this exact progressive disclosure format:
 
@@ -61,7 +61,7 @@ The file MUST follow this exact progressive disclosure format:
 
 ### Also Output
 
-1. **wiki/_index.md** — Detailed topic outlines for future wiki generation. Each topic should have:
+1. **`wiki/_index.md`** — Write this through `write_project_wiki_topic` with `topicId="_index"`. It contains detailed topic outlines for future wiki generation. Each topic should have:
    - A clear title
    - A 2-3 sentence outline of what the page should cover
    - Key files the wiki page should reference
@@ -78,7 +78,8 @@ The file MUST follow this exact progressive disclosure format:
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repository
-- All output goes to the CodaScope project directory
+- **Required source access**: use `list_source_files` and `read_source_file` to inspect repositories. Do not use native filesystem or shell tools to access repositories.
+- **Required project output**: use only `write_code_map` and `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Be thorough but efficient — read enough files to understand deeply, not every file
 - Include at least one Mermaid diagram in the Code Map
 - If you find existing ARCHITECTURE.md or similar docs, incorporate their insights

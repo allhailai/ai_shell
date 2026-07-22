@@ -58,6 +58,11 @@ export function extractTokenUsage(result: { usage?: Record<string, number> } | u
   };
 }
 
+/** Count pages that demonstrate a wiki build produced actual topic content. */
+export function countSubstantiveWikiTopics(topics: Array<{ id: string }>): number {
+  return topics.filter((topic) => topic.id !== "index" && !topic.id.startsWith("_")).length;
+}
+
 // ── Build Orchestrator ──────────────────────────────────────────────
 
 /**
@@ -128,7 +133,7 @@ export async function runAnalyzePipeline(
         modelId,
         systemPrompt:
           "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-          "Follow the instructions precisely. Write all output files to the project directory. " +
+          "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
           "Do NOT modify files in the source repositories.",
         purpose: "wiki-build",
         onMessage: sendMessage,
@@ -157,7 +162,8 @@ export async function runAnalyzePipeline(
   // ── Step 2: Wiki (if toggled on) ───────────────────────────────
   if (wiki) {
     const wikiState = wikiStateSvc.getWikiState(projectDir);
-    const isFullBuild = wiki === "full" || !wikiState || Object.keys(wikiState.topics).length === 0;
+    const existingTopics = await wikiSvc.listTopics(projectId);
+    const isFullBuild = wiki === "full" || !wikiState || countSubstantiveWikiTopics(existingTopics) === 0;
     buildMode = isFullBuild ? "outline" : "delta";
 
     if (isFullBuild) {
@@ -171,6 +177,7 @@ export async function runAnalyzePipeline(
       });
 
       const prompt = loadCommandOrSkill("do_build_full_wiki", projectDir, vars);
+      let outlineError: string | null = null;
       if (prompt) {
         await agentSvc.send({
           projectId,
@@ -178,7 +185,7 @@ export async function runAnalyzePipeline(
           modelId,
           systemPrompt:
             "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-            "Follow the instructions precisely. Write all output files to the project's wiki/ directory. " +
+            "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
             "Do NOT modify files in the source repositories.",
           purpose: "wiki-build",
           onMessage: sendMessage,
@@ -187,9 +194,22 @@ export async function runAnalyzePipeline(
             sendEvent("pipeline-step", { step: "wiki-outline", status: "complete", tokenUsage });
           },
           onError: (err) => {
+            outlineError = err.message;
             sendEvent("pipeline-step", { step: "wiki-outline", status: "error", error: err.message });
           },
         });
+      } else {
+        outlineError = "Full Wiki command not found.";
+        sendEvent("pipeline-step", { step: "wiki-outline", status: "error", error: outlineError });
+      }
+
+      const outlineTopics = await wikiSvc.listTopics(projectId);
+      if (outlineError || countSubstantiveWikiTopics(outlineTopics) === 0) {
+        const error = outlineError ?? "Wiki build finished without creating any registered topic pages in the CodaScope project.";
+        sendEvent("pipeline-step", { step: "wiki-outline", status: "error", error });
+        buildSvc.failBuild(projectId, runId, error);
+        sendEvent("error", { error });
+        return;
       }
     } else {
       // ── Delta Build: only rebuild topics affected by git changes ──
@@ -257,6 +277,7 @@ export async function runAnalyzePipeline(
               systemPrompt:
                 "You are CodaScope, a technical documentation specialist. " +
                 "Update the wiki page to reflect recent code changes. Preserve the existing depth and quality. " +
+                "Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
                 "Do NOT modify files in the source repositories.",
               purpose: "wiki-build",
               onMessage: sendMessage,
@@ -307,7 +328,7 @@ export async function runAnalyzePipeline(
       // Evaluate depth and extract deps for all topics
       const topics = await wikiSvc.listTopics(projectId);
       for (const topic of topics) {
-        if (topic.id === "_index" || topic.id.startsWith("_")) continue;
+        if (topic.id === "index" || topic.id.startsWith("_")) continue;
         const content = await wikiSvc.getTopicContent(projectId, topic.id);
         if (!content) continue;
 
@@ -472,7 +493,7 @@ export async function runEpicDeepenPipeline(
         modelId,
         systemPrompt:
           "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-          "Follow the instructions precisely. Write the wiki page to the project's wiki/ directory. " +
+          "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
           `Focus on the topic: "${entry.topicTitle}". ` +
           (entry.targetDepth
             ? `Target depth: ${entry.targetDepth}. `

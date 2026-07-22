@@ -9,7 +9,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import type { AnalyzeSseCallbacks, AnalyzeServices } from "./codaScopeBuildOrchestrator.js";
-import { extractTokenUsage } from "./codaScopeBuildOrchestrator.js";
+import { countSubstantiveWikiTopics, extractTokenUsage } from "./codaScopeBuildOrchestrator.js";
 import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
@@ -148,7 +148,7 @@ export async function runDeepRunPipeline(
       modelId,
       systemPrompt:
         "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-        "Follow the instructions precisely. Write all output files to the project directory. " +
+        "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
         "Do NOT modify files in the source repositories.",
       purpose: "wiki-build",
       onMessage: sendMessage,
@@ -178,7 +178,7 @@ export async function runDeepRunPipeline(
   // ── Phase 2: Create wiki outline if no topics exist ────────────
   if (!isAborted()) {
     const existingTopics = await wikiSvc.listTopics(projectId);
-    const realTopics = existingTopics.filter((t) => t.id !== "_index" && !t.id.startsWith("_"));
+    const realTopics = existingTopics.filter((t) => t.id !== "index" && !t.id.startsWith("_"));
 
     if (realTopics.length === 0) {
       sendEvent("pipeline-step", { step: "deep-outline", status: "running" });
@@ -190,6 +190,7 @@ export async function runDeepRunPipeline(
       });
 
       const prompt = loadCommandOrSkill("do_build_full_wiki", projectDir, vars);
+      let outlineError: string | null = null;
       if (prompt) {
         await agentSvc.send({
           projectId,
@@ -197,7 +198,7 @@ export async function runDeepRunPipeline(
           modelId,
           systemPrompt:
             "You are CodaScope, an AI agent for codebase analysis and documentation. " +
-            "Follow the instructions precisely. Write all output files to the project's wiki/ directory. " +
+            "Follow the instructions precisely. Use CodaScope tools for all source reads and project writes; never use native filesystem write tools. " +
             "Do NOT modify files in the source repositories.",
           purpose: "wiki-build",
           onMessage: sendMessage,
@@ -206,9 +207,22 @@ export async function runDeepRunPipeline(
             sendEvent("pipeline-step", { step: "deep-outline", status: "complete", tokenUsage });
           },
           onError: (err) => {
+            outlineError = err.message;
             sendEvent("pipeline-step", { step: "deep-outline", status: "error", error: err.message });
           },
         });
+      } else {
+        outlineError = "Full Wiki command not found.";
+        sendEvent("pipeline-step", { step: "deep-outline", status: "error", error: outlineError });
+      }
+
+      const outlineTopics = await wikiSvc.listTopics(projectId);
+      if (outlineError || countSubstantiveWikiTopics(outlineTopics) === 0) {
+        const error = outlineError ?? "Deep Run outline finished without creating any registered topic pages in the CodaScope project.";
+        sendEvent("pipeline-step", { step: "deep-outline", status: "error", error });
+        buildSvc.failBuild(projectId, runId, error);
+        sendEvent("error", { error });
+        return;
       }
     } else {
       sendEvent("pipeline-step", { step: "deep-outline", status: "skipped", reason: `${realTopics.length} topics already exist` });
@@ -263,7 +277,7 @@ export async function runDeepRunPipeline(
         systemPrompt:
           "You are CodaScope, a senior technical documentation specialist. " +
           "You are producing an exhaustive, source-level wiki page. " +
-          "READ actual source files — do not just summarize the code map. " +
+          "Use CodaScope source-read tools to read actual source files — do not just summarize the code map. " +
           `Focus on the topic: "${vars.TOPIC_NAME}". ` +
           "Target ≥1,500 words with ≥5 code examples, ≥2 Mermaid diagrams, and ≥3 [[wiki links]]. " +
           "Do NOT modify files in the source repositories.",
@@ -350,6 +364,7 @@ export async function runDeepRunPipeline(
             `Review the following ${batch.length} wiki pages for cross-reference consistency. ` +
             "ONLY modify pages in your assigned batch. " +
             "Ensure [[wiki links]] are bidirectional and complete. " +
+            "Use CodaScope tools for all project writes; never use native filesystem write tools. " +
             "Do NOT modify files in the source repositories.",
           purpose: "wiki-build",
           onMessage: sendMessage,
@@ -388,15 +403,16 @@ export async function runDeepRunPipeline(
       await agentSvc.send({
         projectId,
         message:
-          "Regenerate ONLY the wiki/index.md file. All topic pages have already been written at deep depth. " +
+          "Regenerate ONLY the index and _index wiki topics. All topic pages have already been written at deep depth. " +
           "Read the existing topic pages to build an accurate, rich index page. " +
-          "Do NOT create or modify any individual topic pages — only wiki/index.md and wiki/_index.md.\n\n" +
+          "Do NOT create or modify any individual topic pages — only the index and _index topics.\n\n" +
           prompt,
         modelId,
         systemPrompt:
           "You are CodaScope, an AI agent for codebase documentation. " +
-          "Your ONLY task is to regenerate the wiki index page (wiki/index.md and wiki/_index.md). " +
+          "Your ONLY task is to regenerate the wiki index page (index and _index topics). " +
           "Do NOT create or modify individual topic pages. Read existing topic pages to build an accurate index. " +
+          "Use CodaScope tools for all project writes; never use native filesystem write tools. " +
           "Do NOT modify files in the source repositories.",
         purpose: "wiki-build",
         onMessage: sendMessage,
@@ -440,7 +456,7 @@ export async function runDeepRunPipeline(
       // Evaluate depth and extract deps for all topics, marking them as "deep"
       const topics = await wikiSvc.listTopics(projectId);
       for (const topic of topics) {
-        if (topic.id === "_index" || topic.id.startsWith("_")) continue;
+        if (topic.id === "index" || topic.id.startsWith("_")) continue;
         const content = await wikiSvc.getTopicContent(projectId, topic.id);
         if (!content) continue;
 

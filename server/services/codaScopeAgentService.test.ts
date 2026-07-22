@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { CodaScopeAgentService } from "./codaScopeAgentService.js";
+import { CodaScopeAgentService, getAgentLocalWorkspace } from "./codaScopeAgentService.js";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteDocumentService } from "./codaScopeNoteDocumentService.js";
@@ -16,6 +16,18 @@ function tmpDir(): string {
 }
 
 describe("CodaScopeAgentService actor isolation", () => {
+  it("sandboxes wiki builds in the CodaScope project instead of a source repository", () => {
+    expect(getAgentLocalWorkspace("wiki-build", "/data/projects/core", ["/repos/core"])).toEqual({
+      cwd: "/data/projects/core",
+      sandboxOptions: { enabled: true },
+    });
+    expect(getAgentLocalWorkspace("chat", "/data/projects/core", ["/repos/core"])).toEqual({
+      cwd: ["/repos/core"],
+    });
+    expect(() => getAgentLocalWorkspace("wiki-build", null, ["/repos/core"]))
+      .toThrow("CodaScope project directory not found for wiki build.");
+  });
+
   it("uses separate pool boundaries and actor-scoped note-document closures", async () => {
     const root = tmpDir();
     try {

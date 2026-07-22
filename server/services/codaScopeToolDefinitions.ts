@@ -99,7 +99,7 @@ export function getToolsForPurpose(
   const noteRead = buildNoteReadTools(projectId, services, actorId);
 
   if (purpose === "wiki-build") {
-    const write = buildWriteTools(projectId, services);
+    const write = buildWriteTools(projectId, services, collectorHolder);
     return { ...readOnly, ...noteRead, ...write };
   }
 
@@ -116,7 +116,7 @@ export function getToolsForPurpose(
 
   if (purpose === "assistant" || purpose === "chat") {
     const epicTools = buildEpicTools(projectId, services, collectorHolder);
-    const write = buildWriteTools(projectId, services);
+    const write = buildWriteTools(projectId, services, collectorHolder);
     const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
     const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);
     return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };

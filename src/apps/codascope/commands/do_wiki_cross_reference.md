@@ -37,7 +37,7 @@ After a Deep Run has individually enriched every wiki topic, the cross-reference
 
 ### 1. Read Your Assigned Pages
 
-Read each wiki page in your assigned batch from the `wiki/` directory. For each page, note:
+Read each wiki page in your assigned batch with `read_wiki_topic`. For each page, note:
 - Which `[[wiki links]]` it currently contains (outgoing references)
 - Which topics it SHOULD link to based on its content (missing references)
 - Which other topics link TO it (check the Wiki Link Index above for incoming references)
@@ -89,12 +89,12 @@ See also: [[authentication]]
 
 ## Output
 
-For each assigned wiki page that needs updates, write the updated page to `wiki/<slug>.md`.
+For each assigned wiki page that needs updates, read it with `read_wiki_topic` and write the complete replacement with `write_project_wiki_topic` using that page's slug.
 
 ## Guardrails
 
 - **READ ONLY**: Do NOT modify any files in the source repositories
-- All output goes to the CodaScope project directory
+- **Required project output**: use only `write_project_wiki_topic`. Do not use filesystem edit, delete, or shell-write tools for output.
 - Only modify cross-reference sections — preserve all other content
 - Do NOT remove or shorten existing content
 - Do NOT add substantive new sections (that was the Deep Enrichment phase's job)

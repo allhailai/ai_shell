@@ -378,7 +378,7 @@ legacy-ownership transition.
 The agent does **not** receive full wiki/code content upfront. Instead:
 
 1. **Lightweight manifest** (~500 tokens) is always injected — project name, repo list, wiki topic titles, build status, freshness timestamps
-2. **Read-only tools** let the agent fetch full content on demand — wiki pages, code maps, build status, skills
+2. **Read-only tools** let the agent fetch full content on demand — wiki pages, code maps, build status, skills, and scoped source files
 3. **The agent decides** what to read based on the user's question and the manifest overview
 
 This hybrid approach avoids token waste (no guessing at relevance) and gives the agent agency over its own context.
@@ -386,9 +386,9 @@ This hybrid approach avoids token waste (no guessing at relevance) and gives the
 ### Tool Set
 
 Tools are purpose-filtered by `getToolsForPurpose()` in `codaScopeToolDefinitions.ts`. Tool implementations live in `tools/` subdirectory, organized into four builder functions:
-- `buildReadOnlyTools()` — wiki, code map, build status, skills (14 tools in `tools/codaScopeReadOnlyTools.ts`)
+- `buildReadOnlyTools()` — wiki, code map, build status, skills, and scoped source reads (16 tools in `tools/codaScopeReadOnlyTools.ts`)
 - `buildEpicTools()` — epic CRUD, scope, design docs, research, wiki write (21 tools in `tools/codaScopeEpicTools.ts`)
-- `buildWriteTools()` — code map write (1 tool in `tools/codaScopeWriteTools.ts`)
+- `buildWriteTools()` — CodaScope project code-map and wiki writes (3 tools in `tools/codaScopeWriteTools.ts`)
 - `buildArtifactTools()` — artifact HTML read/write, epic context assembly (3 tools in `tools/codaScopeArtifactTools.ts`)
 - `buildNoteReadTools()` — note listing, reading, searching, folder listing (4 tools in `tools/codaScopeNoteTools.ts`)
 - `buildNoteWriteTools()` — note creation and editing (2 tools in `tools/codaScopeNoteTools.ts`)
@@ -404,6 +404,19 @@ receiving the assistant's full tool set. User-facing agent pools and note-tool
 closures are also actor-scoped so a private note or document path cannot cross
 users through an agent reuse.
 
+Wiki-builds have a stronger storage boundary: their Cursor SDK workspace is the
+CodaScope project directory and the SDK filesystem sandbox is enabled. They
+read repositories only through the scoped source-read tools and write project
+content only through `write_code_map` and `write_project_wiki_topic`. A wiki
+run that leaves no substantive registered topic is failed rather than reported
+as a successful zero-page build.
+
+For repositories affected by the legacy behavior, the dashboard exposes a
+manual generated-wiki recovery action. It previews only dirty `wiki/**` and
+root `code_map_*.md` paths, requires a typed confirmation tied to the preview,
+and creates a named Git stash with untracked files included. It never stashes
+or discards ordinary repository work automatically.
+
 The table below is a representative subset of read-only tools:
 
 | Tool | Returns |
@@ -413,6 +426,8 @@ The table below is a representative subset of read-only tools:
 | `search_wiki(query)` | Full-text search results |
 | `read_code_map(repoName)` | Repository architecture map |
 | `list_repositories` | Repo names and filesystem paths |
+| `list_source_files(repoName, query?, pathPrefix?)` | Scoped repository-relative file list |
+| `read_source_file(repoName, relativePath)` | Scoped source-file contents |
 | `read_build_status` | Current and historical build state |
 | `list_project_skills` | Available framework commands |
 

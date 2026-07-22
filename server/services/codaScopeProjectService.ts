@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import type { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 
 interface RepoInfo {
@@ -25,6 +25,41 @@ interface ProjectData {
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
+}
+
+export interface RepositoryRecoveryChange {
+  path: string;
+  originalPath?: string;
+  indexStatus: string;
+  worktreeStatus: string;
+}
+
+export interface GeneratedWikiRecoveryPreview {
+  repository: { id: string; name: string };
+  changes: RepositoryRecoveryChange[];
+  fingerprint: string;
+}
+
+const GENERATED_WIKI_PATHSPECS = ["wiki", ":(glob)code_map_*.md"];
+const GENERATED_WIKI_STASH_CONFIRMATION = "STASH GENERATED FILES";
+
+function parsePorcelainChanges(porcelain: string): RepositoryRecoveryChange[] {
+  const records = porcelain.split("\0");
+  const changes: RepositoryRecoveryChange[] = [];
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+
+    const indexStatus = record[0] ?? " ";
+    const worktreeStatus = record[1] ?? " ";
+    const path = record.slice(3);
+    const renamedOrCopied = indexStatus === "R" || indexStatus === "C";
+    const originalPath = renamedOrCopied ? records[++index] || undefined : undefined;
+    changes.push({ indexStatus, worktreeStatus, path, ...(originalPath ? { originalPath } : {}) });
+  }
+
+  return changes;
 }
 
 export class CodaScopeProjectService {
@@ -329,6 +364,115 @@ export class CodaScopeProjectService {
       return this.dirResolver.resolve(id);
     }
     return this.findProjectDir(id);
+  }
+
+  // ── Generated wiki recovery ───────────────────────────────────────
+
+  /**
+   * Return only legacy CodaScope build artifacts that are dirty in a configured
+   * repository. This intentionally excludes all ordinary repository changes.
+   */
+  async previewGeneratedWikiRecovery(
+    projectId: string,
+    repoId: string,
+  ): Promise<GeneratedWikiRecoveryPreview | null> {
+    const projectDir = this.findProjectDir(projectId);
+    if (!projectDir) return null;
+
+    const projectPath = path.join(projectDir, "project.json");
+    const project = JSON.parse(readFileSync(projectPath, "utf-8")) as ProjectData;
+    const repo = project.repositories.find((candidate) => candidate.id === repoId);
+    if (!repo || !existsSync(repo.path) || !existsSync(path.join(repo.path, ".git"))) return null;
+
+    const porcelain = this.generatedWikiRecoveryPorcelain(repo.path);
+    return {
+      repository: { id: repo.id, name: repo.name },
+      changes: parsePorcelainChanges(porcelain),
+      fingerprint: crypto.createHash("sha256").update(porcelain).digest("hex"),
+    };
+  }
+
+  /**
+   * Stash only the files the old wiki-build behavior could have created.
+   * The caller must confirm the exact preview, so newly changed files are
+   * never silently included in a recovery stash.
+   */
+  async stashGeneratedWikiArtifacts(
+    projectId: string,
+    repoId: string,
+    input: { confirmation: unknown; fingerprint: unknown },
+  ): Promise<{ stashRef: string; changes: RepositoryRecoveryChange[] }> {
+    if (input.confirmation !== GENERATED_WIKI_STASH_CONFIRMATION) {
+      throw Object.assign(new Error(`Type ${GENERATED_WIKI_STASH_CONFIRMATION} to stash the generated files.`), {
+        status: 400,
+        code: "generated_wiki_stash_confirmation_required",
+      });
+    }
+
+    if (typeof input.fingerprint !== "string" || !/^[a-f0-9]{64}$/i.test(input.fingerprint)) {
+      throw Object.assign(new Error("A valid recovery preview is required before stashing files."), {
+        status: 400,
+        code: "generated_wiki_stash_preview_required",
+      });
+    }
+
+    const preview = await this.previewGeneratedWikiRecovery(projectId, repoId);
+    if (!preview) {
+      throw Object.assign(new Error("Project or repository not found."), { status: 404, code: "not_found" });
+    }
+    if (preview.fingerprint !== input.fingerprint) {
+      throw Object.assign(new Error("Repository changes have changed. Review the generated files again before stashing."), {
+        status: 409,
+        code: "generated_wiki_stash_preview_stale",
+      });
+    }
+    if (preview.changes.length === 0) {
+      throw Object.assign(new Error("No generated wiki files are currently dirty in this repository."), {
+        status: 409,
+        code: "generated_wiki_stash_empty",
+      });
+    }
+
+    const projectDir = this.findProjectDir(projectId)!;
+    const project = JSON.parse(readFileSync(path.join(projectDir, "project.json"), "utf-8")) as ProjectData;
+    const repo = project.repositories.find((candidate) => candidate.id === repoId)!;
+    const stamp = new Date().toISOString();
+
+    execFileSync(
+      "git",
+      [
+        "stash",
+        "push",
+        "--include-untracked",
+        "--message",
+        `CodaScope recovery: generated wiki files ${stamp}`,
+        "--",
+        ...GENERATED_WIKI_PATHSPECS,
+      ],
+      { cwd: repo.path, encoding: "utf-8", timeout: 30_000, stdio: ["pipe", "pipe", "pipe"] },
+    );
+
+    const stashRef = execFileSync(
+      "git",
+      ["stash", "list", "-1", "--format=%gd"],
+      { cwd: repo.path, encoding: "utf-8", timeout: 5_000, stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    if (!stashRef) {
+      throw Object.assign(new Error("Git did not create a recovery stash."), {
+        status: 500,
+        code: "generated_wiki_stash_missing",
+      });
+    }
+
+    return { stashRef, changes: preview.changes };
+  }
+
+  private generatedWikiRecoveryPorcelain(repoPath: string): string {
+    return execFileSync(
+      "git",
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...GENERATED_WIKI_PATHSPECS],
+      { cwd: repoPath, encoding: "utf-8", timeout: 10_000, stdio: ["pipe", "pipe", "pipe"] },
+    );
   }
 
   // ── Git status check ──────────────────────────────────────────────

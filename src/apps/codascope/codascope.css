@@ -7263,6 +7263,7 @@
 .codascope-repo-row-action {
   min-width: 72px;
   display: flex;
+  gap: var(--space-2);
   justify-content: flex-end;
 }
 
@@ -7276,6 +7277,64 @@
 .codascope-repo-pull-action:hover:not(:disabled) {
   background: hsla(38, 90%, 60%, 0.2);
   border-color: hsla(38, 90%, 60%, 0.4);
+}
+
+.codascope-repo-recovery-action {
+  color: var(--color-text-secondary);
+}
+
+.codascope-generated-wiki-recovery-modal .codascope-modal-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.codascope-generated-wiki-recovery-modal p {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.codascope-recovery-status,
+.codascope-recovery-file-summary {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.codascope-recovery-file-list {
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.codascope-recovery-file-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  font-size: var(--text-sm);
+}
+
+.codascope-recovery-file-list li:last-child {
+  border-bottom: none;
+}
+
+.codascope-recovery-file-list code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-recovery-file-list span {
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .codascope-repo-panel-hint {

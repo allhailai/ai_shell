@@ -30,6 +30,7 @@ import {
   IconHelp,
   IconRefresh,
   IconWarning,
+  IconArchive,
 } from "../components/CodaScopeIcons";
 import { useDashboardBuildState } from "../hooks/useDashboardBuildState";
 import type { PipelineStepStatus, WikiState } from "../codaScopeTypes";
@@ -64,6 +65,17 @@ interface RepoStatus {
   ahead: number;
   branch: string | null;
   error?: string;
+}
+
+interface RepositoryRecoveryPreview {
+  repository: { id: string; name: string };
+  changes: Array<{
+    path: string;
+    originalPath?: string;
+    indexStatus: string;
+    worktreeStatus: string;
+  }>;
+  fingerprint: string;
 }
 
 /* ── Deep Run modal state (for slash command integration) ────────────── */
@@ -110,6 +122,13 @@ export function ProjectDashboard() {
     success: boolean;
     message: string;
   } | null>(null);
+  const [recoveryRepoId, setRecoveryRepoId] = useState<string | null>(null);
+  const [recoveryPreview, setRecoveryPreview] = useState<RepositoryRecoveryPreview | null>(null);
+  const [recoveryConfirmText, setRecoveryConfirmText] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryResult, setRecoveryResult] = useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryStashing, setRecoveryStashing] = useState(false);
 
   // ── Deep Run modal state ──────────────────────────────────────────
   const [showDeepRunModal, setShowDeepRunModal] = useState(false);
@@ -212,6 +231,66 @@ export function ProjectDashboard() {
       setTimeout(() => setPullResult(null), 5000);
     }
   }, [activeProjectId, pullingRepoId, projects]);
+
+  const closeRecovery = useCallback(() => {
+    setRecoveryRepoId(null);
+    setRecoveryPreview(null);
+    setRecoveryConfirmText("");
+    setRecoveryError("");
+    setRecoveryResult("");
+    setRecoveryLoading(false);
+    setRecoveryStashing(false);
+  }, []);
+
+  const openGeneratedWikiRecovery = useCallback(async (repoId: string) => {
+    if (!activeProjectId) return;
+    setRecoveryRepoId(repoId);
+    setRecoveryPreview(null);
+    setRecoveryConfirmText("");
+    setRecoveryError("");
+    setRecoveryResult("");
+    setRecoveryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/repositories/${repoId}/recovery/generated-wiki`,
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not inspect generated wiki files.");
+      setRecoveryPreview(data as RepositoryRecoveryPreview);
+    } catch (err) {
+      setRecoveryError(err instanceof Error ? err.message : "Could not inspect generated wiki files.");
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, [activeProjectId]);
+
+  const stashGeneratedWikiFiles = useCallback(async () => {
+    if (!activeProjectId || !recoveryRepoId || !recoveryPreview || recoveryStashing) return;
+    setRecoveryStashing(true);
+    setRecoveryError("");
+    try {
+      const res = await fetch(
+        `/api/codascope/projects/${activeProjectId}/repositories/${recoveryRepoId}/recovery/generated-wiki/stash`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            confirmation: recoveryConfirmText,
+            fingerprint: recoveryPreview.fingerprint,
+          }),
+        },
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not stash generated wiki files.");
+      setRecoveryResult(`Stashed ${data.changes.length} generated file${data.changes.length === 1 ? "" : "s"} as ${data.stashRef}. You can pull this repository now.`);
+      setRecoveryPreview((current) => current ? { ...current, changes: [] } : current);
+      setRecoveryConfirmText("");
+    } catch (err) {
+      setRecoveryError(err instanceof Error ? err.message : "Could not stash generated wiki files.");
+    } finally {
+      setRecoveryStashing(false);
+    }
+  }, [activeProjectId, recoveryConfirmText, recoveryPreview, recoveryRepoId, recoveryStashing]);
 
   // ── Analyze toggle state ──────────────────────────────────────────
   const [wikiEnabled, setWikiEnabled] = useState(true);
@@ -461,6 +540,15 @@ export function ProjectDashboard() {
                         <IconGitPull size={12} /> Pull
                       </button>
                     )}
+                    <button
+                      className="codascope-btn codascope-btn-sm codascope-btn-ghost codascope-repo-recovery-action"
+                      onClick={() => openGeneratedWikiRecovery(repo.id)}
+                      disabled={!!pullingRepoId || agentRunning}
+                      title="Review and stash legacy CodaScope-generated wiki files"
+                      type="button"
+                    >
+                      <IconArchive size={12} /> Recovery
+                    </button>
                   </div>
                 </div>
               );
@@ -473,6 +561,82 @@ export function ProjectDashboard() {
               Pull remote changes before analyzing to ensure your wiki reflects the latest code.
             </div>
           )}
+        </div>
+      )}
+
+      {recoveryRepoId && (
+        <div className="codascope-modal-overlay" role="presentation" onMouseDown={closeRecovery}>
+          <div
+            className="codascope-modal codascope-generated-wiki-recovery-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="generated-wiki-recovery-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="codascope-modal-header">
+              <div className="codascope-modal-title" id="generated-wiki-recovery-title">
+                <IconArchive size={16} /> Recover Generated Wiki Files
+              </div>
+              <button className="codascope-modal-close" onClick={closeRecovery} aria-label="Close recovery dialog" type="button">
+                <IconClose size={16} />
+              </button>
+            </div>
+            <div className="codascope-modal-body">
+              <p>
+                This is a manual recovery action for legacy builds that wrote documentation into a source repository.
+                It only stashes dirty <code>wiki/**</code> and root <code>code_map_*.md</code> files; all other repository changes stay in place.
+              </p>
+
+              {recoveryLoading && <div className="codascope-recovery-status">Inspecting configured repository…</div>}
+              {recoveryError && <div className="codascope-alert codascope-alert--danger">{recoveryError}</div>}
+              {recoveryResult && <div className="codascope-alert codascope-alert--success">{recoveryResult}</div>}
+
+              {recoveryPreview && !recoveryResult && (
+                recoveryPreview.changes.length > 0 ? (
+                  <>
+                    <div className="codascope-recovery-file-summary">
+                      Found {recoveryPreview.changes.length} generated file{recoveryPreview.changes.length === 1 ? "" : "s"} in <strong>{recoveryPreview.repository.name}</strong>.
+                    </div>
+                    <ul className="codascope-recovery-file-list">
+                      {recoveryPreview.changes.map((change) => (
+                        <li key={`${change.indexStatus}${change.worktreeStatus}:${change.path}`}>
+                          <code>{change.path}</code>
+                          <span>{`${change.indexStatus}${change.worktreeStatus}`.trim() || "modified"}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="codascope-form-label">
+                      Type <code>STASH GENERATED FILES</code> to continue
+                      <input
+                        className="codascope-form-input"
+                        value={recoveryConfirmText}
+                        onChange={(event) => setRecoveryConfirmText(event.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <div className="codascope-recovery-status">No legacy generated wiki files are dirty in this repository.</div>
+                )
+              )}
+            </div>
+            <div className="codascope-modal-footer">
+              <button className="codascope-btn codascope-btn-ghost" onClick={closeRecovery} type="button">
+                Close
+              </button>
+              {recoveryPreview && recoveryPreview.changes.length > 0 && !recoveryResult && (
+                <button
+                  className="codascope-btn codascope-btn-danger"
+                  onClick={stashGeneratedWikiFiles}
+                  disabled={recoveryConfirmText !== "STASH GENERATED FILES" || recoveryStashing}
+                  type="button"
+                >
+                  <IconArchive size={13} /> {recoveryStashing ? "Stashing…" : "Stash Generated Files"}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

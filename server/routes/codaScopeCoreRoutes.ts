@@ -173,6 +173,26 @@ export function registerCoreRoutes(ctx: CodaScopeRouteContext): void {
     res.json(result);
   }));
 
+  // ── Legacy generated-wiki recovery ─────────────────────────────
+
+  app.get("/api/codascope/projects/:id/repositories/:repoId/recovery/generated-wiki", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const repoId = param(req, "repoId");
+    const preview = await projectSvc.previewGeneratedWikiRecovery(id, repoId);
+    if (!preview) throw httpError("Project or repository not found.", 404, "not_found");
+    res.json(preview);
+  }));
+
+  app.post("/api/codascope/projects/:id/repositories/:repoId/recovery/generated-wiki/stash", wrap(async (req, res) => {
+    const { projectSvc } = await ensureServices();
+    const id = param(req, "id");
+    const repoId = param(req, "repoId");
+    const { confirmation, fingerprint } = req.body as { confirmation?: unknown; fingerprint?: unknown };
+    const result = await projectSvc.stashGeneratedWikiArtifacts(id, repoId, { confirmation, fingerprint });
+    res.json({ success: true, ...result });
+  }));
+
   // ── Remap repository path (PATCH) ──────────────────────────────
 
   app.patch("/api/codascope/projects/:id/repositories/:repoId", wrap(async (req, res) => {

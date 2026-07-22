@@ -50,6 +50,28 @@ interface PoolEntry {
   collectorHolder: ToolResultCollectorHolder;
 }
 
+/**
+ * Resolve the native workspace exposed to a CodaScope agent.
+ *
+ * Wiki builds are intentionally isolated from repositories: their source
+ * access is tool-mediated and the SDK sandbox is limited to CodaScope data.
+ */
+export function getAgentLocalWorkspace(
+  purpose: string,
+  projectDir: string | null,
+  repoPaths: string[],
+): { cwd?: string | string[]; sandboxOptions?: { enabled: true } } {
+  if (purpose === "wiki-build") {
+    if (!projectDir) throw new Error("CodaScope project directory not found for wiki build.");
+    return {
+      cwd: projectDir,
+      sandboxOptions: { enabled: true },
+    };
+  }
+
+  return { cwd: repoPaths.length > 0 ? repoPaths : undefined };
+}
+
 /* ── Model Cache ────────────────────────────────────────────────────── */
 
 interface ModelCache {
@@ -203,6 +225,7 @@ export class CodaScopeAgentService {
     const repoPaths = project?.repositories?.map(
       (r: { path: string }) => r.path,
     ) ?? [];
+    const projectDir = projectService.getProjectDir(projectId);
 
     // Create a stable collector holder for this pool entry.
     // Tool closures capture the holder; before each run we swap
@@ -214,7 +237,10 @@ export class CodaScopeAgentService {
       apiKey,
       name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
       local: {
-        cwd: repoPaths.length > 0 ? repoPaths : undefined,
+        // Source repositories remain outside the wiki-build native
+        // filesystem boundary. Custom tools run in the host service and
+        // enforce their own project/repository scoping.
+        ...getAgentLocalWorkspace(purpose, projectDir, repoPaths),
         customTools: this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId),
       },
     });

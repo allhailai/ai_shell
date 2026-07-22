@@ -6,8 +6,76 @@
 import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import { CodaScopeCodeMapService } from "../codaScopeCodeMapService.js";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, realpathSync, type Dirent } from "node:fs";
 import path from "node:path";
+
+const SOURCE_SKIP_DIRS = new Set([
+  ".git", ".hg", ".svn", "node_modules", "dist", "build", "coverage",
+  ".next", ".turbo", "vendor", "target", "__pycache__",
+]);
+const MAX_SOURCE_FILE_BYTES = 256_000;
+const MAX_SOURCE_FILE_LIST = 200;
+
+function resolveConfiguredRepository(
+  repositories: Array<{ id: string; name: string; path: string }> | undefined,
+  repoName: string,
+): { id: string; name: string; path: string } | null {
+  return repositories?.find((repo) => repo.name === repoName || repo.id === repoName) ?? null;
+}
+
+function resolveRepositoryPath(repoPath: string, relativePath: string): string | null {
+  if (!relativePath || path.isAbsolute(relativePath)) return null;
+  const resolved = path.resolve(repoPath, relativePath);
+  const relative = path.relative(repoPath, resolved);
+  return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? resolved : null;
+}
+
+function isRealPathWithinRepository(repoPath: string, filePath: string): boolean {
+  try {
+    const relative = path.relative(realpathSync(repoPath), realpathSync(filePath));
+    return !relative.startsWith("..") && !path.isAbsolute(relative);
+  } catch {
+    return false;
+  }
+}
+
+function listRepositoryFiles(
+  root: string,
+  query: string | undefined,
+  pathPrefix: string | undefined,
+): string[] {
+  const start = pathPrefix ? resolveRepositoryPath(root, pathPrefix) : root;
+  if (!start || !existsSync(start)) return [];
+  if (!isRealPathWithinRepository(root, start)) return [];
+
+  const normalizedQuery = query?.toLowerCase();
+  const files: string[] = [];
+  const walk = (directory: string): void => {
+    if (files.length >= MAX_SOURCE_FILE_LIST) return;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (files.length >= MAX_SOURCE_FILE_LIST) return;
+      if (SOURCE_SKIP_DIRS.has(entry.name)) continue;
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+      } else if (entry.isFile()) {
+        const relativePath = path.relative(root, fullPath);
+        if (!normalizedQuery || relativePath.toLowerCase().includes(normalizedQuery)) {
+          files.push(relativePath);
+        }
+      }
+    }
+  };
+  walk(start);
+  return files;
+}
 
 /**
  * Build read-only tools available to ALL agent purposes.
@@ -152,6 +220,76 @@ export function buildReadOnlyTools(
           );
         } catch {
           return "Failed to list repositories.";
+        }
+      },
+    },
+
+    list_source_files: {
+      description:
+        "List source files from one configured repository. This is read-only and is the only way " +
+        "wiki-build agents discover repository paths after their native workspace is isolated to the CodaScope project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repoName: { type: "string", description: "Configured repository name or ID" },
+          query: { type: "string", description: "Optional case-insensitive substring to match in relative paths" },
+          pathPrefix: { type: "string", description: "Optional relative directory to search within the repository" },
+        },
+        required: ["repoName"],
+      },
+      execute: async (args) => {
+        const repoName = args.repoName as string;
+        if (!repoName) return "repoName is required.";
+        try {
+          const project = await projectService.getProject(projectId);
+          const repo = resolveConfiguredRepository(project?.repositories, repoName);
+          if (!repo) return `Repository "${repoName}" is not configured for this project.`;
+          const pathPrefix = args.pathPrefix as string | undefined;
+          if (pathPrefix && !resolveRepositoryPath(repo.path, pathPrefix)) {
+            return "pathPrefix must remain within the configured repository.";
+          }
+          const files = listRepositoryFiles(repo.path, args.query as string | undefined, pathPrefix);
+          if (files.length === 0) return "No source files matched.";
+          const suffix = files.length === MAX_SOURCE_FILE_LIST ? "\n\nResults are limited to 200 files; narrow query or pathPrefix." : "";
+          return files.map((file) => `- ${file}`).join("\n") + suffix;
+        } catch {
+          return "Failed to list source files.";
+        }
+      },
+    },
+
+    read_source_file: {
+      description:
+        "Read one text source file from a configured repository. The path must be repository-relative; " +
+        "this tool cannot write or access paths outside the configured repository.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repoName: { type: "string", description: "Configured repository name or ID" },
+          relativePath: { type: "string", description: "Repository-relative path to a source file" },
+        },
+        required: ["repoName", "relativePath"],
+      },
+      execute: async (args) => {
+        const repoName = args.repoName as string;
+        const relativePath = args.relativePath as string;
+        if (!repoName || !relativePath) return "repoName and relativePath are required.";
+        try {
+          const project = await projectService.getProject(projectId);
+          const repo = resolveConfiguredRepository(project?.repositories, repoName);
+          if (!repo) return `Repository "${repoName}" is not configured for this project.`;
+          const filePath = resolveRepositoryPath(repo.path, relativePath);
+          if (!filePath) return "relativePath must remain within the configured repository.";
+          if (!existsSync(filePath) || !statSync(filePath).isFile()) return `Source file "${relativePath}" was not found.`;
+          if (!isRealPathWithinRepository(repo.path, filePath)) {
+            return "relativePath must remain within the configured repository.";
+          }
+          if (statSync(filePath).size > MAX_SOURCE_FILE_BYTES) {
+            return `Source file "${relativePath}" exceeds the ${MAX_SOURCE_FILE_BYTES} byte read limit.`;
+          }
+          return readFileSync(filePath, "utf-8");
+        } catch {
+          return `Failed to read source file "${relativePath}".`;
         }
       },
     },

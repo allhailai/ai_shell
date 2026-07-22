@@ -123,7 +123,32 @@ export class CodaScopeCodeMapService {
   /* ── Directory Helpers ────────────────────────────────────────────── */
 
   private projectDir(projectId: string): string {
-    return path.join(this.root, projectId);
+    // Projects are stored by their human-friendly directory slug, while
+    // callers identify them by the stable ID in project.json. Older projects
+    // can happen to use the same value for both, so preserve that fast path.
+    const direct = path.join(this.root, projectId);
+    const directProjectPath = path.join(direct, "project.json");
+    if (existsSync(directProjectPath)) {
+      try {
+        if (JSON.parse(readFileSync(directProjectPath, "utf-8")).id === projectId) return direct;
+      } catch { /* fall through to a directory scan */ }
+    }
+
+    try {
+      for (const entry of readdirSync(this.root, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+        const candidate = path.join(this.root, entry.name);
+        const projectPath = path.join(candidate, "project.json");
+        if (!existsSync(projectPath)) continue;
+        try {
+          if (JSON.parse(readFileSync(projectPath, "utf-8")).id === projectId) return candidate;
+        } catch { /* skip malformed project metadata */ }
+      }
+    } catch { /* root may not exist yet */ }
+
+    // Preserve the legacy behavior for callers that create a project data
+    // directory before its project.json metadata has been written.
+    return direct;
   }
 
   private codeMapPath(projectId: string, repoSlug: string): string {

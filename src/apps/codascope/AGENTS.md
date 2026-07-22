@@ -162,6 +162,24 @@ When extending agent capabilities:
   inherit the assistant/chat tool set.
 - Update `do_chat.md` system prompt with new tool descriptions and behavioral guidance
 
+### 9. Wiki-Build Storage Custody
+
+- A `wiki-build` agent's native workspace is the CodaScope project directory,
+  never a configured source repository. Keep the Cursor SDK sandbox enabled for
+  that purpose.
+- Source repositories are read through `list_source_files` and
+  `read_source_file`, which resolve only configured repositories and reject
+  traversal. Do not restore direct native repository access to build agents.
+- Build output must use `write_code_map` and `write_project_wiki_topic`; those
+  tools store output under the CodaScope project and make it visible to the UI.
+  Do not instruct an agent to write `wiki/*.md` or `code_map_*.md` directly.
+- A full wiki build with zero substantive registered topics is a build error,
+  not a successful no-op.
+- Legacy repository pollution is recovered only through the explicit
+  generated-wiki recovery action. It previews and stashes only `wiki/**` and
+  root `code_map_*.md` changes after a fingerprinted, typed confirmation;
+  never automatically stash or discard arbitrary repository work.
+
 ---
 
 ## File Organization

@@ -5,6 +5,10 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect } from "vitest";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
 import {
   buildReadOnlyTools,
   buildEpicTools,
@@ -63,7 +67,9 @@ describe("tool tier builders", () => {
   it("buildWriteTools returns non-empty tool set", () => {
     const tools = buildWriteTools(PROJECT_ID, services);
     const keys = Object.keys(tools);
-    expect(keys.length).toBeGreaterThanOrEqual(1);
+    expect(keys.length).toBeGreaterThanOrEqual(3);
+    expect(keys).toContain("write_code_map");
+    expect(keys).toContain("write_project_wiki_topic");
     expect(keys).toContain("update_code_map_section");
   });
 
@@ -268,10 +274,46 @@ describe("getToolsForPurpose", () => {
   });
 
   it("tool count sanity check — each tier is meaningful", () => {
-    expect(readCount).toBeGreaterThanOrEqual(13);
+    expect(readCount).toBeGreaterThanOrEqual(15);
     expect(epicCount).toBeGreaterThanOrEqual(15);
-    expect(writeCount).toBeGreaterThanOrEqual(1);
+    expect(writeCount).toBeGreaterThanOrEqual(3);
     expect(artifactCount).toBeGreaterThanOrEqual(3);
     expect(allCount).toBeGreaterThanOrEqual(34);
+  });
+
+  it("wiki-build tools write only to the CodaScope project and scope source reads to configured repositories", async () => {
+    const root = path.join(os.tmpdir(), `codascope-tools-${crypto.randomBytes(6).toString("hex")}`);
+    const projectDir = path.join(root, "core-project");
+    const repoDir = path.join(root, "source-repo");
+    const projectId = "project-core";
+    mkdirSync(path.join(projectDir, "wiki"), { recursive: true });
+    mkdirSync(path.join(repoDir, "src"), { recursive: true });
+    writeFileSync(path.join(repoDir, "src", "entry.ts"), "export const answer = 42;\n");
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: projectId,
+      name: "Core",
+      description: "",
+      repositories: [{ id: "repo-core", name: "core", path: repoDir }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }));
+
+    try {
+      const tools = getToolsForPurpose(projectId, root, "wiki-build");
+      await tools.write_code_map.execute({ repoName: "core", content: "# Code Map: Core\n" }, {} as any);
+      await tools.write_project_wiki_topic.execute({ topicId: "architecture", content: "# Architecture\n" }, {} as any);
+      const invalidWrite = await tools.write_project_wiki_topic.execute({ topicId: "../escape", content: "# Escape\n" }, {} as any);
+
+      expect(readFileSync(path.join(projectDir, "code_map_core.md"), "utf-8")).toContain("Code Map: Core");
+      expect(readFileSync(path.join(projectDir, "wiki", "architecture.md"), "utf-8")).toContain("Architecture");
+      expect(invalidWrite).toContain("Invalid wiki topic ID");
+      expect(existsSync(path.join(projectDir, "escape.md"))).toBe(false);
+      expect(await tools.read_source_file.execute({ repoName: "core", relativePath: "src/entry.ts" }, {} as any))
+        .toContain("answer = 42");
+      expect(await tools.read_source_file.execute({ repoName: "core", relativePath: "../core-project/project.json" }, {} as any))
+        .toContain("must remain within the configured repository");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

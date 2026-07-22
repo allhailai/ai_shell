@@ -109,7 +109,7 @@ const TEXT_COLOR_RE = /<span\s+style="color:\s*([^"]+)">([\s\S]*?)<\/span>/g;
 // ── Bare URL regex ──────────────────────────────────────────────────
 // Matches https:// or http:// URLs that are NOT already inside [text](url)
 const BARE_URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
-const MARKDOWN_LINK_RE = /(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+const MARKDOWN_LINK_RE = /(?<!!)(?:\[([^\]\n]*)\])\((https?:\/\/[^)\s]+)\)/g;
 
 // ── Link widget for bare URLs ───────────────────────────────────────
 
@@ -342,12 +342,12 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
 
       const label = match[1];
       const url = match[2];
-      if (!label || !url) continue;
+      if (!url) continue;
       const matchFrom = from + (match.index ?? 0);
       entries.push({
         from: matchFrom,
         to: matchFrom + match[0].length,
-        decoration: Decoration.replace({ widget: new MarkdownLinkWidget(label, url) }),
+        decoration: Decoration.replace({ widget: new MarkdownLinkWidget(label || url, url) }),
       });
     }
   }
