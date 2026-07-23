@@ -323,7 +323,19 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
       if (docId === "definition") {
         await epicSvc.updateDefinition(id, epicId, content);
       } else {
-        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+        const updated = await designDocSvc.updateDesignDocWithVersion(
+          id,
+          epicId,
+          docId,
+          content,
+          {
+            author: principal(req).username,
+            summary: `Apply directive ${dirId}`,
+          },
+        );
+        if (!updated || "conflict" in updated) {
+          throw httpError("Design doc not found.", 404, "not_found");
+        }
       }
     };
 
@@ -356,7 +368,19 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
       if (docId === "definition") {
         await epicSvc.updateDefinition(id, epicId, content);
       } else {
-        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+        const updated = await designDocSvc.updateDesignDocWithVersion(
+          id,
+          epicId,
+          docId,
+          content,
+          {
+            author: principal(req).username,
+            summary: `Undo directive ${dirId}`,
+          },
+        );
+        if (!updated || "conflict" in updated) {
+          throw httpError("Design doc not found.", 404, "not_found");
+        }
       }
     };
 
@@ -419,7 +443,19 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
       if (docId === "definition") {
         await epicSvc.updateDefinition(id, epicId, content);
       } else {
-        await designDocSvc.updateDesignDoc(id, epicId, docId, content);
+        const updated = await designDocSvc.updateDesignDocWithVersion(
+          id,
+          epicId,
+          docId,
+          content,
+          {
+            author: principal(req).username,
+            summary: "Apply directive batch",
+          },
+        );
+        if (!updated || "conflict" in updated) {
+          throw httpError("Design doc not found.", 404, "not_found");
+        }
       }
     };
 

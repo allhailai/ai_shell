@@ -23,7 +23,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rm, rmdir } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicDesignDoc } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -65,7 +65,32 @@ interface DesignVersionTransaction {
   version: DesignDocVersion;
   previousIndexBytes: Buffer | null;
   snapshotPath: string;
+  versionsDirectoryExisted: boolean;
   prune: DesignDocVersion[];
+}
+
+export interface DesignDocVersionedEditOptions {
+  author: string;
+  summary: string;
+  expectedHash?: string;
+}
+
+export interface DesignDocMutationVersion {
+  author: string;
+  summary: string;
+}
+
+export type DesignDocUpdateResult =
+  | { doc: EpicDesignDoc; contentHash: string }
+  | { conflict: true; currentHash: string; currentContent: string }
+  | null;
+
+interface DesignContentMutationState {
+  index: DesignsIndex;
+  previousIndex: DesignsIndex;
+  doc: EpicDesignDoc;
+  filePath: string;
+  previousContent: string;
 }
 
 /* ── Resize / delete types ────────────────────────────────────────── */
@@ -76,6 +101,9 @@ export type ResizeOp =
   | { type: "delete-mermaid"; index: number }
   | { type: "delete-image"; index: number }
   | { type: "delete-codeblock"; index: number };
+
+export type CosmeticResizeOp = Extract<ResizeOp, { type: "mermaid" | "image" }>;
+export type DestructiveResizeOp = Extract<ResizeOp, { type: `delete-${string}` }>;
 
 /* ── Constants ────────────────────────────────────────────────────── */
 
@@ -255,6 +283,21 @@ export class CodaScopeDesignDocService {
     return this.persistence.canonicalKey("design-versions", this.docDir(projectDir, epicId, docId));
   }
 
+  /**
+   * Operations that touch both the design index/content and version history
+   * always acquire the epic designs key before the per-document version key.
+   */
+  private withDesignVersionMutation<T>(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), () => (
+      this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), operation)
+    ));
+  }
+
   private assertDesignIndexStorage(designsDir: string, epicId: string, index: DesignsIndex): void {
     for (const doc of index.docs) {
       if (doc.epicId !== epicId) {
@@ -344,6 +387,93 @@ export class CodaScopeDesignDocService {
     return blocks;
   }
 
+  private async readContentMutationState(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+  ): Promise<DesignContentMutationState | null> {
+    const index = await this.readIndex(projectDir, epicId);
+    const doc = index.docs.find((candidate) => candidate.id === docId);
+    if (!doc) return null;
+    const filePath = this.docPath(projectDir, epicId, docId);
+    return {
+      index,
+      previousIndex: cloneDesignsIndex(index),
+      doc,
+      filePath,
+      previousContent: readFileSync(filePath, "utf-8"),
+    };
+  }
+
+  private conflictForExpectedHash(
+    previousContent: string,
+    expectedHash?: string,
+  ): { conflict: true; currentHash: string; currentContent: string } | null {
+    if (expectedHash === undefined) return null;
+    const currentHash = this.computeHash(previousContent);
+    return currentHash === expectedHash
+      ? null
+      : { conflict: true, currentHash, currentContent: previousContent };
+  }
+
+  private async persistContentMutation(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    state: DesignContentMutationState,
+    content: string,
+  ): Promise<{ doc: EpicDesignDoc; contentHash: string }> {
+    await this.persistence.writeFile(
+      state.filePath,
+      content,
+      { storage: "design_content", epicId, documentId: docId },
+    );
+    state.doc.updatedAt = new Date().toISOString();
+    state.doc.wordCount = this.countWords(content);
+    state.doc.blockCount = this.countBlocks(content);
+    try {
+      await this.writeIndex(projectDir, epicId, state.index);
+    } catch (error) {
+      try {
+        await this.persistence.writeFile(
+          state.filePath,
+          state.previousContent,
+          { storage: "design_content", epicId, documentId: docId },
+        );
+        await this.writeIndex(projectDir, epicId, state.previousIndex);
+      } catch {
+        throw new CodaScopePersistenceError({
+          storage: "design_content",
+          epicId,
+          documentId: docId,
+          recovery: "operator_required",
+        });
+      }
+      throw error;
+    }
+    return { doc: state.doc, contentHash: this.computeHash(content) };
+  }
+
+  private async rollbackVersionAfterMutationFailure(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    transaction: DesignVersionTransaction,
+    error: unknown,
+  ): Promise<never> {
+    try {
+      await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
+    } catch {
+      throw new CodaScopePersistenceError({
+        storage: "design_versions",
+        epicId,
+        documentId: docId,
+        recovery: "operator_required",
+      });
+    }
+    throw error;
+  }
+
   /* ── CRUD ─────────────────────────────────────────────────────────── */
 
   /** List all design docs for an epic. */
@@ -425,56 +555,69 @@ export class CodaScopeDesignDocService {
     docId: string,
     content: string,
     expectedHash?: string,
-  ): Promise<{ doc: EpicDesignDoc; contentHash: string } | { conflict: true; currentHash: string; currentContent: string } | null> {
+  ): Promise<DesignDocUpdateResult> {
     assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
     return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
-      const index = await this.readIndex(projectDir, epicId);
-      const previousIndex = cloneDesignsIndex(index);
-      const doc = index.docs.find((candidate) => candidate.id === docId);
-      if (!doc) return null;
+      const state = await this.readContentMutationState(projectDir, epicId, docId);
+      if (!state) return null;
+      const conflict = this.conflictForExpectedHash(state.previousContent, expectedHash);
+      if (conflict) return conflict;
+      return this.persistContentMutation(projectDir, epicId, docId, state, content);
+    });
+  }
 
-      const filePath = this.docPath(projectDir, epicId, docId);
-      const previousContent = readFileSync(filePath, "utf-8");
-      if (expectedHash) {
-        const currentHash = this.computeHash(previousContent);
-        if (currentHash !== expectedHash) {
-          return { conflict: true as const, currentHash, currentContent: previousContent };
-        }
+  /**
+   * Create a pre-edit snapshot and publish a content/index update under the
+   * shared design-then-version lock order.
+   */
+  async updateDesignDocWithVersion(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    content: string,
+    options: DesignDocVersionedEditOptions,
+  ): Promise<DesignDocUpdateResult> {
+    assertSafePathSegment(docId, "document ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    return this.withDesignVersionMutation(projectDir, epicId, docId, async () => {
+      const state = await this.readContentMutationState(projectDir, epicId, docId);
+      if (!state) return null;
+      const conflict = this.conflictForExpectedHash(state.previousContent, options.expectedHash);
+      if (conflict) return conflict;
+      if (content === state.previousContent) {
+        return {
+          doc: state.doc,
+          contentHash: this.computeHash(state.previousContent),
+        };
       }
 
-      await this.persistence.writeFile(
-        filePath,
-        content,
-        { storage: "design_content", epicId, documentId: docId },
+      const transaction = await this.createVersionUnlocked(
+        projectDir,
+        epicId,
+        docId,
+        options.author,
+        options.summary,
+        state.previousContent,
       );
-      doc.updatedAt = new Date().toISOString();
-      doc.wordCount = this.countWords(content);
-      doc.blockCount = this.countBlocks(content);
+      let updated: { doc: EpicDesignDoc; contentHash: string };
       try {
-        await this.writeIndex(projectDir, epicId, index);
+        updated = await this.persistContentMutation(projectDir, epicId, docId, state, content);
       } catch (error) {
-        try {
-          await this.persistence.writeFile(
-            filePath,
-            previousContent,
-            { storage: "design_content", epicId, documentId: docId },
-          );
-          await this.writeIndex(projectDir, epicId, previousIndex);
-        } catch {
-          throw new CodaScopePersistenceError({
-            storage: "design_content",
-            epicId,
-            documentId: docId,
-            recovery: "operator_required",
-          });
-        }
-        throw error;
+        return this.rollbackVersionAfterMutationFailure(
+          projectDir,
+          epicId,
+          docId,
+          transaction,
+          error,
+        );
       }
-
-      return { doc, contentHash: this.computeHash(content) };
+      await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
+      return updated;
     });
   }
 
@@ -556,137 +699,188 @@ export class CodaScopeDesignDocService {
     projectId: string,
     epicId: string,
     docId: string,
+    resize: CosmeticResizeOp,
+  ): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null>;
+  async applyResizeMetadata(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    resize: DestructiveResizeOp,
+    version: DesignDocMutationVersion,
+  ): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null>;
+  async applyResizeMetadata(
+    projectId: string,
+    epicId: string,
+    docId: string,
     resize: ResizeOp,
+    version?: DesignDocMutationVersion,
   ): Promise<{ doc: EpicDesignDoc; content: string; contentHash: string } | null> {
     assertSafePathSegment(docId, "document ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
-    const index = await this.readIndex(projectDir, epicId);
-    const previousIndex = cloneDesignsIndex(index);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc) return null;
+    const isDestructive = isDestructiveResizeOp(resize);
+    if (isDestructive && (
+      !version
+      || typeof version.author !== "string"
+      || !version.author.trim()
+      || typeof version.summary !== "string"
+      || !version.summary.trim()
+    )) {
+      throw new Error("Destructive design document mutations require version author and summary.");
+    }
+    if (!isDestructive && version !== undefined) {
+      throw new Error("Cosmetic design document resizes cannot create versions.");
+    }
 
-    const filePath = this.docPath(projectDir, epicId, docId);
-    if (!existsSync(filePath)) return null;
+    const operation = async () => {
+      const state = await this.readContentMutationState(projectDir, epicId, docId);
+      if (!state) return null;
+      let content = state.previousContent;
+      let updated = false;
 
-    let content = readFileSync(filePath, "utf-8");
-    const previousContent = content;
-    let updated = false;
+      if (resize.type === "mermaid") {
+        const roundedHeight = Math.round(resize.height);
+        let mermaidIdx = 0;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const fenceMatch = lines[i].match(/^(\s*(`{3,}|~{3,})\s*mermaid)\s*(?:\{height=\d+\})?\s*$/);
+          if (fenceMatch) {
+            if (mermaidIdx === resize.index) {
+              lines[i] = `${fenceMatch[1]} {height=${roundedHeight}}`;
+              updated = true;
+              break;
+            }
+            mermaidIdx++;
+          }
+        }
+        if (updated) content = lines.join("\n");
+      } else if (resize.type === "image") {
+        const rw = Math.round(resize.width);
+        const rh = Math.round(resize.height);
+        let imgIdx = 0;
+        const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        let match: RegExpExecArray | null;
 
-    if (resize.type === "mermaid") {
-      const roundedHeight = Math.round(resize.height);
-      let mermaidIdx = 0;
-      const lines = content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const fenceMatch = lines[i].match(/^(\s*(`{3,}|~{3,})\s*mermaid)\s*(?:\{height=\d+\})?\s*$/);
-        if (fenceMatch) {
-          if (mermaidIdx === resize.index) {
-            lines[i] = `${fenceMatch[1]} {height=${roundedHeight}}`;
+        while ((match = imgRegex.exec(content)) !== null) {
+          if (imgIdx === resize.index) {
+            const fullMatch = match[0];
+            let alt = match[1];
+            const url = match[2];
+            // Strip existing |WxH from alt
+            alt = alt.replace(/\|\d+x\d+$/, "").trim();
+            const newTag = `![${alt}|${rw}x${rh}](${url})`;
+            content = content.slice(0, match.index) + newTag + content.slice(match.index + fullMatch.length);
             updated = true;
             break;
           }
-          mermaidIdx++;
+          imgIdx++;
         }
-      }
-      if (updated) content = lines.join("\n");
-    } else if (resize.type === "image") {
-      const rw = Math.round(resize.width);
-      const rh = Math.round(resize.height);
-      let imgIdx = 0;
-      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-      let match: RegExpExecArray | null;
+      } else if (resize.type === "delete-mermaid") {
+        // Remove the Nth mermaid fence block (opening fence + content + closing fence)
+        let mermaidIdx = 0;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})\s*mermaid\s*(?:\{height=\d+\})?\s*$/);
+          if (fenceMatch) {
+            if (mermaidIdx === resize.index) {
+              const fenceChar = fenceMatch[2][0]; // ` or ~
+              const fenceLen = fenceMatch[2].length;
+              // Find closing fence
+              let closeIdx = -1;
+              for (let j = i + 1; j < lines.length; j++) {
+                const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
+                if (closeMatch) { closeIdx = j; break; }
+              }
+              if (closeIdx >= 0) {
+                // Remove lines i..closeIdx, plus trailing blank line if present
+                let removeEnd = closeIdx + 1;
+                if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
+                // Also remove leading blank line if present
+                let removeStart = i;
+                if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
+                lines.splice(removeStart, removeEnd - removeStart);
+                updated = true;
+              }
+              break;
+            }
+            mermaidIdx++;
+          }
+        }
+        if (updated) content = lines.join("\n");
+      } else if (resize.type === "delete-image") {
+        // Remove the Nth markdown image
+        let imgIdx = 0;
+        const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+        let match: RegExpExecArray | null;
 
-      while ((match = imgRegex.exec(content)) !== null) {
-        if (imgIdx === resize.index) {
-          const fullMatch = match[0];
-          let alt = match[1];
-          const url = match[2];
-          // Strip existing |WxH from alt
-          alt = alt.replace(/\|\d+x\d+$/, "").trim();
-          const newTag = `![${alt}|${rw}x${rh}](${url})`;
-          content = content.slice(0, match.index) + newTag + content.slice(match.index + fullMatch.length);
-          updated = true;
-          break;
-        }
-        imgIdx++;
-      }
-    } else if (resize.type === "delete-mermaid") {
-      // Remove the Nth mermaid fence block (opening fence + content + closing fence)
-      let mermaidIdx = 0;
-      const lines = content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})\s*mermaid\s*(?:\{height=\d+\})?\s*$/);
-        if (fenceMatch) {
-          if (mermaidIdx === resize.index) {
-            const fenceChar = fenceMatch[2][0]; // ` or ~
-            const fenceLen = fenceMatch[2].length;
-            // Find closing fence
-            let closeIdx = -1;
-            for (let j = i + 1; j < lines.length; j++) {
-              const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
-              if (closeMatch) { closeIdx = j; break; }
+        while ((match = imgRegex.exec(content)) !== null) {
+          if (imgIdx === resize.index) {
+            const before = content.slice(0, match.index);
+            const after = content.slice(match.index + match[0].length);
+            // If the image was on its own line, remove the entire line (+ trailing newline)
+            const lineStart = before.lastIndexOf("\n") + 1;
+            const lineEnd = after.indexOf("\n");
+            const lineBefore = before.slice(lineStart);
+            const lineAfter = lineEnd >= 0 ? after.slice(0, lineEnd) : after;
+            if (lineBefore.trim() === "" && lineAfter.trim() === "") {
+              // Image was alone on the line — remove the whole line
+              let removeFrom = lineStart > 0 ? lineStart - 1 : lineStart; // eat preceding newline
+              let removeTo = match.index + match[0].length + (lineEnd >= 0 ? lineEnd + 1 : after.length);
+              // Also eat one extra blank line after if present
+              const restAfter = content.slice(removeTo);
+              if (restAfter.startsWith("\n")) removeTo++;
+              content = content.slice(0, removeFrom) + content.slice(removeTo);
+            } else {
+              // Image is inline — just remove the tag
+              content = before + after;
             }
-            if (closeIdx >= 0) {
-              // Remove lines i..closeIdx, plus trailing blank line if present
-              let removeEnd = closeIdx + 1;
-              if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
-              // Also remove leading blank line if present
-              let removeStart = i;
-              if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
-              lines.splice(removeStart, removeEnd - removeStart);
-              updated = true;
-            }
+            updated = true;
             break;
           }
-          mermaidIdx++;
+          imgIdx++;
         }
-      }
-      if (updated) content = lines.join("\n");
-    } else if (resize.type === "delete-image") {
-      // Remove the Nth markdown image
-      let imgIdx = 0;
-      const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-      let match: RegExpExecArray | null;
-
-      while ((match = imgRegex.exec(content)) !== null) {
-        if (imgIdx === resize.index) {
-          const before = content.slice(0, match.index);
-          const after = content.slice(match.index + match[0].length);
-          // If the image was on its own line, remove the entire line (+ trailing newline)
-          const lineStart = before.lastIndexOf("\n") + 1;
-          const lineEnd = after.indexOf("\n");
-          const lineBefore = before.slice(lineStart);
-          const lineAfter = lineEnd >= 0 ? after.slice(0, lineEnd) : after;
-          if (lineBefore.trim() === "" && lineAfter.trim() === "") {
-            // Image was alone on the line — remove the whole line
-            let removeFrom = lineStart > 0 ? lineStart - 1 : lineStart; // eat preceding newline
-            let removeTo = match.index + match[0].length + (lineEnd >= 0 ? lineEnd + 1 : after.length);
-            // Also eat one extra blank line after if present
-            const restAfter = content.slice(removeTo);
-            if (restAfter.startsWith("\n")) removeTo++;
-            content = content.slice(0, removeFrom) + content.slice(removeTo);
-          } else {
-            // Image is inline — just remove the tag
-            content = before + after;
-          }
-          updated = true;
-          break;
-        }
-        imgIdx++;
-      }
-    } else if (resize.type === "delete-codeblock") {
-      // Remove the Nth code fence block (any language, including bare fences)
-      let codeIdx = 0;
-      const lines = content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})(.*)$/);
-        if (fenceMatch) {
-          // Skip mermaid fences — those are handled by delete-mermaid
-          const lang = fenceMatch[3].trim().split(/\s/)[0].toLowerCase();
-          if (lang === "mermaid") {
-            // Skip past the closing fence
+      } else if (resize.type === "delete-codeblock") {
+        // Remove the Nth code fence block (any language, including bare fences)
+        let codeIdx = 0;
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const fenceMatch = lines[i].match(/^(\s*)(`{3,}|~{3,})(.*)$/);
+          if (fenceMatch) {
+            // Skip mermaid fences — those are handled by delete-mermaid
+            const lang = fenceMatch[3].trim().split(/\s/)[0].toLowerCase();
+            if (lang === "mermaid") {
+              // Skip past the closing fence
+              const fc = fenceMatch[2][0];
+              const fl = fenceMatch[2].length;
+              for (let j = i + 1; j < lines.length; j++) {
+                if (new RegExp(`^\\s*${fc.replace(/[`~]/g, "\\$&")}{${fl},}\\s*$`).test(lines[j])) {
+                  i = j;
+                  break;
+                }
+              }
+              continue;
+            }
+            if (codeIdx === resize.index) {
+              const fenceChar = fenceMatch[2][0];
+              const fenceLen = fenceMatch[2].length;
+              // Find closing fence
+              let closeIdx = -1;
+              for (let j = i + 1; j < lines.length; j++) {
+                const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
+                if (closeMatch) { closeIdx = j; break; }
+              }
+              if (closeIdx >= 0) {
+                let removeEnd = closeIdx + 1;
+                if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
+                let removeStart = i;
+                if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
+                lines.splice(removeStart, removeEnd - removeStart);
+                updated = true;
+              }
+              break;
+            }
+            // Not our target — skip to closing fence
             const fc = fenceMatch[2][0];
             const fl = fenceMatch[2].length;
             for (let j = i + 1; j < lines.length; j++) {
@@ -695,78 +889,48 @@ export class CodaScopeDesignDocService {
                 break;
               }
             }
-            continue;
+            codeIdx++;
           }
-          if (codeIdx === resize.index) {
-            const fenceChar = fenceMatch[2][0];
-            const fenceLen = fenceMatch[2].length;
-            // Find closing fence
-            let closeIdx = -1;
-            for (let j = i + 1; j < lines.length; j++) {
-              const closeMatch = lines[j].match(new RegExp(`^\\s*${fenceChar.replace(/[`~]/g, "\\$&")}{${fenceLen},}\\s*$`));
-              if (closeMatch) { closeIdx = j; break; }
-            }
-            if (closeIdx >= 0) {
-              let removeEnd = closeIdx + 1;
-              if (removeEnd < lines.length && lines[removeEnd].trim() === "") removeEnd++;
-              let removeStart = i;
-              if (removeStart > 0 && lines[removeStart - 1].trim() === "") removeStart--;
-              lines.splice(removeStart, removeEnd - removeStart);
-              updated = true;
-            }
-            break;
-          }
-          // Not our target — skip to closing fence
-          const fc = fenceMatch[2][0];
-          const fl = fenceMatch[2].length;
-          for (let j = i + 1; j < lines.length; j++) {
-            if (new RegExp(`^\\s*${fc.replace(/[`~]/g, "\\$&")}{${fl},}\\s*$`).test(lines[j])) {
-              i = j;
-              break;
-            }
-          }
-          codeIdx++;
         }
+        if (updated) content = lines.join("\n");
       }
-      if (updated) content = lines.join("\n");
-    }
 
-    if (!updated) return null;
+      if (!updated) return null;
 
-    await this.persistence.writeFile(
-      filePath,
-      content,
-      { storage: "design_content", epicId, documentId: docId },
-    );
-
-    // Update metadata
-    doc.updatedAt = new Date().toISOString();
-    doc.wordCount = this.countWords(content);
-    doc.blockCount = this.countBlocks(content);
-    try {
-      await this.writeIndex(projectDir, epicId, index);
-    } catch (error) {
-      try {
-        await this.persistence.writeFile(
-          filePath,
-          previousContent,
-          { storage: "design_content", epicId, documentId: docId },
-        );
-        await this.writeIndex(projectDir, epicId, previousIndex);
-      } catch {
-        throw new CodaScopePersistenceError({
-          storage: "design_content",
+      const transaction = isDestructive
+        ? await this.createVersionUnlocked(
+          projectDir,
           epicId,
-          documentId: docId,
-          recovery: "operator_required",
-        });
+          docId,
+          version!.author,
+          version!.summary,
+          state.previousContent,
+        )
+        : null;
+      let result: { doc: EpicDesignDoc; contentHash: string };
+      try {
+        result = await this.persistContentMutation(projectDir, epicId, docId, state, content);
+      } catch (error) {
+        if (transaction) {
+          return this.rollbackVersionAfterMutationFailure(
+            projectDir,
+            epicId,
+            docId,
+            transaction,
+            error,
+          );
+        }
+        throw error;
       }
-      throw error;
-    }
+      if (transaction) {
+        await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
+      }
+      return { doc: result.doc, content, contentHash: result.contentHash };
+    };
 
-    const contentHash = this.computeHash(content);
-    return { doc, content, contentHash };
-    });
+    return isDestructive
+      ? this.withDesignVersionMutation(projectDir, epicId, docId, operation)
+      : this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), operation);
   }
 
   /* ── Bulk read (used by version service and getEpic) ──────────────── */
@@ -800,10 +964,17 @@ export class CodaScopeDesignDocService {
   async createVersion(projectId: string, epicId: string, docId: string, author: string, summary: string): Promise<DesignDocVersion> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
-    return this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), async () => {
-      const designsIndex = await this.readIndex(projectDir, epicId);
-      if (!designsIndex.docs.some((doc) => doc.id === docId)) throw new Error("Design doc not found");
-      const transaction = await this.createVersionUnlocked(projectDir, epicId, docId, author, summary);
+    return this.withDesignVersionMutation(projectDir, epicId, docId, async () => {
+      const state = await this.readContentMutationState(projectDir, epicId, docId);
+      if (!state) throw new Error("Design doc not found");
+      const transaction = await this.createVersionUnlocked(
+        projectDir,
+        epicId,
+        docId,
+        author,
+        summary,
+        state.previousContent,
+      );
       await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
       return transaction.version;
     });
@@ -851,9 +1022,9 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    return this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), async () => {
-      const designsIndex = await this.readIndex(projectDir, epicId);
-      if (!designsIndex.docs.some((doc) => doc.id === docId)) return null;
+    return this.withDesignVersionMutation(projectDir, epicId, docId, async () => {
+      const state = await this.readContentMutationState(projectDir, epicId, docId);
+      if (!state) return null;
       const index = await this.readVersionsIndex(projectDir, epicId, docId);
       const targetMeta = index.versions.find((version) => version.number === safeVersion);
       if (!targetMeta) return null;
@@ -872,26 +1043,19 @@ export class CodaScopeDesignDocService {
         docId,
         "user",
         `Reverted to version ${safeVersion}`,
+        state.previousContent,
       );
 
       try {
-        const updated = await this.updateDesignDoc(projectId, epicId, docId, targetContent);
-        if (!updated || "conflict" in updated) {
-          await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
-          return null;
-        }
+        await this.persistContentMutation(projectDir, epicId, docId, state, targetContent);
       } catch (error) {
-        try {
-          await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
-        } catch {
-          throw new CodaScopePersistenceError({
-            storage: "design_versions",
-            epicId,
-            documentId: docId,
-            recovery: "operator_required",
-          });
-        }
-        throw error;
+        return this.rollbackVersionAfterMutationFailure(
+          projectDir,
+          epicId,
+          docId,
+          transaction,
+          error,
+        );
       }
 
       await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
@@ -905,13 +1069,15 @@ export class CodaScopeDesignDocService {
     docId: string,
     author: string,
     summary: string,
+    currentContent?: string,
   ): Promise<DesignVersionTransaction> {
     // The index is validated before docPath can perform legacy migration.
     const indexPath = this.versionsIndexPath(projectDir, epicId, docId);
     const previousIndexBytes = existsSync(indexPath) ? readFileSync(indexPath) : null;
     const previousIndex = await this.readVersionsIndex(projectDir, epicId, docId);
-    const contentPath = this.docPath(projectDir, epicId, docId);
-    const currentContent = readFileSync(contentPath, "utf-8");
+    const versionsDirectoryExisted = existsSync(this.versionsDir(projectDir, epicId, docId));
+    const snapshotContent = currentContent
+      ?? readFileSync(this.docPath(projectDir, epicId, docId), "utf-8");
     let maxVersion = 0;
     for (const version of previousIndex.versions) maxVersion = Math.max(maxVersion, version.number);
     const nextNum = assertPositiveSafeInteger(maxVersion + 1, "design version number");
@@ -921,7 +1087,7 @@ export class CodaScopeDesignDocService {
       createdAt: new Date().toISOString(),
       author,
       summary,
-      wordCount: this.countWords(currentContent),
+      wordCount: this.countWords(snapshotContent),
     };
     const nextIndex: DesignDocVersionsIndex = {
       maxVersions: MAX_VERSIONS,
@@ -934,7 +1100,7 @@ export class CodaScopeDesignDocService {
 
     await this.persistence.writeFile(
       snapshotPath,
-      currentContent,
+      snapshotContent,
       { storage: "design_version_snapshot", epicId, documentId: docId },
     );
     try {
@@ -947,6 +1113,7 @@ export class CodaScopeDesignDocService {
       version,
       previousIndexBytes,
       snapshotPath,
+      versionsDirectoryExisted,
       prune,
     };
   }
@@ -968,6 +1135,9 @@ export class CodaScopeDesignDocService {
       await rm(indexPath, { force: true });
     }
     await rm(transaction.snapshotPath, { force: true });
+    if (!transaction.versionsDirectoryExisted) {
+      await rmdir(this.versionsDir(projectDir, epicId, docId));
+    }
   }
 
   private async pruneCommittedDesignSnapshots(
@@ -1087,6 +1257,12 @@ function validateDesignVersionsIndex(value: unknown): DesignDocVersionsIndex {
 
 function cloneDesignsIndex(index: DesignsIndex): DesignsIndex {
   return { docs: index.docs.map((doc) => ({ ...doc })) };
+}
+
+function isDestructiveResizeOp(resize: ResizeOp): resize is DestructiveResizeOp {
+  return resize.type === "delete-mermaid"
+    || resize.type === "delete-image"
+    || resize.type === "delete-codeblock";
 }
 
 function isNonNegativeNumber(value: unknown): value is number {

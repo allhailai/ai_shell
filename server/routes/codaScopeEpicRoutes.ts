@@ -12,7 +12,6 @@ import {
   handlePreStreamError,
 } from "./utils/ssePipelineHelper.js";
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
-import { isPersistenceDomainError } from "../services/codaScopePersistence.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
@@ -471,13 +470,17 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
     if (content === undefined || typeof content !== "string") {
       throw httpError("content is required.", 400, "invalid_input");
     }
-    // Create a version snapshot before saving (best effort — don't fail the save)
-    try {
-      await designDocSvc.createVersion(id, epicId, docId, "user", "Manual save");
-    } catch (error) {
-      if (isPersistenceDomainError(error)) throw error;
-    }
-    const result = await designDocSvc.updateDesignDoc(id, epicId, docId, content, expectedHash);
+    const result = await designDocSvc.updateDesignDocWithVersion(
+      id,
+      epicId,
+      docId,
+      content,
+      {
+        author: principal(req).username,
+        summary: "Manual save",
+        expectedHash,
+      },
+    );
     if (!result) throw httpError("Design doc not found.", 404, "not_found");
     if ("conflict" in result) {
       res.status(409).json({
@@ -508,8 +511,6 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError("width and height are required for image resize.", 400, "invalid_input");
     }
 
-    const isDelete = body.type.startsWith("delete-");
-
     let resizeOp: import("../services/codaScopeDesignDocService.js").ResizeOp;
     switch (body.type) {
       case "mermaid":
@@ -531,16 +532,20 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
         throw httpError(`Unknown operation type: ${body.type}`, 400, "invalid_input");
     }
 
-    // Create a version snapshot before destructive deletes (best effort)
-    if (isDelete) {
-      try {
-        await designDocSvc.createVersion(id, epicId, docId, "user", `Delete ${body.type.replace("delete-", "")}`);
-      } catch (error) {
-        if (isPersistenceDomainError(error)) throw error;
-      }
-    }
-
-    const result = await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);
+    const result = resizeOp.type === "delete-mermaid"
+      || resizeOp.type === "delete-image"
+      || resizeOp.type === "delete-codeblock"
+      ? await designDocSvc.applyResizeMetadata(
+        id,
+        epicId,
+        docId,
+        resizeOp,
+        {
+          author: principal(req).username,
+          summary: `Delete ${body.type.replace("delete-", "")}`,
+        },
+      )
+      : await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);
     if (!result) throw httpError("Design doc not found or target not found.", 404, "not_found");
     res.json({ doc: result.doc, content: result.content, contentHash: result.contentHash });
   }));

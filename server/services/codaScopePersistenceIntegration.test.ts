@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -11,6 +12,7 @@ import {
 import { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
 import { CodaScopeVersionService } from "./codaScopeVersionService.js";
 
 const roots: string[] = [];
@@ -128,6 +130,48 @@ class CoordinateConcurrentMetadataReadsPersistence extends CodaScopePersistence 
     if (this.metadataReaders === 2) this.releaseMetadataReaders?.();
     await this.metadataReadersReady;
     return value;
+  }
+}
+
+class BarrierDesignContentPersistence extends CodaScopePersistence {
+  private blockNextContentWrite = true;
+  private releaseBlockedWrite: (() => void) | null = null;
+  private readonly blockedWriteReleased = new Promise<void>((resolve) => {
+    this.releaseBlockedWrite = resolve;
+  });
+  private signalBlockedWrite: (() => void) | null = null;
+  readonly blockedWriteReached = new Promise<void>((resolve) => {
+    this.signalBlockedWrite = resolve;
+  });
+
+  release(): void {
+    this.releaseBlockedWrite?.();
+  }
+
+  override async writeFile(
+    filePath: string,
+    data: string | Uint8Array,
+    context: PersistenceContext,
+  ): Promise<void> {
+    if (context.storage === "design_content" && this.blockNextContentWrite) {
+      this.blockNextContentWrite = false;
+      this.signalBlockedWrite?.();
+      await this.blockedWriteReleased;
+    }
+    await super.writeFile(filePath, data, context);
+  }
+}
+
+class RecordingMutationOrderPersistence extends CodaScopePersistence {
+  private readonly activeKeys = new AsyncLocalStorage<readonly string[]>();
+  readonly acquisitions: string[][] = [];
+
+  override withMutation<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    return super.withMutation(key, () => {
+      const keys = [...(this.activeKeys.getStore() ?? []), key];
+      this.acquisitions.push(keys);
+      return this.activeKeys.run(keys, operation);
+    });
   }
 }
 
@@ -562,6 +606,300 @@ describe("version persistence integration", () => {
       .toEqual(Array.from({ length: 15 }, (_, index) => index + 1));
     expect((await service.listDocVersions("project-id", "epic-safe", doc.id)).map((version) => version.number))
       .toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+  });
+
+  it("publishes one snapshot when two edits start from the same expected hash", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    scaffoldEpic(projectDir);
+    const normal = new CodaScopeDesignDocService(root);
+    const doc = await normal.createDesignDoc(
+      "project-id",
+      "epic-safe",
+      { title: "Doc", content: "Initial content." },
+    );
+    for (let index = 1; index <= 10; index++) {
+      await normal.createVersion("project-id", "epic-safe", doc.id, "seed", `seed-${index}`);
+    }
+    const observed = await normal.getDesignDoc("project-id", "epic-safe", doc.id);
+    expect(observed).not.toBeNull();
+
+    const barrier = new BarrierDesignContentPersistence();
+    const service = new CodaScopeDesignDocService(root, barrier);
+    const first = service.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      "First committed edit.",
+      { author: "alice", summary: "first", expectedHash: observed!.contentHash },
+    );
+    await barrier.blockedWriteReached;
+    const second = service.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      "Conflicting edit.",
+      { author: "bob", summary: "second", expectedHash: observed!.contentHash },
+    );
+    barrier.release();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).not.toBeNull();
+    expect(firstResult && "conflict" in firstResult).toBe(false);
+    expect(secondResult).toMatchObject({ conflict: true });
+    const versions = await service.listDocVersions("project-id", "epic-safe", doc.id);
+    expect(versions.map((version) => version.number))
+      .toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(versions.at(-1)).toMatchObject({ number: 11, author: "alice", summary: "first" });
+    expect((await service.getDocVersion("project-id", "epic-safe", doc.id, 11))?.content)
+      .toBe("Initial content.");
+    expect((await service.getDesignDoc("project-id", "epic-safe", doc.id))?.content)
+      .toBe("First committed edit.");
+  });
+
+  it("preserves every committed intermediate state across serialized agent-style edits", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    scaffoldEpic(projectDir);
+    const normal = new CodaScopeDesignDocService(root);
+    const doc = await normal.createDesignDoc(
+      "project-id",
+      "epic-safe",
+      { title: "Doc", content: "Initial content." },
+    );
+
+    const barrier = new BarrierDesignContentPersistence();
+    const service = new CodaScopeDesignDocService(root, barrier);
+    const first = service.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      "First agent edit.",
+      { author: "agent", summary: "first agent edit" },
+    );
+    await barrier.blockedWriteReached;
+    const second = service.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      "Second agent edit.",
+      { author: "agent", summary: "second agent edit" },
+    );
+    barrier.release();
+    const results = await Promise.all([first, second]);
+
+    expect(results.every((result) => result && !("conflict" in result))).toBe(true);
+    const versions = await service.listDocVersions("project-id", "epic-safe", doc.id);
+    expect(versions.map((version) => version.number)).toEqual([1, 2]);
+    expect((await service.getDocVersion("project-id", "epic-safe", doc.id, 1))?.content)
+      .toBe("Initial content.");
+    expect((await service.getDocVersion("project-id", "epic-safe", doc.id, 2))?.content)
+      .toBe("First agent edit.");
+    expect((await service.getDesignDoc("project-id", "epic-safe", doc.id))?.content)
+      .toBe("Second agent edit.");
+  });
+
+  it.each([
+    ["content publication", "writeFile", "design_content"],
+    ["design index publication", "writeJson", "design_index"],
+  ] as const)(
+    "rolls back a prepared snapshot when %s fails without pruning history",
+    async (_failure, method, storage) => {
+      const root = tempRoot();
+      const projectDir = scaffoldProject(root);
+      scaffoldEpic(projectDir);
+      const normal = new CodaScopeDesignDocService(root);
+      const doc = await normal.createDesignDoc(
+        "project-id",
+        "epic-safe",
+        { title: "Doc", content: "Original content." },
+      );
+      for (let index = 1; index <= 10; index++) {
+        await normal.createVersion("project-id", "epic-safe", doc.id, "alice", `v${index}`);
+      }
+      const docDir = path.join(projectDir, "epics", "epic-safe", "designs", doc.id);
+      const before = treeSnapshot(docDir);
+      const failing = new CodaScopeDesignDocService(
+        root,
+        new FailOncePersistence(method, storage),
+      );
+
+      await expect(failing.updateDesignDocWithVersion(
+        "project-id",
+        "epic-safe",
+        doc.id,
+        "Uncommitted content.",
+        { author: "alice", summary: "must roll back" },
+      )).rejects.toMatchObject({ code: "persistence_failed" });
+      expect(treeSnapshot(docDir)).toEqual(before);
+      expect((await normal.listDocVersions("project-id", "epic-safe", doc.id)).map((version) => version.number))
+        .toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    },
+  );
+
+  it.each([
+    ["content publication", "writeFile", "design_content"],
+    ["design index publication", "writeJson", "design_index"],
+  ] as const)(
+    "does not create a phantom version when directive batch %s fails and restores original content",
+    async (_failure, method, storage) => {
+      const root = tempRoot();
+      const projectDir = scaffoldProject(root);
+      scaffoldEpic(projectDir);
+      const normal = new CodaScopeDesignDocService(root);
+      const doc = await normal.createDesignDoc(
+        "project-id",
+        "epic-safe",
+        { title: "Doc", content: "Original content." },
+      );
+      for (let index = 1; index <= 10; index++) {
+        await normal.createVersion("project-id", "epic-safe", doc.id, "seed", `seed-${index}`);
+      }
+      const directives = new CodaScopeDirectiveService(root);
+      const directive = await directives.createDirective(
+        "project-id",
+        "epic-safe",
+        doc.id,
+        {
+          type: "insert",
+          afterLine: 1,
+          instruction: "Insert generated content",
+          author: "alice",
+        },
+      );
+      await directives.updateDirective(
+        "project-id",
+        "epic-safe",
+        directive.id,
+        doc.id,
+        { generatedContent: "Generated content." },
+      );
+      const docDir = path.join(projectDir, "epics", "epic-safe", "designs", doc.id);
+      const before = treeSnapshot(docDir);
+      const failing = new CodaScopeDesignDocService(
+        root,
+        new FailOncePersistence(method, storage),
+      );
+      const getDocContent = async (): Promise<string> => (
+        (await failing.getDesignDoc("project-id", "epic-safe", doc.id))?.content ?? ""
+      );
+      const setDocContent = async (content: string): Promise<void> => {
+        const updated = await failing.updateDesignDocWithVersion(
+          "project-id",
+          "epic-safe",
+          doc.id,
+          content,
+          { author: "alice", summary: "Apply directive batch" },
+        );
+        if (!updated || "conflict" in updated) throw new Error("Unexpected design update result");
+      };
+
+      await expect(directives.executeBatchDirectives(
+        "project-id",
+        "epic-safe",
+        doc.id,
+        getDocContent,
+        setDocContent,
+      )).rejects.toMatchObject({
+        code: "persistence_failed",
+        context: { storage },
+      });
+      expect(treeSnapshot(docDir)).toEqual(before);
+      expect((await normal.getDesignDoc("project-id", "epic-safe", doc.id))?.content)
+        .toBe("Original content.");
+      expect((await normal.listDocVersions("project-id", "epic-safe", doc.id)).map((version) => version.number))
+        .toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    },
+  );
+
+  it("revert creates one undoable snapshot under design-then-version lock order", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    scaffoldEpic(projectDir);
+    const persistence = new RecordingMutationOrderPersistence();
+    const service = new CodaScopeDesignDocService(root, persistence);
+    const doc = await service.createDesignDoc(
+      "project-id",
+      "epic-safe",
+      { title: "Doc", content: "Initial content." },
+    );
+    await service.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      "Modified content.",
+      { author: "alice", summary: "modify" },
+    );
+    const before = await service.listDocVersions("project-id", "epic-safe", doc.id);
+    persistence.acquisitions.length = 0;
+
+    const reverted = await service.revertToVersion("project-id", "epic-safe", doc.id, 1);
+
+    expect(reverted?.content).toBe("Initial content.");
+    const after = await service.listDocVersions("project-id", "epic-safe", doc.id);
+    expect(after).toHaveLength(before.length + 1);
+    expect((await service.getDocVersion("project-id", "epic-safe", doc.id, after.at(-1)!.number))?.content)
+      .toBe("Modified content.");
+    const nestedAcquisitions = persistence.acquisitions.filter((keys) => keys.length === 2);
+    expect(nestedAcquisitions).toHaveLength(1);
+    expect(nestedAcquisitions[0][0]).toMatch(/^design-index:/);
+    expect(nestedAcquisitions[0][1]).toMatch(/^design-versions:/);
+  });
+
+  it("creates exactly one recoverable pre-delete snapshot", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    scaffoldEpic(projectDir);
+    const service = new CodaScopeDesignDocService(root);
+    const original = "# Design\n\n```ts\nconst value = 1;\n```\n\nAfter.";
+    const doc = await service.createDesignDoc(
+      "project-id",
+      "epic-safe",
+      { title: "Doc", content: original },
+    );
+
+    const result = await service.applyResizeMetadata(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      { type: "delete-codeblock", index: 0 },
+      { author: "alice", summary: "Delete codeblock" },
+    );
+
+    expect(result?.content).not.toContain("const value");
+    const versions = await service.listDocVersions("project-id", "epic-safe", doc.id);
+    expect(versions).toHaveLength(1);
+    expect((await service.getDocVersion("project-id", "epic-safe", doc.id, 1))?.content)
+      .toBe(original);
+  });
+
+  it("rolls back a destructive edit snapshot when content publication fails", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    scaffoldEpic(projectDir);
+    const normal = new CodaScopeDesignDocService(root);
+    const original = "# Design\n\n```ts\nconst value = 1;\n```\n\nAfter.";
+    const doc = await normal.createDesignDoc(
+      "project-id",
+      "epic-safe",
+      { title: "Doc", content: original },
+    );
+    const docDir = path.join(projectDir, "epics", "epic-safe", "designs", doc.id);
+    const before = treeSnapshot(docDir);
+    const failing = new CodaScopeDesignDocService(
+      root,
+      new FailOncePersistence("writeFile", "design_content"),
+    );
+
+    await expect(failing.applyResizeMetadata(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      { type: "delete-codeblock", index: 0 },
+      { author: "alice", summary: "Delete codeblock" },
+    )).rejects.toMatchObject({ code: "persistence_failed" });
+    expect(treeSnapshot(docDir)).toEqual(before);
+    expect(await normal.listDocVersions("project-id", "epic-safe", doc.id)).toEqual([]);
   });
 
   it("does not prune old design snapshots when index publication fails", async () => {

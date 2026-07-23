@@ -58,8 +58,9 @@ When adding a new icon:
   authoritative color-token boundary. Use its `--color-*` and `--shadow-*`
   properties directly, or use `color-mix()` whose color inputs are shell
   tokens and allowed CSS keywords such as `transparent` and `currentColor`.
-- Do not add literal hexadecimal, `rgb[a]()`, `hsl[a]()`, or named visual
-  colors to CodaScope stylesheets. Literal color fallbacks such as
+- Do not add literal hexadecimal, `rgb[a]()`, `hsl[a]()`, `hwb()`, `lab()`,
+  `lch()`, `oklab()`, `oklch()`, `color()`, or opaque named visual colors to
+  CodaScope UI styles. Literal color fallbacks such as
   `var(--color-danger, #f87171)` are also forbidden; a missing shell token must
   fail the automated audit instead of being concealed.
 - A repeated CodaScope-only semantic may use a `--codascope-*` alias only when
@@ -75,8 +76,10 @@ When adding a new icon:
 - Primary styles go in `codascope.css`; assistant-specific styles in `CodaScopeAssistant.css`; notes styles in `codascope-notes.css`
 - Dark theme is assumed (inherited from shell `:root` tokens)
 - `codaScopeStyleTokens.test.ts` audits all three stylesheets, shell-token
-  resolution, token-derived CodaScope aliases, inline UI styles, and the
-  persisted-content allowlist. Run it for every CodaScope color change.
+  resolution, token-derived CodaScope aliases, CSS fallbacks, and
+  color-bearing TS/TSX properties. Its AST pass follows statically resolvable
+  local constants and retains only the exact persisted-content/native-picker
+  allowlist. Run it for every CodaScope color change.
 
 When a new semantic color is needed, first map it to the existing accent,
 status, text, surface, or border tokens. Use a token-based `color-mix()` for
@@ -419,7 +422,18 @@ Every design doc edit (agent or manual) creates a version snapshot:
 When modifying the design doc service:
 - Always use `docPath()` which handles storage migration transparently
 - Never read/write to `<docId>.md` directly — use the service methods
-- Version creation is best-effort (wrapped in try/catch in tools and routes)
+- Versioned edits use the service-owned combined mutation boundary; callers
+  must never call `createVersion()` and `updateDesignDoc()` as separate edit
+  steps
+- Combined design mutations acquire the epic `designs/` key before the
+  per-document version key. Revert and destructive resize/delete operations
+  use that same order.
+- Optimistic hash validation happens inside the combined lock before snapshot
+  publication. A conflict creates no version and does not prune history.
+- After hash validation, a byte-identical versioned update is a no-op: do not
+  update metadata, create a snapshot, or prune.
+- `applyResizeMetadata()` derives version behavior from the operation type:
+  deletes require author/summary metadata, while cosmetic resizes reject it.
 
 ### Storage Layout
 

@@ -10,7 +10,6 @@ import type { TopicDepth, CurationReasonType } from "../../../src/apps/codascope
 import { searchWeb } from "../codaScopeWebSearchService.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 import { formatCompletedAction } from "../codaScopeActionParser.js";
-import { isPersistenceDomainError } from "../codaScopePersistence.js";
 import { startBackgroundSsePump } from "../codaScopeBackgroundSse.js";
 
 /**
@@ -720,13 +719,13 @@ export function buildEpicTools(
           return "epicId, docId, content, and editSummary are required.";
         }
         try {
-          // Create a version snapshot before editing (Phase 4: version history)
-          try {
-            await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary);
-          } catch (error) {
-            if (isPersistenceDomainError(error)) throw error;
-          }
-          const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
+          const updated = await designDocService.updateDesignDocWithVersion(
+            projectId,
+            epicId,
+            docId,
+            content,
+            { author: "agent", summary: editSummary },
+          );
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
           if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
 
@@ -773,19 +772,22 @@ export function buildEpicTools(
           const result = await designDocService.getDesignDoc(projectId, epicId, docId);
           if (!result) return `Design doc "${docId}" not found in epic "${epicId}".`;
 
-          // Create a version snapshot before editing (Phase 4: version history)
-          try {
-            await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary);
-          } catch (error) {
-            if (isPersistenceDomainError(error)) throw error;
-          }
-
           const lines = result.content.split("\n");
           const before = lines.slice(0, startLine - 1);
           const after = lines.slice(endLine);
           const updatedContent = [...before, newContent, ...after].join("\n");
 
-          const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, updatedContent);
+          const updated = await designDocService.updateDesignDocWithVersion(
+            projectId,
+            epicId,
+            docId,
+            updatedContent,
+            {
+              author: "agent",
+              summary: editSummary,
+              expectedHash: result.contentHash,
+            },
+          );
           if (!updated) return `Failed to update design doc "${docId}".`;
           if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
 

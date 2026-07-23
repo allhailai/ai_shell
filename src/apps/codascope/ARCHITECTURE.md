@@ -345,20 +345,26 @@ Icon rules:
   `--codascope-*` namespace, are available to every CodaScope rendering region,
   and derive exclusively from shell tokens or token-based `color-mix()`.
   CodaScope does not define app-local `--color-*` properties.
-- Raw hexadecimal, `rgb[a]()`, `hsl[a]()`, named visual colors, and literal
-  color fallbacks inside `var()` are prohibited in active CodaScope stylesheet
-  declarations.
+- Raw hexadecimal, `rgb[a]()`, `hsl[a]()`, `hwb()`, `lab()`, `lch()`,
+  `oklab()`, `oklch()`, `color()`, opaque named visual colors, and literal
+  color fallbacks inside `var()` are prohibited in CodaScope UI color
+  contexts. `color-mix()` remains valid only when its color inputs resolve
+  through shell tokens, token-derived CodaScope aliases, or the permitted
+  keywords `transparent` and `currentColor`; it is not a raw-color exemption.
 - The only literal-color exceptions are persisted/user-content semantics:
   note highlight and text palettes in `NoteFormattingToolbar.tsx`, configurable
   highlights and the native color-input default in `Settings.tsx`,
   persisted-markup color fixtures, and the `AppManifest` accent metadata in
   `manifest.tsx`.
 - `codaScopeStyleTokens.test.ts` enforces the stylesheet token contract,
-  authoritative token resolution, token-derived aliases, inline UI color
-  rules, and the exact persisted-content allowlist. Future semantic colors
-  should reuse a shell token, use a token-based mix for a state variant, or—if
-  truly shell-wide and not representable—be introduced as a documented and
-  tested shell token.
+  authoritative token resolution, token-derived aliases and fallbacks, and
+  color-bearing TS/TSX property values. Its AST analysis follows statically
+  resolvable local constant and template-literal flows without treating
+  unrelated prose, labels, identifiers, or filenames as colors. The exact
+  persisted-content/native-picker allowlist remains the only literal
+  exception. Future semantic colors should reuse a shell token, use a
+  token-based mix for a state variant, or—if truly shell-wide and not
+  representable—be introduced as a documented and tested shell token.
 - Dark theme assumed (inherits from shell `:root` tokens)
 - Never use hard-coded colors for CodaScope-owned UI chrome.
 
@@ -762,13 +768,21 @@ re-entrant in-process coordinator:
 | Epic index, lifecycle, scope, definition metadata, epic versions, epic import | Project `epics/` directory |
 | Epic annotations | Epic `annotations/` directory |
 | Design-document versions and revert | Design-document directory |
-| Design index/content metadata used by revert | Epic `designs/` directory |
+| Design index/content metadata and all design edits | Epic `designs/` directory |
 
 The deployed concurrency contract is one AIShell server process. The
 coordinator prevents lost updates between services in that process, including
 epic bundle import, and permits same-key nested service operations. Multiple
 server processes and direct external writers are unsupported and require
 external coordination.
+
+Any mutation that touches both design content/index metadata and version
+history acquires the epic `designs/` key first and the per-document version key
+second. `updateDesignDocWithVersion()`, destructive resize/delete mutations,
+standalone design snapshot creation, and revert all use this one acquisition
+order; no supported path acquires those keys in reverse. Unversioned content
+mutations still hold the outer `designs/` key, so they cannot interleave with a
+combined versioned edit.
 
 Every operation that can replace an active epic's `epic.json` uses the same
 project `epics/` key, including epic-version creation. Strict reads also bind
@@ -789,15 +803,22 @@ unindexed tombstone is retained for explicit operator cleanup.
 Raw lifecycle filesystem failures, including rollback failures, are converted
 to the sanitized `persistence_failed` domain error before reaching routes.
 
-Design versions atomically create the new snapshot, publish `versions.json`,
-and only then prune snapshots excluded by the committed index. Index failure
-removes the unpublished snapshot and never prunes old history. Epic versions
-are built completely in a hidden sibling staging directory and renamed into
-place before publishing `versions.json`; that index is authoritative, while
-`epic.json.currentVersion` is a derived current pointer updated last. A failed
-index or metadata publication attempts to restore the prior index/metadata and
-remove the new snapshot. If bounded rollback itself fails, the error calls for
-operator recovery; no multi-file ACID guarantee is claimed.
+Versioned design edits check any expected content hash inside the combined
+lock before snapshot publication. After that validation, a byte-identical
+update returns the current document and hash without changing metadata,
+creating a snapshot, or pruning. A successful content-changing edit publishes
+exactly one snapshot of its immediately preceding content, commits content
+plus design index metadata, and only then prunes snapshots excluded by the
+committed version index. A conflict publishes nothing. If content or
+design-index publication fails after snapshot preparation, bounded rollback
+restores the prior version index, removes the new snapshot, and preserves
+prior history without pruning. Epic versions are built completely in a hidden sibling
+staging directory and renamed into place before publishing `versions.json`;
+that index is authoritative, while `epic.json.currentVersion` is a derived
+current pointer updated last. A failed index or metadata publication attempts
+to restore the prior index/metadata and remove the new snapshot. If bounded
+rollback itself fails, the error calls for operator recovery; no multi-file
+ACID guarantee is claimed.
 
 ### Portable Project Import and Export
 
@@ -1042,7 +1063,9 @@ template-selection API. The flow:
 3. For an explicit creation request, it drafts substantial complete markdown and calls `create_design_doc(epicId, title, content)` without a confirmation action card
 4. It uses `edit_design_doc` / `edit_design_doc_section` for later changes
 5. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
-6. Every edit (agent or manual) creates a version snapshot before writing
+6. Every versioned edit (agent or manual) uses the combined service mutation
+   boundary, which snapshots the immediately preceding bytes and commits the
+   edit under one ordered lock scope
 7. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
 
 The optional persisted `EpicDesignDoc.template` property is retained only so
@@ -1058,6 +1081,9 @@ Each design doc maintains its own version history within `<docId>/versions/`:
 - **Metadata**: `versions.json` tracks author, timestamp, summary, and word count per version
 - **Max versions**: 10 per document. Oldest are pruned automatically.
 - **Revert**: copies target version content back to `content.md` and creates a NEW version documenting the revert (so reverts are undoable)
+- **Atomic edit boundary**: manual saves, agent full/section edits, directive apply/undo/batch mutations, destructive deletes, and reverts hold `designs/` then the document-version key across hash validation, snapshot publication, and content/index commit
+- **Conflict/no-op/failure behavior**: stale hashes create no snapshot; byte-identical content is a metadata-preserving no-op after hash validation; failed content/index publication rolls the prepared snapshot back before returning a persistence-domain error
+- **Resize/delete versioning**: cosmetic mermaid/image resizes cannot accept version metadata, while destructive deletes require it and always use the combined boundary
 - **Storage migration**: legacy flat-file docs (`<docId>.md`) are migrated to `<docId>/content.md` on first access
 
 #### Version API Endpoints

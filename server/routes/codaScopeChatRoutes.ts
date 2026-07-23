@@ -20,7 +20,10 @@ import {
   type SelectionContext,
 } from "../services/codaScopeChatOrchestrator.js";
 import type { MessageContext } from "../services/codaScopeChatService.js";
-import { createSseTerminalWriter } from "./utils/ssePipelineHelper.js";
+import {
+  createSseTerminalWriter,
+  type SseTerminalWriter,
+} from "./utils/ssePipelineHelper.js";
 
 function parseMessageContext(value: Record<string, unknown> | undefined): MessageContext | null {
   if (!value || typeof value.view !== "string" || !value.view.trim()) return null;
@@ -33,6 +36,72 @@ function parseMessageContext(value: Record<string, unknown> | undefined): Messag
     ...(typeof value.noteVisibility === "string" || value.noteVisibility === null ? { noteVisibility: value.noteVisibility } : {}),
     ...(typeof value.notePath === "string" || value.notePath === null ? { notePath: value.notePath } : {}),
   };
+}
+
+function chatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function preflightDonePayload(payload: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const serialized = JSON.stringify(payload);
+    if (typeof serialized !== "string") {
+      throw new TypeError("Done terminal payload did not serialize to JSON.");
+    }
+    return JSON.parse(serialized) as Record<string, unknown>;
+  } catch {
+    throw new TypeError("Server could not serialize done terminal payload.");
+  }
+}
+
+async function publishChatFailure(options: {
+  terminal: SseTerminalWriter;
+  error: unknown;
+  persistError: (message: string) => Promise<void>;
+  errorPayload?: (message: string) => Record<string, unknown>;
+}): Promise<void> {
+  if (options.terminal.terminalEvent()) return;
+  const message = chatErrorMessage(options.error);
+
+  try {
+    await options.persistError(message);
+  } catch {
+    // Error-state persistence is best effort. Terminal failure still belongs
+    // to this route and must be published exactly once.
+  }
+
+  if (options.errorPayload) {
+    options.terminal.sendEvent("error", options.errorPayload(message));
+  } else {
+    options.terminal.error(message);
+  }
+}
+
+async function persistThenPublishChatCompletion(options: {
+  terminal: SseTerminalWriter;
+  donePayload: Record<string, unknown>;
+  persistComplete: () => Promise<void>;
+  persistError: (message: string) => Promise<void>;
+  errorPayload?: (message: string) => Record<string, unknown>;
+}): Promise<void> {
+  try {
+    // Validate the exact proposed terminal object before any message can be
+    // durably marked complete. Publishing the parsed preflight result also
+    // prevents a stateful toJSON/getter from changing on a second traversal.
+    const publishableDonePayload = preflightDonePayload(options.donePayload);
+    await options.persistComplete();
+    options.terminal.done(publishableDonePayload);
+  } catch (error) {
+    await publishChatFailure({ ...options, error });
+  }
+}
+
+function metadataWithoutActions(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!metadata || !Object.prototype.hasOwnProperty.call(metadata, "actions")) return metadata;
+  const { actions: _actions, ...remaining } = metadata;
+  return Object.keys(remaining).length > 0 ? remaining : undefined;
 }
 
 export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
@@ -323,10 +392,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      res.on("close", () => {
-        aborted = true;
-      });
       const terminal = createSseTerminalWriter(res, () => aborted);
+      res.on("close", () => {
+        if (!terminal.isResponseEnding()) aborted = true;
+      });
 
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
@@ -343,54 +412,80 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           },
         });
 
-        // Update assistant message with final content + actions
-        try {
-          const conv = await chatSvc.readConversation(id, convId, actorId);
-          if (conv) {
-            const updated = {
-              ...conv,
-              messages: conv.messages.map((m) =>
-                m.id === assistantMsgId
-                  ? {
-                      ...m,
-                      content: fullResponse,
-                      status: "complete" as const,
-                      updatedAt: new Date().toISOString(),
-                      metadata: {
-                        ...(m.metadata ?? {}),
-                        ...(actions.length > 0 ? { actions } : {}),
-                      },
-                    }
-                  : m,
-              ),
+        const donePayload = { ...agentResult as object, conversationId: convId, actions };
+        await persistThenPublishChatCompletion({
+          terminal,
+          donePayload,
+          persistComplete: async () => {
+            const conv = await chatSvc.readConversation(id, convId, actorId);
+            if (!conv) throw new Error("Conversation disappeared before assistant completion could be persisted.");
+            const placeholderIndex = conv.messages.findIndex((message) =>
+              message.id === assistantMsgId
+              && message.role === "assistant"
+              && message.status === "streaming"
+            );
+            if (placeholderIndex < 0) {
+              throw new Error("Expected assistant streaming placeholder was not found.");
+            }
+            const messages = [...conv.messages];
+            const placeholder = messages[placeholderIndex];
+            messages[placeholderIndex] = {
+              ...placeholder,
+              content: fullResponse,
+              status: "complete" as const,
+              updatedAt: new Date().toISOString(),
+              metadata: {
+                ...(placeholder.metadata ?? {}),
+                ...(actions.length > 0 ? { actions } : {}),
+              },
             };
-            await chatSvc.writeConversation(id, actorId, updated);
-          }
-        } catch {
-          // Best effort persistence
-        }
-        terminal.done({ ...agentResult as object, conversationId: convId, actions });
+            const persisted = await chatSvc.writeConversation(id, actorId, {
+              ...conv,
+              messages,
+            });
+            if (!persisted) {
+              throw new Error("Conversation disappeared before assistant completion could be persisted.");
+            }
+          },
+          persistError: async (message) => {
+            const conv = await chatSvc.readConversation(id, convId, actorId);
+            if (!conv) return;
+            const placeholderIndex = conv.messages.findIndex((candidate) => candidate.id === assistantMsgId);
+            if (placeholderIndex < 0) return;
+            const messages = [...conv.messages];
+            const placeholder = messages[placeholderIndex];
+            messages[placeholderIndex] = {
+              ...placeholder,
+              content: fullResponse || `Error: ${message}`,
+              status: "error" as const,
+              updatedAt: new Date().toISOString(),
+              metadata: metadataWithoutActions(placeholder.metadata),
+            };
+            await chatSvc.writeConversation(id, actorId, { ...conv, messages });
+          },
+        });
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
-        // Mark assistant message as error
-        try {
-          const conv = await chatSvc.readConversation(id, convId, actorId);
-          if (conv) {
-            const updated = {
-              ...conv,
-              messages: conv.messages.map((m) =>
-                m.id === assistantMsgId
-                  ? { ...m, content: partialResponse || `Error: ${errMsg}`, status: "error" as const, updatedAt: new Date().toISOString() }
-                  : m,
-              ),
+        await publishChatFailure({
+          terminal,
+          error: err,
+          persistError: async (message) => {
+            const conv = await chatSvc.readConversation(id, convId, actorId);
+            if (!conv) return;
+            const placeholderIndex = conv.messages.findIndex((candidate) => candidate.id === assistantMsgId);
+            if (placeholderIndex < 0) return;
+            const messages = [...conv.messages];
+            const placeholder = messages[placeholderIndex];
+            messages[placeholderIndex] = {
+              ...placeholder,
+              content: partialResponse || `Error: ${message}`,
+              status: "error" as const,
+              updatedAt: new Date().toISOString(),
+              metadata: metadataWithoutActions(placeholder.metadata),
             };
-            await chatSvc.writeConversation(id, actorId, updated);
-          }
-        } catch {
-          // Best effort
-        }
-        terminal.error(errMsg);
+            await chatSvc.writeConversation(id, actorId, { ...conv, messages });
+          },
+        });
       }
     })().catch(next);
   });
@@ -463,10 +558,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      res.on("close", () => {
-        aborted = true;
-      });
       const terminal = createSseTerminalWriter(res, () => aborted);
+      res.on("close", () => {
+        if (!terminal.isResponseEnding()) aborted = true;
+      });
 
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
@@ -482,28 +577,67 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           },
         });
 
-        if (fullResponse) {
-          await chatSvc.appendMessage(id, convId!, actorId, {
-            role: "assistant",
-            content: fullResponse,
-            modelId,
-            status: "complete",
-            metadata: actions.length > 0 ? { actions } : undefined,
-          }).catch(() => { /* best effort */ });
-        }
-        terminal.done({ ...agentResult as object, conversationId: convId, actions });
+        const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const donePayload = { ...agentResult as object, conversationId: convId, actions };
+        await persistThenPublishChatCompletion({
+          terminal,
+          donePayload,
+          persistComplete: async () => {
+            const persisted = await chatSvc.appendMessage(id, convId!, actorId, {
+              id: assistantMsgId,
+              role: "assistant",
+              content: fullResponse,
+              modelId,
+              status: "complete",
+              metadata: actions.length > 0 ? { actions } : undefined,
+            });
+            if (!persisted) {
+              throw new Error("Conversation disappeared before assistant completion could be persisted.");
+            }
+          },
+          persistError: async (message) => {
+            const conv = await chatSvc.readConversation(id, convId!, actorId);
+            const existingIndex = conv?.messages.findIndex((candidate) => candidate.id === assistantMsgId) ?? -1;
+            if (conv && existingIndex >= 0) {
+              const messages = [...conv.messages];
+              const existing = messages[existingIndex];
+              messages[existingIndex] = {
+                ...existing,
+                content: fullResponse || `Error: ${message}`,
+                status: "error" as const,
+                updatedAt: new Date().toISOString(),
+                metadata: metadataWithoutActions(existing.metadata),
+              };
+              await chatSvc.writeConversation(id, actorId, { ...conv, messages });
+              return;
+            }
+            await chatSvc.appendMessage(id, convId!, actorId, {
+              id: assistantMsgId,
+              role: "assistant",
+              content: fullResponse || `Error: ${message}`,
+              modelId,
+              status: "error",
+            });
+          },
+          errorPayload: (message) => ({ error: message, conversationId: convId }),
+        });
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
-        if (partialResponse) {
-          await chatSvc.appendMessage(id, convId!, actorId, {
-            role: "assistant",
-            content: partialResponse,
-            modelId,
-            status: "error",
-          }).catch(() => { /* best effort */ });
-        }
-        terminal.sendEvent("error", { error: errMsg, conversationId: convId });
+        const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        await publishChatFailure({
+          terminal,
+          error: err,
+          persistError: async (message) => {
+            await chatSvc.appendMessage(id, convId!, actorId, {
+              id: assistantMsgId,
+              role: "assistant",
+              content: partialResponse || `Error: ${message}`,
+              modelId,
+              status: "error",
+            });
+          },
+          errorPayload: (message) => ({ error: message, conversationId: convId }),
+        });
       }
     })().catch(next);
   });

@@ -222,6 +222,133 @@ describe("CodaScopeDesignDocService", () => {
       const result = await svc.updateDesignDoc("proj-upd2", "epic-upd2", "nonexistent", "content");
       expect(result).toBeNull();
     });
+
+    it("makes a same-content versioned update a no-op after checking the expected hash", async () => {
+      const projectId = "proj-versioned-noop";
+      const epicId = "epic-versioned-noop";
+      const projectDir = scaffoldProject(root, projectId, epicId);
+      const content = "# Unchanged\n\nSame bytes.";
+      const doc = await svc.createDesignDoc(projectId, epicId, {
+        title: "No-op",
+        content,
+      });
+      const observed = await svc.getDesignDoc(projectId, epicId, doc.id);
+      expect(observed).not.toBeNull();
+      const indexPath = path.join(projectDir, "epics", epicId, "designs", "designs.json");
+      const indexBefore = readFileSync(indexPath);
+
+      const noOp = await svc.updateDesignDocWithVersion(
+        projectId,
+        epicId,
+        doc.id,
+        content,
+        {
+          author: "alice",
+          summary: "No byte changes",
+          expectedHash: observed!.contentHash,
+        },
+      );
+
+      expect(noOp).not.toBeNull();
+      expect(noOp && "conflict" in noOp).toBe(false);
+      expect(noOp && !("conflict" in noOp) ? noOp.contentHash : null).toBe(observed!.contentHash);
+      expect(noOp && !("conflict" in noOp) ? noOp.doc.updatedAt : null).toBe(observed!.doc.updatedAt);
+      expect(readFileSync(indexPath)).toEqual(indexBefore);
+      expect(await svc.listDocVersions(projectId, epicId, doc.id)).toEqual([]);
+      expect(existsSync(path.join(projectDir, "epics", epicId, "designs", doc.id, "versions"))).toBe(false);
+
+      const conflict = await svc.updateDesignDocWithVersion(
+        projectId,
+        epicId,
+        doc.id,
+        content,
+        {
+          author: "alice",
+          summary: "Stale no-op",
+          expectedHash: "wrong-hash",
+        },
+      );
+
+      expect(conflict).toMatchObject({
+        conflict: true,
+        currentHash: observed!.contentHash,
+        currentContent: content,
+      });
+      expect(readFileSync(indexPath)).toEqual(indexBefore);
+      expect(await svc.listDocVersions(projectId, epicId, doc.id)).toEqual([]);
+    });
+  });
+
+  describe("resize mutation version contract", () => {
+    it("rejects a destructive mutation without version metadata before changing content", async () => {
+      const projectId = "proj-delete-requires-version";
+      const epicId = "epic-delete-requires-version";
+      scaffoldProject(root, projectId, epicId);
+      const original = "# Design\n\n```ts\nconst value = 1;\n```\n";
+      const doc = await svc.createDesignDoc(projectId, epicId, {
+        title: "Protected delete",
+        content: original,
+      });
+
+      await expect((svc.applyResizeMetadata as any)(
+        projectId,
+        epicId,
+        doc.id,
+        { type: "delete-codeblock", index: 0 },
+      )).rejects.toThrow("Destructive design document mutations require version author and summary.");
+
+      expect((await svc.getDesignDoc(projectId, epicId, doc.id))?.content).toBe(original);
+      expect(await svc.listDocVersions(projectId, epicId, doc.id)).toEqual([]);
+    });
+
+    it("rejects version metadata for cosmetic resize and never creates a snapshot", async () => {
+      const projectId = "proj-cosmetic-unversioned";
+      const epicId = "epic-cosmetic-unversioned";
+      scaffoldProject(root, projectId, epicId);
+      const original = "# Diagram\n\n```mermaid\ngraph TD\n  A --> B\n```\n";
+      const doc = await svc.createDesignDoc(projectId, epicId, {
+        title: "Cosmetic resize",
+        content: original,
+      });
+      const resize = { type: "mermaid", index: 0, height: 480 } as const;
+
+      await expect((svc.applyResizeMetadata as any)(
+        projectId,
+        epicId,
+        doc.id,
+        resize,
+        { author: "alice", summary: "Should not version" },
+      )).rejects.toThrow("Cosmetic design document resizes cannot create versions.");
+      const result = await svc.applyResizeMetadata(projectId, epicId, doc.id, resize);
+
+      expect(result?.content).toContain("```mermaid {height=480}");
+      expect(await svc.listDocVersions(projectId, epicId, doc.id)).toEqual([]);
+    });
+
+    it("creates exactly one recoverable snapshot for a destructive mutation with metadata", async () => {
+      const projectId = "proj-delete-versioned";
+      const epicId = "epic-delete-versioned";
+      scaffoldProject(root, projectId, epicId);
+      const original = "# Design\n\n```ts\nconst value = 1;\n```\n";
+      const doc = await svc.createDesignDoc(projectId, epicId, {
+        title: "Versioned delete",
+        content: original,
+      });
+
+      const result = await svc.applyResizeMetadata(
+        projectId,
+        epicId,
+        doc.id,
+        { type: "delete-codeblock", index: 0 },
+        { author: "alice", summary: "Delete codeblock" },
+      );
+
+      expect(result?.content).not.toContain("const value");
+      const versions = await svc.listDocVersions(projectId, epicId, doc.id);
+      expect(versions).toHaveLength(1);
+      expect((await svc.getDocVersion(projectId, epicId, doc.id, versions[0].number))?.content)
+        .toBe(original);
+    });
   });
 
   // ── Storage migration ─────────────────────────────────────────

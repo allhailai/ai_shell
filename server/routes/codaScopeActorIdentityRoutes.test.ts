@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RequestHandler } from "express";
+import { registerAnnotationRoutes } from "./codaScopeAnnotationRoutes.js";
 import { registerArtifactRoutes } from "./codaScopeArtifactRoutes.js";
 import { registerEpicRoutes } from "./codaScopeEpicRoutes.js";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
@@ -77,6 +78,181 @@ describe("CodaScope route audit identities", () => {
     );
 
     expect(createArtifact).toHaveBeenCalledWith("proj", "epic", { title: "Artifact", createdBy: "alice" });
+  });
+
+  it("routes manual saves through the combined versioned edit boundary with the observed hash", async () => {
+    const updateDesignDocWithVersion = vi.fn(async () => ({
+      doc: { id: "doc", title: "Design" },
+      contentHash: "new-hash",
+    }));
+    const routes = registerRoutes(registerEpicRoutes, {
+      designDocSvc: { updateDesignDocWithVersion },
+    });
+    const response = { json: vi.fn() };
+
+    await handler(routes, "put", "/api/codascope/projects/:id/epics/:epicId/designs/:docId")(
+      {
+        params: { id: "proj", epicId: "epic", docId: "doc" },
+        body: { content: "Updated design.", expectedHash: "observed-hash" },
+      } as never,
+      response as never,
+      (() => undefined) as never,
+    );
+
+    expect(updateDesignDocWithVersion).toHaveBeenCalledWith(
+      "proj",
+      "epic",
+      "doc",
+      "Updated design.",
+      {
+        author: "alice",
+        summary: "Manual save",
+        expectedHash: "observed-hash",
+      },
+    );
+  });
+
+  it("versions destructive resize mutations but leaves cosmetic resizes unversioned", async () => {
+    const applyResizeMetadata = vi.fn(async () => ({
+      doc: { id: "doc", title: "Design" },
+      content: "Updated design.",
+      contentHash: "new-hash",
+    }));
+    const routes = registerRoutes(registerEpicRoutes, {
+      designDocSvc: { applyResizeMetadata },
+    });
+    const response = { json: vi.fn() };
+    const resizeHandler = handler(
+      routes,
+      "patch",
+      "/api/codascope/projects/:id/epics/:epicId/designs/:docId/resize",
+    );
+
+    await resizeHandler(
+      {
+        params: { id: "proj", epicId: "epic", docId: "doc" },
+        body: { type: "delete-image", index: 0 },
+      } as never,
+      response as never,
+      (() => undefined) as never,
+    );
+    await resizeHandler(
+      {
+        params: { id: "proj", epicId: "epic", docId: "doc" },
+        body: { type: "mermaid", index: 0, height: 480 },
+      } as never,
+      response as never,
+      (() => undefined) as never,
+    );
+
+    expect(applyResizeMetadata).toHaveBeenNthCalledWith(
+      1,
+      "proj",
+      "epic",
+      "doc",
+      { type: "delete-image", index: 0 },
+      { author: "alice", summary: "Delete image" },
+    );
+    expect(applyResizeMetadata).toHaveBeenNthCalledWith(
+      2,
+      "proj",
+      "epic",
+      "doc",
+      { type: "mermaid", index: 0, height: 480 },
+    );
+  });
+
+  it("routes directive apply, undo, and batch design mutations through the combined boundary", async () => {
+    const getDesignDoc = vi.fn(async () => ({
+      doc: { id: "doc", title: "Design" },
+      content: "Original.",
+      contentHash: "hash",
+    }));
+    const updateDesignDocWithVersion = vi.fn(async () => ({
+      doc: { id: "doc", title: "Design" },
+      contentHash: "new-hash",
+    }));
+    const applyDirective = vi.fn(async (
+      _projectId: string,
+      _epicId: string,
+      _docId: string,
+      dirId: string,
+      getContent: () => Promise<string>,
+      setContent: (content: string) => Promise<void>,
+    ) => {
+      const content = `${await getContent()} Applied.`;
+      await setContent(content);
+      return { directive: { id: dirId }, newContent: content };
+    });
+    const undoDirective = vi.fn(async (
+      _projectId: string,
+      _epicId: string,
+      _docId: string,
+      dirId: string,
+      setContent: (content: string) => Promise<void>,
+    ) => {
+      await setContent("Restored.");
+      return { id: dirId };
+    });
+    const executeBatchDirectives = vi.fn(async (
+      _projectId: string,
+      _epicId: string,
+      _docId: string,
+      getContent: () => Promise<string>,
+      setContent: (content: string) => Promise<void>,
+    ) => {
+      const content = `${await getContent()} Batched.`;
+      await setContent(content);
+      return { applied: [], newContent: content };
+    });
+    const routes = registerRoutes(registerAnnotationRoutes, {
+      designDocSvc: { getDesignDoc, updateDesignDocWithVersion },
+      epicSvc: {},
+      directiveSvc: { applyDirective, undoDirective, executeBatchDirectives },
+    });
+    const response = { json: vi.fn() };
+    const params = { id: "proj", epicId: "epic", docId: "doc", dirId: "directive-1" };
+
+    await handler(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/apply",
+    )({ params } as never, response as never, (() => undefined) as never);
+    await handler(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/undo",
+    )({ params } as never, response as never, (() => undefined) as never);
+    await handler(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/batch",
+    )({ params } as never, response as never, (() => undefined) as never);
+
+    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
+      1,
+      "proj",
+      "epic",
+      "doc",
+      "Original. Applied.",
+      { author: "alice", summary: "Apply directive directive-1" },
+    );
+    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
+      2,
+      "proj",
+      "epic",
+      "doc",
+      "Restored.",
+      { author: "alice", summary: "Undo directive directive-1" },
+    );
+    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
+      3,
+      "proj",
+      "epic",
+      "doc",
+      "Original. Batched.",
+      { author: "alice", summary: "Apply directive batch" },
+    );
   });
 
   it("derives lock ownership from the principal for acquire, heartbeat, and release", async () => {

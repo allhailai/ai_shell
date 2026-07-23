@@ -158,6 +158,94 @@ describe("tool tier builders", () => {
     });
   });
 
+  it("routes full-document agent edits through the combined versioned edit boundary", async () => {
+    const updateDesignDocWithVersion = vi.fn(async () => ({
+      doc: { id: "doc-1", title: "Design", wordCount: 4 },
+      contentHash: "new-hash",
+    }));
+    const contractServices = {
+      ...services,
+      designDoc: { updateDesignDocWithVersion },
+    };
+    const tool = buildEpicTools(PROJECT_ID, contractServices as any).edit_design_doc;
+
+    const result = await tool.execute({
+      epicId: "epic-1",
+      docId: "doc-1",
+      content: "# Updated\n\nComplete replacement.",
+      editSummary: "Replace the design",
+    }, {} as any);
+
+    expect(String(result)).toContain("Updated design document");
+    expect(updateDesignDocWithVersion).toHaveBeenCalledWith(
+      PROJECT_ID,
+      "epic-1",
+      "doc-1",
+      "# Updated\n\nComplete replacement.",
+      { author: "agent", summary: "Replace the design" },
+    );
+  });
+
+  it("conflicts a stale section edit instead of clobbering the concurrent content", async () => {
+    const root = path.join(os.tmpdir(), `codascope-design-section-${crypto.randomBytes(6).toString("hex")}`);
+    const projectDir = path.join(root, "project-dir");
+    const epicDir = path.join(projectDir, "epics", "epic-1");
+    mkdirSync(epicDir, { recursive: true });
+    writeFileSync(
+      path.join(projectDir, "project.json"),
+      JSON.stringify({ id: PROJECT_ID, name: "Project" }),
+      "utf-8",
+    );
+    try {
+      const liveServices = createToolServices(root);
+      const designDoc = liveServices.designDoc;
+      const doc = await designDoc.createDesignDoc(PROJECT_ID, "epic-1", {
+        title: "Design",
+        content: "# Heading\n\nOriginal target.\n\nTail.",
+      });
+      let concurrentEditCommitted = false;
+      const racingDesignDoc = {
+        getDesignDoc: async (projectId: string, epicId: string, docId: string) => {
+          const observed = await designDoc.getDesignDoc(projectId, epicId, docId);
+          if (observed && !concurrentEditCommitted) {
+            concurrentEditCommitted = true;
+            await designDoc.updateDesignDocWithVersion(
+              projectId,
+              epicId,
+              docId,
+              "# Concurrent\n\nConcurrent content moved the target.",
+              { author: "agent", summary: "concurrent edit" },
+            );
+          }
+          return observed;
+        },
+        updateDesignDocWithVersion: designDoc.updateDesignDocWithVersion.bind(designDoc),
+      };
+      const tool = buildEpicTools(
+        PROJECT_ID,
+        { ...liveServices, designDoc: racingDesignDoc } as any,
+      ).edit_design_doc_section;
+
+      const result = await tool.execute({
+        epicId: "epic-1",
+        docId: doc.id,
+        startLine: 3,
+        endLine: 3,
+        newContent: "Stale replacement.",
+        editSummary: "replace target",
+      }, {} as any);
+
+      expect(String(result)).toContain("modified concurrently");
+      expect((await designDoc.getDesignDoc(PROJECT_ID, "epic-1", doc.id))?.content)
+        .toBe("# Concurrent\n\nConcurrent content moved the target.");
+      expect(await designDoc.listDocVersions(PROJECT_ID, "epic-1", doc.id)).toHaveLength(1);
+      expect((await designDoc.getDocVersion(PROJECT_ID, "epic-1", doc.id, 1))?.content)
+        .toBe("# Heading\n\nOriginal target.\n\nTail.");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not expose legacy template metadata as an agent capability", async () => {
     const legacyDoc = {
       id: "doc-legacy",
