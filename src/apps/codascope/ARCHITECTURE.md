@@ -337,9 +337,30 @@ Icon rules:
 
 - All styles namespaced with `codascope-` prefix
 - Scoped CSS files: `codascope.css` for the app, `CodaScopeAssistant.css` for the assistant panel, and `codascope-notes.css` for notes
-- Uses shell design tokens (`--color-*`, `--space-*`, `--text-*`, etc.)
+- `src/styles/01-tokens.css` is the authoritative source for CodaScope UI
+  colors. Styles use its `--color-*` and `--shadow-*` properties directly, or
+  `color-mix()` expressions composed from shell tokens and non-color keywords
+  such as `transparent` and `currentColor`.
+- CodaScope-specific semantic aliases, when necessary, use the
+  `--codascope-*` namespace, are available to every CodaScope rendering region,
+  and derive exclusively from shell tokens or token-based `color-mix()`.
+  CodaScope does not define app-local `--color-*` properties.
+- Raw hexadecimal, `rgb[a]()`, `hsl[a]()`, named visual colors, and literal
+  color fallbacks inside `var()` are prohibited in active CodaScope stylesheet
+  declarations.
+- The only literal-color exceptions are persisted/user-content semantics:
+  note highlight and text palettes in `NoteFormattingToolbar.tsx`, configurable
+  highlights and the native color-input default in `Settings.tsx`,
+  persisted-markup color fixtures, and the `AppManifest` accent metadata in
+  `manifest.tsx`.
+- `codaScopeStyleTokens.test.ts` enforces the stylesheet token contract,
+  authoritative token resolution, token-derived aliases, inline UI color
+  rules, and the exact persisted-content allowlist. Future semantic colors
+  should reuse a shell token, use a token-based mix for a state variant, or—if
+  truly shell-wide and not representable—be introduced as a documented and
+  tested shell token.
 - Dark theme assumed (inherits from shell `:root` tokens)
-- Never use hard-coded colors — always reference design tokens
+- Never use hard-coded colors for CodaScope-owned UI chrome.
 
 ### Component Patterns
 

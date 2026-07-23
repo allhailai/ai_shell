@@ -624,7 +624,7 @@ export function ProjectList() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="codascope-modal-header">
-              <div className="codascope-modal-title" style={{ color: "hsl(40, 90%, 64%)" }}>
+              <div className="codascope-modal-title codascope-modal-title-warning">
                 <IconWarning size={16} /> Change Projects Root
               </div>
               <button

@@ -108,7 +108,7 @@
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
   max-height: 360px;
   display: flex;
   flex-direction: column;
@@ -477,7 +477,7 @@
 
 .codascope-msg-copy-btn-copied {
   opacity: 1;
-  color: var(--color-success, #4ade80);
+  color: var(--color-success);
 }
 
 /* ── Thinking Indicator ─────────────────────────────────────────── */
@@ -548,16 +548,16 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  background: hsl(270 40% 18% / 0.6);
-  border-left: 3px solid hsl(270 70% 60%);
+  background: color-mix(in srgb, var(--color-accent-muted) 60%, transparent);
+  border-left: 3px solid var(--color-accent);
   font-size: var(--text-xs);
-  color: hsl(270 60% 82%);
+  color: var(--color-accent-text);
   animation: codascope-curation-bar-pulse 2.5s ease-in-out infinite;
 }
 
 @keyframes codascope-curation-bar-pulse {
-  0%, 100% { border-left-color: hsl(270 70% 60%); background: hsl(270 40% 18% / 0.6); }
-  50% { border-left-color: hsl(270 80% 72%); background: hsl(270 40% 22% / 0.7); }
+  0%, 100% { border-left-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent-muted) 60%, transparent); }
+  50% { border-left-color: var(--color-accent-hover); background: color-mix(in srgb, var(--color-accent-muted) 70%, transparent); }
 }
 
 .codascope-assistant-curation-bar-icon {
@@ -565,7 +565,7 @@
   align-items: center;
   line-height: 0;
   animation: codascope-curate-spin 1.2s linear infinite;
-  color: hsl(270 70% 70%);
+  color: var(--color-accent-text);
 }
 
 .codascope-assistant-curation-bar-text {
@@ -633,8 +633,8 @@
 }
 
 .codascope-assistant-stop-btn:hover {
-  background: var(--color-danger-muted, hsl(0, 60%, 20%));
-  color: var(--color-danger, hsl(0, 75%, 60%));
+  background: var(--color-danger-muted);
+  color: var(--color-danger);
 }
 
 .codascope-assistant-input-row {
@@ -678,7 +678,7 @@
   justify-content: center;
   border-radius: var(--radius-md);
   background: var(--color-accent);
-  color: white;
+  color: var(--color-text-inverse);
   transition: all var(--transition-fast);
 }
 
@@ -743,21 +743,21 @@
 }
 
 .codascope-action-card:hover {
-  border-color: var(--color-border-hover, var(--color-border-secondary));
+  border-color: var(--color-border-secondary);
 }
 
 .codascope-action-card-success {
-  border-color: var(--color-success, #34d399);
-  background: color-mix(in srgb, var(--color-success, #34d399) 6%, var(--color-bg-secondary));
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 6%, var(--color-bg-secondary));
 }
 
 .codascope-action-card-error {
-  border-color: var(--color-error, #f87171);
-  background: color-mix(in srgb, var(--color-error, #f87171) 6%, var(--color-bg-secondary));
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 6%, var(--color-bg-secondary));
 }
 
 .codascope-action-card-running {
-  border-color: var(--color-accent, #60a5fa);
+  border-color: var(--color-accent);
 }
 
 .codascope-action-card-header {
@@ -828,18 +828,18 @@
 }
 
 .codascope-action-card-btn-success {
-  color: var(--color-success, #34d399);
-  border-color: var(--color-success, #34d399);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 .codascope-action-card-btn-error {
-  color: var(--color-error, #f87171);
-  border-color: var(--color-error, #f87171);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 .codascope-action-card-error {
   font-size: var(--text-2xs);
-  color: var(--color-error, #f87171);
+  color: var(--color-danger);
   white-space: normal;
   word-break: break-word;
   line-height: 1.4;
@@ -850,7 +850,7 @@
   width: 12px;
   height: 12px;
   border: 2px solid var(--color-border-primary);
-  border-top-color: var(--color-accent, #60a5fa);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: codascope-spin 0.6s linear infinite;
 }
@@ -882,8 +882,8 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--color-accent, hsl(220 90% 56%)) 40%,
-    var(--color-accent, hsl(220 90% 56%)) 60%,
+    var(--color-accent) 40%,
+    var(--color-accent) 60%,
     transparent 100%
   );
   animation: codascope-research-shimmer 1.5s ease-in-out infinite;
@@ -896,7 +896,7 @@
 
 .codascope-action-card-progress-text {
   font-size: var(--text-2xs);
-  color: var(--color-accent-text, hsl(220 95% 72%));
+  color: var(--color-accent-text);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -924,15 +924,15 @@
 }
 
 .codascope-action-card-badge-success {
-  color: var(--color-success, #34d399);
-  background: color-mix(in srgb, var(--color-success, #34d399) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-success, #34d399) 30%, transparent);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .codascope-action-card-badge-error {
-  color: var(--color-error, #f87171);
-  background: color-mix(in srgb, var(--color-error, #f87171) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-error, #f87171) 30%, transparent);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 
 /* ── Ghost Button (secondary rebuild/retry) ──────────────────────── */
@@ -958,8 +958,8 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: linear-gradient(135deg, hsl(210 60% 15% / 0.8), hsl(250 50% 18% / 0.6));
-  border-bottom: 1px solid hsl(210 60% 30% / 0.3);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-info-muted) 80%, transparent), color-mix(in srgb, var(--color-accent-muted) 60%, transparent));
+  border-bottom: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
@@ -1060,7 +1060,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--color-bg-primary) 50%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1081,7 +1081,7 @@
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-xl);
   animation: codascope-modal-slide 0.2s ease-out;
 }
 
@@ -1618,7 +1618,7 @@
 }
 
 .codascope-slash-toast-icon {
-  color: var(--color-success, #4ade80);
+  color: var(--color-success);
   font-weight: var(--weight-bold);
   font-size: var(--text-sm);
 }
@@ -1631,8 +1631,8 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 900;
-  background: var(--color-bg-tertiary, hsl(228, 14%, 14%));
-  border: 2px solid var(--color-accent, hsl(230, 80%, 62%));
+  background: var(--color-bg-tertiary);
+  border: 2px solid var(--color-accent);
   border-radius: var(--radius-lg);
   width: 720px;
   max-width: 90vw;
@@ -1640,9 +1640,9 @@
   display: flex;
   flex-direction: column;
   box-shadow:
-    0 0 20px rgba(99, 102, 241, 0.25),
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    0 24px 64px rgba(0, 0, 0, 0.4);
+    0 0 20px color-mix(in srgb, var(--color-accent) 25%, transparent),
+    0 8px 32px color-mix(in srgb, var(--color-bg-primary) 50%, transparent),
+    0 24px 64px color-mix(in srgb, var(--color-bg-primary) 40%, transparent);
   animation: codascope-guide-slide 0.25s ease-out;
   overflow: hidden;
 }
@@ -1755,7 +1755,7 @@
 
 .codascope-guide-modal-tab--active {
   color: var(--color-text-primary);
-  border-bottom-color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  border-bottom-color: var(--color-accent);
 }
 
 /* ── Content Area ─────────────────────────────────────────────────── */
@@ -1877,7 +1877,7 @@
 }
 
 .codascope-guide-expandable-trigger:hover {
-  color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  color: var(--color-accent);
 }
 
 .codascope-guide-expandable-arrow {
@@ -1955,7 +1955,7 @@
   height: 32px;
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
-  color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  color: var(--color-accent);
   flex-shrink: 0;
 }
 
@@ -2029,7 +2029,7 @@
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-sm);
-  color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  color: var(--color-accent);
 }
 
 /* ── Mentions Grid ────────────────────────────────────────────────── */
@@ -2193,15 +2193,15 @@
 }
 
 .codascope-guide-depth-bar--outline {
-  background: hsl(210, 60%, 40%);
+  background: color-mix(in srgb, var(--color-info) 60%, var(--color-bg-secondary));
 }
 
 .codascope-guide-depth-bar--developed {
-  background: hsl(210, 80%, 55%);
+  background: var(--color-info);
 }
 
 .codascope-guide-depth-bar--deep {
-  background: hsl(210, 100%, 65%);
+  background: color-mix(in srgb, var(--color-info) 75%, var(--color-text-primary));
 }
 
 .codascope-guide-depth-level strong {
@@ -2242,8 +2242,8 @@
 }
 
 .codascope-guide-lifecycle-step--active {
-  color: var(--color-accent-primary, hsl(210, 100%, 60%));
-  border-color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .codascope-guide-lifecycle-arrow {
@@ -2319,7 +2319,7 @@
   height: 32px;
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
-  color: var(--color-accent-primary, hsl(210, 100%, 60%));
+  color: var(--color-accent);
 }
 
 .codascope-assistant-welcome-card-label {

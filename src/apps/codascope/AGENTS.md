@@ -54,9 +54,35 @@ When adding a new icon:
 ### 2. CSS — Namespaced, Token-Only
 
 - **Prefix all classes** with `codascope-` (e.g., `codascope-wiki-tree`, `codascope-action-card`)
-- **Never hard-code colors** — use shell design tokens: `--color-*`, `--space-*`, `--text-*`, `--radius-*`
+- **Never hard-code UI colors** — `src/styles/01-tokens.css` is the
+  authoritative color-token boundary. Use its `--color-*` and `--shadow-*`
+  properties directly, or use `color-mix()` whose color inputs are shell
+  tokens and allowed CSS keywords such as `transparent` and `currentColor`.
+- Do not add literal hexadecimal, `rgb[a]()`, `hsl[a]()`, or named visual
+  colors to CodaScope stylesheets. Literal color fallbacks such as
+  `var(--color-danger, #f87171)` are also forbidden; a missing shell token must
+  fail the automated audit instead of being concealed.
+- A repeated CodaScope-only semantic may use a `--codascope-*` alias only when
+  the alias is defined from authoritative shell tokens or token-based
+  `color-mix()`. Define it where main content, navigation, notes, assistant
+  panels, and modals can all inherit it. Never create an app-specific
+  `--color-*` property.
+- Persisted content colors are the narrow exception: the user-authored
+  highlight/text palettes in `NoteFormattingToolbar.tsx`, configurable
+  highlight values and the native color-input default in `Settings.tsx`,
+  persisted-markup test fixtures, and `manifest.tsx` accent metadata retain
+  literal values. Do not reuse those exceptions for UI chrome.
 - Primary styles go in `codascope.css`; assistant-specific styles in `CodaScopeAssistant.css`; notes styles in `codascope-notes.css`
 - Dark theme is assumed (inherited from shell `:root` tokens)
+- `codaScopeStyleTokens.test.ts` audits all three stylesheets, shell-token
+  resolution, token-derived CodaScope aliases, inline UI styles, and the
+  persisted-content allowlist. Run it for every CodaScope color change.
+
+When a new semantic color is needed, first map it to the existing accent,
+status, text, surface, or border tokens. Use a token-based `color-mix()` for
+translucency or a state variation. Add a shell token only when the concept is
+genuinely AIShell-wide, cannot be expressed clearly from existing tokens, and
+is documented and covered by the shell/CodaScope token contract.
 
 ### 3. State Management — Zustand + URL
 
