@@ -41,6 +41,13 @@ export interface AgentSendOptions {
   onError: (err: Error) => void;
 }
 
+const EPIC_MUTATION_PURPOSES = new Set<AgentSendOptions["purpose"]>([
+  "assistant",
+  "chat",
+  "curation",
+  "research",
+]);
+
 interface PoolEntry {
   agent: SDKAgent;
   projectId: string;
@@ -377,6 +384,10 @@ export class CodaScopeAgentService {
 
     if (this.disposed) {
       onError(new Error("CodaScope agent service has been disposed."));
+      return;
+    }
+    if (EPIC_MUTATION_PURPOSES.has(purpose) && !actorId?.trim()) {
+      onError(new Error(`An authenticated initiating actor is required for ${purpose} agent tools.`));
       return;
     }
 

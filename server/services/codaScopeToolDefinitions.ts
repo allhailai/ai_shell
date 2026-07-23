@@ -104,7 +104,7 @@ export function getToolsForPurpose(
   }
 
   if (purpose === "curation" || purpose === "research") {
-    const epicTools = buildEpicTools(projectId, services, collectorHolder);
+    const epicTools = buildEpicTools(projectId, services, collectorHolder, actorId);
     return { ...readOnly, ...noteRead, ...epicTools };
   }
 
@@ -115,7 +115,7 @@ export function getToolsForPurpose(
   }
 
   if (purpose === "assistant" || purpose === "chat") {
-    const epicTools = buildEpicTools(projectId, services, collectorHolder);
+    const epicTools = buildEpicTools(projectId, services, collectorHolder, actorId);
     const write = buildWriteTools(projectId, services, collectorHolder);
     const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
     const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);

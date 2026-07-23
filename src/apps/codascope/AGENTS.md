@@ -165,6 +165,44 @@ Each service file has one clear domain:
   whole-reaction-array replacement.
 - Use `registerProjectDir(id, path)` pattern when the service needs to resolve project directories
 
+### Epic Annotation Identity and Recovery
+
+- Epic annotation identity is a service boundary. Routes derive human actors
+  from `principal(req).username`; agent tools carry the initiating `actorId`
+  and record agent provenance separately. Never accept an annotation author,
+  owner, reaction username, provenance, or effective actor from a client.
+- Only an owned annotation's author may edit its body or delete it. Enforce
+  this inside `CodaScopeAnnotationService`, and return the same generic absence
+  for unauthorized and missing body edits/deletes.
+- Never recursively delete another actor's replies. Remove an owned leaf, or
+  retain a visible deleted-comment tombstone when descendants still exist.
+- Status is collaborative root-thread state. Enforce the transition table in
+  the service and apply root transitions to every descendant; replies cannot
+  transition independently. Version-2 persistence requires every descendant
+  status to equal its root, while legacy migration normalizes descendants to
+  the preserved root status.
+- Annotation IDs form one epic-wide namespace across all document sidecars.
+  Read the strict epic catalog under the annotation mutation key before any
+  creation or ID-based mutation; cross-file duplicates are corruption, never
+  first-file-wins lookup behavior.
+- Reactions are actor-bound add/remove operations unique by emoji and username.
+  Whole-array replacement is forbidden.
+- Never silently reattach an epic annotation by nearby line, substring,
+  section, or fuzzy scoring. Only the exact stored block ID is attached.
+  Detached threads remain visible as `needs_review` or `orphaned` and move only
+  through an explicit, current-content-hash-checked reattachment. Reattachment
+  must coordinate with the definition/design writer's mutation key so a save
+  cannot interleave between hash verification and annotation publication.
+- Preserve and expose complete legacy thread graphs recursively in deterministic
+  parent-before-child order. Status, attachment, deletion, and reattachment
+  operations cover every descendant.
+- Every assistant, chat, research, or curation agent that receives epic mutation
+  tools must carry the authenticated initiating actor through `agentSvc.send()`;
+  fail before agent creation when no actor exists.
+- Epic annotation schema migration, reconciliation, reactions, deletes, and
+  reattachment all use `codaScopePersistence.ts` under the per-epic annotation
+  mutation key. Malformed or unknown-version files are preserved unchanged.
+
 ### Portable Projects and Projects-Root Custody
 
 - Ordinary project export is a versioned, allowlisted portable bundle of

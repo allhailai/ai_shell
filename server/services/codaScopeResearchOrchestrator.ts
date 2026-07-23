@@ -35,6 +35,7 @@ export interface ResearchOptions {
   projectId: string;
   epicId: string;
   modelId: string;
+  actorId: string;
   topics: string[];
   parentQueryId?: string;        // if this is a "go deeper" follow-up
 }
@@ -83,7 +84,7 @@ export async function runResearchPipeline(
   callbacks: ResearchSseCallbacks,
   services: ResearchServices,
 ): Promise<ResearchReport> {
-  const { projectId, epicId, modelId, topics, parentQueryId } = options;
+  const { projectId, epicId, modelId, actorId, topics, parentQueryId } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
   const { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc, curationSvc, contentSvc, secretSvc } = services;
 
@@ -110,7 +111,7 @@ export async function runResearchPipeline(
     sendEvent("research-step", { step: "generate-plan", status: "running", topics });
 
     const plan = await generateResearchPlan(
-      { projectId, epicId, modelId, topics },
+      { projectId, epicId, modelId, actorId, topics },
       { sendEvent, sendMessage, isAborted },
       { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc },
     );
@@ -235,7 +236,7 @@ export async function runResearchPipeline(
 // ── Phase 1: Generate Research Plan ─────────────────────────────────
 
 async function generateResearchPlan(
-  options: { projectId: string; epicId: string; modelId: string; topics: string[] },
+  options: { projectId: string; epicId: string; modelId: string; actorId: string; topics: string[] },
   callbacks: Pick<ResearchSseCallbacks, "sendEvent" | "sendMessage" | "isAborted">,
   services: {
     agentSvc: CodaScopeAgentService;
@@ -244,7 +245,7 @@ async function generateResearchPlan(
     epicKnowledgeSvc: CodaScopeEpicKnowledgeService;
   },
 ): Promise<ResearchPlan | null> {
-  const { projectId, epicId, modelId, topics } = options;
+  const { projectId, epicId, modelId, actorId, topics } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
   const { agentSvc, projectSvc, epicSvc, epicKnowledgeSvc } = services;
 
@@ -301,6 +302,7 @@ async function generateResearchPlan(
   await new Promise<void>((resolve, reject) => {
     agentSvc.send({
       projectId,
+      actorId,
       message: prompt,
       modelId,
       systemPrompt:

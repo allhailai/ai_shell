@@ -4,7 +4,7 @@
    write tool tiers.
    ──────────────────────────────────────────────────────────────────── */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -121,6 +121,198 @@ describe("tool tier builders", () => {
     for (const [name, tool] of Object.entries(allTools)) {
       expect(tool.description, `${name} should have a description`).toBeTruthy();
       expect(typeof tool.execute, `${name} should have an execute function`).toBe("function");
+    }
+  });
+
+  it("fails agent annotation creation closed without an actor and records actor provenance when present", async () => {
+    const createAnnotation = vi.fn(async () => ({ id: "ann-agent" }));
+    const actorServices = {
+      ...services,
+      epic: { ...services.epic, getDefinition: vi.fn(async () => "# Heading\n\nTarget") },
+      annotation: {
+        ...services.annotation,
+        computeBlockIds: vi.fn(() => [{ blockId: "block", sectionSlug: "heading", lineStart: 3, lineEnd: 3, content: "Target" }]),
+        createAnnotation,
+      },
+    };
+    const args = { epicId: "epic", documentId: "definition", blockId: "block", body: "Agent review" };
+
+    const unowned = await buildEpicTools(PROJECT_ID, actorServices as any).create_annotation.execute(args, {} as any);
+    expect(unowned).toContain("authenticated initiating actor is required");
+    expect(createAnnotation).not.toHaveBeenCalled();
+
+    await buildEpicTools(PROJECT_ID, actorServices as any, undefined, "alice").create_annotation.execute(args, {} as any);
+    expect(createAnnotation).toHaveBeenCalledWith(
+      PROJECT_ID,
+      "epic",
+      "definition",
+      { username: "alice", origin: "agent" },
+      expect.objectContaining({ body: "Agent review" }),
+    );
+  });
+
+  it("creates actor-owned agent annotations through assistant, chat, research, and curation assemblies", async () => {
+    const root = path.join(os.tmpdir(), `codascope-annotation-tools-${crypto.randomBytes(6).toString("hex")}`);
+    const projectId = "project";
+    const epicId = "epic";
+    const projectDir = path.join(root, "project-dir");
+    const epicDir = path.join(projectDir, "epics", epicId);
+    mkdirSync(path.join(epicDir, "annotations"), { recursive: true });
+    const now = "2026-01-01T00:00:00.000Z";
+    const epic = {
+      id: epicId,
+      projectId,
+      title: "Epic",
+      status: "designing",
+      createdAt: now,
+      updatedAt: now,
+      createdBy: "alice",
+      collaborators: ["alice"],
+      currentVersion: 0,
+    };
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: projectId,
+      name: "Project",
+      description: "",
+      repositories: [],
+      createdAt: now,
+      updatedAt: now,
+    }), "utf-8");
+    writeFileSync(path.join(projectDir, "epics", "epics.json"), JSON.stringify({ epics: [epic] }), "utf-8");
+    writeFileSync(path.join(epicDir, "epic.json"), JSON.stringify({ ...epic, conversationId: null }), "utf-8");
+    const definition = "# Heading\n\nTarget paragraph.";
+    writeFileSync(path.join(epicDir, "definition.md"), definition, "utf-8");
+
+    try {
+      const blockId = createToolServices(root).annotation.computeBlockIds(definition)
+        .find((block) => block.content === "Target paragraph.")!.blockId;
+      for (const purpose of ["assistant", "chat", "research", "curation"] as const) {
+        const tools = getToolsForPurpose(projectId, root, purpose, undefined, "alice");
+        const result = await tools.create_annotation.execute({
+          epicId,
+          documentId: "definition",
+          blockId,
+          body: `${purpose} annotation`,
+        }, {} as any);
+        expect(result).toContain("Annotation created");
+      }
+
+      const stored = JSON.parse(readFileSync(
+        path.join(epicDir, "annotations", "definition-annotations.json"),
+        "utf-8",
+      ));
+      expect(stored.annotations).toHaveLength(4);
+      expect(stored.annotations.every((annotation: { author: string; origin: string }) =>
+        annotation.author === "alice" && annotation.origin === "agent")).toBe(true);
+
+      for (const purpose of ["assistant", "chat", "research", "curation"] as const) {
+        const tools = getToolsForPurpose(projectId, root, purpose);
+        await expect(tools.create_annotation.execute({
+          epicId,
+          documentId: "definition",
+          blockId,
+          body: "Unowned",
+        }, {} as any)).resolves.toContain("authenticated initiating actor is required");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reconciles annotation read tools with current content and returns nested descendants", async () => {
+    const base = {
+      epicId: "epic",
+      documentId: "design",
+      documentVersion: 0,
+      anchor: { blockId: "block", sectionSlug: "root", anchorText: "Target", lineNumber: 1 },
+      author: "alice",
+      origin: "user" as const,
+      ownership: "owned" as const,
+      status: "open" as const,
+      reactions: [],
+      attachmentState: "attached" as const,
+    };
+    const annotations = [
+      { ...base, id: "root", createdAt: "2026-01-01T00:00:00.000Z", body: "Root" },
+      { ...base, id: "reply", parentId: "root", createdAt: "2026-01-01T00:01:00.000Z", body: "Reply" },
+      { ...base, id: "grandchild", parentId: "reply", createdAt: "2026-01-01T00:02:00.000Z", body: "Grandchild" },
+    ];
+    const listAnnotations = vi.fn(async () => annotations);
+    const readServices = {
+      ...services,
+      epic: { ...services.epic, getDefinition: vi.fn(async () => "# Definition") },
+      designDoc: {
+        ...services.designDoc,
+        getDesignDoc: vi.fn(async () => ({ content: "# Design", contentHash: "hash", doc: {} })),
+      },
+      annotation: { ...services.annotation, listAnnotations },
+    };
+    const tools = buildReadOnlyTools(PROJECT_ID, readServices as any);
+
+    await tools.list_annotations.execute({ epicId: "epic", documentId: "definition" }, {} as any);
+    const threadResult = await tools.read_annotation_thread.execute({
+      epicId: "epic",
+      documentId: "design",
+      annotationId: "root",
+    }, {} as any);
+
+    expect(listAnnotations).toHaveBeenNthCalledWith(1, PROJECT_ID, "epic", "definition", "# Definition");
+    expect(listAnnotations).toHaveBeenNthCalledWith(2, PROJECT_ID, "epic", "design", "# Design");
+    expect(JSON.parse(String(threadResult)).thread.map((annotation: { id: string }) => annotation.id))
+      .toEqual(["root", "reply", "grandchild"]);
+  });
+
+  it("reports an exact legacy anchor as currently attached instead of legacy_unverified", async () => {
+    const root = path.join(os.tmpdir(), `codascope-annotation-read-${crypto.randomBytes(6).toString("hex")}`);
+    const projectDir = path.join(root, "project-dir");
+    const epicDir = path.join(projectDir, "epics", "epic");
+    mkdirSync(path.join(epicDir, "annotations"), { recursive: true });
+    const now = "2026-01-01T00:00:00.000Z";
+    const epic = {
+      id: "epic",
+      projectId: "project",
+      title: "Epic",
+      status: "designing",
+      createdAt: now,
+      updatedAt: now,
+      createdBy: "alice",
+      collaborators: ["alice"],
+      currentVersion: 0,
+    };
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: "project", name: "Project", description: "", repositories: [], createdAt: now, updatedAt: now,
+    }), "utf-8");
+    writeFileSync(path.join(projectDir, "epics", "epics.json"), JSON.stringify({ epics: [epic] }), "utf-8");
+    writeFileSync(path.join(epicDir, "epic.json"), JSON.stringify({ ...epic, conversationId: null }), "utf-8");
+    const definition = "# Heading\n\nTarget paragraph.";
+    writeFileSync(path.join(epicDir, "definition.md"), definition, "utf-8");
+    const annotationService = createToolServices(root).annotation;
+    const target = annotationService.computeBlockIds(definition).find((block) => block.content === "Target paragraph.")!;
+    writeFileSync(path.join(epicDir, "annotations", "definition-annotations.json"), JSON.stringify({
+      annotations: [{
+        id: "legacy",
+        epicId: "epic",
+        documentId: "definition",
+        documentVersion: 0,
+        anchor: { blockId: target.blockId, sectionSlug: target.sectionSlug, anchorText: target.content, lineNumber: target.lineStart },
+        author: "alice",
+        createdAt: now,
+        body: "Legacy",
+        status: "open",
+        reactions: [],
+      }],
+    }), "utf-8");
+
+    try {
+      const result = await getToolsForPurpose("project", root, "artifact-build")
+        .list_annotations.execute({ epicId: "epic", documentId: "definition" }, {} as any);
+      expect(JSON.parse(String(result))[0]).toMatchObject({ id: "legacy", attachmentState: "attached" });
+      expect(JSON.parse(readFileSync(
+        path.join(epicDir, "annotations", "definition-annotations.json"),
+        "utf-8",
+      ))).toMatchObject({ version: 2, annotations: [{ attachmentState: "attached" }] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

@@ -62,6 +62,7 @@ interface DocumentBlockRendererProps {
   activeProjectId: string;
   epicId: string;
   docId: string;
+  currentUsername: string | null;
   /** Callback to reload annotations */
   onReloadAnnotations: () => void;
   /** Callback to reload directives */
@@ -142,6 +143,7 @@ export function DocumentBlockRenderer({
   activeProjectId,
   epicId,
   docId,
+  currentUsername,
   onReloadAnnotations,
   onReloadDirectives,
   onWikiLink,
@@ -306,6 +308,7 @@ export function DocumentBlockRenderer({
                 epicId={epicId}
                 onUpdate={onReloadAnnotations}
                 onClose={() => onToggleThread(block.blockId)}
+                currentUsername={currentUsername}
               />
             ))}
 

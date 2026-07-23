@@ -28,6 +28,7 @@ export interface CurationOptions {
   projectId: string;
   epicId: string;
   modelId: string;
+  actorId: string;
   /** Optional: manually specified reasons override accumulated reasons */
   manualReasons?: CurationReason[];
 }
@@ -65,7 +66,7 @@ export async function runCurationPipeline(
   callbacks: CurationSseCallbacks,
   services: CurationServices,
 ): Promise<void> {
-  const { projectId, epicId, modelId } = options;
+  const { projectId, epicId, modelId, actorId } = options;
   const { sendEvent, sendMessage, isAborted } = callbacks;
   const { agentSvc, projectSvc, wikiSvc, epicSvc, epicKnowledgeSvc, curationSvc, codeMapSvc } = services;
 
@@ -228,6 +229,7 @@ export async function runCurationPipeline(
     await new Promise<void>((resolve, reject) => {
       agentSvc.send({
         projectId,
+        actorId,
         message: prompt,
         modelId,
         systemPrompt:

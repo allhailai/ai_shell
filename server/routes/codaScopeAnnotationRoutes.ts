@@ -4,29 +4,41 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import { createHash } from "node:crypto";
+import type { BlockAnchor } from "../../src/apps/codascope/codaScopeTypes.js";
+import { isAnnotationServiceError } from "../services/codaScopeAnnotationService.js";
 
 export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, principal } = ctx;
+
+  const annotationFailure = (error: unknown): never => {
+    if (isAnnotationServiceError(error)) throw httpError(error.message, error.status, error.code);
+    throw error;
+  };
+
+  const loadDocument = async (projectId: string, epicId: string, documentId: string) => {
+    const { epicSvc, designDocSvc } = await ensureServices();
+    if (documentId === "definition") {
+      const content = await epicSvc.getDefinition(projectId, epicId);
+      if (content === null) return null;
+      return { content, contentHash: contentHash(content) };
+    }
+    const result = await designDocSvc.getDesignDoc(projectId, epicId, documentId);
+    return result ? { content: result.content, contentHash: result.contentHash } : null;
+  };
 
   // ── Annotations ───────────────────────────────────────────────────
 
   // List annotations for a document
   app.get("/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations", wrap(async (req, res) => {
-    const { annotationSvc, epicSvc, designDocSvc } = await ensureServices();
+    const { annotationSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
 
-    // Get current document content for re-anchoring
-    let content: string | undefined;
-    if (docId === "definition") {
-      content = (await epicSvc.getDefinition(id, epicId)) ?? undefined;
-    } else {
-      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
-      content = result?.content;
-    }
-
-    const annotations = await annotationSvc.listAnnotations(id, epicId, docId, content);
+    const document = await loadDocument(id, epicId, docId);
+    if (!document) throw httpError("Document not found.", 404, "not_found");
+    const annotations = await annotationSvc.listAnnotations(id, epicId, docId, document.content);
     res.json({ annotations });
   }));
 
@@ -36,23 +48,57 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
+    assertOnlyFields(req.body, ["anchor", "body", "parentId", "documentVersion"], httpError);
     const { anchor, body, parentId, documentVersion } = req.body as {
       anchor?: unknown;
-      body?: string;
-      parentId?: string;
-      documentVersion?: number;
+      body?: unknown;
+      parentId?: unknown;
+      documentVersion?: unknown;
     };
-    if (!anchor || !body || typeof body !== "string") {
-      throw httpError("anchor and body are required.", 400, "invalid_input");
+    if (typeof body !== "string" || !body.trim()) {
+      throw httpError("body must be a non-empty string.", 400, "invalid_input");
     }
-    const annotation = await annotationSvc.createAnnotation(id, epicId, docId, {
-      anchor: anchor as any,
-      author: principal(req).username,
-      body,
-      parentId,
-      documentVersion,
-    });
-    res.status(201).json({ annotation });
+    if (parentId !== undefined && (typeof parentId !== "string" || !parentId)) {
+      throw httpError("parentId must be a non-empty string.", 400, "invalid_input");
+    }
+    if (documentVersion !== undefined
+      && (!Number.isSafeInteger(documentVersion) || (documentVersion as number) < 0)) {
+      throw httpError("documentVersion must be a non-negative integer.", 400, "invalid_input");
+    }
+    if (parentId && anchor !== undefined) {
+      throw httpError("Replies inherit their root thread anchor.", 400, "invalid_input");
+    }
+    let trustedAnchor: BlockAnchor | undefined;
+    if (!parentId) {
+      if (!isBlockAnchor(anchor)) throw httpError("A valid block anchor is required.", 400, "invalid_input");
+      const document = await loadDocument(id, epicId, docId);
+      if (!document) throw httpError("Document not found.", 404, "not_found");
+      const target = annotationSvc.computeBlockIds(document.content).find((block) => block.blockId === anchor.blockId);
+      if (!target) throw httpError("The selected annotation block no longer exists.", 400, "invalid_input");
+      trustedAnchor = {
+        blockId: target.blockId,
+        sectionSlug: target.sectionSlug,
+        anchorText: target.content,
+        lineNumber: target.lineStart,
+      };
+    }
+    try {
+      const annotation = await annotationSvc.createAnnotation(
+        id,
+        epicId,
+        docId,
+        { username: principal(req).username, origin: "user" },
+        {
+          anchor: trustedAnchor,
+          body,
+          parentId: parentId as string | undefined,
+          documentVersion: documentVersion as number | undefined,
+        },
+      );
+      res.status(201).json({ annotation });
+    } catch (error) {
+      annotationFailure(error);
+    }
   }));
 
   // Update annotation (resolve, edit)
@@ -61,18 +107,114 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const annId = param(req, "annId");
-    const { status, body, reactions } = req.body as {
-      status?: string;
-      body?: string;
-      reactions?: Array<{ emoji: string; user: string }>;
+    assertOnlyFields(req.body, ["status", "body"], httpError);
+    const { status, body } = req.body as { status?: unknown; body?: unknown };
+    if (status === undefined && body === undefined) {
+      throw httpError("Provide a body or status update.", 400, "invalid_input");
+    }
+    if (status !== undefined && typeof status !== "string") {
+      throw httpError("status must be a string.", 400, "invalid_input");
+    }
+    if (body !== undefined && (typeof body !== "string" || !body.trim())) {
+      throw httpError("body must be a non-empty string.", 400, "invalid_input");
+    }
+    try {
+      const annotation = await annotationSvc.updateAnnotation(
+        id,
+        epicId,
+        annId,
+        { username: principal(req).username, origin: "user" },
+        { status: status as any, body: body as string | undefined },
+      );
+      if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
+      res.json({ annotation });
+    } catch (error) {
+      annotationFailure(error);
+    }
+  }));
+
+  // Add one actor-bound reaction. The request never carries a username.
+  app.post("/api/codascope/projects/:id/epics/:epicId/annotations/:annId/reactions", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices();
+    assertOnlyFields(req.body, ["emoji"], httpError);
+    const emoji = (req.body as { emoji?: unknown }).emoji;
+    if (typeof emoji !== "string" || !emoji.trim() || Array.from(emoji.trim()).length > 32) {
+      throw httpError("emoji must be between 1 and 32 characters.", 400, "invalid_input");
+    }
+    try {
+      const annotation = await annotationSvc.addReaction(
+        param(req, "id"),
+        param(req, "epicId"),
+        param(req, "annId"),
+        { username: principal(req).username, origin: "user" },
+        emoji,
+      );
+      if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
+      res.json({ annotation });
+    } catch (error) {
+      annotationFailure(error);
+    }
+  }));
+
+  // Remove one actor-bound reaction. Missing reactions are idempotent.
+  app.delete("/api/codascope/projects/:id/epics/:epicId/annotations/:annId/reactions", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices();
+    assertOnlyFields(req.body, ["emoji"], httpError);
+    const emoji = (req.body as { emoji?: unknown }).emoji;
+    if (typeof emoji !== "string" || !emoji.trim() || Array.from(emoji.trim()).length > 32) {
+      throw httpError("emoji must be between 1 and 32 characters.", 400, "invalid_input");
+    }
+    try {
+      const annotation = await annotationSvc.removeReaction(
+        param(req, "id"),
+        param(req, "epicId"),
+        param(req, "annId"),
+        { username: principal(req).username, origin: "user" },
+        emoji,
+      );
+      if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
+      res.json({ annotation });
+    } catch (error) {
+      annotationFailure(error);
+    }
+  }));
+
+  // Explicitly move a root thread to an exact block in the current document.
+  app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations/:annId/reattach", wrap(async (req, res) => {
+    const { annotationSvc } = await ensureServices();
+    assertOnlyFields(req.body, ["targetBlockId", "contentHash"], httpError);
+    const { targetBlockId, contentHash: expectedHash } = req.body as {
+      targetBlockId?: unknown;
+      contentHash?: unknown;
     };
-    const changes: Record<string, unknown> = {};
-    if (status !== undefined) changes.status = status;
-    if (body !== undefined) changes.body = body;
-    if (reactions !== undefined) changes.reactions = reactions;
-    const annotation = await annotationSvc.updateAnnotation(id, epicId, annId, changes as any);
-    if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
-    res.json({ annotation });
+    if (typeof targetBlockId !== "string" || !targetBlockId
+      || typeof expectedHash !== "string" || !expectedHash) {
+      throw httpError("targetBlockId and contentHash are required.", 400, "invalid_input");
+    }
+    const id = param(req, "id");
+    const epicId = param(req, "epicId");
+    const docId = param(req, "docId");
+    const document = await loadDocument(id, epicId, docId);
+    if (!document) throw httpError("Document not found.", 404, "not_found");
+    if (document.contentHash !== expectedHash) {
+      throw httpError("Document content changed. Reload before reattaching the annotation.", 409, "conflict");
+    }
+    const target = annotationSvc.computeBlockIds(document.content).find((block) => block.blockId === targetBlockId);
+    if (!target) throw httpError("The selected annotation block no longer exists.", 400, "invalid_input");
+    try {
+      const annotation = await annotationSvc.reattachAnnotation(
+        id,
+        epicId,
+        docId,
+        param(req, "annId"),
+        expectedHash,
+        target.blockId,
+      );
+      if (!annotation) throw httpError("Annotation not found.", 404, "not_found");
+      res.json({ annotation });
+    } catch (error) {
+      annotationFailure(error);
+    }
   }));
 
   // Delete annotation
@@ -81,7 +223,12 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const annId = param(req, "annId");
-    const deleted = await annotationSvc.deleteAnnotation(id, epicId, annId);
+    const deleted = await annotationSvc.deleteAnnotation(
+      id,
+      epicId,
+      annId,
+      { username: principal(req).username, origin: "user" },
+    );
     if (!deleted) throw httpError("Annotation not found.", 404, "not_found");
     res.json({ deleted: true });
   }));
@@ -248,7 +395,7 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     }
 
     const blocks = annotationSvc.computeBlockIds(content);
-    res.json({ blocks });
+    res.json({ blocks, contentHash: contentHash(content) });
   }));
 
   // ── Batch Directives ──────────────────────────────────────────────
@@ -280,4 +427,33 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     if (!result) throw httpError("Document not found.", 404, "not_found");
     res.json({ applied: result.applied, content: result.newContent });
   }));
+}
+
+function contentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+function assertOnlyFields(
+  value: unknown,
+  allowed: string[],
+  httpError: CodaScopeRouteContext["httpError"],
+): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw httpError("A JSON object body is required.", 400, "invalid_input");
+  }
+  const allowedSet = new Set(allowed);
+  if (Object.keys(value).some((key) => !allowedSet.has(key))) {
+    throw httpError("The request contains unsupported annotation fields.", 400, "invalid_input");
+  }
+}
+
+function isBlockAnchor(value: unknown): value is BlockAnchor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const anchor = value as Record<string, unknown>;
+  if (Object.keys(anchor).some((key) => !new Set(["blockId", "sectionSlug", "anchorText", "lineNumber"]).has(key))) return false;
+  return typeof anchor.blockId === "string" && Boolean(anchor.blockId)
+    && typeof anchor.sectionSlug === "string"
+    && typeof anchor.anchorText === "string"
+    && typeof anchor.lineNumber === "number"
+    && Number.isFinite(anchor.lineNumber);
 }

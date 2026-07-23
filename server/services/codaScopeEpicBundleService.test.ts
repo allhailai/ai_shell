@@ -33,6 +33,27 @@ function project(root: string, slug: string, id: string): string {
   return projectDir;
 }
 
+function annotationRecord(epicId: string, documentId: string, id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    epicId,
+    documentId,
+    documentVersion: 0,
+    anchor: { blockId: "blk_root_0_abcd", sectionSlug: "root", anchorText: "Portable", lineNumber: 1 },
+    author: "alexa",
+    origin: "user",
+    ownership: "owned",
+    createdAt: "2026-01-02T00:00:00.000Z",
+    body: "Portable discussion",
+    status: "open",
+    reactions: [],
+    attachmentState: "needs_review",
+    detachedReason: "block_missing_exact_text",
+    detachedAt: "2026-01-03T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 async function writeExport(service: CodaScopeEpicBundleService, projectId: string, epicId: string, zipPath: string): Promise<void> {
   const bundle = service.createExport(projectId, epicId);
   if (!bundle) throw new Error("Expected export bundle");
@@ -103,7 +124,15 @@ describe("CodaScopeEpicBundleService", () => {
       docs: [{ id: "doc_1", epicId: sourceEpicId, title: "Design", createdAt: "", updatedAt: "", createdBy: "alexa", wordCount: 1, blockCount: 1, annotationCount: 0, directiveCount: 0 }],
     });
     writeJson(path.join(sourceEpicDir, "annotations", "definition-annotations.json"), {
-      annotations: [{ id: "ann_1", epicId: sourceEpicId, documentId: "definition" }],
+      version: 2,
+      annotations: [
+        annotationRecord(sourceEpicId, "definition", "ann_1", { origin: "agent" }),
+        annotationRecord(sourceEpicId, "definition", "ann_reply", {
+          author: "sam",
+          body: "Portable reply",
+          parentId: "ann_1",
+        }),
+      ],
     });
     writeFileSync(path.join(sourceEpicDir, "locks.json"), JSON.stringify({ locks: [{ lockedBy: "alexa" }] }), "utf-8");
     writeJson(path.join(sourceProjectDir, "conversations", "conversations.json"), {
@@ -127,7 +156,19 @@ describe("CodaScopeEpicBundleService", () => {
     const targetMetadata = JSON.parse(readFileSync(path.join(targetEpicDir, "epic.json"), "utf-8"));
     expect(targetMetadata).toMatchObject({ id: result.epic.id, projectId: targetProjectId, conversationId: null });
     const annotations = JSON.parse(readFileSync(path.join(targetEpicDir, "annotations", "definition-annotations.json"), "utf-8"));
+    expect(annotations.version).toBe(2);
     expect(annotations.annotations[0].epicId).toBe(result.epic.id);
+    expect(annotations.annotations[0]).toMatchObject({
+      author: "alexa",
+      origin: "agent",
+      ownership: "owned",
+      body: "Portable discussion",
+      attachmentState: "needs_review",
+      detachedReason: "block_missing_exact_text",
+      detachedAt: "2026-01-03T00:00:00.000Z",
+    });
+    expect(annotations.annotations.map((annotation: { status: string }) => annotation.status)).toEqual(["open", "open"]);
+    expect(annotations.annotations[1]).toMatchObject({ id: "ann_reply", parentId: "ann_1", body: "Portable reply" });
     const designs = JSON.parse(readFileSync(path.join(targetEpicDir, "designs", "designs.json"), "utf-8"));
     expect(designs.docs[0].epicId).toBe(result.epic.id);
     const targetIndex = JSON.parse(readFileSync(path.join(targetProjectDir, "epics", "epics.json"), "utf-8"));
@@ -137,6 +178,63 @@ describe("CodaScopeEpicBundleService", () => {
     const sourceMetadata = JSON.parse(readFileSync(path.join(sourceEpicDir, "epic.json"), "utf-8"));
     expect(sourceMetadata).toMatchObject({ id: sourceEpicId, projectId: sourceProjectId, conversationId: "conv_should_not_move" });
     expect(existsSync(path.join(sourceEpicDir, "locks.json"))).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "cross-document duplicate annotation IDs",
+      files: (epicId: string) => ({
+        "definition-annotations.json": { version: 2, annotations: [annotationRecord(epicId, "definition", "ann_duplicate")] },
+        "design-annotations.json": { version: 2, annotations: [annotationRecord(epicId, "design", "ann_duplicate")] },
+      }),
+    },
+    {
+      name: "a descendant status that differs from its root",
+      files: (epicId: string) => ({
+        "definition-annotations.json": {
+          version: 2,
+          annotations: [
+            annotationRecord(epicId, "definition", "ann_root"),
+            annotationRecord(epicId, "definition", "ann_reply", {
+              parentId: "ann_root",
+              status: "resolved",
+            }),
+          ],
+        },
+      }),
+    },
+  ])("rejects $name before bundle publication", async ({ files }) => {
+    const root = tmpDir();
+    const sourceProjectId = "project-source";
+    const targetProjectId = "project-target";
+    const sourceProjectDir = project(root, "source", sourceProjectId);
+    const targetProjectDir = project(root, "target", targetProjectId);
+    const sourceEpicId = "epic_source_annotations";
+    const sourceEpicDir = path.join(sourceProjectDir, "epics", sourceEpicId);
+    mkdirSync(sourceEpicDir, { recursive: true });
+    writeJson(path.join(sourceEpicDir, "epic.json"), {
+      id: sourceEpicId,
+      projectId: sourceProjectId,
+      title: "Annotation validation",
+      status: "defining",
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+      createdBy: "alexa",
+      collaborators: ["alexa"],
+      currentVersion: 0,
+    });
+    writeFileSync(path.join(sourceEpicDir, "definition.md"), "# Portable\n", "utf-8");
+    for (const [filename, value] of Object.entries(files(sourceEpicId))) {
+      writeJson(path.join(sourceEpicDir, "annotations", filename), value);
+    }
+
+    const bundleSvc = new CodaScopeEpicBundleService(new CodaScopeProjectService(root));
+    const zipPath = path.join(root, "invalid-annotations.zip");
+    await writeExport(bundleSvc, sourceProjectId, sourceEpicId, zipPath);
+
+    await expect(bundleSvc.importEpic(targetProjectId, zipPath))
+      .rejects.toThrow("annotation file");
+    expect(existsSync(path.join(targetProjectDir, "epics"))).toBe(false);
   });
 
   it("rejects an archive whose manifest does not match its epic metadata", async () => {

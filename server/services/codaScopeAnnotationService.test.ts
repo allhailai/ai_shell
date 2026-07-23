@@ -12,6 +12,12 @@ import path from "node:path";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
 
+type LegacyTestService = Omit<CodaScopeAnnotationService, "createAnnotation" | "updateAnnotation" | "deleteAnnotation"> & {
+  createAnnotation(projectId: string, epicId: string, documentId: string, data: any): ReturnType<CodaScopeAnnotationService["createAnnotation"]>;
+  updateAnnotation(projectId: string, epicId: string, annotationId: string, changes: any): ReturnType<CodaScopeAnnotationService["updateAnnotation"]>;
+  deleteAnnotation(projectId: string, epicId: string, annotationId: string): ReturnType<CodaScopeAnnotationService["deleteAnnotation"]>;
+};
+
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
@@ -38,12 +44,40 @@ function scaffoldProject(root: string, projectId: string, epicId: string): strin
 
 describe("CodaScopeAnnotationService", () => {
   let root: string;
-  let svc: CodaScopeAnnotationService;
+  let svc: LegacyTestService;
 
   beforeEach(() => {
     root = tmpRoot();
     mkdirSync(root, { recursive: true });
-    svc = new CodaScopeAnnotationService(root);
+    const service = new CodaScopeAnnotationService(root);
+    svc = new Proxy(service, {
+      get(target, property) {
+        if (property === "createAnnotation") {
+          return (projectId: string, epicId: string, documentId: string, data: any) => {
+            const { author, ...content } = data;
+            return target.createAnnotation(
+              projectId,
+              epicId,
+              documentId,
+              { username: author, origin: author === "agent" ? "agent" : "user" },
+              content,
+            );
+          };
+        }
+        if (property === "updateAnnotation") {
+          return (projectId: string, epicId: string, annotationId: string, changes: any) => (
+            target.updateAnnotation(projectId, epicId, annotationId, { username: "user", origin: "user" }, changes)
+          );
+        }
+        if (property === "deleteAnnotation") {
+          return (projectId: string, epicId: string, annotationId: string) => (
+            target.deleteAnnotation(projectId, epicId, annotationId, { username: "user", origin: "user" })
+          );
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as unknown as LegacyTestService;
   });
 
   afterEach(() => {
@@ -224,7 +258,7 @@ describe("CodaScopeAnnotationService", () => {
       expect(list.every((a) => a.status === "resolved")).toBe(true);
     });
 
-    it("deletes an annotation and its replies", async () => {
+    it("tombstones an annotation and preserves its replies", async () => {
       scaffoldProject(root, "proj-ann5", "epic5");
       const parent = await svc.createAnnotation("proj-ann5", "epic5", "doc1", {
         anchor: { blockId: "b1", sectionSlug: "root", lineNumber: 1, anchorText: "Deletable" },
@@ -242,7 +276,8 @@ describe("CodaScopeAnnotationService", () => {
       expect(result).toBe(true);
 
       const list = await svc.listAnnotations("proj-ann5", "epic5", "doc1");
-      expect(list).toHaveLength(0);
+      expect(list).toHaveLength(2);
+      expect(list.find((item) => item.id === parent.id)).toMatchObject({ deletedBy: "user", body: "" });
     });
 
     it("counts open annotations (top-level only)", async () => {
@@ -289,7 +324,7 @@ describe("CodaScopeAnnotationService", () => {
   // ── Anchor Repair ────────────────────────────────────────────
 
   describe("anchor repair", () => {
-    it("re-anchors annotation when block ID no longer matches", async () => {
+    it("marks an exact-text candidate for review without moving the anchor", async () => {
       scaffoldProject(root, "proj-repair", "epic-r");
 
       // Create annotation against original document
@@ -314,13 +349,9 @@ describe("CodaScopeAnnotationService", () => {
       const list = await svc.listAnnotations("proj-repair", "epic-r", "doc1", modifiedDoc);
       expect(list).toHaveLength(1);
 
-      // Annotation should have been re-anchored via fuzzy text match
       const ann = list[0];
-      const newBlocks = svc.computeBlockIds(modifiedDoc);
-      const matchingBlock = newBlocks.find((b) => b.content.includes("auth"));
-
-      // The anchor's blockId should now match the new document's block
-      expect(ann.anchor.blockId).toBe(matchingBlock!.blockId);
+      expect(ann.anchor.blockId).toBe(firstContentBlock!.blockId);
+      expect(ann.attachmentState).toBe("needs_review");
     });
 
     it("preserves annotations when blocks haven't changed", async () => {

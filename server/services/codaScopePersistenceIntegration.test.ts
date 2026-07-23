@@ -14,6 +14,7 @@ import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import { CodaScopeVersionService } from "./codaScopeVersionService.js";
 
 const roots: string[] = [];
+const ALICE = { username: "alice", origin: "user" as const };
 
 function tempRoot(): string {
   const root = mkdtempSync(path.join(os.tmpdir(), "codascope-persistence-integration-"));
@@ -406,14 +407,13 @@ describe("annotation persistence integration", () => {
     writeFileSync(annotationsPath, corrupt, "utf-8");
     const service = new CodaScopeAnnotationService(root);
     const request = operation === "create"
-      ? service.createAnnotation("project-id", "epic-safe", "definition", {
+      ? service.createAnnotation("project-id", "epic-safe", "definition", ALICE, {
         anchor: { blockId: "b", sectionSlug: "root", anchorText: "text", lineNumber: 1 },
-        author: "alice",
         body: "body",
       })
       : operation === "update"
-        ? service.updateAnnotation("project-id", "epic-safe", "ann-existing", { body: "changed" })
-        : service.deleteAnnotation("project-id", "epic-safe", "ann-existing");
+        ? service.updateAnnotation("project-id", "epic-safe", "ann-existing", ALICE, { body: "changed" })
+        : service.deleteAnnotation("project-id", "epic-safe", "ann-existing", ALICE);
     await expect(request).rejects.toMatchObject({ code: "persistence_corrupt" });
     expect(readFileSync(annotationsPath, "utf-8")).toBe(corrupt);
     expect(readdirSync(path.dirname(annotationsPath))).toEqual(["definition-annotations.json"]);
@@ -425,14 +425,13 @@ describe("annotation persistence integration", () => {
     scaffoldEpic(projectDir);
     const service = new CodaScopeAnnotationService(root);
     const annotations = await Promise.all(Array.from({ length: 20 }, (_, index) => (
-      service.createAnnotation("project-id", "epic-safe", "definition", {
+      service.createAnnotation("project-id", "epic-safe", "definition", ALICE, {
         anchor: { blockId: `b${index}`, sectionSlug: "root", anchorText: `text${index}`, lineNumber: index + 1 },
-        author: "alice",
         body: `body-${index}`,
       })
     )));
     await Promise.all(annotations.map((annotation, index) => (
-      service.updateAnnotation("project-id", "epic-safe", annotation.id, { body: `updated-${index}` })
+      service.updateAnnotation("project-id", "epic-safe", annotation.id, ALICE, { body: `updated-${index}` })
     )));
     const stored = await service.listAnnotations("project-id", "epic-safe", "definition");
     expect(stored).toHaveLength(20);
@@ -446,17 +445,15 @@ describe("annotation persistence integration", () => {
     const projectDir = scaffoldProject(root);
     const epicDir = scaffoldEpic(projectDir);
     const normal = new CodaScopeAnnotationService(root);
-    await normal.createAnnotation("project-id", "epic-safe", "definition", {
+    await normal.createAnnotation("project-id", "epic-safe", "definition", ALICE, {
       anchor: { blockId: "b", sectionSlug: "root", anchorText: "text", lineNumber: 1 },
-      author: "alice",
       body: "original",
     });
     const annotationPath = path.join(epicDir, "annotations", "definition-annotations.json");
     const before = readFileSync(annotationPath);
     const failing = new CodaScopeAnnotationService(root, new FailOncePersistence("writeJson", "epic_annotations"));
-    await expect(failing.createAnnotation("project-id", "epic-safe", "definition", {
+    await expect(failing.createAnnotation("project-id", "epic-safe", "definition", ALICE, {
       anchor: { blockId: "b2", sectionSlug: "root", anchorText: "text2", lineNumber: 2 },
-      author: "alice",
       body: "not committed",
     })).rejects.toMatchObject({ code: "persistence_failed" });
     expect(readFileSync(annotationPath)).toEqual(before);

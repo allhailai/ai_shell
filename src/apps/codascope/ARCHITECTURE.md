@@ -842,7 +842,7 @@ The Epic Design subsystem provides collaborative document authoring for software
     │           ├── v002.md
     │           └── versions.json         # Version metadata index
     ├── annotations/
-    │   └── <docId>-annotations.json        # Inline annotations per document
+    │   └── <docId>-annotations.json        # Version-2 actor-aware annotation threads
     ├── directives/
     │   └── <docId>-directives.json         # Insertion directives per document
     ├── artifacts/
@@ -866,6 +866,64 @@ defining → curating → designing → in-review → approved → archived
 ```
 
 Health is computed at read-time (never stored): `active | hot | stale | blocked`.
+
+### Epic Annotation Identity, Persistence, and Recovery
+
+Epic annotation files use the explicit version-2 shape
+`{ "version": 2, "annotations": [...] }`. The service recognizes only that
+schema and the exact unversioned legacy shape. It validates unique IDs,
+same-file parents, acyclic parent chains, and stored epic/document identities.
+IDs are also unique across every annotation sidecar in the epic because
+ID-only mutation routes resolve through an epic-wide catalog; a cross-document
+duplicate makes the epic annotation store corrupt rather than selecting the
+first file. Version-2 descendants must persist the same status as their root.
+Valid legacy files migrate atomically under the Phase 3 per-epic annotation
+mutation key. Malformed files and unknown versions fail as
+`persistence_corrupt` and retain their original bytes. Legacy records authored
+by the literal `agent` remain `legacy_unowned`; migration never guesses a
+human owner. Legacy migration preserves each root status and normalizes every
+nested descendant to it. Epic and project bundle round trips preserve and
+validate the version-2 data and epic-wide ID namespace.
+
+Human authorship comes only from `principal(req).username`. Agent-created
+comments keep the initiating principal as `author` and store `origin: "agent"`
+separately. Only an owned annotation's author may edit its body or delete it;
+unauthorized and missing edits/deletes have the same generic not-found result.
+Status is collaborative root-thread state with these transitions:
+`open -> resolved | wontfix` and `resolved | wontfix -> open`; same-state
+requests are idempotent, replies cannot transition independently, and a root
+transition updates every descendant. Reactions are actor-bound add/remove
+operations unique by `(emoji, username)`; clients cannot replace reaction
+arrays or supply the reacting username.
+
+Assistant, chat, research, and curation agents receive epic mutation tools only
+with an authenticated initiating actor. Research and curation routes derive it
+from their request principal, nested orchestrators carry it into
+`agentSvc.send()`, and same-process pipeline triggers preserve it through the
+process-local authenticated request boundary. Agent creation fails closed when
+that actor is absent.
+
+Deleting an owned leaf removes only that record. When descendants exist, the
+record becomes a neutral visible `Comment deleted` tombstone and the replies
+remain intact. There is no administrator or moderator override for annotation
+body ownership or deletion.
+
+Every root thread has an explicit attachment state: `attached`,
+`needs_review`, or `orphaned`. Only an exact stored block-ID match is attached.
+If that block disappears, exact quoted-text evidence can mark the thread for
+review, but it is advisory and never changes the stored anchor; without exact
+evidence the thread is orphaned. Nearby-line placement, substring matching,
+section proximity, and fuzzy scoring are forbidden. Replies inherit their
+root's attachment. Detached threads stay visible in an annotations-needing-
+review area and move only after a user selects an exact current block through
+a content-hash-checked reattachment request. Complete nested legacy graphs are
+returned in deterministic parent-before-child order and remain covered by
+status, attachment, tombstone, and reattachment operations. Reattachment holds
+the compatible definition/design mutation key through the authoritative hash
+recheck and atomic annotation publication, preventing a concurrent save from
+committing a stale anchor. Phase 3 atomic replacement and
+per-epic serialization remain authoritative for migration, reconciliation,
+reactions, deletion, and reattachment.
 
 ### Edit Locks (P4 Hardened)
 

@@ -272,6 +272,7 @@ export class CodaScopeCurationService {
     projectId: string,
     epicId: string,
     modelId: string,
+    actorId: string,
   ): Promise<{ success: boolean; error?: string }> {
     const port = process.env.AISHELL_PORT ?? "5175";
     const url = `http://localhost:${port}/api/codascope/projects/${projectId}/epics/${epicId}/curation/run`;
@@ -284,6 +285,7 @@ export class CodaScopeCurationService {
           ...(process.env.AISHELL_INTERNAL_REQUEST_TOKEN
             ? { "X-AIShell-Internal-Token": process.env.AISHELL_INTERNAL_REQUEST_TOKEN }
             : {}),
+          "X-AIShell-Initiating-Actor": actorId,
         },
         body: JSON.stringify({ modelId }),
       });

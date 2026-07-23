@@ -33,6 +33,7 @@ import {
   readActiveEpicsIndex,
   validateEpicsIndex,
 } from "./codaScopeEpicStorage.js";
+import { validateEpicAnnotationsFile } from "./codaScopeAnnotationService.js";
 
 const MANIFEST_FILENAME = "codascope-epic-manifest.json";
 const PAYLOAD_DIRECTORY = "epic";
@@ -146,6 +147,7 @@ export class CodaScopeEpicBundleService {
           projectId,
           newEpicId,
         );
+        this.validateAnnotationPayload(sourceEpicDir, newEpicId);
         const importedMetadata = this.readMetadata(sourceMetadataPath);
         if (!importedMetadata) throw new Error("Invalid epic archive: rebased metadata could not be read.");
         const importedAt = new Date().toISOString();
@@ -318,6 +320,31 @@ export class CodaScopeEpicBundleService {
       });
     } catch {
       return [];
+    }
+  }
+
+  private validateAnnotationPayload(epicDir: string, epicId: string): void {
+    const annotationsDir = path.join(epicDir, "annotations");
+    if (!existsSync(annotationsDir)) return;
+    const annotationIds = new Set<string>();
+    for (const filename of readdirSync(annotationsDir).sort()) {
+      if (!filename.endsWith("-annotations.json")) continue;
+      const documentId = filename.slice(0, -"-annotations.json".length);
+      assertSafePathSegment(documentId, "document ID");
+      const filePath = path.join(annotationsDir, filename);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+        const validated = validateEpicAnnotationsFile(parsed, epicId, documentId);
+        for (const annotation of validated.annotations) {
+          if (annotationIds.has(annotation.id)) {
+            throw new Error(`duplicate epic annotation ID: ${annotation.id}`);
+          }
+          annotationIds.add(annotation.id);
+        }
+      } catch {
+        throw new Error(`Invalid epic archive: annotation file "${filename}" is malformed or unsupported.`);
+      }
     }
   }
 }

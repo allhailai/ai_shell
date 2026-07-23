@@ -16,6 +16,9 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useEditorDiff } from "../hooks/useEditorDiff";
 import { useEditorResize } from "../hooks/useEditorResize";
 import { MarkdownEditor } from "../../../shared/markdown/MarkdownEditor";
+import { useAuth } from "../../../shell/authContext";
+import { AnnotationThread } from "./AnnotationThread";
+import { collectAnnotationDescendants } from "../codaScopeTypes";
 import type { EpicDesignDoc, EditLock, Annotation, InsertionDirective, BlockInfo, EpicWikiPage } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
@@ -43,6 +46,7 @@ const HEARTBEAT_INTERVAL_MS = 60_000;
 
 export function DocumentEditor({ epicId, doc, content, contentHash: initialContentHash, onContentChange, onClose: _onClose, wikiPages }: DocumentEditorProps) {
   const { activeProjectId } = useCodaScopeStore();
+  const { user } = useAuth();
   const commandBus = useCommandBus();
   const { navigate } = useAppSubRoute("codascope");
 
@@ -95,6 +99,10 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
   useEffect(() => {
     if (!editing) setEditContent(content);
   }, [content, editing]);
+
+  useEffect(() => {
+    setContentHash(initialContentHash);
+  }, [initialContentHash]);
 
   /* ── Block computation ───────────────────────────────────────────── */
 
@@ -188,20 +196,26 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
 
   const annotationsByBlock = useMemo(() => {
     const map = new Map<string, { roots: Annotation[]; replies: Map<string, Annotation[]> }>();
-    for (const ann of annotations) {
-      const blockId = ann.anchor.blockId;
+    const roots = annotations
+      .filter((annotation) => !annotation.parentId && annotation.attachmentState === "attached")
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    for (const root of roots) {
+      const blockId = root.anchor.blockId;
       if (!map.has(blockId)) map.set(blockId, { roots: [], replies: new Map() });
       const group = map.get(blockId)!;
-      if (ann.parentId) {
-        const existing = group.replies.get(ann.parentId) ?? [];
-        existing.push(ann);
-        group.replies.set(ann.parentId, existing);
-      } else {
-        group.roots.push(ann);
-      }
+      group.roots.push(root);
+      group.replies.set(root.id, collectAnnotationDescendants(annotations, root.id));
     }
     return map;
   }, [annotations]);
+
+  const detachedThreads = useMemo(() => annotations
+    .filter((annotation) => !annotation.parentId && annotation.attachmentState !== "attached")
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    .map((root) => ({
+      root,
+      replies: collectAnnotationDescendants(annotations, root.id),
+    })), [annotations]);
 
   /* ── Directive grouping by location ────────────────────────────── */
 
@@ -451,7 +465,6 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
               anchorText: (block?.content ?? "").slice(0, 100),
               lineNumber: block?.lineStart ?? 0,
             },
-            author: "user",
             body: commentText.trim(),
           }),
         },
@@ -806,6 +819,30 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
         </div>
       ) : (
         <div className="codascope-document-editor-viewer" ref={viewerRef}>
+          {detachedThreads.length > 0 && (
+            <section className="codascope-annotation-review-area">
+              <div className="codascope-annotation-review-area-header">
+                <IconWarning size={14} />
+                <div>
+                  <strong>Annotations needing review</strong>
+                  <p>These threads are not attached to a current document block.</p>
+                </div>
+              </div>
+              {detachedThreads.map(({ root, replies }) => (
+                <AnnotationThread
+                  key={root.id}
+                  annotation={root}
+                  replies={replies}
+                  projectId={activeProjectId!}
+                  epicId={epicId}
+                  currentUsername={user?.username ?? null}
+                  reattachBlocks={blocks}
+                  contentHash={contentHash}
+                  onUpdate={loadAnnotations}
+                />
+              ))}
+            </section>
+          )}
           <DocumentBlockRenderer
             displayContent={displayContent}
             blocks={blocks}
@@ -829,6 +866,7 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
             activeProjectId={activeProjectId!}
             epicId={epicId}
             docId={doc.id}
+            currentUsername={user?.username ?? null}
             onReloadAnnotations={loadAnnotations}
             onReloadDirectives={loadDirectives}
             onWikiLink={handleWikiLink}

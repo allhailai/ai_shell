@@ -19,7 +19,7 @@ import { runCurationPipeline } from "../services/codaScopeCurationOrchestrator.j
 import { runResearchPipeline } from "../services/codaScopeResearchOrchestrator.js";
 
 export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
-  const { app, httpError, ensureServices, wrap, param, upload, secretService } = ctx;
+  const { app, httpError, ensureServices, wrap, param, principal, upload, secretService } = ctx;
 
   // ── Knowledge Sources ─────────────────────────────────────────────
 
@@ -400,6 +400,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
       const epicId = param(req, "epicId");
+      const actorId = principal(req).username;
       const { modelId, topics, parentQueryId } = req.body as { modelId?: string; topics?: string[]; parentQueryId?: string };
 
       if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
@@ -436,7 +437,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await runResearchPipeline(
-          { projectId: id, epicId, modelId, topics, parentQueryId },
+          { projectId: id, epicId, modelId, topics, parentQueryId, actorId },
           { sendEvent, sendMessage: callbacks.sendMessage, isAborted },
           {
             agentSvc: svcs.agentSvc,
@@ -476,6 +477,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
       const { buildSvc, projectSvc } = svcs;
       const id = param(req, "id");
       const epicId = param(req, "epicId");
+      const actorId = principal(req).username;
       const { modelId } = req.body as { modelId?: string };
 
       if (!modelId) throw httpError("modelId is required.", 400, "invalid_input");
@@ -498,7 +500,7 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await runCurationPipeline(
-          { projectId: id, epicId, modelId },
+          { projectId: id, epicId, modelId, actorId },
           { sendEvent, sendMessage, isAborted },
           {
             agentSvc: svcs.agentSvc,

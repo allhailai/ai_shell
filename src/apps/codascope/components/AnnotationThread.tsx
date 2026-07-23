@@ -6,7 +6,7 @@
 import { useState, useCallback } from "react";
 import { MarkdownViewer } from "../../../shared/markdown";
 import { IconAnnotation, IconDelete, IconClose, IconCheckmark, IconUndo, IconUser, IconAgent, IconReply } from "./CodaScopeIcons";
-import type { Annotation, AnnotationStatus } from "../codaScopeTypes";
+import type { Annotation, AnnotationStatus, BlockInfo } from "../codaScopeTypes";
 
 /* ── Props ───────────────────────────────────────────────────────────── */
 
@@ -22,7 +22,12 @@ interface AnnotationThreadProps {
   /** Called when annotation state changes (resolve, delete, reply) */
   onUpdate: () => void;
   /** Called when user clicks close */
-  onClose: () => void;
+  onClose?: () => void;
+  /** Current authenticated username, used only to decide whether to show delete. */
+  currentUsername: string | null;
+  /** Current blocks and hash enable explicit recovery for detached root threads. */
+  reattachBlocks?: BlockInfo[];
+  contentHash?: string;
 }
 
 /* ── Component ───────────────────────────────────────────────────────── */
@@ -34,54 +39,96 @@ export function AnnotationThread({
   epicId,
   onUpdate,
   onClose,
+  currentUsername,
+  reattachBlocks = [],
+  contentHash,
 }: AnnotationThreadProps) {
   const [replyText, setReplyText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showReplyInput, setShowReplyInput] = useState(false);
+  const [selectedBlockId, setSelectedBlockId] = useState(reattachBlocks[0]?.blockId ?? "");
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   /* ── Actions ──────────────────────────────────────────────────────── */
 
   const updateStatus = useCallback(async (status: AnnotationStatus) => {
+    setRequestError(null);
     try {
-      await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/annotations/${annotation.id}`, {
+      const response = await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/annotations/${annotation.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
+      if (!response.ok) throw new Error("Could not update annotation status.");
       onUpdate();
-    } catch { /* ignore */ }
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not update annotation status.");
+    }
   }, [projectId, epicId, annotation.id, onUpdate]);
 
   const deleteAnnotation = useCallback(async (annId: string) => {
+    setRequestError(null);
     try {
-      await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/annotations/${annId}`, {
+      const response = await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/annotations/${annId}`, {
         method: "DELETE",
       });
+      if (!response.ok) throw new Error("Could not delete annotation.");
       onUpdate();
-    } catch { /* ignore */ }
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not delete annotation.");
+    }
   }, [projectId, epicId, onUpdate]);
 
   const submitReply = useCallback(async () => {
     if (!replyText.trim()) return;
     setSubmitting(true);
+    setRequestError(null);
     try {
-      await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/docs/${annotation.documentId}/annotations`, {
+      const response = await fetch(`/api/codascope/projects/${projectId}/epics/${epicId}/docs/${annotation.documentId}/annotations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          anchor: annotation.anchor,
-          author: "user",
           body: replyText.trim(),
           parentId: annotation.id,
           documentVersion: annotation.documentVersion,
         }),
       });
+      if (!response.ok) throw new Error("Could not add reply.");
       setReplyText("");
       setShowReplyInput(false);
       onUpdate();
-    } catch { /* ignore */ }
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not add reply.");
+    }
     setSubmitting(false);
   }, [projectId, epicId, annotation, replyText, onUpdate]);
+
+  const reattach = useCallback(async () => {
+    if (!selectedBlockId || !contentHash) {
+      setRequestError("Select a current document block before reattaching.");
+      return;
+    }
+    setRequestError(null);
+    try {
+      const response = await fetch(
+        `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${annotation.documentId}/annotations/${annotation.id}/reattach`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetBlockId: selectedBlockId, contentHash }),
+        },
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(response.status === 409
+          ? "The document changed. Reload it before reattaching this annotation."
+          : result.message ?? "Could not reattach annotation.");
+      }
+      onUpdate();
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Could not reattach annotation.");
+    }
+  }, [selectedBlockId, contentHash, projectId, epicId, annotation.documentId, annotation.id, onUpdate]);
 
   /* ── Time formatting ─────────────────────────────────────────────── */
 
@@ -97,9 +144,12 @@ export function AnnotationThread({
   const renderEntry = (ann: Annotation, isReply: boolean) => (
     <div key={ann.id} className={`codascope-annotation-thread-entry${isReply ? " codascope-annotation-thread-entry--reply" : ""}`}>
       <div className="codascope-annotation-thread-header">
-        <span className="codascope-annotation-thread-author">
-          {ann.author === "user" ? <IconUser size={12} /> : <IconAgent size={12} />} {ann.author}
-        </span>
+        {!ann.deletedAt && (
+          <span className="codascope-annotation-thread-author">
+            {annotationProvenance(ann) === "agent" ? <IconAgent size={12} /> : <IconUser size={12} />} {ann.author}
+          </span>
+        )}
+        {ann.deletedAt && <span className="codascope-annotation-thread-author">Deleted comment</span>}
         <span className="codascope-annotation-thread-time">{formatTime(ann.createdAt)}</span>
         {!isReply && (
           <span className={`codascope-annotation-thread-status codascope-annotation-thread-status--${ann.status}`}>
@@ -108,17 +158,21 @@ export function AnnotationThread({
         )}
       </div>
       <div className="codascope-annotation-thread-body">
-        <MarkdownViewer content={ann.body} />
+        {ann.deletedAt
+          ? <p className="codascope-annotation-thread-tombstone">Comment deleted</p>
+          : <MarkdownViewer content={ann.body} />}
       </div>
       <div className="codascope-annotation-thread-entry-actions">
-        <button
-          className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-          onClick={() => deleteAnnotation(ann.id)}
-          type="button"
-          title="Delete"
-        >
-          <IconDelete size={12} />
-        </button>
+        {canDeleteAnnotation(ann, currentUsername) && (
+          <button
+            className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+            onClick={() => deleteAnnotation(ann.id)}
+            type="button"
+            title="Delete"
+          >
+            <IconDelete size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -127,6 +181,7 @@ export function AnnotationThread({
 
   const isResolved = annotation.status === "resolved" || annotation.status === "wontfix";
   const threadCount = replies.length + 1;
+  const detached = annotation.attachmentState !== "attached";
 
   return (
     <div className="codascope-annotation-thread">
@@ -145,23 +200,61 @@ export function AnnotationThread({
               <IconUndo size={12} /> Reopen
             </button>
           ) : (
+            <>
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+                onClick={() => updateStatus("resolved")}
+                type="button"
+              >
+                <IconCheckmark size={12} /> Resolve
+              </button>
+              <button
+                className="codascope-btn codascope-btn-ghost codascope-btn-xs"
+                onClick={() => updateStatus("wontfix")}
+                type="button"
+              >
+                <IconClose size={12} /> Won&apos;t fix
+              </button>
+            </>
+          )}
+          {onClose && (
             <button
               className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-              onClick={() => updateStatus("resolved")}
+              onClick={onClose}
               type="button"
             >
-              <IconCheckmark size={12} /> Resolve
+              <IconClose size={12} />
             </button>
           )}
-          <button
-            className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-            onClick={onClose}
-            type="button"
-          >
-            <IconClose size={12} />
-          </button>
         </div>
       </div>
+
+      {requestError && <p className="codascope-annotation-thread-error">{requestError}</p>}
+
+      {detached && (
+        <div className="codascope-annotation-thread-recovery">
+          <strong>{annotation.attachmentState === "needs_review" ? "Needs review" : "Orphaned"}</strong>
+          <p>The stored block is no longer present. Choose the intended current block to reattach this thread.</p>
+          <div className="codascope-annotation-thread-recovery-actions">
+            <select value={selectedBlockId} onChange={(event) => setSelectedBlockId(event.target.value)}>
+              <option value="">Select a block</option>
+              {reattachBlocks.map((block) => (
+                <option key={block.blockId} value={block.blockId}>
+                  {block.sectionSlug} — {block.content.replace(/\s+/g, " ").slice(0, 90)}
+                </option>
+              ))}
+            </select>
+            <button
+              className="codascope-btn codascope-btn-primary codascope-btn-xs"
+              onClick={reattach}
+              disabled={!selectedBlockId || !contentHash}
+              type="button"
+            >
+              Reattach
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Thread entries */}
       <div className="codascope-annotation-thread-entries">
@@ -209,4 +302,23 @@ export function AnnotationThread({
       )}
     </div>
   );
+}
+
+export function canDeleteAnnotation(annotation: Annotation, currentUsername: string | null): boolean {
+  return Boolean(currentUsername)
+    && !annotation.deletedAt
+    && annotation.ownership === "owned"
+    && annotation.author === currentUsername;
+}
+
+export function annotationProvenance(annotation: Annotation): "user" | "agent" {
+  return annotation.origin;
+}
+
+export function annotationNeedsReview(annotation: Annotation): boolean {
+  return annotation.attachmentState === "needs_review" || annotation.attachmentState === "orphaned";
+}
+
+export function annotationDisplayBody(annotation: Annotation): string {
+  return annotation.deletedAt ? "Comment deleted" : annotation.body;
 }

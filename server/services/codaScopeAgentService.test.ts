@@ -139,4 +139,31 @@ describe("CodaScopeAgentService actor isolation", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("fails every epic-mutation agent purpose before agent creation when the actor is absent", async () => {
+    const root = tmpDir();
+    try {
+      const service = new CodaScopeAgentService({} as any, root);
+      const createAgent = vi.spyOn(service as any, "getOrCreateAgent");
+      for (const purpose of ["assistant", "chat", "research", "curation"] as const) {
+        const onError = vi.fn();
+        await service.send({
+          projectId: "project",
+          message: "Run",
+          modelId: "model",
+          purpose,
+          onMessage: vi.fn(),
+          onDone: vi.fn(),
+          onError,
+        });
+        expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+          message: expect.stringContaining("authenticated initiating actor"),
+        }));
+      }
+      expect(createAgent).not.toHaveBeenCalled();
+      await service.shutdown();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

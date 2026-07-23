@@ -102,10 +102,12 @@ export function createAuthMiddleware(opts: AuthMiddlewareOpts) {
     // Long-running agent tools start a same-process SSE pipeline through the
     // normal HTTP route. A random, non-persisted capability preserves the
     // route's authentication invariant without forwarding a user's cookie
-    // into background work.
+    // into background work. The initiating actor header is trusted only
+    // alongside that capability; ordinary clients can never choose it.
     if (internalRequestToken && req.get("x-aishell-internal-token") === internalRequestToken) {
+      const initiatingActor = req.get("x-aishell-initiating-actor")?.trim();
       req.user = {
-        username: "system",
+        username: initiatingActor || "system",
         firstname: "",
         lastname: "",
         is_admin: true,

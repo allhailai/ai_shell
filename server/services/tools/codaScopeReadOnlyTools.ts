@@ -8,6 +8,7 @@ import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import { CodaScopeCodeMapService } from "../codaScopeCodeMapService.js";
 import { existsSync, readdirSync, readFileSync, statSync, realpathSync, type Dirent } from "node:fs";
 import path from "node:path";
+import { collectAnnotationDescendants } from "../../../src/apps/codascope/codaScopeTypes.js";
 import {
   isSameOrDescendantPath,
   resolveContainedRelativePath,
@@ -97,6 +98,11 @@ export function buildReadOnlyTools(
     designDoc: designDocService,
     annotation: annotationService,
   } = services;
+
+  const loadAnnotationDocument = async (epicId: string, documentId: string): Promise<string | null> => {
+    if (documentId === "definition") return epicService.getDefinition(projectId, epicId);
+    return (await designDocService.getDesignDoc(projectId, epicId, documentId))?.content ?? null;
+  };
 
   return {
     list_wiki_topics: {
@@ -590,7 +596,9 @@ export function buildReadOnlyTools(
         const documentId = args.documentId as string;
         if (!epicId || !documentId) return "epicId and documentId are required.";
         try {
-          const annotations = await annotationService.listAnnotations(projectId, epicId, documentId);
+          const documentContent = await loadAnnotationDocument(epicId, documentId);
+          if (documentContent === null) throw new Error("document not found");
+          const annotations = await annotationService.listAnnotations(projectId, epicId, documentId, documentContent);
           if (annotations.length === 0) {
             return `No annotations on document "${documentId}" in epic "${epicId}".`;
           }
@@ -598,13 +606,17 @@ export function buildReadOnlyTools(
             annotations.map((a) => ({
               id: a.id,
               author: a.author,
+              origin: a.origin,
+              ownership: a.ownership,
               status: a.status,
+              attachmentState: a.attachmentState,
+              deleted: Boolean(a.deletedAt),
               anchor: {
                 sectionSlug: a.anchor.sectionSlug,
                 anchorText: a.anchor.anchorText?.slice(0, 80),
                 blockId: a.anchor.blockId,
               },
-              body: a.body.length > 200 ? a.body.slice(0, 200) + "..." : a.body,
+              body: a.deletedAt ? "Comment deleted" : a.body.length > 200 ? a.body.slice(0, 200) + "..." : a.body,
               parentId: a.parentId,
               createdAt: a.createdAt,
               reactionCount: a.reactions?.length ?? 0,
@@ -649,17 +661,22 @@ export function buildReadOnlyTools(
           return "epicId, documentId, and annotationId are required.";
         }
         try {
-          const allAnnotations = await annotationService.listAnnotations(projectId, epicId, documentId);
+          const documentContent = await loadAnnotationDocument(epicId, documentId);
+          if (documentContent === null) throw new Error("document not found");
+          const allAnnotations = await annotationService.listAnnotations(projectId, epicId, documentId, documentContent);
           const root = allAnnotations.find((a) => a.id === annotationId);
           if (!root) return `Annotation "${annotationId}" not found.`;
 
-          // Collect the thread: root + all replies
-          const replies = allAnnotations.filter((a) => a.parentId === annotationId);
+          // Collect the complete legacy-compatible graph in deterministic order.
+          const replies = collectAnnotationDescendants(allAnnotations, root.id);
           const thread = [root, ...replies].map((a) => ({
             id: a.id,
             author: a.author,
+            origin: a.origin,
+            ownership: a.ownership,
             status: a.status,
-            body: a.body,
+            body: a.deletedAt ? "Comment deleted" : a.body,
+            deletedAt: a.deletedAt,
             parentId: a.parentId,
             createdAt: a.createdAt,
             reactions: a.reactions,

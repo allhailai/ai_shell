@@ -340,6 +340,14 @@ export interface VersionDiff {
 
 export type AnnotationStatus = "open" | "resolved" | "wontfix";
 
+export type AnnotationOrigin = "user" | "agent";
+
+export type EpicAnnotationDetachmentReason =
+  | "legacy_unverified"
+  | "block_missing_exact_text"
+  | "block_missing_ambiguous_text"
+  | "block_missing_no_match";
+
 export type DirectiveStatus = "pending" | "generating" | "applied" | "rejected";
 
 export type DirectiveType = "insert" | "replace" | "expand";
@@ -380,11 +388,52 @@ export interface Annotation {
   documentVersion: number;
   anchor: BlockAnchor;
   author: string;
+  /** Trusted provenance. Ownership always remains the initiating username. */
+  origin: AnnotationOrigin;
+  /** Legacy literal-agent records stay unowned rather than guessing a person. */
+  ownership: "owned" | "legacy_unowned";
   createdAt: string;
   body: string;               // markdown content
   parentId?: string;          // reply threading
   status: AnnotationStatus;
   reactions: Array<{ emoji: string; user: string }>;
+  attachmentState: AnnotationAttachmentState;
+  detachedReason?: EpicAnnotationDetachmentReason;
+  detachedAt?: string;
+  reattachedAt?: string;
+  /** A deleted record is a visible tombstone retained only when descendants exist. */
+  deletedAt?: string;
+  deletedBy?: string;
+}
+
+/** Return every descendant in deterministic parent-before-child thread order. */
+export function collectAnnotationDescendants(
+  annotations: Annotation[],
+  rootId: string,
+): Annotation[] {
+  const children = new Map<string, Annotation[]>();
+  for (const annotation of annotations) {
+    if (!annotation.parentId) continue;
+    const siblings = children.get(annotation.parentId) ?? [];
+    siblings.push(annotation);
+    children.set(annotation.parentId, siblings);
+  }
+  for (const siblings of children.values()) {
+    siblings.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  }
+
+  const descendants: Annotation[] = [];
+  const visited = new Set<string>([rootId]);
+  const visit = (parentId: string): void => {
+    for (const child of children.get(parentId) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      descendants.push(child);
+      visit(child.id);
+    }
+  };
+  visit(rootId);
+  return descendants;
 }
 
 export interface InsertionDirective {
@@ -697,7 +746,20 @@ export interface NoteFolderEntry {
  * Mirrors the server's NoteAnnotation (codaScopeNoteAnnotationService.ts)
  * but defined here to avoid cross-boundary imports that trigger node:fs errors.
  */
-export interface NoteAnnotation extends Omit<Annotation, "epicId" | "documentId" | "documentVersion" | "anchor"> {
+export interface NoteAnnotation extends Omit<Annotation,
+  | "epicId"
+  | "documentId"
+  | "documentVersion"
+  | "anchor"
+  | "origin"
+  | "ownership"
+  | "attachmentState"
+  | "detachedReason"
+  | "detachedAt"
+  | "reattachedAt"
+  | "deletedAt"
+  | "deletedBy"
+> {
   noteScope: NoteScope;
   noteVisibility: NoteVisibility;
   notePath: string;

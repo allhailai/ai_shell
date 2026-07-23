@@ -21,6 +21,7 @@ export function buildEpicTools(
   projectId: string,
   services: ToolServices,
   collector?: ToolResultCollectorHolder,
+  actorId?: string,
 ): Record<string, SDKCustomTool> {
   const {
     wiki: wikiService,
@@ -304,6 +305,7 @@ export function buildEpicTools(
         const modelId = args.modelId as string;
         if (!epicId) return "epicId is required.";
         if (!modelId) return "modelId is required. Pass the model ID you are running on.";
+        if (!actorId?.trim()) return "Failed to start curation: an authenticated initiating actor is required.";
 
         // Check if already running via build state
         const scope = `curation::${epicId}`;
@@ -313,7 +315,7 @@ export function buildEpicTools(
         }
 
         // Fire the curation pipeline via the curation service
-        const result = await services.curation.triggerCurationPipeline(projectId, epicId, modelId);
+        const result = await services.curation.triggerCurationPipeline(projectId, epicId, modelId, actorId);
 
         if (!result.success) {
           return `Failed to start curation: ${result.error ?? "Unknown error"}`;
@@ -349,6 +351,7 @@ export function buildEpicTools(
         const topics = args.topics as string[];
         const modelId = args.modelId as string;
         if (!epicId || !topics?.length || !modelId) return "epicId, topics, and modelId are required.";
+        if (!actorId?.trim()) return "Failed to start research: an authenticated initiating actor is required.";
 
         try {
           const port = process.env.AISHELL_PORT ?? "5175";
@@ -361,6 +364,7 @@ export function buildEpicTools(
                 ...(process.env.AISHELL_INTERNAL_REQUEST_TOKEN
                   ? { "X-AIShell-Internal-Token": process.env.AISHELL_INTERNAL_REQUEST_TOKEN }
                   : {}),
+                "X-AIShell-Initiating-Actor": actorId,
               },
               body: JSON.stringify({ modelId, topics }),
             },
@@ -451,18 +455,37 @@ export function buildEpicTools(
         if (!epicId || !documentId || !blockId || !body) {
           return "epicId, documentId, blockId, and body are required.";
         }
+        if (!actorId?.trim()) {
+          return "Failed to create annotation: an authenticated initiating actor is required.";
+        }
         try {
+          const documentContent = documentId === "definition"
+            ? await epicService.getDefinition(projectId, epicId)
+            : (await designDocService.getDesignDoc(projectId, epicId, documentId))?.content;
+          if (documentContent === null || documentContent === undefined) {
+            return `Failed to create annotation: document "${documentId}" was not found.`;
+          }
+          const target = annotationService.computeBlockIds(documentContent)
+            .find((block) => block.blockId === blockId);
+          if (!target) {
+            return `Failed to create annotation: block "${blockId}" no longer exists in document "${documentId}".`;
+          }
           const categoryPrefix = category ? `[${category}] ` : "";
-          const annotation = await annotationService.createAnnotation(projectId, epicId, documentId, {
-            anchor: {
-              blockId,
-              sectionSlug: "",
-              anchorText: "",
-              lineNumber: 0,
+          const annotation = await annotationService.createAnnotation(
+            projectId,
+            epicId,
+            documentId,
+            { username: actorId, origin: "agent" },
+            {
+              anchor: {
+                blockId: target.blockId,
+                sectionSlug: target.sectionSlug,
+                anchorText: target.content,
+                lineNumber: target.lineStart,
+              },
+              body: `${categoryPrefix}${body}`,
             },
-            author: "agent",
-            body: `${categoryPrefix}${body}`,
-          });
+          );
           return completed(
             "create_annotation",
             `Annotation created (ID: ${annotation.id}) on block "${blockId}" in document "${documentId}".`,
