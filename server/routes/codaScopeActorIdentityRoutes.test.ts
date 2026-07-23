@@ -54,14 +54,14 @@ describe("CodaScope route audit identities", () => {
       { params: { id: "proj" }, body: { title: "Epic", createdBy: "mallory" } } as never, response as never, (() => undefined) as never,
     );
     await handler(routes, "post", "/api/codascope/projects/:id/epics/:epicId/designs")(
-      { params: { id: "proj", epicId: "epic" }, body: { title: "Doc", createdBy: "mallory" } } as never, response as never, (() => undefined) as never,
+      { params: { id: "proj", epicId: "epic" }, body: { title: "Doc", content: "Complete design.", template: "api-spec", createdBy: "mallory" } } as never, response as never, (() => undefined) as never,
     );
     await handler(routes, "post", "/api/codascope/projects/:id/epics/:epicId/versions")(
       { params: { id: "proj", epicId: "epic" }, body: { label: "v1", createdBy: "mallory" } } as never, response as never, (() => undefined) as never,
     );
 
     expect(createEpic).toHaveBeenCalledWith("proj", { title: "Epic", createdBy: "alice" });
-    expect(createDesignDoc).toHaveBeenCalledWith("proj", "epic", { title: "Doc", content: undefined, createdBy: "alice" });
+    expect(createDesignDoc).toHaveBeenCalledWith("proj", "epic", { title: "Doc", content: "Complete design.", createdBy: "alice" });
     expect(createVersion).toHaveBeenCalledWith("proj", "epic", { label: "v1", note: undefined, createdBy: "alice" });
   });
 

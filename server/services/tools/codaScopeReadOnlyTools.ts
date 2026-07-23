@@ -497,7 +497,7 @@ export function buildReadOnlyTools(
     list_design_docs: {
       description:
         "List all design documents for a specific epic. Returns doc IDs, titles, " +
-        "templates, word counts, and annotation/directive counts. " +
+        "word counts, and annotation/directive counts. " +
         "Use list_epic_designs first to discover available epic IDs.",
       inputSchema: {
         type: "object",
@@ -521,7 +521,6 @@ export function buildReadOnlyTools(
             docs.map((d) => ({
               id: d.id,
               title: d.title,
-              template: d.template,
               wordCount: d.wordCount,
               blockCount: d.blockCount,
               annotationCount: d.annotationCount,
@@ -564,7 +563,7 @@ export function buildReadOnlyTools(
           const result = await designDocService.getDesignDoc(projectId, epicId, docId);
           if (result === null) return `Design doc "${docId}" not found in epic "${epicId}".`;
           return `# ${result.doc.title}\n\n` +
-            `_Template: ${result.doc.template || "blank"} | Words: ${result.doc.wordCount} | Updated: ${result.doc.updatedAt}_\n\n` +
+            `_Words: ${result.doc.wordCount} | Updated: ${result.doc.updatedAt}_\n\n` +
             result.content;
         } catch {
           return `Failed to read design doc "${docId}" for epic "${epicId}".`;

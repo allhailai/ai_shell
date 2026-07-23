@@ -261,9 +261,10 @@ export function formatViewContext(ctx: ViewContext | null | undefined): string {
       if (tabLabel === "design") {
         lines.push(
           `The user is on the Design tab. If curated knowledge or research exists, you can:`,
-          `- Suggest which design document templates are most relevant based on the epic's scope and definition`,
+          `- Recommend relevant design-document archetypes, such as an API specification, data model, system design, user flow, or decision record, and explain why they fit this epic`,
           `- Draft design docs grounded in curated research (reference epic wiki pages and research sources)`,
           `- Review existing design documents and use create_annotation to leave targeted feedback`,
+          `CodaScope has no selectable design-document catalog or picker. When the user requests creation, read the current epic and research context, draft substantial complete markdown, then call create_design_doc(epicId, title, content). Do not create a confirmation action card for that explicit request.`,
         );
       }
       break;

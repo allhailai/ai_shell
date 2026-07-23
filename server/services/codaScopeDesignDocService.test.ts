@@ -79,6 +79,7 @@ describe("CodaScopeDesignDocService", () => {
       expect(doc.blockCount).toBeGreaterThan(0);
       expect(doc.annotationCount).toBe(0);
       expect(doc.directiveCount).toBe(0);
+      expect(doc).not.toHaveProperty("template");
 
       // Verify content.md was created in subdirectory
       const contentPath = path.join(
@@ -86,6 +87,11 @@ describe("CodaScopeDesignDocService", () => {
       );
       expect(existsSync(contentPath)).toBe(true);
       expect(readFileSync(contentPath, "utf-8")).toBe("# API Design\n\nEndpoints and contracts.");
+      const index = JSON.parse(readFileSync(
+        path.join(projDir, "epics", epicId, "designs", "designs.json"),
+        "utf-8",
+      ));
+      expect(index.docs[0]).not.toHaveProperty("template");
     });
 
     it("creates a doc with empty content when none provided", async () => {
@@ -143,6 +149,42 @@ describe("CodaScopeDesignDocService", () => {
     it("returns null for nonexistent project", async () => {
       const result = await svc.getDesignDoc("nonexistent", "epic1", "doc1");
       expect(result).toBeNull();
+    });
+
+    it("keeps optional legacy template metadata readable through edits", async () => {
+      const projectId = "proj-legacy-template";
+      const epicId = "epic-legacy-template";
+      const projDir = scaffoldProject(root, projectId, epicId);
+      const docId = "legacy_template_doc";
+      const designsDir = path.join(projDir, "epics", epicId, "designs");
+      mkdirSync(path.join(designsDir, docId), { recursive: true });
+      writeFileSync(path.join(designsDir, docId, "content.md"), "Legacy content.", "utf-8");
+      writeFileSync(path.join(designsDir, "designs.json"), JSON.stringify({
+        docs: [{
+          id: docId,
+          epicId,
+          title: "Legacy Design",
+          template: "legacy-api-spec-v1",
+          createdAt: "2025-01-01T00:00:00.000Z",
+          updatedAt: "2025-01-01T00:00:00.000Z",
+          createdBy: "legacy-import",
+          wordCount: 2,
+          blockCount: 1,
+          annotationCount: 0,
+          directiveCount: 0,
+        }],
+      }), "utf-8");
+
+      const initial = await svc.getDesignDoc(projectId, epicId, docId);
+      expect(initial?.doc.template).toBe("legacy-api-spec-v1");
+
+      const updated = await svc.updateDesignDoc(projectId, epicId, docId, "Updated legacy content.");
+      expect(updated).not.toBeNull();
+      expect("conflict" in updated!).toBe(false);
+      if (updated && !("conflict" in updated)) {
+        expect(updated.doc.template).toBe("legacy-api-spec-v1");
+      }
+      expect((await svc.listDesignDocs(projectId, epicId))[0].template).toBe("legacy-api-spec-v1");
     });
   });
 

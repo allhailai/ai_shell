@@ -593,9 +593,6 @@ export function DocumentEditor({ epicId, doc, content, contentHash: initialConte
       <div className="codascope-document-editor-toolbar">
         <div className="codascope-document-editor-toolbar-left">
           <h2 className="codascope-document-editor-title">{doc.title}</h2>
-          {doc.template && (
-            <span className="codascope-document-editor-template-badge">{doc.template}</span>
-          )}
         </div>
         <div className="codascope-document-editor-toolbar-right">
           <span className="codascope-document-editor-meta">

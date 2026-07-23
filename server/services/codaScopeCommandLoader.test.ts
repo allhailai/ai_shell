@@ -75,6 +75,21 @@ describe("loadCommandTemplate", () => {
       expect(template).toContain("{{USER_MESSAGE}}");
     }
   });
+
+  it("describes design-document archetypes and the executable creation workflow", () => {
+    const prompt = loadCommandTemplate("do_chat");
+    expect(prompt).not.toBeNull();
+
+    expect(prompt).toContain("document archetypes");
+    expect(prompt).toContain("Read the current epic definition and scope");
+    expect(prompt).toContain("Draft substantial, complete markdown");
+    expect(prompt).toContain("create_design_doc(epicId, title, content)");
+    expect(prompt).toContain("explicit creation request authorizes this write tool");
+    expect(prompt).not.toMatch(/available templates|selectable templates/i);
+    for (const obsoleteId of ["api-spec", "data-model", "system-design", "user-flow"]) {
+      expect(prompt).not.toContain(obsoleteId);
+    }
+  });
 });
 
 describe("loadCommandOrSkill", () => {

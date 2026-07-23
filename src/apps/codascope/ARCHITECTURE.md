@@ -977,13 +977,25 @@ Locks prevent concurrent edits to the same document:
 
 ### Chat-Driven Design Doc Creation
 
-Design documents are created via the chat assistant, not templates. The flow:
+Design documents are fully written or generated markdown documents created via
+the chat assistant. API specifications, data models, system designs, user
+flows, decision records, and similar archetypes may guide structure, but they
+are examples rather than registered resources. CodaScope has no
+design-template catalog, stable template IDs, template picker, or
+template-selection API. The flow:
 
 1. User navigates to the Design tab or opens chat in an epic context
-2. The chat assistant uses `create_design_doc` / `edit_design_doc` / `edit_design_doc_section` tools
-3. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
-4. Every edit (agent or manual) creates a version snapshot before writing
-5. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
+2. The chat assistant reads the current definition, scope, existing designs, and relevant research context
+3. For an explicit creation request, it drafts substantial complete markdown and calls `create_design_doc(epicId, title, content)` without a confirmation action card
+4. It uses `edit_design_doc` / `edit_design_doc_section` for later changes
+5. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
+6. Every edit (agent or manual) creates a version snapshot before writing
+7. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
+
+The optional persisted `EpicDesignDoc.template` property is retained only so
+legacy and imported metadata remains readable and round-trippable. It is not a
+supported creation input and is not exposed as a current agent or user-facing
+selection mechanism.
 
 ### Per-Document Version History
 

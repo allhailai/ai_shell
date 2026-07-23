@@ -3155,17 +3155,6 @@
   text-overflow: ellipsis;
 }
 
-.codascope-document-editor-template-badge {
-  padding: 2px var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-muted);
-  color: var(--color-accent-text);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-  text-transform: capitalize;
-  flex-shrink: 0;
-}
-
 .codascope-document-editor-meta {
   font-size: var(--text-2xs);
   color: var(--color-text-tertiary);

@@ -282,6 +282,7 @@ export interface EpicDesignDoc {
   id: string;
   epicId: string;
   title: string;
+  /** Legacy/imported compatibility metadata; not a supported creation input. */
   template?: string;
   createdAt: string;
   updatedAt: string;
@@ -304,15 +305,6 @@ export interface EpicVersion {
   designDocHashes: Record<string, string>;
   scopeHash: string;
   status: "draft" | "in-review" | "approved" | "superseded";
-}
-
-// ── Design Doc Templates ────────────────────────────────────────────
-
-export interface DesignDocTemplate {
-  id: string;
-  title: string;
-  description: string;
-  filename: string;
 }
 
 // ── Version Diff ────────────────────────────────────────────────────

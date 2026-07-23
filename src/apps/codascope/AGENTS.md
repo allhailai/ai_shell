@@ -343,11 +343,22 @@ When extending agent capabilities:
 
 ### Chat-Driven Creation (No Templates)
 
-Design documents are created and edited via the chat assistant, not through templates. The flow is:
+Design documents are fully written or generated markdown documents created and
+edited through the chat assistant. Document archetypes such as API
+specifications, data models, system designs, user flows, and decision records
+may guide their structure, but CodaScope has no design-template catalog,
+stable template IDs, template picker, or template-selection API. The flow is:
 
-1. Agent uses `create_design_doc` / `edit_design_doc` / `edit_design_doc_section` tools
-2. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger frontend auto-navigation and diff highlighting
-3. Users can select text → "Edit with Agent" for targeted edits
+1. Agent reads the current epic definition, scope, existing designs, and relevant research context
+2. Agent drafts substantial, complete markdown and uses `create_design_doc(epicId, title, content)` for an explicit creation request
+3. Agent uses `edit_design_doc` / `edit_design_doc_section` for later changes
+4. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger frontend auto-navigation and diff highlighting
+5. Users can select text → "Edit with Agent" for targeted edits
+
+The optional persisted `EpicDesignDoc.template` field is legacy/import
+compatibility metadata only. Preserve it when reading, editing, or bundling old
+documents, but never accept it as a new creation input or present it as an
+available design capability.
 
 ### Version History
 

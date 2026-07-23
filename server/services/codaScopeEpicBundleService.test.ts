@@ -121,7 +121,7 @@ describe("CodaScopeEpicBundleService", () => {
       lastScopedBy: null,
     });
     writeJson(path.join(sourceEpicDir, "designs", "designs.json"), {
-      docs: [{ id: "doc_1", epicId: sourceEpicId, title: "Design", createdAt: "", updatedAt: "", createdBy: "alexa", wordCount: 1, blockCount: 1, annotationCount: 0, directiveCount: 0 }],
+      docs: [{ id: "doc_1", epicId: sourceEpicId, title: "Design", template: "legacy-api-spec-v1", createdAt: "", updatedAt: "", createdBy: "alexa", wordCount: 1, blockCount: 1, annotationCount: 0, directiveCount: 0 }],
     });
     writeJson(path.join(sourceEpicDir, "annotations", "definition-annotations.json"), {
       version: 2,
@@ -171,6 +171,7 @@ describe("CodaScopeEpicBundleService", () => {
     expect(annotations.annotations[1]).toMatchObject({ id: "ann_reply", parentId: "ann_1", body: "Portable reply" });
     const designs = JSON.parse(readFileSync(path.join(targetEpicDir, "designs", "designs.json"), "utf-8"));
     expect(designs.docs[0].epicId).toBe(result.epic.id);
+    expect(designs.docs[0].template).toBe("legacy-api-spec-v1");
     const targetIndex = JSON.parse(readFileSync(path.join(targetProjectDir, "epics", "epics.json"), "utf-8"));
     expect(targetIndex.epics).toContainEqual(expect.objectContaining({ id: result.epic.id, projectId: targetProjectId }));
 

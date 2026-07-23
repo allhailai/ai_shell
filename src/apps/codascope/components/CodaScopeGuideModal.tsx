@@ -37,6 +37,14 @@ const TABS: { id: GuideTab; label: string }[] = [
   { id: "shortcuts", label: "Shortcuts" },
 ];
 
+export const DESIGN_DOCUMENT_GUIDE_COPY = {
+  description:
+    "Ask the assistant to create a freeform, context-specific design document grounded in the epic's research and code knowledge.",
+  archetypes: ["API specifications", "system designs", "data models", "user flows"],
+  refinement:
+    "These are examples of useful document structures. The assistant writes the complete document for the epic, and annotations support iterative refinement.",
+} as const;
+
 // ── Expandable Section ──────────────────────────────────────────────
 
 function ExpandableSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -336,9 +344,9 @@ function TabEpics() {
           </ExpandableSection>
           <ExpandableSection title="Design — Create design documents">
             <p>
-              Write design documents grounded in your research and code knowledge.
-              Use templates (API spec, data model, system design, user flow) or go freeform.
-              Annotate with targeted feedback for iterative refinement.
+              {DESIGN_DOCUMENT_GUIDE_COPY.description} Examples include{" "}
+              {DESIGN_DOCUMENT_GUIDE_COPY.archetypes.join(", ")}.{" "}
+              {DESIGN_DOCUMENT_GUIDE_COPY.refinement}
             </p>
           </ExpandableSection>
           <ExpandableSection title="History — Track changes and versions">

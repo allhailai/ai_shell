@@ -124,6 +124,77 @@ describe("tool tier builders", () => {
     }
   });
 
+  it("registers the exact design-document creation inputs", async () => {
+    const createDesignDoc = vi.fn(async (_projectId, epicId, input) => ({
+      id: "doc-created",
+      epicId,
+      title: input.title,
+      wordCount: input.content.split(/\s+/).length,
+    }));
+    const contractServices = {
+      ...services,
+      designDoc: { createDesignDoc },
+    };
+    const tool = buildEpicTools(PROJECT_ID, contractServices as any).create_design_doc;
+    const schema = tool.inputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "epicId", "title"]);
+    expect([...schema.required].sort()).toEqual(["content", "epicId", "title"]);
+
+    await tool.execute({
+      epicId: "epic-1",
+      title: "Scheduling Design",
+      content: "# Scheduling Design\n\nComplete context-grounded content.",
+      template: "api-spec",
+    }, {} as any);
+
+    expect(createDesignDoc).toHaveBeenCalledWith(PROJECT_ID, "epic-1", {
+      title: "Scheduling Design",
+      content: "# Scheduling Design\n\nComplete context-grounded content.",
+      createdBy: "agent",
+    });
+  });
+
+  it("does not expose legacy template metadata as an agent capability", async () => {
+    const legacyDoc = {
+      id: "doc-legacy",
+      epicId: "epic-1",
+      title: "Imported Design",
+      template: "api-spec",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      createdBy: "legacy-import",
+      wordCount: 3,
+      blockCount: 1,
+      annotationCount: 0,
+      directiveCount: 0,
+    };
+    const contractServices = {
+      ...services,
+      designDoc: {
+        listDesignDocs: vi.fn(async () => [legacyDoc]),
+        getDesignDoc: vi.fn(async () => ({
+          doc: legacyDoc,
+          content: "# Imported Design\n\nLegacy content.",
+          contentHash: "hash",
+        })),
+      },
+    };
+    const tools = buildReadOnlyTools(PROJECT_ID, contractServices as any);
+
+    expect(tools.list_design_docs.description).not.toMatch(/template/i);
+    const listed = String(await tools.list_design_docs.execute({ epicId: "epic-1" }, {} as any));
+    const read = String(await tools.read_design_doc.execute({ epicId: "epic-1", docId: "doc-legacy" }, {} as any));
+    expect(listed).not.toContain("api-spec");
+    expect(listed).not.toMatch(/template/i);
+    expect(read).not.toContain("api-spec");
+    expect(read).not.toMatch(/template/i);
+    expect(read).toContain("Legacy content.");
+  });
+
   it("fails agent annotation creation closed without an actor and records actor provenance when present", async () => {
     const createAnnotation = vi.fn(async () => ({ id: "ann-agent" }));
     const actorServices = {
