@@ -397,9 +397,9 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
           buildScope,
         );
 
-        completeSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, isAborted);
+        completeSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, callbacks);
       } catch (err) {
-        failSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, err, isAborted);
+        failSsePipeline(res, { projectId: id, scope: buildScope, buildSvc }, runId, err, callbacks);
       }
     })().catch(next);
   });

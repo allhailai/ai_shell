@@ -775,9 +775,49 @@ full-fidelity backup route.
 
 ### SSE Streaming
 
-Agent runs use Server-Sent Events:
-- **Live stream**: `POST /api/codascope/projects/:id/runs` → SSE response with events: `run-started`, `data`, `wiki-refresh`, `done`, `error`
-- **Reconnectable replay**: `GET /api/codascope/projects/:id/build-log/:runId/stream` → replays the `.log` file, then tails live if still running
+All fetch-based CodaScope streams use the stateful parser and transport in
+`codaScopeSseClient.ts`. The parser retains event names, multi-line data, and
+partial lines across arbitrary LF/CRLF network chunks, dispatches records only
+at blank-line boundaries, ignores comments/heartbeats, and flushes both the
+decoder and parser at EOF. Custom events are surfaced through the same parser;
+components may not implement their own byte or line parser.
+
+The canonical terminal contract is:
+
+- `done` is success, `error` is failure, and `cancelled` is cancellation.
+- Every operation emits exactly one terminal event and closes. Events after a
+  terminal are ignored by the client and rejected by the server's terminal
+  writer.
+- EOF before a valid terminal, incomplete trailing records, and malformed
+  terminal JSON are failures. HTTP non-2xx JSON or text errors are surfaced
+  before SSE processing begins.
+- Caller-initiated abort is cleanup, not success and not a server error. Server
+  cancellation is an explicit `cancelled` outcome and never calls `onDone`.
+- Domain events such as `research-complete` describe progress/results but are
+  not transport terminals. Research succeeds only after the following `done`.
+- Partial chat text may remain visible after failure, but it is marked
+  incomplete/error and is never persisted or rendered as a completed response.
+
+Terminal ownership is explicit by pipeline family:
+
+| Pipeline family | Terminal owner |
+|---|---|
+| Skill runs and generic `/runs` | `codaScopeBuildRoutes.ts` route callback through the exactly-once writer |
+| Analyze and Deep Run | build/deep orchestrator for normal `done`/`cancelled`; route writer for thrown errors and missing-terminal fail-closed checks |
+| Research and curation | route plus `ssePipelineHelper.ts`; research/curation custom events remain non-terminal |
+| Epic deepen | build orchestrator for normal terminal after build-state persistence; route/helper guards errors and duplicates |
+| Conversation messages and assistant | `codaScopeChatRoutes.ts`, after completed/error message persistence |
+| Build-log reconnect/replay | `codaScopeBuildRoutes.ts`, resolved by run ID across scoped and unscoped builds; missing/invalid/failed runs emit `error` |
+
+The live `POST /api/codascope/projects/:id/runs` stream emits progress such as
+`run-started`, message data, and `wiki-refresh` before its standard terminal.
+The reconnectable `GET /api/codascope/projects/:id/build-log/:runId/stream`
+replays the `.log`, tails a live run, and always emits the persisted terminal.
+
+The artifact build-status endpoint remains the one documented `EventSource`
+exception because it is GET-only status polling. Its domain status is still
+fail-closed: only `complete` succeeds; `idle`, malformed status, timeout,
+connection loss, and `error` fail. It is not a precedent for another parser.
 
 ### Project Storage
 

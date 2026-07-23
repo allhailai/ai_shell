@@ -26,7 +26,7 @@ import {
   IconSearch,
   IconWarning,
 } from "./CodaScopeIcons";
-import { connectToSseStream, parseSseChunk } from "../codaScopeSseClient";
+import { startSseStream } from "../codaScopeSseClient";
 import { useBuildState } from "../hooks/useBuildState";
 import { useCommandBus } from "../../../shell/hooks";
 
@@ -519,13 +519,10 @@ import type { SseStreamTarget } from "../codaScopeSseClient";
  * Resolves when the stream ends (onDone), rejects on error (onError).
  * Uses the shared connectToSseStream client.
  */
-function awaitSseStream(target: SseStreamTarget): Promise<void> {
-  return new Promise((resolve, reject) => {
-    connectToSseStream(target, {
-      onText: () => { /* discard — action cards don't render stream output */ },
-      onDone: () => resolve(),
-      onError: (error) => reject(new Error(error)),
-    });
+export function awaitSseStream(target: SseStreamTarget): Promise<void> {
+  return startSseStream(target).completion.then((terminal) => {
+    if (terminal.type === "error") throw new Error(terminal.error);
+    if (terminal.type === "cancelled") throw new Error("Operation was cancelled.");
   });
 }
 
@@ -534,138 +531,97 @@ function awaitSseStream(target: SseStreamTarget): Promise<void> {
 /**
  * Run the research pipeline via SSE, reporting live progress.
  *
- * The research endpoint emits custom events that differ from the standard
- * pipeline SSE events, so we consume the stream directly instead of using
- * connectToSseStream (which only knows about `done`/`error`/`pipeline-step`).
+ * Custom research events are progress only. The promise settles exclusively
+ * from the shared transport's standard done/error/cancelled terminal event.
  */
-function runResearchStream(
+export function runResearchStream(
   url: string,
   body: Record<string, unknown>,
   onProgress: (msg: string | null) => void,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    void (async () => {
-      try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok || !res.body) {
-          let errorText = "Failed to start research pipeline.";
-          try {
-            const data = await res.json();
-            errorText = data.error ?? data.message ?? errorText;
-          } catch {
-            errorText = await res.text();
-          }
-          reject(new Error(errorText));
-          return;
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          buffer = parseSseChunk(buffer, (event, data) => {
-            try {
-              const parsed = JSON.parse(data);
-
-              switch (event) {
-                case "research-started":
-                  onProgress("Starting research pipeline…");
-                  break;
-                case "research-step": {
-                  const step = parsed.step as string;
-                  if (step === "generate-plan") {
-                    onProgress("Phase 1/3 — Generating research plan…");
-                  } else if (step === "execute-downloads") {
-                    onProgress("Phase 2/3 — Downloading sources…");
-                  } else if (step === "process-sources") {
-                    onProgress("Phase 3/3 — Processing into wiki pages…");
-                  } else {
-                    onProgress(`Running: ${step}`);
-                  }
-                  break;
-                }
-                case "research-plan-generated": {
-                  const qc = parsed.queryCount ?? 0;
-                  const uc = parsed.urlCount ?? 0;
-                  onProgress(`Plan ready — ${qc} queries, ${uc} URLs to fetch`);
-                  break;
-                }
-                case "research-download-complete": {
-                  const s = parsed.succeeded ?? 0;
-                  const b = parsed.blocked ?? 0;
-                  const f = parsed.failed ?? 0;
-                  onProgress(`Downloads done — ${s} fetched, ${b} blocked, ${f} failed`);
-                  break;
-                }
-                case "research-complete":
-                  onProgress(null);
-                  resolve();
-                  return;
-                case "research-error":
-                  reject(new Error(parsed.error ?? "Research pipeline failed."));
-                  return;
-                case "research-cancelled":
-                  reject(new Error("Research pipeline was cancelled."));
-                  return;
-                case "done":
-                  onProgress(null);
-                  resolve();
-                  return;
-                case "error":
-                  reject(new Error(parsed.error ?? "Unknown error"));
-                  return;
-                case "research-download-progress": {
-                  const cur = parsed.current ?? 0;
-                  const tot = parsed.total ?? 0;
-                  onProgress(`Phase 2/3 — Downloading ${cur}/${tot}`);
-                  break;
-                }
-                case "research-processing": {
-                  const prog = parsed.progress ?? "";
-                  const title = parsed.sourceTitle ?? "";
-                  const shortTitle = title.length > 50 ? title.slice(0, 47) + "…" : title;
-                  onProgress(`Phase 3/3 — Source ${prog}: ${shortTitle}`);
-                  break;
-                }
-                case "research-synthesis-batch": {
-                  const idx = parsed.batchIndex ?? 0;
-                  const cnt = parsed.batchCount ?? 0;
-                  const label = parsed.topicLabel ?? "";
-                  onProgress(`Phase 3/3 — Synthesizing batch ${idx + 1}/${cnt}${label ? ` (${label})` : ""}…`);
-                  break;
-                }
-                case "research-page-written": {
-                  const pi = parsed.pageIndex ?? 0;
-                  const pc = parsed.pageCount ?? 0;
-                  const ptitle = parsed.title ?? "";
-                  onProgress(`Phase 3/3 — Created: ${ptitle} (${pi + 1}/${pc})`);
-                  break;
-                }
-                default:
-                  // Ignore other events (e.g. message)
-                  break;
+  const { completion } = startSseStream({ url, method: "POST", body }, {
+      onEvent: ({ event, data }) => {
+        if (event === "done" || event === "error" || event === "cancelled") return;
+        try {
+          const parsed = JSON.parse(data);
+          switch (event) {
+            case "research-started":
+              onProgress("Starting research pipeline…");
+              break;
+            case "research-step": {
+              const step = parsed.step as string;
+              if (step === "generate-plan") {
+                onProgress("Phase 1/3 — Generating research plan…");
+              } else if (step === "execute-downloads") {
+                onProgress("Phase 2/3 — Downloading sources…");
+              } else if (step === "process-sources") {
+                onProgress("Phase 3/3 — Processing into wiki pages…");
+              } else {
+                onProgress(`Running: ${step}`);
               }
-            } catch {
-              // Ignore malformed JSON
+              break;
             }
-          });
+            case "research-plan-generated": {
+              const qc = parsed.queryCount ?? 0;
+              const uc = parsed.urlCount ?? 0;
+              onProgress(`Plan ready — ${qc} queries, ${uc} URLs to fetch`);
+              break;
+            }
+            case "research-download-complete": {
+              const s = parsed.succeeded ?? 0;
+              const b = parsed.blocked ?? 0;
+              const f = parsed.failed ?? 0;
+              onProgress(`Downloads done — ${s} fetched, ${b} blocked, ${f} failed`);
+              break;
+            }
+            case "research-complete":
+              onProgress("Finalizing research results…");
+              break;
+            case "research-error":
+              onProgress("Research pipeline failed…");
+              break;
+            case "research-cancelled":
+              onProgress("Research pipeline was cancelled…");
+              break;
+            case "research-download-progress": {
+              const cur = parsed.current ?? 0;
+              const tot = parsed.total ?? 0;
+              onProgress(`Phase 2/3 — Downloading ${cur}/${tot}`);
+              break;
+            }
+            case "research-processing": {
+              const prog = parsed.progress ?? "";
+              const title = parsed.sourceTitle ?? "";
+              const shortTitle = title.length > 50 ? title.slice(0, 47) + "…" : title;
+              onProgress(`Phase 3/3 — Source ${prog}: ${shortTitle}`);
+              break;
+            }
+            case "research-synthesis-batch": {
+              const idx = parsed.batchIndex ?? 0;
+              const cnt = parsed.batchCount ?? 0;
+              const label = parsed.topicLabel ?? "";
+              onProgress(`Phase 3/3 — Synthesizing batch ${idx + 1}/${cnt}${label ? ` (${label})` : ""}…`);
+              break;
+            }
+            case "research-page-written": {
+              const pi = parsed.pageIndex ?? 0;
+              const pc = parsed.pageCount ?? 0;
+              const ptitle = parsed.title ?? "";
+              onProgress(`Phase 3/3 — Created: ${ptitle} (${pi + 1}/${pc})`);
+              break;
+            }
+            default:
+              // Ignore other events (e.g. message)
+              break;
+          }
+        } catch {
+          // Malformed non-terminal progress cannot decide stream success.
         }
-
-        // Stream ended without explicit done/error event
-        resolve();
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-      }
-    })();
+      },
+  });
+  return completion.then((terminal) => {
+    if (terminal.type === "error") throw new Error(terminal.error);
+    if (terminal.type === "cancelled") throw new Error("Research pipeline was cancelled.");
+    onProgress(null);
   });
 }

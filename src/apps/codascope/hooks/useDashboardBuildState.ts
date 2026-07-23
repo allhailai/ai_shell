@@ -213,6 +213,12 @@ export function useDashboardBuildState(
                 setAgentStatus("");
                 setRunningCommand(null);
               },
+              onCancelled: () => {
+                setAgentRunning(false);
+                setAgentStatus("");
+                setRunningCommand(null);
+                setBuildSummary("Build cancelled");
+              },
             },
           );
           streamRef.current = controller;
@@ -326,6 +332,13 @@ export function useDashboardBuildState(
         setAgentRunning(false);
         setAgentStatus("");
         setRunningCommand(null);
+      },
+      onCancelled: () => {
+        setAgentRunning(false);
+        setAgentStatus("");
+        setRunningCommand(null);
+        setBuildSummary("Build cancelled");
+        void refreshBuildLogs();
       },
     });
     streamRef.current = controller;

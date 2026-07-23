@@ -80,9 +80,11 @@ function request(body: Record<string, unknown>) {
 function response() {
   return {
     headersSent: false,
+    writableEnded: false,
     writeHead: vi.fn(),
     write: vi.fn(),
     end: vi.fn(),
+    on: vi.fn(),
     status: vi.fn(() => ({ json: vi.fn() })),
   };
 }

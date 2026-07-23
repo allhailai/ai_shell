@@ -70,6 +70,7 @@ export interface BuildLogEntry {
   pageCount: number | null;
   durationMs: number | null;
   pipelineSteps?: PipelineStepRecord[];
+  scope?: string;
   // ── Build Analytics ──
   totalTokens?: number;
   totalInputTokens?: number;
@@ -143,6 +144,33 @@ export class CodaScopeBuildStateService {
     this.projectDirs.set(projectId, projectDir);
   }
 
+  /** Repair a persisted in-progress run that has no live in-memory owner. */
+  private recoverInterruptedBuild(
+    state: BuildState,
+    persisted: BuildLogEntry,
+    metaPath: string,
+  ): BuildState {
+    if (state.status !== "building") return state;
+
+    const now = new Date();
+    const durationMs = now.getTime() - new Date(state.startedAt).getTime();
+    state.status = "error";
+    state.completedAt = now.toISOString();
+    state.error = "Build was interrupted by server restart.";
+    state.summary = `Interrupted after ${formatDuration(durationMs)}`;
+
+    const repaired: BuildLogEntry = {
+      ...persisted,
+      status: "error",
+      completedAt: state.completedAt,
+      summary: state.summary,
+      error: state.error,
+      durationMs,
+    };
+    writeFileSync(metaPath, JSON.stringify(repaired, null, 2), "utf-8");
+    return state;
+  }
+
   /**
    * Hydrate build state from disk for a given project.
    * If a build was "building" when the server crashed, mark it as interrupted.
@@ -209,27 +237,7 @@ export class CodaScopeBuildStateService {
           scope: logScope,
         };
 
-        // If the build was interrupted (still "building" on disk), mark it as crashed
-        if (state.status === "building") {
-          const now = new Date();
-          state.status = "error";
-          state.completedAt = now.toISOString();
-          state.error = "Build was interrupted by server restart.";
-          const startTime = new Date(state.startedAt).getTime();
-          const durationMs = now.getTime() - startTime;
-          state.summary = `Interrupted after ${formatDuration(durationMs)}`;
-
-          // Update the on-disk metadata too
-          const entry: BuildLogEntry = {
-            ...data,
-            status: "error",
-            completedAt: state.completedAt,
-            summary: state.summary,
-            error: state.error,
-            durationMs,
-          };
-          writeFileSync(file.path, JSON.stringify(entry, null, 2), "utf-8");
-        }
+        this.recoverInterruptedBuild(state, data, file.path);
 
         this.activeBuilds.set(key, state);
         return; // found the matching log, stop searching
@@ -561,6 +569,7 @@ export class CodaScopeBuildStateService {
       pageCount: pageCount ?? null,
       durationMs,
       pipelineSteps: state.pipelineSteps,
+      scope: state.scope,
       totalTokens: totalTokens > 0 ? totalTokens : undefined,
       totalInputTokens: totalInputTokens > 0 ? totalInputTokens : undefined,
       totalOutputTokens: totalOutputTokens > 0 ? totalOutputTokens : undefined,
@@ -581,6 +590,47 @@ export class CodaScopeBuildStateService {
     // Hydrate from disk if we haven't seen this key yet
     this.hydrateFromDisk(projectId, scope);
     return this.activeBuilds.get(this.buildKey(projectId, scope)) ?? null;
+  }
+
+  /** Resolve a build by its run ID across unscoped and scoped pipelines. */
+  getBuildStateByRunId(projectId: string, runId: string): BuildState | null {
+    assertSafePathSegment(runId, "run ID");
+    for (const [key, state] of this.activeBuilds) {
+      const belongsToProject = key === projectId || key.startsWith(`${projectId}::`);
+      if (belongsToProject && state.runId === runId) return state;
+    }
+
+    const metaPath = this.runMetadataPath(projectId, runId);
+    if (!existsSync(metaPath)) return null;
+    try {
+      const data = JSON.parse(readFileSync(metaPath, "utf-8")) as BuildLogEntry & Partial<BuildState>;
+      if (
+        data.runId !== runId
+        || !["idle", "building", "complete", "error"].includes(data.status ?? "")
+        || typeof data.command !== "string"
+        || typeof data.modelId !== "string"
+        || typeof data.startedAt !== "string"
+      ) {
+        return null;
+      }
+      const state: BuildState = {
+        runId,
+        status: data.status as BuildStatus,
+        command: data.command,
+        modelId: data.modelId,
+        startedAt: data.startedAt,
+        completedAt: typeof data.completedAt === "string" ? data.completedAt : null,
+        summary: typeof data.summary === "string" ? data.summary : null,
+        error: typeof data.error === "string" ? data.error : null,
+        outputLength: typeof data.outputLength === "number" ? data.outputLength : 0,
+        pipelineSteps: Array.isArray(data.pipelineSteps) ? data.pipelineSteps : [],
+        ...(typeof data.scope === "string" ? { scope: data.scope } : {}),
+        ...(data.buildType === "analyze" || data.buildType === "deep-run" ? { buildType: data.buildType } : {}),
+      };
+      return this.recoverInterruptedBuild(state, data, metaPath);
+    } catch {
+      return null;
+    }
   }
 
   /** Read the output log file for a given run. Returns the text content. */

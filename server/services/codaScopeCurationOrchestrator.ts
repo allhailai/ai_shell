@@ -102,7 +102,6 @@ export async function runCurationPipeline(
     });
 
     if (isAborted()) {
-      sendEvent("cancelled", {});
       return;
     }
 
@@ -187,7 +186,6 @@ export async function runCurationPipeline(
     sendEvent("pipeline-step", { step: "build-context", status: "complete" });
 
     if (isAborted()) {
-      sendEvent("cancelled", {});
       await curationSvc.updateLog(projectId, epicId, curationId, {
         status: "error",
         error: "Cancelled by user",
@@ -259,7 +257,6 @@ export async function runCurationPipeline(
     });
 
     if (isAborted()) {
-      sendEvent("cancelled", {});
       await curationSvc.updateLog(projectId, epicId, curationId, {
         status: "error",
         error: "Cancelled by user",

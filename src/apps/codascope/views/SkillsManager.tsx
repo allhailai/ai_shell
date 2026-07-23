@@ -70,6 +70,7 @@ export function SkillsManager() {
             onText: (text) => setRunOutput((prev) => prev + text),
             onDone: () => resolve(),
             onError: (error) => reject(new Error(error)),
+            onCancelled: () => reject(new Error("Skill run was cancelled.")),
           },
         );
       });

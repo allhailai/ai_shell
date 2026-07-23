@@ -117,6 +117,13 @@ export function useBuildState(options: UseBuildStateOptions): UseBuildStateResul
                 setProgressMsg(null);
               }
             },
+            onCancelled: () => {
+              if (!cancelled) {
+                setStatus("error");
+                setError("Build was cancelled.");
+                setProgressMsg(null);
+              }
+            },
           });
           abortRef.current = ctrl;
 

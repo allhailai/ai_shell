@@ -155,6 +155,7 @@ export function WikiBrowser() {
             onText: (text) => setBuildLog((prev) => prev + text),
             onDone: () => resolve(),
             onError: (error) => reject(new Error(error)),
+            onCancelled: () => reject(new Error("Build was cancelled.")),
             onWikiRefresh: () => void refreshTopics(),
           },
         );

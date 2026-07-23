@@ -450,9 +450,9 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
           },
         );
 
-        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, isAborted);
+        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, callbacks);
       } catch (err) {
-        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, isAborted);
+        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, callbacks);
       }
     } catch (err) {
       handlePreStreamError(res, err);
@@ -513,9 +513,9 @@ export function registerKnowledgeRoutes(ctx: CodaScopeRouteContext): void {
           },
         );
 
-        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, isAborted);
+        completeSsePipeline(res, { projectId: id, scope, buildSvc }, runId, callbacks);
       } catch (err) {
-        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, isAborted);
+        failSsePipeline(res, { projectId: id, scope, buildSvc }, runId, err, callbacks);
       }
     } catch (err) {
       handlePreStreamError(res, err);

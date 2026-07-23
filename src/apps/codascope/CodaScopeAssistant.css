@@ -392,6 +392,23 @@
   padding: var(--space-1) 0;
 }
 
+.codascope-assistant-msg-error .codascope-assistant-msg-content {
+  border-left: 2px solid var(--color-danger);
+  padding-left: var(--space-2);
+}
+
+.codascope-assistant-msg-error-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* Markdown inside assistant messages */
 .codascope-assistant-msg-assistant .shared-md-viewer {
   font-size: var(--text-sm);
@@ -2326,4 +2343,3 @@
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
 }
-

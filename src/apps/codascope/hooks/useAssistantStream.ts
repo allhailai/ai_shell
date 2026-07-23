@@ -8,14 +8,15 @@
    - Provides cancel support (client + server-side)
    - Returns streaming state for the UI layer
 
-   NOTE: This hook intentionally keeps inline SSE parsing (not using
-   codaScopeSseClient.ts) because the chat stream has specialized
-   handling for action parsing, auto-title, and per-block text
-   accumulation that doesn't fit the generic SSE client interface.
+   Parsing and terminal enforcement are delegated to codaScopeSseClient.ts.
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useRef, useCallback } from "react";
 import type { CodaScopeAction } from "../components/ActionCard";
+import {
+  consumeSseResponse,
+  SseProtocolError,
+} from "../codaScopeSseClient";
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
@@ -50,6 +51,74 @@ interface StreamOptions {
 interface StreamResult {
   assistantMessage: ChatMessage | null;
   newTitle?: string;
+}
+
+export type AssistantStreamOutcome =
+  | {
+      status: "complete";
+      content: string;
+      actions: CodaScopeAction[];
+      conversationId?: string;
+    }
+  | {
+      status: "error";
+      content: string;
+      error: string;
+      conversationId?: string;
+    }
+  | { status: "cancelled"; content: string };
+
+/** Consume chat SSE while retaining partial text for an explicit error result. */
+export async function consumeAssistantStreamResponse(
+  response: Response,
+  signal: AbortSignal | undefined,
+  onText: (content: string) => void,
+): Promise<AssistantStreamOutcome> {
+  let accumulated = "";
+  try {
+    const terminal = await consumeSseResponse(response, {
+      onText: (text) => {
+        accumulated += text;
+        onText(accumulated);
+      },
+    }, signal);
+
+    if (terminal.type === "cancelled") {
+      return { status: "cancelled", content: accumulated };
+    }
+
+    const conversationId = terminal.data.conversationId;
+    if (conversationId !== undefined && typeof conversationId !== "string") {
+      throw new SseProtocolError(`Malformed ${terminal.type} terminal event payload.`);
+    }
+
+    if (terminal.type === "error") {
+      return {
+        status: "error",
+        content: accumulated,
+        error: terminal.error,
+        ...(typeof conversationId === "string" ? { conversationId } : {}),
+      };
+    }
+
+    const rawActions = terminal.data.actions;
+    if (rawActions !== undefined && !Array.isArray(rawActions)) {
+      throw new SseProtocolError("Malformed done terminal event payload.");
+    }
+    return {
+      status: "complete",
+      content: accumulated,
+      actions: (rawActions ?? []) as CodaScopeAction[],
+      ...(typeof conversationId === "string" ? { conversationId } : {}),
+    };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw err;
+    return {
+      status: "error",
+      content: accumulated,
+      error: err instanceof Error ? err.message : "Network error.",
+    };
+  }
 }
 
 interface UseAssistantStreamResult {
@@ -106,64 +175,36 @@ export function useAssistantStream(
         },
       );
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Request failed" }));
-        throw new Error((err as { error?: string }).error ?? `HTTP ${response.status}`);
+      const outcome = await consumeAssistantStreamResponse(
+        response,
+        controller.signal,
+        setStreamingContent,
+      );
+      if (outcome.status !== "cancelled" && outcome.conversationId) {
+        setActiveConversationId(outcome.conversationId);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      let buffer = "";
-      let parsedActions: CodaScopeAction[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.type === "assistant" && data.message?.content) {
-                for (const block of data.message.content) {
-                  if (block.type === "text") {
-                    accumulated += block.text;
-                    setStreamingContent(accumulated);
-                  }
-                }
-              }
-              // Capture actions from done event
-              if (data.actions && Array.isArray(data.actions)) {
-                parsedActions = data.actions as CodaScopeAction[];
-              }
-              // Capture conversation ID if it was just created
-              if (data.conversationId) {
-                setActiveConversationId(data.conversationId);
-              }
-            } catch {
-              // Skip malformed JSON
-            }
-          }
-          // "event: done" line is consumed; the data line above handles the payload.
-        }
+      if (outcome.status === "cancelled") {
+        return { assistantMessage: null };
       }
 
       // Build the final assistant message
       let assistantMessage: ChatMessage | null = null;
-      if (accumulated) {
+      if (outcome.status === "error") {
+        const failureText = `**Stream failed:** ${outcome.error}`;
+        assistantMessage = {
+          id: `error-${Date.now()}`,
+          role: "assistant",
+          content: outcome.content ? `${outcome.content}\n\n${failureText}` : failureText,
+          status: "error",
+        };
+      } else if (outcome.content) {
         assistantMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
-          content: accumulated,
+          content: outcome.content,
           status: "complete",
-          metadata: parsedActions.length > 0 ? { actions: parsedActions } : undefined,
+          metadata: outcome.actions.length > 0 ? { actions: outcome.actions } : undefined,
         };
       }
 

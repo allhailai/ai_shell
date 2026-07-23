@@ -117,7 +117,6 @@ export async function runResearchPipeline(
     );
 
     if (isAborted()) {
-      sendEvent("research-cancelled", {});
       await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
@@ -156,7 +155,6 @@ export async function runResearchPipeline(
     );
 
     if (isAborted()) {
-      sendEvent("research-cancelled", {});
       await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
@@ -214,7 +212,6 @@ export async function runResearchPipeline(
     }
 
     if (isAborted()) {
-      sendEvent("research-cancelled", {});
       await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "cancelled", report, parentQueryId);
       return report;
     }
@@ -229,7 +226,7 @@ export async function runResearchPipeline(
     const errorMsg = err instanceof Error ? err.message : String(err);
     sendEvent("research-error", { error: errorMsg });
     await writeLogEntry(epicKnowledgeSvc, projectId, epicId, topics, "error", report, parentQueryId).catch(() => {});
-    return report;
+    throw err;
   }
 }
 

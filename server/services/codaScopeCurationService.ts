@@ -19,6 +19,7 @@ import type {
   CurationReasons,
   CurationLogEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { startBackgroundSsePump } from "./codaScopeBackgroundSse.js";
 import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
@@ -304,12 +305,8 @@ export class CodaScopeCurationService {
 
       // Consume the SSE stream in the background so the connection stays alive.
       // The pipeline runs server-side; we just need to keep the client connection open.
-      if (res.body) {
-        const reader = (res.body as unknown as ReadableStream<Uint8Array>).getReader();
-        const pump = (): void => {
-          void reader.read().then(({ done }) => { if (!done) pump(); });
-        };
-        pump();
+      if (!startBackgroundSsePump(res, "curation-start")) {
+        return { success: false, error: "Curation stream did not include a response body." };
       }
 
       return { success: true };

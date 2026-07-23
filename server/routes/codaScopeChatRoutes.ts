@@ -20,6 +20,7 @@ import {
   type SelectionContext,
 } from "../services/codaScopeChatOrchestrator.js";
 import type { MessageContext } from "../services/codaScopeChatService.js";
+import { createSseTerminalWriter } from "./utils/ssePipelineHelper.js";
 
 function parseMessageContext(value: Record<string, unknown> | undefined): MessageContext | null {
   if (!value || typeof value.view !== "string" || !value.view.trim()) return null;
@@ -322,9 +323,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      req.on("close", () => {
+      res.on("close", () => {
         aborted = true;
       });
+      const terminal = createSseTerminalWriter(res, () => aborted);
 
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
@@ -336,7 +338,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           agentSvc,
           ...(sdkImages.length > 0 ? { images: sdkImages } : {}),
           onMessage: (msg) => {
-            if (aborted) return;
+            if (aborted || terminal.terminalEvent()) return;
             res.write(`data: ${JSON.stringify(msg)}\n\n`);
           },
         });
@@ -367,10 +369,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         } catch {
           // Best effort persistence
         }
-        if (!aborted) {
-          res.write(`event: done\ndata: ${JSON.stringify({ ...agentResult as object, conversationId: convId, actions })}\n\n`);
-          res.end();
-        }
+        terminal.done({ ...agentResult as object, conversationId: convId, actions });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
@@ -391,10 +390,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         } catch {
           // Best effort
         }
-        if (!aborted) {
-          res.write(`event: error\ndata: ${JSON.stringify({ error: errMsg })}\n\n`);
-          res.end();
-        }
+        terminal.error(errMsg);
       }
     })().catch(next);
   });
@@ -467,9 +463,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      req.on("close", () => {
+      res.on("close", () => {
         aborted = true;
       });
+      const terminal = createSseTerminalWriter(res, () => aborted);
 
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
@@ -480,7 +477,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           systemPrompt,
           agentSvc,
           onMessage: (msg) => {
-            if (aborted) return;
+            if (aborted || terminal.terminalEvent()) return;
             res.write(`data: ${JSON.stringify(msg)}\n\n`);
           },
         });
@@ -494,10 +491,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
             metadata: actions.length > 0 ? { actions } : undefined,
           }).catch(() => { /* best effort */ });
         }
-        if (!aborted) {
-          res.write(`event: done\ndata: ${JSON.stringify({ ...agentResult as object, conversationId: convId, actions })}\n\n`);
-          res.end();
-        }
+        terminal.done({ ...agentResult as object, conversationId: convId, actions });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
@@ -509,10 +503,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
             status: "error",
           }).catch(() => { /* best effort */ });
         }
-        if (!aborted) {
-          res.write(`event: error\ndata: ${JSON.stringify({ error: errMsg, conversationId: convId })}\n\n`);
-          res.end();
-        }
+        terminal.sendEvent("error", { error: errMsg, conversationId: convId });
       }
     })().catch(next);
   });

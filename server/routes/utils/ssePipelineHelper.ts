@@ -21,6 +21,20 @@ export interface SseCallbacks {
   sendEvent: (event: string, data: unknown) => void;
   sendMessage: (msg: unknown) => void;
   isAborted: () => boolean;
+  isClientDisconnected: () => boolean;
+  isCancelled: () => boolean;
+  terminal: SseTerminalWriter;
+}
+
+export type StandardSseTerminalEvent = "done" | "error" | "cancelled";
+
+export interface SseTerminalWriter {
+  sendEvent: (event: string, data: unknown) => boolean;
+  done: (data?: Record<string, unknown>) => boolean;
+  error: (error: unknown) => boolean;
+  cancelled: (data?: Record<string, unknown>) => boolean;
+  terminalEvent: () => StandardSseTerminalEvent | null;
+  isResponseEnding: () => boolean;
 }
 
 export interface SsePipelineConfig {
@@ -41,6 +55,98 @@ export interface SsePipelineConfig {
 export interface SsePipelineResult {
   runId: string;
   callbacks: SseCallbacks;
+}
+
+/** Exactly-once SSE writer shared by every route that owns a stream terminal. */
+export function createSseTerminalWriter(
+  res: Response,
+  isClientDisconnected: () => boolean = () => false,
+): SseTerminalWriter {
+  let terminal: StandardSseTerminalEvent | null = null;
+  let responseEnding = false;
+  let terminalPublishing = false;
+
+  const serializeFrame = (event: string, data: unknown): string => {
+    const payload = JSON.stringify(data);
+    if (typeof payload !== "string") {
+      throw new TypeError(`SSE ${event} payload did not serialize to JSON.`);
+    }
+    return `event: ${event}\ndata: ${payload}\n\n`;
+  };
+
+  const write = (event: string, data: unknown): boolean => {
+    if (terminal || terminalPublishing || isClientDisconnected() || res.writableEnded) return false;
+    const frame = serializeFrame(event, data);
+    res.write(frame);
+    return true;
+  };
+
+  const writeTerminal = (event: StandardSseTerminalEvent, data: Record<string, unknown>): boolean => {
+    if (terminal || terminalPublishing || isClientDisconnected() || res.writableEnded) return false;
+    terminalPublishing = true;
+
+    try {
+      let publishedEvent = event;
+      let frame: string;
+      try {
+        frame = serializeFrame(event, data);
+      } catch {
+        publishedEvent = "error";
+        frame = serializeFrame("error", {
+          error: `Server could not serialize ${event} terminal payload.`,
+        });
+      }
+
+      // Serialization and validation are complete before terminal ownership.
+      // res.write accepts the full frame synchronously, even when it reports
+      // backpressure with a false return value.
+      res.write(frame);
+      terminal = publishedEvent;
+      responseEnding = true;
+      res.end();
+      return true;
+    } finally {
+      terminalPublishing = false;
+    }
+  };
+
+  return {
+    sendEvent: (event, data) => {
+      const objectData = data && typeof data === "object" && !Array.isArray(data)
+        ? data as Record<string, unknown>
+        : null;
+      if (event === "done") {
+        return objectData
+          ? writeTerminal("done", objectData)
+          : writeTerminal("error", { error: "Server produced a malformed done terminal payload." });
+      }
+      if (event === "cancelled") {
+        return objectData
+          ? writeTerminal("cancelled", objectData)
+          : writeTerminal("error", { error: "Server produced a malformed cancelled terminal payload." });
+      }
+      if (event === "error") {
+        const message = objectData?.error;
+        return writeTerminal("error", {
+          ...(objectData ?? {}),
+          error: typeof message === "string" && message.trim()
+            ? message
+            : "SSE pipeline failed without an error message.",
+        });
+      }
+      return write(event, data);
+    },
+    done: (data = {}) => writeTerminal("done", data),
+    error: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return writeTerminal("error", {
+        error: message.trim() ? message : "SSE pipeline failed without an error message.",
+      });
+    },
+    cancelled: (data = {}) => writeTerminal("cancelled", data),
+    terminalEvent: () => terminal,
+    isResponseEnding: () => responseEnding,
+  };
 }
 
 /* ── SSE Pipeline Handler ────────────────────────────────────────── */
@@ -89,25 +195,40 @@ export function initSsePipeline(
     "X-Accel-Buffering": "no",
   });
 
-  // Abort tracking
-  let aborted = false;
-  req.on("close", () => { aborted = true; });
-
-  const isAborted = () => aborted || buildSvc.isCancelled(projectId, scope);
+  // Keep transport disconnect separate from deliberate server cancellation.
+  let clientDisconnected = false;
+  const isClientDisconnected = () => clientDisconnected;
+  const isCancelled = () => buildSvc.isCancelled(projectId, scope);
+  const isAborted = () => isClientDisconnected() || isCancelled();
+  const terminal = createSseTerminalWriter(res, isClientDisconnected);
+  res.on("close", () => {
+    if (!terminal.isResponseEnding()) clientDisconnected = true;
+  });
 
   const sendEvent = (event: string, data: unknown) => {
-    if (isAborted()) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const standardTerminal = event === "done" || event === "error" || event === "cancelled";
+    if (!standardTerminal && isAborted()) return;
+    terminal.sendEvent(event, data);
   };
 
   const sendMessage = (msg: unknown) => {
     const msgJson = JSON.stringify(msg);
     buildSvc.appendOutput(projectId, runId, msgJson + "\n", scope);
-    if (isAborted()) return;
+    if (isAborted() || terminal.terminalEvent()) return;
     res.write(`event: message\ndata: ${msgJson}\n\n`);
   };
 
-  return { runId, callbacks: { sendEvent, sendMessage, isAborted } };
+  return {
+    runId,
+    callbacks: {
+      sendEvent,
+      sendMessage,
+      isAborted,
+      isClientDisconnected,
+      isCancelled,
+      terminal,
+    },
+  };
 }
 
 /**
@@ -117,13 +238,24 @@ export function completeSsePipeline(
   res: Response,
   config: Pick<SsePipelineConfig, "projectId" | "scope" | "buildSvc">,
   runId: string,
-  isAborted: () => boolean,
+  callbacks: Pick<SseCallbacks, "isAborted" | "isClientDisconnected" | "isCancelled" | "terminal">,
 ): void {
-  config.buildSvc.completeBuild(config.projectId, runId, undefined, undefined, config.scope);
-  if (!isAborted()) {
-    res.write(`event: done\ndata: ${JSON.stringify({})}\n\n`);
-    res.end();
+  const existingTerminal = callbacks.terminal.terminalEvent();
+  if (existingTerminal) {
+    if (existingTerminal === "cancelled" && callbacks.isCancelled()) {
+      config.buildSvc.clearCancellation(config.projectId, config.scope);
+    }
+    return;
   }
+
+  if (callbacks.isAborted()) {
+    config.buildSvc.failBuild(config.projectId, runId, "Pipeline cancelled.", config.scope);
+    if (callbacks.isCancelled()) config.buildSvc.clearCancellation(config.projectId, config.scope);
+    callbacks.terminal.cancelled({ runId });
+    return;
+  }
+  config.buildSvc.completeBuild(config.projectId, runId, undefined, undefined, config.scope);
+  callbacks.terminal.done({});
 }
 
 /**
@@ -134,14 +266,13 @@ export function failSsePipeline(
   config: Pick<SsePipelineConfig, "projectId" | "scope" | "buildSvc">,
   runId: string,
   error: unknown,
-  isAborted: () => boolean,
+  callbacks: Pick<SseCallbacks, "isCancelled" | "terminal">,
 ): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (callbacks.terminal.terminalEvent()) return;
   config.buildSvc.failBuild(config.projectId, runId, message, config.scope);
-  if (!isAborted()) {
-    res.write(`event: error\ndata: ${JSON.stringify({ error: message })}\n\n`);
-    res.end();
-  }
+  if (callbacks.isCancelled()) config.buildSvc.clearCancellation(config.projectId, config.scope);
+  callbacks.terminal.error(message);
 }
 
 /**
@@ -155,7 +286,6 @@ export function handlePreStreamError(res: Response, error: unknown): void {
     const status = (error as any)?.status ?? 500;
     res.status(status).json({ error: message });
   } else {
-    res.write(`event: error\ndata: ${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n\n`);
-    res.end();
+    createSseTerminalWriter(res).error(error);
   }
 }

@@ -208,6 +208,9 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
       const epicId = param(req, "epicId");
       const artId = param(req, "artId");
 
+      const artifact = await artifactSvc.getArtifact(id, epicId, artId);
+      if (!artifact) throw httpError("Artifact not found.", 404, "not_found");
+
       // SSE headers
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -217,7 +220,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      req.on("close", () => { aborted = true; });
+      res.on("close", () => { aborted = true; });
 
       // Poll build status every 500ms
       const poll = setInterval(() => {
@@ -225,19 +228,38 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
           clearInterval(poll);
           return;
         }
-        const status = artifactSvc.getBuildStatus(id, epicId, artId);
-        res.write(`data: ${JSON.stringify(status)}\n\n`);
+        try {
+          const status = artifactSvc.getBuildStatus(id, epicId, artId);
+          res.write(`data: ${JSON.stringify(status)}\n\n`);
 
-        if (status.status === "complete" || status.status === "error" || status.status === "idle") {
+          if (status.status === "complete" || status.status === "error" || status.status === "idle") {
+            clearInterval(poll);
+            if (!aborted) res.end();
+          }
+        } catch (err) {
           clearInterval(poll);
-          if (!aborted) res.end();
+          if (!aborted) {
+            res.write(`data: ${JSON.stringify({
+              artifactId: artId,
+              status: "error",
+              error: err instanceof Error ? err.message : String(err),
+            })}\n\n`);
+            res.end();
+          }
         }
       }, 500);
 
       // Timeout after 5 minutes
       setTimeout(() => {
         clearInterval(poll);
-        if (!aborted) res.end();
+        if (!aborted && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({
+            artifactId: artId,
+            status: "error",
+            error: "Artifact build status stream timed out.",
+          })}\n\n`);
+          res.end();
+        }
       }, 5 * 60 * 1000);
     })().catch(next);
   });

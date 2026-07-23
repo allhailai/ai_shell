@@ -66,7 +66,7 @@ When adding a new icon:
 
 ### 4. SSE Streaming — ReadableStream Pattern
 
-All streaming uses `fetch` + `ReadableStream`, **not** `EventSource`. Use the shared `codaScopeSseClient.ts` module:
+All streaming uses `fetch` + `ReadableStream`, **not** `EventSource`. Use the shared stateful parser and transport in `codaScopeSseClient.ts`:
 
 ```typescript
 import { connectToSseStream } from "../codaScopeSseClient";
@@ -81,7 +81,30 @@ const controller = connectToSseStream(url, {
 
 Do not duplicate the SSE parsing logic — always import from `codaScopeSseClient.ts`.
 
-> **Exception**: `artifactApi.ts` uses the browser-native `EventSource` API for GET-based SSE polling of artifact build status. This is an acceptable deviation because `connectToSseStream` is designed for POST-based SSE streams, while the artifact status endpoint is a GET-only polling endpoint.
+The transport contract is strict:
+
+- `done` is the only standard success terminal; `error` is failure and
+  `cancelled` is cancellation, never success.
+- A stream must emit exactly one standard terminal and then close. EOF before
+  a terminal, an incomplete trailing record, or a malformed terminal payload
+  is a transport failure.
+- Caller abort is silent transport cleanup. It must not call `onDone` or be
+  converted into a user-facing network error. A server `cancelled` event uses
+  `onCancelled` and must never fall back to success.
+- Custom/domain events such as `research-complete` are progress only. Consume
+  them through `onEvent`; never add another byte, line, or chunk parser.
+- Promise consumers use `startSseStream(...).completion`; callback consumers
+  use `connectToSseStream()`. Both share the same parser, HTTP error handling,
+  terminal validation, decoder flush, and unexpected-EOF behavior.
+- On the server, every route family has one terminal owner and uses the
+  exactly-once writer in `server/routes/utils/ssePipelineHelper.ts`. Exceptions
+  after SSE headers are sent must become an `error` event before closure.
+
+> **Exception**: `artifactApi.ts` intentionally retains browser-native
+> `EventSource` for its GET-only artifact status subscription and automatic
+> connection lifecycle; it is the only CodaScope streaming exception.
+> Its domain status still fails closed: only `complete` succeeds; `idle`,
+> malformed data, timeout, connection loss, and `error` all fail.
 
 ### 5. Backend Services — Single Responsibility
 

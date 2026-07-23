@@ -11,6 +11,7 @@ import { searchWeb } from "../codaScopeWebSearchService.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 import { formatCompletedAction } from "../codaScopeActionParser.js";
 import { isPersistenceDomainError } from "../codaScopePersistence.js";
+import { startBackgroundSsePump } from "../codaScopeBackgroundSse.js";
 
 /**
  * Build epic-related write tools and new read tools.
@@ -375,10 +376,8 @@ export function buildEpicTools(
 
           // Keep the internal SSE connection alive while the server executes
           // the pipeline. Progress remains available through build state.
-          if (response.body) {
-            const reader = response.body.getReader();
-            const pump = (): void => { void reader.read().then(({ done }) => { if (!done) pump(); }); };
-            pump();
+          if (!startBackgroundSsePump(response, "research-start")) {
+            return "Failed to start research: stream did not include a response body.";
           }
           return completed(
             "start_research",

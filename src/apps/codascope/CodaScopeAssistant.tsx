@@ -17,7 +17,7 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend } from "./components/CodaScopeIcons";
+import { IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend, IconWarning } from "./components/CodaScopeIcons";
 import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
@@ -925,14 +925,21 @@ export function CodaScopeAssistant() {
           return (
             <div key={msg.id}>
               <div
-                className={`codascope-assistant-msg codascope-assistant-msg-${msg.role}`}
+                className={`codascope-assistant-msg codascope-assistant-msg-${msg.role}${msg.status === "error" ? " codascope-assistant-msg-error" : ""}`}
               >
                 <div className="codascope-assistant-msg-avatar">
                   {msg.role === "user" ? "👤" : "🤖"}
                 </div>
                 <div className="codascope-assistant-msg-content">
                   {msg.role === "assistant" ? (
-                    <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId, currentEpicId)} />
+                    <>
+                      {msg.status === "error" && (
+                        <div className="codascope-assistant-msg-error-label">
+                          <IconWarning size={12} /> Incomplete response
+                        </div>
+                      )}
+                      <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId, currentEpicId)} />
+                    </>
                   ) : (
                     <>
                       {msg.images && msg.images.length > 0 && (

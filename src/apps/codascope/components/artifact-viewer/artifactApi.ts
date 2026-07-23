@@ -129,26 +129,58 @@ export function subscribeBuildStatus(
 ): () => void {
   const url = buildStatusUrl(projectId, epicId, artifactId);
   const es = new EventSource(url);
-  es.onmessage = (event) => {
+  let terminalSettled = false;
+
+  const settle = (callback: () => void): void => {
+    if (terminalSettled) return;
+    terminalSettled = true;
+    es.close();
     try {
-      const data = JSON.parse(event.data) as ArtifactBuildProgress;
-      onProgress(data);
-      if (data.status === "complete" || data.status === "idle") {
-        es.close();
-        onDone();
-      } else if (data.status === "error") {
-        es.close();
-        onError(new Error(data.error ?? "Build failed"));
-      }
+      callback();
     } catch {
-      // ignore parse errors
+      // Consumer callback failures must not produce a second terminal outcome.
+    }
+  };
+
+  es.onmessage = (event) => {
+    if (terminalSettled) return;
+    let data: ArtifactBuildProgress;
+    try {
+      const parsed: unknown = JSON.parse(event.data);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new TypeError("Artifact build status must be an object.");
+      }
+      const status = (parsed as { status?: unknown }).status;
+      if (!["idle", "building", "regenerating", "complete", "error"].includes(String(status))) {
+        throw new TypeError("Artifact build status is invalid.");
+      }
+      data = parsed as ArtifactBuildProgress;
+    } catch {
+      settle(() => onError(new Error("Artifact build stream returned malformed status data.")));
+      return;
+    }
+
+    try {
+      onProgress(data);
+    } catch {
+      // Progress observers do not own transport or terminal state.
+    }
+
+    if (data.status === "complete") {
+      settle(onDone);
+    } else if (data.status === "error") {
+      settle(() => onError(new Error(data.error ?? "Build failed")));
+    } else if (data.status === "idle") {
+      settle(() => onError(new Error("Artifact build stream has no active run.")));
     }
   };
   es.onerror = () => {
-    es.close();
-    onError(new Error("SSE connection lost"));
+    settle(() => onError(new Error("SSE connection lost")));
   };
-  return () => es.close();
+  return () => {
+    terminalSettled = true;
+    es.close();
+  };
 }
 
 /* ── Preview ──────────────────────────────────────────────────────── */

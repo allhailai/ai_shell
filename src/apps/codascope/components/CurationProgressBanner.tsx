@@ -10,7 +10,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { connectToSseStream } from "../codaScopeSseClient";
+import { connectToSseStream, responseErrorMessage } from "../codaScopeSseClient";
 import { IconCurate, IconClose, IconCheckCircle, IconWarning } from "./CodaScopeIcons";
 
 /* ── Types ───────────────────────────────────────────────────────────── */
@@ -47,13 +47,15 @@ function useReconnectPolling(
         const res = await fetch(
           `/api/codascope/projects/${projectId}/build-status?scope=curation::${epicId}`,
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          onError(await responseErrorMessage(res, "Failed to reconnect to curation."));
+          return;
+        }
         const data = await res.json();
         const build = data.build;
 
         if (!build) {
-          // No build found — curation may have completed before we started polling
-          onComplete();
+          onError("Curation run was not found while reconnecting.");
           return;
         }
 
@@ -71,9 +73,11 @@ function useReconnectPolling(
           onComplete();
         } else if (build.status === "error") {
           onError(build.error ?? "Curation failed");
+        } else {
+          onError("Curation run has an invalid state.");
         }
-      } catch {
-        // Network error — keep polling
+      } catch (err) {
+        onError(err instanceof Error ? err.message : "Failed to reconnect to curation.");
       }
     };
 
@@ -163,6 +167,11 @@ export function CurationProgressBanner({
           setState("error");
           setErrorMsg(error);
           setStepText("Curation failed");
+        },
+        onCancelled: () => {
+          setState("error");
+          setErrorMsg("Curation was cancelled.");
+          setStepText("Curation cancelled");
         },
       },
     );

@@ -14,6 +14,7 @@ import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
 import { useShellStore } from "../../../shell/store";
 import { MarkdownViewer } from "../../../shared/markdown";
+import { startSseStream } from "../codaScopeSseClient";
 import { SourceUpload } from "../components/SourceUpload";
 import { BlockedDownloadItem } from "../components/BlockedDownloadItem";
 import { ErrorSourceItem } from "../components/ErrorSourceItem";
@@ -771,6 +772,7 @@ function ResearchQueryLogSection({ epic, entries, onChanged }: ResearchQueryLogS
   const { activeProjectId } = useCodaScopeStore();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deepeningId, setDeepeningId] = useState<string | null>(null);
+  const [deepeningError, setDeepeningError] = useState<string | null>(null);
 
   const handleDelete = useCallback(async (entryId: string) => {
     if (!activeProjectId) return;
@@ -797,39 +799,26 @@ function ResearchQueryLogSection({ epic, entries, onChanged }: ResearchQueryLogS
       return;
     }
     setDeepeningId(entry.id);
+    setDeepeningError(null);
     try {
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/knowledge/research`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            modelId,
-            topics: entry.topics,
-            parentQueryId: entry.id,
-          }),
+      const { completion } = startSseStream({
+        url: `/api/codascope/projects/${activeProjectId}/epics/${epic.id}/knowledge/research`,
+        method: "POST",
+        body: {
+          modelId,
+          topics: entry.topics,
+          parentQueryId: entry.id,
         },
-      );
-
-      if (res.ok && res.body) {
-        // Consume the SSE stream to completion
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let done = false;
-        while (!done) {
-          const { value, done: streamDone } = await reader.read();
-          done = streamDone;
-          if (value) {
-            // We just consume — we don't need to parse SSE events here
-            decoder.decode(value, { stream: !done });
-          }
-        }
-      }
+      });
+      const terminal = await completion;
+      if (terminal.type === "error") throw new Error(terminal.error);
+      if (terminal.type === "cancelled") throw new Error("Research pipeline was cancelled.");
       onChanged();
-    } catch {
-      /* silent */
+    } catch (err) {
+      setDeepeningError(err instanceof Error ? err.message : "Research pipeline failed.");
+    } finally {
+      setDeepeningId(null);
     }
-    setDeepeningId(null);
   }, [activeProjectId, epic.id, onChanged]);
 
   // Find parent topics for lineage display
@@ -848,6 +837,13 @@ function ResearchQueryLogSection({ epic, entries, onChanged }: ResearchQueryLogS
           <span className="codascope-research-log-count">{entries.length}</span>
         )}
       </div>
+
+      {deepeningError && (
+        <div className="codascope-research-log-stream-error" role="alert">
+          <IconWarning size={12} />
+          <span>Go Deeper failed: {deepeningError}</span>
+        </div>
+      )}
 
       {entries.length === 0 ? (
         <div className="codascope-research-log-empty">

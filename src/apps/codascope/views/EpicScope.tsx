@@ -235,6 +235,10 @@ export function EpicScope({ epic, setEpic }: EpicScopeProps) {
           setLocalDeepenProgress(`Error: ${err}`);
           setLocalDeepening(false);
         },
+        onCancelled: () => {
+          setLocalDeepenProgress("Enrichment cancelled");
+          setLocalDeepening(false);
+        },
       },
     );
   }, [activeProjectId, epic.id, selectedModel, refreshScope, deepenBuild.rebuild]);

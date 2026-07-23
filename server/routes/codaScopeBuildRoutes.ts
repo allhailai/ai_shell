@@ -10,6 +10,7 @@ import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
 import { runAnalyzePipeline, runDeepRunPipeline } from "../services/codaScopeBuildOrchestrator.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { createSseTerminalWriter } from "./utils/ssePipelineHelper.js";
 
 const WIKI_BUILD_COMMANDS = new Set([
   "do_explore",
@@ -87,9 +88,11 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      req.on("close", () => { aborted = true; });
+      res.on("close", () => { aborted = true; });
+      const terminal = createSseTerminalWriter(res, () => aborted);
 
-      await agentSvc.send({
+      try {
+        await agentSvc.send({
         projectId: id,
         message: "Execute the following skill:\n\n" + prompt,
         modelId,
@@ -99,26 +102,28 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           "Use CodaScope tools for all source reads and project writes; never use native filesystem write tools.",
         purpose: "wiki-build",
         onMessage: (msg) => {
-          if (aborted) return;
+          if (aborted || terminal.terminalEvent()) return;
           res.write(`data: ${JSON.stringify(msg)}\n\n`);
         },
         onDone: async (result) => {
-          if (!aborted) {
+          if (!aborted && !terminal.terminalEvent()) {
             // Refresh wiki topics in case the skill created/modified wiki pages
             try {
               const topics = await wikiSvc.listTopics(id);
-              res.write(`event: wiki-refresh\ndata: ${JSON.stringify({ topics })}\n\n`);
+              terminal.sendEvent("wiki-refresh", { topics });
             } catch { /* ignore refresh errors */ }
-            res.write(`event: done\ndata: ${JSON.stringify(result)}\n\n`);
-            res.end();
+            terminal.done(result && typeof result === "object"
+              ? result as unknown as Record<string, unknown>
+              : {});
           }
         },
         onError: (err) => {
-          if (aborted) return;
-          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-          res.end();
+          terminal.error(err);
         },
-      });
+        });
+      } catch (err) {
+        terminal.error(err);
+      }
     })().catch(next);
   });
 
@@ -193,9 +198,11 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       res.write(`event: run-started\ndata: ${JSON.stringify({ runId })}\n\n`);
 
       let aborted = false;
-      req.on("close", () => { aborted = true; });
+      res.on("close", () => { aborted = true; });
+      const terminal = createSseTerminalWriter(res, () => aborted);
 
-      await agentSvc.send({
+      try {
+        await agentSvc.send({
         projectId: id,
         message: prompt,
         modelId,
@@ -209,7 +216,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           const msgJson = JSON.stringify(msg);
           buildSvc.appendOutput(id, runId, msgJson + "\n");
 
-          if (aborted) return;
+          if (aborted || terminal.terminalEvent()) return;
           res.write(`data: ${msgJson}\n\n`);
         },
         onDone: async (result) => {
@@ -220,8 +227,8 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
             const topics = await wikiSvc.listTopics(id);
             pageCount = topics.length;
             substantivePageCount = topics.filter((topic) => topic.id !== "index" && !topic.id.startsWith("_")).length;
-            if (!aborted) {
-              res.write(`event: wiki-refresh\ndata: ${JSON.stringify({ topics })}\n\n`);
+            if (!aborted && !terminal.terminalEvent()) {
+              terminal.sendEvent("wiki-refresh", { topics });
             }
           } catch { /* ignore refresh errors */ }
 
@@ -230,29 +237,27 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
               ? "Could not verify registered wiki output in the CodaScope project."
               : "Wiki build finished without creating any registered topic pages in the CodaScope project.";
             buildSvc.failBuild(id, runId, error);
-            if (!aborted) {
-              res.write(`event: error\ndata: ${JSON.stringify({ error })}\n\n`);
-              res.end();
-            }
+            terminal.error(error);
             return;
           }
 
           buildSvc.completeBuild(id, runId, pageCount);
 
-          if (!aborted) {
+          if (!aborted && !terminal.terminalEvent()) {
             const buildState = buildSvc.getBuildState(id);
-            res.write(`event: done\ndata: ${JSON.stringify({ ...result, buildSummary: buildState?.summary })}\n\n`);
-            res.end();
+            terminal.done({ ...result as object, buildSummary: buildState?.summary });
           }
         },
         onError: (err) => {
           buildSvc.failBuild(id, runId, err.message);
 
-          if (aborted) return;
-          res.write(`event: error\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
-          res.end();
+          terminal.error(err);
         },
-      });
+        });
+      } catch (err) {
+        buildSvc.failBuild(id, runId, err instanceof Error ? err.message : String(err));
+        terminal.error(err);
+      }
     })().catch(next);
   });
 
@@ -316,7 +321,14 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       let aborted = false;
-      req.on("close", () => { aborted = true; });
+      res.on("close", () => { aborted = true; });
+      const terminal = createSseTerminalWriter(res, () => aborted);
+      try {
+        const buildState = buildSvc.getBuildStateByRunId(id, runId);
+        if (!buildState) {
+          terminal.error("Build run not found.");
+          return;
+        }
 
       // 1. Replay stored output
       const logPath = buildSvc.getBuildOutputPath(id, runId);
@@ -330,26 +342,23 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       }
 
       // 1b. Replay persisted pipeline steps
-      const buildState = buildSvc.getBuildState(id);
-      if (buildState && buildState.runId === runId && buildState.pipelineSteps.length > 0) {
+      if (buildState.pipelineSteps.length > 0) {
         for (const step of buildState.pipelineSteps) {
           if (aborted) break;
-          res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: step.id, status: step.status, detail: step.detail })}\n\n`);
+          terminal.sendEvent("pipeline-step", { step: step.id, status: step.status, detail: step.detail });
         }
       }
 
       // 2. Check if build is still running
-      const state = buildSvc.getBuildState(id);
-      if (!state || state.runId !== runId || state.status !== "building") {
+      if (buildState.status !== "building") {
         // Build is done — send final status and close
-        if (state && state.runId === runId) {
-          if (state.status === "complete") {
-            res.write(`event: done\ndata: ${JSON.stringify({ buildSummary: state.summary })}\n\n`);
-          } else if (state.status === "error") {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: state.error })}\n\n`);
-          }
+        if (buildState.status === "complete") {
+          terminal.done({ buildSummary: buildState.summary });
+        } else if (buildState.status === "error") {
+          terminal.error(buildState.error ?? "Build failed.");
+        } else {
+          terminal.error("Build run has no valid terminal state.");
         }
-        res.end();
         return;
       }
 
@@ -362,7 +371,8 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           return;
         }
 
-        const currentState = buildSvc.getBuildState(id);
+        try {
+          const currentState = buildSvc.getBuildStateByRunId(id, runId);
 
         // Check for new output
         if (existsSync(logPath)) {
@@ -387,35 +397,43 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           if (steps.length > lastStepCount) {
             // Send newly added steps
             for (let i = lastStepCount; i < steps.length; i++) {
-              res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: steps[i].id, status: steps[i].status, detail: steps[i].detail })}\n\n`);
+              terminal.sendEvent("pipeline-step", { step: steps[i].id, status: steps[i].status, detail: steps[i].detail });
             }
             lastStepCount = steps.length;
           } else {
             // Check if existing steps have been updated (status changed)
             for (const step of steps) {
-              res.write(`event: pipeline-step\ndata: ${JSON.stringify({ step: step.id, status: step.status, detail: step.detail })}\n\n`);
+              terminal.sendEvent("pipeline-step", { step: step.id, status: step.status, detail: step.detail });
             }
           }
         }
 
         // Check if build finished
-        if (!currentState || currentState.runId !== runId || currentState.status !== "building") {
+        if (!currentState || currentState.status !== "building") {
           clearInterval(pollInterval);
-          if (currentState && currentState.runId === runId) {
-            if (currentState.status === "complete") {
-              res.write(`event: done\ndata: ${JSON.stringify({ buildSummary: currentState.summary })}\n\n`);
-            } else if (currentState.status === "error") {
-              res.write(`event: error\ndata: ${JSON.stringify({ error: currentState.error })}\n\n`);
-            }
+          if (!currentState) {
+            terminal.error("Build run disappeared while reconnecting.");
+          } else if (currentState.status === "complete") {
+            terminal.done({ buildSummary: currentState.summary });
+          } else if (currentState.status === "error") {
+            terminal.error(currentState.error ?? "Build failed.");
+          } else {
+            terminal.error("Build run has no valid terminal state.");
           }
-          res.end();
+        }
+        } catch (err) {
+          clearInterval(pollInterval);
+          terminal.error(err);
         }
       }, 500); // Poll every 500ms
 
       // Clean up on disconnect
-      req.on("close", () => {
-        clearInterval(pollInterval);
-      });
+        res.on("close", () => {
+          clearInterval(pollInterval);
+        });
+      } catch (err) {
+        terminal.error(err);
+      }
     })().catch(next);
   });
 
@@ -467,22 +485,24 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       buildSvc.clearCancellation(id);
 
       let sseAborted = false;
-      req.on("close", () => { sseAborted = true; });
+      res.on("close", () => { sseAborted = true; });
 
       const isAborted = () => sseAborted || buildSvc.isCancelled(id);
+      const terminal = createSseTerminalWriter(res, () => sseAborted);
 
       const sendEvent = (event: string, data: unknown) => {
         if (event === "pipeline-step") {
           buildSvc.addPipelineStep(id, runId, data as { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord });
         }
-        if (isAborted()) return;
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const standardTerminal = event === "done" || event === "error" || event === "cancelled";
+        if (!standardTerminal && isAborted()) return;
+        terminal.sendEvent(event, data);
       };
 
       const sendMessage = (msg: unknown) => {
         const msgJson = JSON.stringify(msg);
         buildSvc.appendOutput(id, runId, msgJson + "\n");
-        if (isAborted()) return;
+        if (isAborted() || terminal.terminalEvent()) return;
         res.write(`data: ${msgJson}\n\n`);
       };
 
@@ -493,14 +513,23 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           svcs,
           runId,
         );
+        if (!terminal.terminalEvent()) {
+          if (isAborted()) {
+            buildSvc.failBuild(id, runId, "Analysis cancelled.");
+            terminal.cancelled({ runId });
+          } else {
+            const error = "Analysis pipeline ended without a terminal result.";
+            buildSvc.failBuild(id, runId, error);
+            terminal.error(error);
+          }
+        }
       } catch (err) {
+        if (terminal.terminalEvent() === "done") return;
         const message = err instanceof Error ? err.message : String(err);
         buildSvc.failBuild(id, runId, message);
         buildSvc.clearCancellation(id);
-        sendEvent("error", { error: message });
+        terminal.error(message);
       }
-
-      if (!isAborted()) res.end();
     })().catch(next);
   });
 
@@ -555,22 +584,24 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       buildSvc.clearCancellation(id);
 
       let sseAborted = false;
-      req.on("close", () => { sseAborted = true; });
+      res.on("close", () => { sseAborted = true; });
 
       const isAborted = () => sseAborted || buildSvc.isCancelled(id);
+      const terminal = createSseTerminalWriter(res, () => sseAborted);
 
       const sendEvent = (event: string, data: unknown) => {
         if (event === "pipeline-step") {
           buildSvc.addPipelineStep(id, runId, data as { step: string; status: string; repo?: string; topic?: string; progress?: string; reason?: string; error?: string; mode?: string; tokenUsage?: TokenUsageRecord });
         }
-        if (isAborted()) return;
-        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        const standardTerminal = event === "done" || event === "error" || event === "cancelled";
+        if (!standardTerminal && isAborted()) return;
+        terminal.sendEvent(event, data);
       };
 
       const sendMessage = (msg: unknown) => {
         const msgJson = JSON.stringify(msg);
         buildSvc.appendOutput(id, runId, msgJson + "\n");
-        if (isAborted()) return;
+        if (isAborted() || terminal.terminalEvent()) return;
         res.write(`data: ${msgJson}\n\n`);
       };
 
@@ -581,14 +612,23 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
           svcs,
           runId,
         );
+        if (!terminal.terminalEvent()) {
+          if (isAborted()) {
+            buildSvc.failBuild(id, runId, "Deep Run cancelled.");
+            terminal.cancelled({ runId });
+          } else {
+            const error = "Deep Run pipeline ended without a terminal result.";
+            buildSvc.failBuild(id, runId, error);
+            terminal.error(error);
+          }
+        }
       } catch (err) {
+        if (terminal.terminalEvent() === "done") return;
         const message = err instanceof Error ? err.message : String(err);
         buildSvc.failBuild(id, runId, message);
         buildSvc.clearCancellation(id);
-        sendEvent("error", { error: message });
+        terminal.error(message);
       }
-
-      if (!isAborted()) res.end();
     })().catch(next);
   });
 }
