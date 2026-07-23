@@ -380,9 +380,8 @@ describe("CodaScopeDesignDocService", () => {
 
       await expect(svc.createVersion(projectId, epicId, doc.id, "user", "trigger prune"))
         .rejects.toMatchObject({
-          status: 400,
-          code: "invalid_input",
-          message: "Invalid design version number.",
+          status: 500,
+          code: "persistence_corrupt",
         });
 
       expect(readFileSync(sentinel, "utf-8")).toBe("sentinel-bytes");
@@ -471,13 +470,13 @@ describe("CodaScopeDesignDocService", () => {
       await svc.createDesignDoc("proj-bulk", "epic-bulk", { title: "Bulk" });
 
       const epicDir = path.join(projDir, "epics", "epic-bulk");
-      const docs = svc.readDesignsIndex(epicDir);
+      const docs = await svc.readDesignsIndex(epicDir);
       expect(docs).toHaveLength(1);
       expect(docs[0].title).toBe("Bulk");
     });
 
-    it("returns empty array for nonexistent path", () => {
-      const docs = svc.readDesignsIndex("/nonexistent/path");
+    it("returns empty array for nonexistent path", async () => {
+      const docs = await svc.readDesignsIndex("/nonexistent/path");
       expect(docs).toEqual([]);
     });
   });

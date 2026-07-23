@@ -22,7 +22,8 @@
          versions.json      (version metadata index)
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync, unlinkSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicDesignDoc } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -32,6 +33,12 @@ import {
   assertStrictDescendant,
   assertVersionIndex,
 } from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistence,
+  CodaScopePersistenceCorruptError,
+  CodaScopePersistenceError,
+  codaScopePersistence,
+} from "./codaScopePersistence.js";
 
 /* ── Storage schema ───────────────────────────────────────────────── */
 
@@ -54,6 +61,13 @@ interface DesignDocVersionsIndex {
   maxVersions: number;
 }
 
+interface DesignVersionTransaction {
+  version: DesignDocVersion;
+  previousIndexBytes: Buffer | null;
+  snapshotPath: string;
+  prune: DesignDocVersion[];
+}
+
 /* ── Resize / delete types ────────────────────────────────────────── */
 
 export type ResizeOp =
@@ -72,7 +86,10 @@ const MAX_VERSIONS = 10;
 export class CodaScopeDesignDocService {
   private root: string;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+  ) {
     this.root = root;
   }
 
@@ -160,42 +177,103 @@ export class CodaScopeDesignDocService {
 
   /* ── Index helpers ────────────────────────────────────────────────── */
 
-  private readIndex(projectDir: string, epicId: string): DesignsIndex {
+  private async readIndex(projectDir: string, epicId: string): Promise<DesignsIndex> {
     const p = this.indexPath(projectDir, epicId);
-    if (!existsSync(p)) return { docs: [] };
-    try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { docs: [] };
-    }
+    const index = await this.persistence.readJson(p, {
+      context: { storage: "design_index", epicId },
+      missing: () => {
+        const designDir = this.designsDir(projectDir, epicId);
+        const hasDocuments = existsSync(designDir)
+          && readdirSync(designDir, { withFileTypes: true })
+            .some((entry) => !entry.name.startsWith(".") && entry.name !== "designs.json");
+        if (hasDocuments) throw new CodaScopePersistenceCorruptError({ storage: "design_index", epicId });
+        return { docs: [] };
+      },
+      validate: validateDesignsIndex,
+    });
+    this.assertDesignIndexStorage(this.designsDir(projectDir, epicId), epicId, index);
+    return index;
   }
 
-  private writeIndex(projectDir: string, epicId: string, index: DesignsIndex): void {
-    const dir = this.designsDir(projectDir, epicId);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.indexPath(projectDir, epicId), JSON.stringify(index, null, 2), "utf-8");
+  private writeIndex(projectDir: string, epicId: string, index: DesignsIndex): Promise<void> {
+    validateDesignsIndex(index);
+    return this.persistence.writeJson(
+      this.indexPath(projectDir, epicId),
+      index,
+      { storage: "design_index", epicId },
+    );
   }
 
   /* ── Version index helpers ───────────────────────────────────────── */
 
-  private readVersionsIndex(projectDir: string, epicId: string, docId: string): DesignDocVersionsIndex {
+  private async readVersionsIndex(projectDir: string, epicId: string, docId: string): Promise<DesignDocVersionsIndex> {
     const p = this.versionsIndexPath(projectDir, epicId, docId);
-    if (!existsSync(p)) return { versions: [], maxVersions: MAX_VERSIONS };
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { versions: [], maxVersions: MAX_VERSIONS };
+    const index = await this.persistence.readJson(p, {
+      context: { storage: "design_versions", epicId, documentId: docId },
+      missing: () => {
+        const versionDir = this.versionsDir(projectDir, epicId, docId);
+        const hasSnapshots = existsSync(versionDir)
+          && readdirSync(versionDir).some((entry) => /^v\d+\.md$/.test(entry));
+        if (hasSnapshots) {
+          throw new CodaScopePersistenceCorruptError({
+            storage: "design_versions",
+            epicId,
+            documentId: docId,
+          });
+        }
+        return { versions: [], maxVersions: MAX_VERSIONS };
+      },
+      validate: validateDesignVersionsIndex,
+    });
+    const versionDir = this.versionsDir(projectDir, epicId, docId);
+    for (const version of index.versions) {
+      if (!existsSync(this.versionFilePath(versionDir, version.number))) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "design_versions",
+          epicId,
+          documentId: docId,
+        });
+      }
     }
-    assertVersionIndex(parsed, "number", "design version number");
-    return parsed as DesignDocVersionsIndex;
+    return index;
   }
 
-  private writeVersionsIndex(projectDir: string, epicId: string, docId: string, index: DesignDocVersionsIndex): void {
+  private writeVersionsIndex(projectDir: string, epicId: string, docId: string, index: DesignDocVersionsIndex): Promise<void> {
     assertVersionIndex(index, "number", "design version number");
-    const dir = this.versionsDir(projectDir, epicId, docId);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.versionsIndexPath(projectDir, epicId, docId), JSON.stringify(index, null, 2), "utf-8");
+    return this.persistence.writeJson(
+      this.versionsIndexPath(projectDir, epicId, docId),
+      index,
+      { storage: "design_versions", epicId, documentId: docId },
+    );
+  }
+
+  private designsMutationKey(projectDir: string, epicId: string): string {
+    return this.persistence.canonicalKey("design-index", this.designsDir(projectDir, epicId));
+  }
+
+  private versionMutationKey(projectDir: string, epicId: string, docId: string): string {
+    return this.persistence.canonicalKey("design-versions", this.docDir(projectDir, epicId, docId));
+  }
+
+  private assertDesignIndexStorage(designsDir: string, epicId: string, index: DesignsIndex): void {
+    for (const doc of index.docs) {
+      if (doc.epicId !== epicId) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "design_index",
+          epicId,
+          documentId: doc.id,
+        });
+      }
+      const currentPath = path.join(designsDir, doc.id, "content.md");
+      const legacyPath = path.join(designsDir, `${doc.id}.md`);
+      if (!existsSync(currentPath) && !existsSync(legacyPath)) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "design_content",
+          epicId,
+          documentId: doc.id,
+        });
+      }
+    }
   }
 
   /* ── Content helpers ──────────────────────────────────────────────── */
@@ -272,7 +350,7 @@ export class CodaScopeDesignDocService {
   async listDesignDocs(projectId: string, epicId: string): Promise<EpicDesignDoc[]> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
-    return this.readIndex(projectDir, epicId).docs;
+    return (await this.readIndex(projectDir, epicId)).docs;
   }
 
   /** Create a new design doc with optional initial content. */
@@ -284,35 +362,38 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
-    const now = new Date().toISOString();
-    const id = `doc_${crypto.randomBytes(6).toString("hex")}`;
-
-    const initialContent = opts.content ?? "";
-
-    const doc: EpicDesignDoc = {
-      id,
-      epicId,
-      title: opts.title,
-      createdAt: now,
-      updatedAt: now,
-      createdBy: opts.createdBy ?? "user",
-      wordCount: this.countWords(initialContent),
-      blockCount: this.countBlocks(initialContent),
-      annotationCount: 0,
-      directiveCount: 0,
-    };
-
-    // Write markdown file in the new directory layout
-    const docDirectory = this.docDir(projectDir, epicId, id);
-    if (!existsSync(docDirectory)) mkdirSync(docDirectory, { recursive: true });
-    writeFileSync(path.join(docDirectory, "content.md"), initialContent, "utf-8");
-
-    // Update index
-    const index = this.readIndex(projectDir, epicId);
-    index.docs.push(doc);
-    this.writeIndex(projectDir, epicId, index);
-
-    return doc;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const now = new Date().toISOString();
+      const id = `doc_${crypto.randomBytes(6).toString("hex")}`;
+      const initialContent = opts.content ?? "";
+      const doc: EpicDesignDoc = {
+        id,
+        epicId,
+        title: opts.title,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: opts.createdBy ?? "user",
+        wordCount: this.countWords(initialContent),
+        blockCount: this.countBlocks(initialContent),
+        annotationCount: 0,
+        directiveCount: 0,
+      };
+      const contentPath = path.join(this.docDir(projectDir, epicId, id), "content.md");
+      await this.persistence.writeFile(
+        contentPath,
+        initialContent,
+        { storage: "design_content", epicId, documentId: id },
+      );
+      index.docs.push(doc);
+      try {
+        await this.writeIndex(projectDir, epicId, index);
+      } catch (error) {
+        await rm(this.docDir(projectDir, epicId, id), { recursive: true, force: true });
+        throw error;
+      }
+      return doc;
+    });
   }
 
   /** Get design doc content (markdown) with content hash for concurrency control. */
@@ -321,12 +402,12 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const index = this.readIndex(projectDir, epicId);
+    const index = await this.readIndex(projectDir, epicId);
     const doc = index.docs.find((d) => d.id === docId);
     if (!doc) return null;
 
     const filePath = this.docPath(projectDir, epicId, docId);
-    const content = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
+    const content = readFileSync(filePath, "utf-8");
     const contentHash = this.computeHash(content);
 
     return { doc, content, contentHash };
@@ -349,34 +430,52 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const index = this.readIndex(projectDir, epicId);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc) return null;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const previousIndex = cloneDesignsIndex(index);
+      const doc = index.docs.find((candidate) => candidate.id === docId);
+      if (!doc) return null;
 
-    // Ensure docPath triggers migration if needed
-    const filePath = this.docPath(projectDir, epicId, docId);
-    const docDirectory = path.dirname(filePath);
-    if (!existsSync(docDirectory)) mkdirSync(docDirectory, { recursive: true });
-
-    // Optimistic concurrency check
-    if (expectedHash) {
-      const currentContent = existsSync(filePath) ? readFileSync(filePath, "utf-8") : "";
-      const currentHash = this.computeHash(currentContent);
-      if (currentHash !== expectedHash) {
-        return { conflict: true, currentHash, currentContent };
+      const filePath = this.docPath(projectDir, epicId, docId);
+      const previousContent = readFileSync(filePath, "utf-8");
+      if (expectedHash) {
+        const currentHash = this.computeHash(previousContent);
+        if (currentHash !== expectedHash) {
+          return { conflict: true as const, currentHash, currentContent: previousContent };
+        }
       }
-    }
 
-    writeFileSync(filePath, content, "utf-8");
+      await this.persistence.writeFile(
+        filePath,
+        content,
+        { storage: "design_content", epicId, documentId: docId },
+      );
+      doc.updatedAt = new Date().toISOString();
+      doc.wordCount = this.countWords(content);
+      doc.blockCount = this.countBlocks(content);
+      try {
+        await this.writeIndex(projectDir, epicId, index);
+      } catch (error) {
+        try {
+          await this.persistence.writeFile(
+            filePath,
+            previousContent,
+            { storage: "design_content", epicId, documentId: docId },
+          );
+          await this.writeIndex(projectDir, epicId, previousIndex);
+        } catch {
+          throw new CodaScopePersistenceError({
+            storage: "design_content",
+            epicId,
+            documentId: docId,
+            recovery: "operator_required",
+          });
+        }
+        throw error;
+      }
 
-    // Update metadata
-    doc.updatedAt = new Date().toISOString();
-    doc.wordCount = this.countWords(content);
-    doc.blockCount = this.countBlocks(content);
-    this.writeIndex(projectDir, epicId, index);
-
-    const contentHash = this.computeHash(content);
-    return { doc, contentHash };
+      return { doc, contentHash: this.computeHash(content) };
+    });
   }
 
   /** Archive a design doc (soft delete — preserves file on disk). Also clears pin. */
@@ -385,14 +484,15 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const index = this.readIndex(projectDir, epicId);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc) return false;
-
-    doc.archivedAt = new Date().toISOString();
-    delete doc.pinnedAt;
-    this.writeIndex(projectDir, epicId, index);
-    return true;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const doc = index.docs.find((candidate) => candidate.id === docId);
+      if (!doc) return false;
+      doc.archivedAt = new Date().toISOString();
+      delete doc.pinnedAt;
+      await this.writeIndex(projectDir, epicId, index);
+      return true;
+    });
   }
 
   /** Pin a design doc. */
@@ -401,13 +501,14 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const index = this.readIndex(projectDir, epicId);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc) return false;
-
-    doc.pinnedAt = new Date().toISOString();
-    this.writeIndex(projectDir, epicId, index);
-    return true;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const doc = index.docs.find((candidate) => candidate.id === docId);
+      if (!doc) return false;
+      doc.pinnedAt = new Date().toISOString();
+      await this.writeIndex(projectDir, epicId, index);
+      return true;
+    });
   }
 
   /** Unpin a design doc. */
@@ -416,13 +517,14 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const index = this.readIndex(projectDir, epicId);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc || !doc.pinnedAt) return false;
-
-    delete doc.pinnedAt;
-    this.writeIndex(projectDir, epicId, index);
-    return true;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const doc = index.docs.find((candidate) => candidate.id === docId);
+      if (!doc || !doc.pinnedAt) return false;
+      delete doc.pinnedAt;
+      await this.writeIndex(projectDir, epicId, index);
+      return true;
+    });
   }
 
   /** Unarchive a design doc (restore from soft delete). */
@@ -431,13 +533,14 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const index = this.readIndex(projectDir, epicId);
-    const doc = index.docs.find((d) => d.id === docId);
-    if (!doc || !doc.archivedAt) return false;
-
-    delete doc.archivedAt;
-    this.writeIndex(projectDir, epicId, index);
-    return true;
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+      const index = await this.readIndex(projectDir, epicId);
+      const doc = index.docs.find((candidate) => candidate.id === docId);
+      if (!doc || !doc.archivedAt) return false;
+      delete doc.archivedAt;
+      await this.writeIndex(projectDir, epicId, index);
+      return true;
+    });
   }
 
   /* ── Server-Side Resize ─────────────────────────────────────────────── */
@@ -459,7 +562,9 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const index = this.readIndex(projectDir, epicId);
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), async () => {
+    const index = await this.readIndex(projectDir, epicId);
+    const previousIndex = cloneDesignsIndex(index);
     const doc = index.docs.find((d) => d.id === docId);
     if (!doc) return null;
 
@@ -467,6 +572,7 @@ export class CodaScopeDesignDocService {
     if (!existsSync(filePath)) return null;
 
     let content = readFileSync(filePath, "utf-8");
+    const previousContent = content;
     let updated = false;
 
     if (resize.type === "mermaid") {
@@ -627,31 +733,62 @@ export class CodaScopeDesignDocService {
 
     if (!updated) return null;
 
-    // Write updated content (no version snapshot for resize)
-    writeFileSync(filePath, content, "utf-8");
+    await this.persistence.writeFile(
+      filePath,
+      content,
+      { storage: "design_content", epicId, documentId: docId },
+    );
 
     // Update metadata
     doc.updatedAt = new Date().toISOString();
     doc.wordCount = this.countWords(content);
     doc.blockCount = this.countBlocks(content);
-    this.writeIndex(projectDir, epicId, index);
+    try {
+      await this.writeIndex(projectDir, epicId, index);
+    } catch (error) {
+      try {
+        await this.persistence.writeFile(
+          filePath,
+          previousContent,
+          { storage: "design_content", epicId, documentId: docId },
+        );
+        await this.writeIndex(projectDir, epicId, previousIndex);
+      } catch {
+        throw new CodaScopePersistenceError({
+          storage: "design_content",
+          epicId,
+          documentId: docId,
+          recovery: "operator_required",
+        });
+      }
+      throw error;
+    }
 
     const contentHash = this.computeHash(content);
     return { doc, content, contentHash };
+    });
   }
 
   /* ── Bulk read (used by version service and getEpic) ──────────────── */
 
   /** Read the designs index directly from a project dir (no projectId lookup). */
-  readDesignsIndex(epicDir: string): EpicDesignDoc[] {
+  async readDesignsIndex(epicDir: string): Promise<EpicDesignDoc[]> {
     const indexPath = path.join(epicDir, "designs", "designs.json");
-    if (!existsSync(indexPath)) return [];
-    try {
-      const data: DesignsIndex = JSON.parse(readFileSync(indexPath, "utf-8"));
-      return data.docs;
-    } catch {
-      return [];
-    }
+    const epicId = path.basename(epicDir);
+    const index = await this.persistence.readJson(indexPath, {
+      context: { storage: "design_index", epicId },
+      missing: () => {
+        const designsDir = path.dirname(indexPath);
+        const hasDocuments = existsSync(designsDir)
+          && readdirSync(designsDir, { withFileTypes: true })
+            .some((entry) => !entry.name.startsWith(".") && entry.name !== "designs.json");
+        if (hasDocuments) throw new CodaScopePersistenceCorruptError({ storage: "design_index", epicId });
+        return { docs: [] };
+      },
+      validate: validateDesignsIndex,
+    });
+    this.assertDesignIndexStorage(path.dirname(indexPath), epicId, index);
+    return index.docs;
   }
 
   /* ── Version History ─────────────────────────────────────────────── */
@@ -663,53 +800,20 @@ export class CodaScopeDesignDocService {
   async createVersion(projectId: string, epicId: string, docId: string, author: string, summary: string): Promise<DesignDocVersion> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
-
-    // Validate the complete persisted index before migration, directory
-    // creation, snapshot writes, or pruning can mutate the filesystem.
-    const vIndex = this.readVersionsIndex(projectDir, epicId, docId);
-
-    // Ensure content file exists (triggers migration if needed)
-    const contentPath = this.docPath(projectDir, epicId, docId);
-    if (!existsSync(contentPath)) throw new Error("Design doc not found");
-
-    const currentContent = readFileSync(contentPath, "utf-8");
-    const vDir = this.versionsDir(projectDir, epicId, docId);
-    if (!existsSync(vDir)) mkdirSync(vDir, { recursive: true });
-
-    // Determine next version number
-    let maxVersion = 0;
-    for (const version of vIndex.versions) maxVersion = Math.max(maxVersion, version.number);
-    const nextNum = assertPositiveSafeInteger(maxVersion + 1, "design version number");
-
-    // Pad version number to 3 digits for consistent file sorting
-    writeFileSync(this.versionFilePath(vDir, nextNum), currentContent, "utf-8");
-
-    const version: DesignDocVersion = {
-      number: nextNum,
-      createdAt: new Date().toISOString(),
-      author,
-      summary,
-      wordCount: this.countWords(currentContent),
-    };
-
-    vIndex.versions.push(version);
-
-    // Prune beyond max versions (delete oldest)
-    while (vIndex.versions.length > MAX_VERSIONS) {
-      const oldest = vIndex.versions.shift()!;
-      const oldFile = this.versionFilePath(vDir, oldest.number);
-      if (existsSync(oldFile)) unlinkSync(oldFile);
-    }
-
-    this.writeVersionsIndex(projectDir, epicId, docId, vIndex);
-    return version;
+    return this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), async () => {
+      const designsIndex = await this.readIndex(projectDir, epicId);
+      if (!designsIndex.docs.some((doc) => doc.id === docId)) throw new Error("Design doc not found");
+      const transaction = await this.createVersionUnlocked(projectDir, epicId, docId, author, summary);
+      await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
+      return transaction.version;
+    });
   }
 
   /** List all versions for a design doc. */
   async listDocVersions(projectId: string, epicId: string, docId: string): Promise<DesignDocVersion[]> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
-    return this.readVersionsIndex(projectDir, epicId, docId).versions;
+    return (await this.readVersionsIndex(projectDir, epicId, docId)).versions;
   }
 
   /** Get a specific version's content. */
@@ -718,13 +822,19 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const vIndex = this.readVersionsIndex(projectDir, epicId, docId);
+    const vIndex = await this.readVersionsIndex(projectDir, epicId, docId);
     const vMeta = vIndex.versions.find((v) => v.number === safeVersion);
     if (!vMeta) return null;
 
     const vDir = this.versionsDir(projectDir, epicId, docId);
     const vFile = this.versionFilePath(vDir, safeVersion);
-    if (!existsSync(vFile)) return null;
+    if (!existsSync(vFile)) {
+      throw new CodaScopePersistenceCorruptError({
+        storage: "design_versions",
+        epicId,
+        documentId: docId,
+      });
+    }
 
     return { version: vMeta, content: readFileSync(vFile, "utf-8") };
   }
@@ -741,20 +851,143 @@ export class CodaScopeDesignDocService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    // Get the target version content
-    const target = await this.getDocVersion(projectId, epicId, docId, safeVersion);
-    if (!target) return null;
+    return this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), async () => {
+      const designsIndex = await this.readIndex(projectDir, epicId);
+      if (!designsIndex.docs.some((doc) => doc.id === docId)) return null;
+      const index = await this.readVersionsIndex(projectDir, epicId, docId);
+      const targetMeta = index.versions.find((version) => version.number === safeVersion);
+      if (!targetMeta) return null;
+      const targetPath = this.versionFilePath(this.versionsDir(projectDir, epicId, docId), safeVersion);
+      if (!existsSync(targetPath)) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "design_versions",
+          epicId,
+          documentId: docId,
+        });
+      }
+      const targetContent = readFileSync(targetPath, "utf-8");
+      const transaction = await this.createVersionUnlocked(
+        projectDir,
+        epicId,
+        docId,
+        "user",
+        `Reverted to version ${safeVersion}`,
+      );
 
-    // Create a snapshot of the current content before reverting
-    const revertVersion = await this.createVersion(
-      projectId, epicId, docId, "user", `Reverted to version ${safeVersion}`,
+      try {
+        const updated = await this.updateDesignDoc(projectId, epicId, docId, targetContent);
+        if (!updated || "conflict" in updated) {
+          await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
+          return null;
+        }
+      } catch (error) {
+        try {
+          await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
+        } catch {
+          throw new CodaScopePersistenceError({
+            storage: "design_versions",
+            epicId,
+            documentId: docId,
+            recovery: "operator_required",
+          });
+        }
+        throw error;
+      }
+
+      await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
+      return { content: targetContent, revertVersion: transaction.version };
+    });
+  }
+
+  private async createVersionUnlocked(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    author: string,
+    summary: string,
+  ): Promise<DesignVersionTransaction> {
+    // The index is validated before docPath can perform legacy migration.
+    const indexPath = this.versionsIndexPath(projectDir, epicId, docId);
+    const previousIndexBytes = existsSync(indexPath) ? readFileSync(indexPath) : null;
+    const previousIndex = await this.readVersionsIndex(projectDir, epicId, docId);
+    const contentPath = this.docPath(projectDir, epicId, docId);
+    const currentContent = readFileSync(contentPath, "utf-8");
+    let maxVersion = 0;
+    for (const version of previousIndex.versions) maxVersion = Math.max(maxVersion, version.number);
+    const nextNum = assertPositiveSafeInteger(maxVersion + 1, "design version number");
+    const snapshotPath = this.versionFilePath(this.versionsDir(projectDir, epicId, docId), nextNum);
+    const version: DesignDocVersion = {
+      number: nextNum,
+      createdAt: new Date().toISOString(),
+      author,
+      summary,
+      wordCount: this.countWords(currentContent),
+    };
+    const nextIndex: DesignDocVersionsIndex = {
+      maxVersions: MAX_VERSIONS,
+      versions: [...previousIndex.versions, version],
+    };
+    const prune = nextIndex.versions.length > MAX_VERSIONS
+      ? nextIndex.versions.slice(0, nextIndex.versions.length - MAX_VERSIONS)
+      : [];
+    nextIndex.versions = nextIndex.versions.slice(-MAX_VERSIONS);
+
+    await this.persistence.writeFile(
+      snapshotPath,
+      currentContent,
+      { storage: "design_version_snapshot", epicId, documentId: docId },
     );
+    try {
+      await this.writeVersionsIndex(projectDir, epicId, docId, nextIndex);
+    } catch (error) {
+      await rm(snapshotPath, { force: true });
+      throw error;
+    }
+    return {
+      version,
+      previousIndexBytes,
+      snapshotPath,
+      prune,
+    };
+  }
 
-    // Write the reverted content (no expectedHash — revert always wins)
-    const updated = await this.updateDesignDoc(projectId, epicId, docId, target.content);
-    if (!updated || "conflict" in updated) return null;
+  private async rollbackCreatedVersion(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    transaction: DesignVersionTransaction,
+  ): Promise<void> {
+    const indexPath = this.versionsIndexPath(projectDir, epicId, docId);
+    if (transaction.previousIndexBytes) {
+      await this.persistence.writeFile(
+        indexPath,
+        transaction.previousIndexBytes,
+        { storage: "design_versions", epicId, documentId: docId },
+      );
+    } else {
+      await rm(indexPath, { force: true });
+    }
+    await rm(transaction.snapshotPath, { force: true });
+  }
 
-    return { content: target.content, revertVersion };
+  private async pruneCommittedDesignSnapshots(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    versions: DesignDocVersion[],
+  ): Promise<void> {
+    try {
+      for (const version of versions) {
+        await rm(this.versionFilePath(this.versionsDir(projectDir, epicId, docId), version.number), { force: true });
+      }
+    } catch {
+      throw new CodaScopePersistenceError({
+        storage: "design_versions",
+        epicId,
+        documentId: docId,
+        recovery: "orphan_snapshot",
+      });
+    }
   }
 
   /* ── Design Doc Images ──────────────────────────────────────────── */
@@ -802,4 +1035,64 @@ export class CodaScopeDesignDocService {
     const imagePath = path.join(this.docDir(projectDir, epicId, docId), "images", safeName);
     return existsSync(imagePath) ? imagePath : null;
   }
+}
+
+function validateDesignsIndex(value: unknown): DesignsIndex {
+  if (!isRecord(value) || !Array.isArray(value.docs)) throw new Error("invalid designs index");
+  const ids = new Set<string>();
+  for (const doc of value.docs) {
+    if (!isRecord(doc)
+      || typeof doc.id !== "string"
+      || typeof doc.epicId !== "string"
+      || typeof doc.title !== "string"
+      || typeof doc.createdAt !== "string"
+      || typeof doc.updatedAt !== "string"
+      || typeof doc.createdBy !== "string"
+      || !isNonNegativeNumber(doc.wordCount)
+      || !isNonNegativeNumber(doc.blockCount)
+      || !isNonNegativeNumber(doc.annotationCount)
+      || !isNonNegativeNumber(doc.directiveCount)
+      || (doc.template !== undefined && typeof doc.template !== "string")
+      || (doc.archivedAt !== undefined && typeof doc.archivedAt !== "string")
+      || (doc.pinnedAt !== undefined && typeof doc.pinnedAt !== "string")
+      || ids.has(doc.id)) {
+      throw new Error("invalid design record");
+    }
+    assertSafePathSegment(doc.id, "document ID");
+    ids.add(doc.id);
+  }
+  return value as unknown as DesignsIndex;
+}
+
+function validateDesignVersionsIndex(value: unknown): DesignDocVersionsIndex {
+  assertVersionIndex(value, "number", "design version number");
+  if (!isRecord(value)
+    || !Array.isArray(value.versions)
+    || typeof value.maxVersions !== "number"
+    || !Number.isSafeInteger(value.maxVersions)
+    || value.maxVersions <= 0) {
+    throw new Error("invalid design version index");
+  }
+  for (const version of value.versions) {
+    if (!isRecord(version)
+      || typeof version.createdAt !== "string"
+      || typeof version.author !== "string"
+      || typeof version.summary !== "string"
+      || !isNonNegativeNumber(version.wordCount)) {
+      throw new Error("invalid design version record");
+    }
+  }
+  return value as unknown as DesignDocVersionsIndex;
+}
+
+function cloneDesignsIndex(index: DesignsIndex): DesignsIndex {
+  return { docs: index.docs.map((doc) => ({ ...doc })) };
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

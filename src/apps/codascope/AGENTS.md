@@ -117,6 +117,32 @@ Each service file has one clear domain:
   Never aim traversal/destructive tests at this checkout, configured CodaScope
   data, a user's home directory, or shared fixtures.
 
+### Authoritative JSON Persistence
+
+- Never interpret malformed or structurally invalid persistent JSON as empty
+  state. Only a genuinely missing, explicitly uninitialized file may use a
+  documented default; preserve corrupt bytes for operator repair.
+- Never directly overwrite authoritative JSON. Use
+  `codaScopePersistence.ts` for strict reads and same-directory atomic
+  replacement.
+- Hold the canonical mutation-coordinator key across the complete
+  read-validate-modify-write operation. Epic lifecycle and epic import share
+  the project `epics/` key; epic-version creation uses that same key because it
+  replaces `epic.json`; annotations use a per-epic key; design versions use a
+  per-document key.
+- Validate persisted `projectId` and `id` values against their requested
+  project and storage directory before mutation. Indexed-but-missing metadata,
+  required content, or snapshot files are `persistence_corrupt`, never empty
+  content or not-found.
+- Never prune snapshots, permanently delete an epic, or discard old state
+  before the replacement authoritative index is durable. Use staging,
+  tombstones, ordering, and bounded rollback; do not claim multi-file ACID.
+- Persistence tests must inject write, flush/close, rename, index-publication,
+  and metadata-publication failures and verify the prior bytes, directories,
+  and queued mutations remain usable.
+- The mutation coordinator assumes one AIShell server process. Direct external
+  writers and multiple server processes are unsupported.
+
 ### Notes Documents and Priority
 
 - A personal star belongs only in that user's `_notes/_user-prefs` data. Never

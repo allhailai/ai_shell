@@ -48,6 +48,20 @@ function writeText(filePath: string, content: string): void {
   writeFileSync(filePath, content, "utf-8");
 }
 
+function epicRecord(projectId: string, epicId: string, title: string) {
+  return {
+    id: epicId,
+    projectId,
+    title,
+    status: "defining" as const,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdBy: "alice",
+    collaborators: ["alice"],
+    currentVersion: 0,
+  };
+}
+
 function fixture() {
   const root = tempRoot();
   const projectsRoot = path.join(root, "projects");
@@ -56,27 +70,21 @@ function fixture() {
   const epicId = "epic-valid_uuid_123";
   const epicDir = path.join(projectDir, "epics", epicId);
   const archivedEpicDir = path.join(projectDir, "epics", "_archive", "archived-valid_id");
+  const activeEpic = epicRecord("project-id", epicId, "Legitimate epic");
+  const archivedEpic = {
+    ...epicRecord("project-id", "archived-valid_id", "Archived epic"),
+    status: "archived" as const,
+  };
 
   writeText(path.join(projectsRoot, "projects-root.sentinel"), "projects-root-sentinel");
   writeText(path.join(projectDir, "project.sentinel"), "project-sentinel");
   writeText(path.join(projectDir, "project.json"), JSON.stringify({ id: "project-id", name: "Primary" }));
   writeText(path.join(neighborDir, "neighbor.sentinel"), "neighbor-sentinel");
   writeText(path.join(neighborDir, "project.json"), JSON.stringify({ id: "neighbor-id", name: "Neighbor" }));
-  writeText(path.join(epicDir, "epic.json"), JSON.stringify({
-    id: epicId,
-    projectId: "project-id",
-    title: "Legitimate epic",
-    status: "defining",
-    collaborators: [],
-  }));
+  writeText(path.join(projectDir, "epics", "epics.json"), JSON.stringify({ epics: [activeEpic] }));
+  writeText(path.join(epicDir, "epic.json"), JSON.stringify({ ...activeEpic, conversationId: null }));
   writeText(path.join(epicDir, "definition.md"), "legitimate-epic-content");
-  writeText(path.join(archivedEpicDir, "epic.json"), JSON.stringify({
-    id: "archived-valid_id",
-    projectId: "project-id",
-    title: "Archived epic",
-    status: "archived",
-    collaborators: [],
-  }));
+  writeText(path.join(archivedEpicDir, "epic.json"), JSON.stringify({ ...archivedEpic, conversationId: null }));
 
   return { projectsRoot, projectDir, neighborDir, epicId, epicDir, archivedEpicDir };
 }
@@ -165,6 +173,13 @@ describe("CodaScope service filesystem boundaries", () => {
     "continues to read legitimate epic ID %s",
     async (epicId) => {
       const f = fixture();
+      const existing = epicRecord("project-id", f.epicId, "Legitimate epic");
+      const added = epicRecord("project-id", epicId, "Additional epic");
+      writeText(path.join(f.projectDir, "epics", "epics.json"), JSON.stringify({ epics: [existing, added] }));
+      writeText(
+        path.join(f.projectDir, "epics", epicId, "epic.json"),
+        JSON.stringify({ ...added, conversationId: null }),
+      );
       writeText(path.join(f.projectDir, "epics", epicId, "definition.md"), epicId);
       const service = new CodaScopeEpicService(f.projectsRoot);
       await expect(service.getDefinition("project-id", epicId)).resolves.toBe(epicId);

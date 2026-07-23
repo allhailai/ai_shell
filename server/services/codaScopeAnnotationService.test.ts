@@ -6,20 +6,16 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import crypto from "node:crypto";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
-  return path.join(
-    process.cwd(),
-    ".test-tmp",
-    `annotation-svc-${crypto.randomBytes(4).toString("hex")}`,
-  );
+  return mkdtempSync(path.join(os.tmpdir(), "codascope-annotation-svc-"));
 }
 
 /** Scaffold a minimal project + epic with annotations/directives dirs. */

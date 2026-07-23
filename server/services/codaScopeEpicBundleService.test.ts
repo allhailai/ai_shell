@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { createWriteStream, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ZipArchive } from "archiver";
@@ -183,6 +183,46 @@ describe("CodaScopeEpicBundleService", () => {
     const projectSvc = new CodaScopeProjectService(root);
     const bundleSvc = new CodaScopeEpicBundleService(projectSvc);
     await expect(bundleSvc.importEpic(targetProjectId, badZipPath)).rejects.toThrow("manifest and epic metadata do not match");
+  });
+
+  it("preserves a corrupt destination epic index and publishes no imported directory", async () => {
+    const root = tmpDir();
+    const sourceProjectId = "project-source";
+    const targetProjectId = "project-target";
+    const sourceProjectDir = project(root, "source", sourceProjectId);
+    const targetProjectDir = project(root, "target", targetProjectId);
+    const sourceEpicId = "epic_source123";
+    const sourceEpicDir = path.join(sourceProjectDir, "epics", sourceEpicId);
+    mkdirSync(sourceEpicDir, { recursive: true });
+    writeJson(path.join(sourceEpicDir, "epic.json"), {
+      id: sourceEpicId,
+      projectId: sourceProjectId,
+      title: "Portable Design",
+      status: "defining",
+      createdAt: "2026-01-02T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+      createdBy: "alexa",
+      collaborators: ["alexa"],
+      currentVersion: 0,
+      conversationId: null,
+    });
+    writeFileSync(path.join(sourceEpicDir, "definition.md"), "# Portable\n", "utf-8");
+    const targetEpicsDir = path.join(targetProjectDir, "epics");
+    mkdirSync(targetEpicsDir, { recursive: true });
+    const indexPath = path.join(targetEpicsDir, "epics.json");
+    const corrupt = "{ destination-corrupt";
+    writeFileSync(indexPath, corrupt, "utf-8");
+
+    const bundleSvc = new CodaScopeEpicBundleService(new CodaScopeProjectService(root));
+    const zipPath = path.join(root, "portable-corrupt-target.zip");
+    await writeExport(bundleSvc, sourceProjectId, sourceEpicId, zipPath);
+
+    await expect(bundleSvc.importEpic(targetProjectId, zipPath)).rejects.toMatchObject({
+      status: 500,
+      code: "persistence_corrupt",
+    });
+    expect(readFileSync(indexPath, "utf-8")).toBe(corrupt);
+    expect(readdirSync(targetEpicsDir)).toEqual(["epics.json"]);
   });
 
   it.each([

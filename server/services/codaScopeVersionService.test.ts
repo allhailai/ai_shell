@@ -33,9 +33,25 @@ function scaffoldProject(
 
   const epicDir = path.join(projectDir, "epics", epicId);
   mkdirSync(epicDir, { recursive: true });
+  const epic = {
+    id: epicId,
+    projectId,
+    title: "Test Epic",
+    status: "defining",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdBy: "user",
+    collaborators: ["user"],
+    currentVersion: 0,
+  };
+  writeFileSync(
+    path.join(projectDir, "epics", "epics.json"),
+    JSON.stringify({ epics: [epic] }),
+    "utf-8",
+  );
   writeFileSync(
     path.join(epicDir, "epic.json"),
-    JSON.stringify({ id: epicId, name: "Test Epic", currentVersion: 0 }),
+    JSON.stringify({ ...epic, conversationId: null }),
     "utf-8",
   );
 
@@ -135,6 +151,24 @@ describe("CodaScopeVersionService", () => {
       expect(version.designDocHashes["doc1"]).toBeTruthy();
     });
 
+    it("round-trips directory-layout design documents through an epic snapshot", async () => {
+      const projectId = "proj-directory-design";
+      const epicId = "epic-directory-design";
+      const projDir = scaffoldProject(root, projectId, epicId);
+      const docDir = path.join(projDir, "epics", epicId, "designs", "doc1");
+      mkdirSync(docDir, { recursive: true });
+      writeFileSync(path.join(docDir, "content.md"), "# Directory design\n\nContent.", "utf-8");
+
+      const version = await svc.createVersion(projectId, epicId, { createdBy: "agent" });
+      expect(version.designDocHashes.doc1).toBeTruthy();
+      const snapshot = await svc.getVersion(projectId, epicId, version.version);
+      expect(snapshot?.designDocs).toEqual([{
+        id: "doc1",
+        filename: "doc1/content.md",
+        content: "# Directory design\n\nContent.",
+      }]);
+    });
+
     it("throws when project not found", async () => {
       await expect(
         svc.createVersion("nonexistent", "epic1", { createdBy: "user" }),
@@ -188,9 +222,8 @@ describe("CodaScopeVersionService", () => {
 
       await expect(svc.createVersion(projectId, epicId, { createdBy: "user" }))
         .rejects.toMatchObject({
-          status: 400,
-          code: "invalid_input",
-          message: "Invalid epic version number.",
+          status: 500,
+          code: "persistence_corrupt",
         });
 
       expect(readFileSync(sentinel, "utf-8")).toBe("sentinel-bytes");
@@ -335,8 +368,8 @@ describe("CodaScopeVersionService", () => {
       expect(result!.definition).toBe("");
     });
 
-    it("readVersionsIndex returns empty array for non-existent path", () => {
-      const result = svc.readVersionsIndex("/nonexistent/path");
+    it("readVersionsIndex returns empty array for non-existent path", async () => {
+      const result = await svc.readVersionsIndex("/nonexistent/path");
       expect(result).toEqual([]);
     });
   });

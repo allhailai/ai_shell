@@ -683,6 +683,69 @@ before any atomic publication. Hostile-path tests use temporary directories
 and sentinel files only; they never target the repository, configured project
 storage, home directories, or shared fixtures.
 
+### Atomic Persistence and Corruption Recovery
+
+`server/services/codaScopePersistence.ts` is the shared persistence boundary
+for authoritative CodaScope JSON covered by the epic/design persistence
+contract. Reads distinguish a missing, genuinely uninitialized file from an
+existing malformed or structurally invalid file. A corrupt file fails closed
+with `persistence_corrupt`; its bytes are preserved for explicit operator
+repair or restoration. Atomic I/O failures use `persistence_failed`. HTTP
+responses and logs expose only these stable messages/codes and logical storage
+context, never an absolute path or raw filesystem error.
+
+Atomic replacement writes a unique exclusive same-directory sibling, flushes
+and closes it, renames it over the target, and flushes the parent directory
+where supported. A temporary backup link/copy permits bounded rollback when a
+post-rename flush fails. Temporary and backup siblings are removed after
+success or failure, and the old target is never truncated or unlinked before
+the publishing rename succeeds.
+
+Read-validate-modify-write operations use the persistence module's keyed,
+re-entrant in-process coordinator:
+
+| State | Serialization identity |
+|-------|------------------------|
+| Epic index, lifecycle, scope, definition metadata, epic versions, epic import | Project `epics/` directory |
+| Epic annotations | Epic `annotations/` directory |
+| Design-document versions and revert | Design-document directory |
+| Design index/content metadata used by revert | Epic `designs/` directory |
+
+The deployed concurrency contract is one AIShell server process. The
+coordinator prevents lost updates between services in that process, including
+epic bundle import, and permits same-key nested service operations. Multiple
+server processes and direct external writers are unsupported and require
+external coordination.
+
+Every operation that can replace an active epic's `epic.json` uses the same
+project `epics/` key, including epic-version creation. Strict reads also bind
+persisted identities to their storage location: index and metadata `projectId`
+values must match the requested project, and metadata `id` must match its epic
+directory. An index entry whose metadata, required definition/design content,
+or committed version snapshot is missing is corruption, not empty or absent
+state. These checks run before mutation.
+
+`epics.json`, each design `versions.json`, and each epic `versions.json` are
+the authoritative commit records for their respective collections. Epic
+lifecycle operations validate the active index before touching directories,
+use hidden staging/tombstone paths, and apply bounded rollback around index
+publication. A missing epic index is an empty store only when no active epic
+directory exists. Delete publishes the index before removing its tombstone;
+if post-commit cleanup fails, the index remains authoritative and the hidden,
+unindexed tombstone is retained for explicit operator cleanup.
+Raw lifecycle filesystem failures, including rollback failures, are converted
+to the sanitized `persistence_failed` domain error before reaching routes.
+
+Design versions atomically create the new snapshot, publish `versions.json`,
+and only then prune snapshots excluded by the committed index. Index failure
+removes the unpublished snapshot and never prunes old history. Epic versions
+are built completely in a hidden sibling staging directory and renamed into
+place before publishing `versions.json`; that index is authoritative, while
+`epic.json.currentVersion` is a derived current pointer updated last. A failed
+index or metadata publication attempts to restore the prior index/metadata and
+remove the new snapshot. If bounded rollback itself fails, the error calls for
+operator recovery; no multi-file ACID guarantee is claimed.
+
 ### Portable Project Import and Export
 
 `GET /api/codascope/projects/:id/export` creates a
@@ -789,7 +852,11 @@ The Epic Design subsystem provides collaborative document authoring for software
     │           └── <version>/
     │               └── index.html          # Built HTML output
     └── versions/
-        └── <version>-<timestamp>.json      # Epic-level versioned snapshots
+        ├── versions.json                   # Authoritative epic-version index
+        └── v<version>/                     # Atomically published snapshot directory
+            ├── definition.md
+            ├── scope.json
+            └── designs/
 ```
 
 ### Epic Lifecycle

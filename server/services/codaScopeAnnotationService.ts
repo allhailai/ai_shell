@@ -13,7 +13,7 @@
    Note: Insertion directives have been extracted to CodaScopeDirectiveService.
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {
@@ -23,6 +23,10 @@ import type {
   BlockAnchor,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { assertSafePathSegment } from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistence,
+  codaScopePersistence,
+} from "./codaScopePersistence.js";
 
 /* ── Storage schemas ─────────────────────────────────────────────── */
 
@@ -37,7 +41,10 @@ interface AnnotationsFile {
 export class CodaScopeAnnotationService {
   private root: string;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+  ) {
     this.root = root;
   }
 
@@ -80,20 +87,25 @@ export class CodaScopeAnnotationService {
 
   /* ── File I/O helpers ──────────────────────────────────────────── */
 
-  private readAnnotations(projectDir: string, epicId: string, documentId: string): AnnotationsFile {
+  private readAnnotations(projectDir: string, epicId: string, documentId: string): Promise<AnnotationsFile> {
     const p = this.annotationsPath(projectDir, epicId, documentId);
-    if (!existsSync(p)) return { annotations: [] };
-    try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { annotations: [] };
-    }
+    return this.persistence.readJson(p, {
+      context: { storage: "epic_annotations", epicId, documentId },
+      missing: () => ({ annotations: [] }),
+      validate: validateAnnotationsFile,
+    });
   }
 
-  private writeAnnotations(projectDir: string, epicId: string, documentId: string, data: AnnotationsFile): void {
-    const dir = this.annotationsDir(projectDir, epicId);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.annotationsPath(projectDir, epicId, documentId), JSON.stringify(data, null, 2), "utf-8");
+  private writeAnnotations(projectDir: string, epicId: string, documentId: string, data: AnnotationsFile): Promise<void> {
+    return this.persistence.writeJson(
+      this.annotationsPath(projectDir, epicId, documentId),
+      data,
+      { storage: "epic_annotations", epicId, documentId },
+    );
+  }
+
+  private mutationKey(projectDir: string, epicId: string): string {
+    return this.persistence.canonicalKey("epic-annotations", this.annotationsDir(projectDir, epicId));
   }
 
 
@@ -276,7 +288,7 @@ export class CodaScopeAnnotationService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
 
-    const file = this.readAnnotations(projectDir, epicId, documentId);
+    const file = await this.readAnnotations(projectDir, epicId, documentId);
     if (!documentContent) return file.annotations;
 
     // Re-anchor: resolve each annotation's block against current document
@@ -314,26 +326,27 @@ export class CodaScopeAnnotationService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
-    const id = `ann_${crypto.randomBytes(6).toString("hex")}`;
-    const annotation: Annotation = {
-      id,
-      epicId,
-      documentId,
-      documentVersion: data.documentVersion ?? 0,
-      anchor: data.anchor,
-      author: data.author,
-      createdAt: new Date().toISOString(),
-      body: data.body,
-      parentId: data.parentId,
-      status: "open",
-      reactions: [],
-    };
+    return this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
+      const id = `ann_${crypto.randomBytes(6).toString("hex")}`;
+      const annotation: Annotation = {
+        id,
+        epicId,
+        documentId,
+        documentVersion: data.documentVersion ?? 0,
+        anchor: data.anchor,
+        author: data.author,
+        createdAt: new Date().toISOString(),
+        body: data.body,
+        parentId: data.parentId,
+        status: "open",
+        reactions: [],
+      };
 
-    const file = this.readAnnotations(projectDir, epicId, documentId);
-    file.annotations.push(annotation);
-    this.writeAnnotations(projectDir, epicId, documentId, file);
-
-    return annotation;
+      const file = await this.readAnnotations(projectDir, epicId, documentId);
+      file.annotations.push(annotation);
+      await this.writeAnnotations(projectDir, epicId, documentId, file);
+      return annotation;
+    });
   }
 
   /** Update an annotation (status, body, reactions). */
@@ -350,39 +363,39 @@ export class CodaScopeAnnotationService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    // Search all annotation files for this epic
-    const annDir = this.annotationsDir(projectDir, epicId);
-    if (!existsSync(annDir)) return null;
+    return this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
+      // Search and mutation share one per-epic critical section so moving the
+      // owning annotation between files cannot lose a concurrent update.
+      const annDir = this.annotationsDir(projectDir, epicId);
+      if (!existsSync(annDir)) return null;
 
-    const files = readdirSync(annDir).filter((f) => f.endsWith("-annotations.json"));
+      const files = readdirSync(annDir).filter((f) => f.endsWith("-annotations.json"));
 
-    for (const filename of files) {
-      const docId = filename.replace("-annotations.json", "");
-      const file = this.readAnnotations(projectDir, epicId, docId);
-      const idx = file.annotations.findIndex((a) => a.id === annotationId);
+      for (const filename of files) {
+        const docId = filename.replace("-annotations.json", "");
+        const file = await this.readAnnotations(projectDir, epicId, docId);
+        const idx = file.annotations.findIndex((a) => a.id === annotationId);
 
-      if (idx >= 0) {
-        const ann = file.annotations[idx];
-        if (changes.status !== undefined) ann.status = changes.status;
-        if (changes.body !== undefined) ann.body = changes.body;
-        if (changes.reactions !== undefined) ann.reactions = changes.reactions;
+        if (idx >= 0) {
+          const ann = file.annotations[idx];
+          if (changes.status !== undefined) ann.status = changes.status;
+          if (changes.body !== undefined) ann.body = changes.body;
+          if (changes.reactions !== undefined) ann.reactions = changes.reactions;
 
-        // If resolving a parent, also resolve all replies
-        if (changes.status === "resolved" && !ann.parentId) {
-          for (const reply of file.annotations) {
-            if (reply.parentId === annotationId) {
-              reply.status = "resolved";
+          // If resolving a parent, also resolve all replies
+          if (changes.status === "resolved" && !ann.parentId) {
+            for (const reply of file.annotations) {
+              if (reply.parentId === annotationId) reply.status = "resolved";
             }
           }
+
+          file.annotations[idx] = ann;
+          await this.writeAnnotations(projectDir, epicId, docId, file);
+          return ann;
         }
-
-        file.annotations[idx] = ann;
-        this.writeAnnotations(projectDir, epicId, docId, file);
-        return ann;
       }
-    }
-
-    return null;
+      return null;
+    });
   }
 
   /** Delete an annotation (and its replies). */
@@ -394,38 +407,37 @@ export class CodaScopeAnnotationService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const annDir = this.annotationsDir(projectDir, epicId);
-    if (!existsSync(annDir)) return false;
+    return this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
+      const annDir = this.annotationsDir(projectDir, epicId);
+      if (!existsSync(annDir)) return false;
 
-    const files = readdirSync(annDir).filter((f) => f.endsWith("-annotations.json"));
+      const files = readdirSync(annDir).filter((f) => f.endsWith("-annotations.json"));
 
-    for (const filename of files) {
-      const docId = filename.replace("-annotations.json", "");
-      const file = this.readAnnotations(projectDir, epicId, docId);
-      const targetIdx = file.annotations.findIndex((a) => a.id === annotationId);
+      for (const filename of files) {
+        const docId = filename.replace("-annotations.json", "");
+        const file = await this.readAnnotations(projectDir, epicId, docId);
+        const targetIdx = file.annotations.findIndex((a) => a.id === annotationId);
 
-      if (targetIdx >= 0) {
-        // Remove the annotation and all its replies
-        const idsToRemove = new Set([annotationId]);
-        // Recursively find all replies
-        let found = true;
-        while (found) {
-          found = false;
-          for (const ann of file.annotations) {
-            if (ann.parentId && idsToRemove.has(ann.parentId) && !idsToRemove.has(ann.id)) {
-              idsToRemove.add(ann.id);
-              found = true;
+        if (targetIdx >= 0) {
+          const idsToRemove = new Set([annotationId]);
+          let found = true;
+          while (found) {
+            found = false;
+            for (const ann of file.annotations) {
+              if (ann.parentId && idsToRemove.has(ann.parentId) && !idsToRemove.has(ann.id)) {
+                idsToRemove.add(ann.id);
+                found = true;
+              }
             }
           }
+
+          file.annotations = file.annotations.filter((a) => !idsToRemove.has(a.id));
+          await this.writeAnnotations(projectDir, epicId, docId, file);
+          return true;
         }
-
-        file.annotations = file.annotations.filter((a) => !idsToRemove.has(a.id));
-        this.writeAnnotations(projectDir, epicId, docId, file);
-        return true;
       }
-    }
-
-    return false;
+      return false;
+    });
   }
 
   /** Count open annotations across all documents for an epic. */
@@ -441,7 +453,7 @@ export class CodaScopeAnnotationService {
 
     for (const filename of files) {
       const docId = filename.replace("-annotations.json", "");
-      const file = this.readAnnotations(projectDir, epicId, docId);
+      const file = await this.readAnnotations(projectDir, epicId, docId);
       // Count top-level open annotations (not replies)
       count += file.annotations.filter((a) => a.status === "open" && !a.parentId).length;
     }
@@ -461,4 +473,41 @@ function slugify(text: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40) || "root";
+}
+
+function validateAnnotationsFile(value: unknown): AnnotationsFile {
+  if (!isRecord(value) || !Array.isArray(value.annotations)) throw new Error("invalid annotations file");
+  const ids = new Set<string>();
+  for (const annotation of value.annotations) {
+    if (!isAnnotation(annotation) || ids.has(annotation.id)) throw new Error("invalid annotation record");
+    ids.add(annotation.id);
+  }
+  return value as unknown as AnnotationsFile;
+}
+
+function isAnnotation(value: unknown): value is Annotation {
+  if (!isRecord(value) || !isRecord(value.anchor)) return false;
+  return typeof value.id === "string"
+    && typeof value.epicId === "string"
+    && typeof value.documentId === "string"
+    && typeof value.documentVersion === "number"
+    && Number.isFinite(value.documentVersion)
+    && typeof value.author === "string"
+    && typeof value.createdAt === "string"
+    && typeof value.body === "string"
+    && (value.parentId === undefined || typeof value.parentId === "string")
+    && (value.status === "open" || value.status === "resolved" || value.status === "wontfix")
+    && Array.isArray(value.reactions)
+    && value.reactions.every((reaction) => isRecord(reaction)
+      && typeof reaction.emoji === "string"
+      && typeof reaction.user === "string")
+    && typeof value.anchor.blockId === "string"
+    && typeof value.anchor.sectionSlug === "string"
+    && typeof value.anchor.anchorText === "string"
+    && typeof value.anchor.lineNumber === "number"
+    && Number.isFinite(value.anchor.lineNumber);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

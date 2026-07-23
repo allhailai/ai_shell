@@ -10,6 +10,7 @@ import type { TopicDepth, CurationReasonType } from "../../../src/apps/codascope
 import { searchWeb } from "../codaScopeWebSearchService.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
 import { formatCompletedAction } from "../codaScopeActionParser.js";
+import { isPersistenceDomainError } from "../codaScopePersistence.js";
 
 /**
  * Build epic-related write tools and new read tools.
@@ -698,7 +699,11 @@ export function buildEpicTools(
         }
         try {
           // Create a version snapshot before editing (Phase 4: version history)
-          try { await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary); } catch { /* best effort */ }
+          try {
+            await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary);
+          } catch (error) {
+            if (isPersistenceDomainError(error)) throw error;
+          }
           const updated = await designDocService.updateDesignDoc(projectId, epicId, docId, content);
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
           if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
@@ -747,7 +752,11 @@ export function buildEpicTools(
           if (!result) return `Design doc "${docId}" not found in epic "${epicId}".`;
 
           // Create a version snapshot before editing (Phase 4: version history)
-          try { await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary); } catch { /* best effort */ }
+          try {
+            await designDocService.createVersion(projectId, epicId, docId, "agent", editSummary);
+          } catch (error) {
+            if (isPersistenceDomainError(error)) throw error;
+          }
 
           const lines = result.content.split("\n");
           const before = lines.slice(0, startLine - 1);

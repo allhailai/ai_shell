@@ -9,7 +9,8 @@
    - Diff two versions (line-by-line markdown diff)
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, cpSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import type { EpicVersion } from "../../src/apps/codascope/codaScopeTypes.js";
@@ -19,6 +20,29 @@ import {
   assertStrictDescendant,
   assertVersionIndex,
 } from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistence,
+  CodaScopePersistenceCorruptError,
+  CodaScopePersistenceError,
+  codaScopePersistence,
+  isPersistenceDomainError,
+} from "./codaScopePersistence.js";
+import {
+  epicStorageMutationKey,
+  readActiveEpicsIndex,
+  readEpicMetadata,
+} from "./codaScopeEpicStorage.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+
+export interface CodaScopeVersionSnapshotFileSystem {
+  mkdir(directory: string, options: { recursive?: boolean }): Promise<unknown>;
+  writeFile(filePath: string, data: string, encoding: BufferEncoding): Promise<void>;
+  cp(source: string, target: string, options: { recursive: true; errorOnExist: true }): Promise<void>;
+  rename(source: string, target: string): Promise<void>;
+  rm(target: string, options: { recursive?: boolean; force?: boolean }): Promise<void>;
+}
+
+const versionSnapshotFileSystem: CodaScopeVersionSnapshotFileSystem = { mkdir, writeFile, cp, rename, rm };
 
 /* ── Storage schema ───────────────────────────────────────────────── */
 
@@ -52,7 +76,11 @@ export interface VersionDiff {
 export class CodaScopeVersionService {
   private root: string;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+    private readonly snapshotFs: CodaScopeVersionSnapshotFileSystem = versionSnapshotFileSystem,
+  ) {
     this.root = root;
   }
 
@@ -102,38 +130,96 @@ export class CodaScopeVersionService {
 
   /* ── Index helpers ────────────────────────────────────────────────── */
 
-  private readIndex(projectDir: string, epicId: string): VersionsIndex {
+  private async readIndex(projectDir: string, epicId: string): Promise<VersionsIndex> {
     const p = this.indexPath(projectDir, epicId);
-    if (!existsSync(p)) return { versions: [] };
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { versions: [] };
-    }
-    assertVersionIndex(parsed, "version", "epic version number");
-    return parsed as VersionsIndex;
+    const index = await this.persistence.readJson(p, {
+      context: { storage: "epic_versions", epicId },
+      missing: () => {
+        const versionsDir = this.versionsDir(projectDir, epicId);
+        const hasSnapshots = existsSync(versionsDir)
+          && readdirSync(versionsDir, { withFileTypes: true })
+            .some((entry) => entry.isDirectory() && /^v\d+$/.test(entry.name));
+        if (hasSnapshots) {
+          throw new CodaScopePersistenceCorruptError({ storage: "epic_versions", epicId });
+        }
+        return { versions: [] };
+      },
+      validate: validateVersionsIndex,
+    });
+    this.assertSnapshotFiles(this.versionsDir(projectDir, epicId), epicId, index);
+    return index;
   }
 
-  private writeIndex(projectDir: string, epicId: string, index: VersionsIndex): void {
+  private writeIndex(projectDir: string, epicId: string, index: VersionsIndex): Promise<void> {
     assertVersionIndex(index, "version", "epic version number");
-    const dir = this.versionsDir(projectDir, epicId);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.indexPath(projectDir, epicId), JSON.stringify(index, null, 2), "utf-8");
+    return this.persistence.writeJson(
+      this.indexPath(projectDir, epicId),
+      index,
+      { storage: "epic_versions", epicId },
+    );
   }
 
   /** Read the versions index directly from an epic dir (for getEpic assembly). */
-  readVersionsIndex(epicDir: string): EpicVersion[] {
+  async readVersionsIndex(epicDir: string): Promise<EpicVersion[]> {
     const indexPath = path.join(epicDir, "versions", "versions.json");
-    if (!existsSync(indexPath)) return [];
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(indexPath, "utf-8"));
-    } catch {
-      return [];
+    const epicId = path.basename(epicDir);
+    const index = await this.persistence.readJson(indexPath, {
+      context: { storage: "epic_versions", epicId },
+      missing: () => {
+        const versionsDir = path.dirname(indexPath);
+        const hasSnapshots = existsSync(versionsDir)
+          && readdirSync(versionsDir, { withFileTypes: true })
+            .some((entry) => entry.isDirectory() && /^v\d+$/.test(entry.name));
+        if (hasSnapshots) throw new CodaScopePersistenceCorruptError({ storage: "epic_versions", epicId });
+        return { versions: [] };
+      },
+      validate: validateVersionsIndex,
+    });
+    this.assertSnapshotFiles(path.dirname(indexPath), epicId, index);
+    return index.versions;
+  }
+
+  private mutationKey(projectDir: string): string {
+    return epicStorageMutationKey(projectDir, this.persistence);
+  }
+
+  private assertSnapshotFiles(versionsRoot: string, epicId: string, index: VersionsIndex): void {
+    for (const version of index.versions) {
+      const snapshotDir = assertStrictDescendant(
+        versionsRoot,
+        path.join(versionsRoot, `v${version.version}`),
+        "epic version directory",
+      );
+      if (!existsSync(snapshotDir)
+        || !existsSync(path.join(snapshotDir, "definition.md"))
+        || !existsSync(path.join(snapshotDir, "scope.json"))) {
+        throw new CodaScopePersistenceCorruptError({ storage: "epic_versions", epicId });
+      }
+      for (const docId of Object.keys(version.designDocHashes)) {
+        const safeDocId = assertSafePathSegment(docId, "document ID");
+        const designsDir = path.join(snapshotDir, "designs");
+        const legacyPath = path.join(designsDir, `${safeDocId}.md`);
+        const currentPath = path.join(designsDir, safeDocId, "content.md");
+        if (!existsSync(legacyPath) && !existsSync(currentPath)) {
+          throw new CodaScopePersistenceCorruptError({
+            storage: "epic_versions",
+            epicId,
+            documentId: safeDocId,
+          });
+        }
+      }
     }
-    assertVersionIndex(parsed, "version", "epic version number");
-    return (parsed as VersionsIndex).versions;
+  }
+
+  private readRequiredFile(filePath: string, context: { storage: string; epicId: string }): string {
+    try {
+      return readFileSync(filePath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new CodaScopePersistenceCorruptError(context);
+      }
+      throw new CodaScopePersistenceError(context);
+    }
   }
 
   /* ── Hash helpers ─────────────────────────────────────────────────── */
@@ -142,13 +228,32 @@ export class CodaScopeVersionService {
     return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
   }
 
+  private readSnapshotDesignDocs(designsDir: string): Array<{ id: string; filename: string; content: string }> {
+    if (!existsSync(designsDir)) return [];
+    const docs = new Map<string, { id: string; filename: string; content: string }>();
+    for (const entry of readdirSync(designsDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        const id = assertSafePathSegment(entry.name.replace(/\.md$/, ""), "document ID");
+        docs.set(id, { id, filename: entry.name, content: readFileSync(path.join(designsDir, entry.name), "utf-8") });
+        continue;
+      }
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const id = assertSafePathSegment(entry.name, "document ID");
+      const contentPath = path.join(designsDir, id, "content.md");
+      if (existsSync(contentPath)) {
+        docs.set(id, { id, filename: `${id}/content.md`, content: readFileSync(contentPath, "utf-8") });
+      }
+    }
+    return [...docs.values()];
+  }
+
   /* ── CRUD ─────────────────────────────────────────────────────────── */
 
   /** List all versions for an epic. */
   async listVersions(projectId: string, epicId: string): Promise<EpicVersion[]> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
-    return this.readIndex(projectDir, epicId).versions;
+    return (await this.readIndex(projectDir, epicId)).versions;
   }
 
   /** Create a version snapshot — copies definition, scope, and designs. */
@@ -160,86 +265,129 @@ export class CodaScopeVersionService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
-    const epicDirectory = this.epicDir(projectDir, epicId);
-    if (!existsSync(epicDirectory)) throw new Error("Epic not found");
+    return this.persistence.withMutation(this.mutationKey(projectDir), async () => {
+      const epicIndex = await readActiveEpicsIndex(this.persistence, projectDir, projectId);
+      if (!epicIndex.epics.some((epic) => epic.id === epicId)) throw new Error("Epic not found");
+      const epicDirectory = this.epicDir(projectDir, epicId);
 
-    // Determine next version number
-    const index = this.readIndex(projectDir, epicId);
-    let maxVersion = 0;
-    for (const version of index.versions) maxVersion = Math.max(maxVersion, version.version);
-    const nextVersion = assertPositiveSafeInteger(maxVersion + 1, "epic version number");
-
-    // Mark previous versions as superseded
-    for (const v of index.versions) {
-      if (v.status === "draft" || v.status === "in-review") {
-        v.status = "superseded";
+      const indexPath = this.indexPath(projectDir, epicId);
+      const previousIndexBytes = existsSync(indexPath) ? readFileSync(indexPath) : null;
+      const index = await this.readIndex(projectDir, epicId);
+      const epicMetaPath = path.join(epicDirectory, "epic.json");
+      const previousMeta = await readEpicMetadata(this.persistence, projectDir, projectId, epicId);
+      const definitionPath = path.join(epicDirectory, "definition.md");
+      const defContent = this.readRequiredFile(
+        definitionPath,
+        { storage: "epic_definition", epicId },
+      );
+      const designsIndexPath = path.join(epicDirectory, "designs", "designs.json");
+      if (existsSync(designsIndexPath)) {
+        await new CodaScopeDesignDocService(this.root, this.persistence).readDesignsIndex(epicDirectory);
       }
-    }
 
-    // Create version directory
-    const vDir = this.versionDir(projectDir, epicId, nextVersion);
-    mkdirSync(vDir, { recursive: true });
-
-    // Copy definition.md
-    const defSrc = path.join(epicDirectory, "definition.md");
-    const defDst = path.join(vDir, "definition.md");
-    const defContent = existsSync(defSrc) ? readFileSync(defSrc, "utf-8") : "";
-    writeFileSync(defDst, defContent, "utf-8");
-
-    // Copy scope.json
-    const scopeSrc = path.join(epicDirectory, "scope.json");
-    const scopeDst = path.join(vDir, "scope.json");
-    const scopeContent = existsSync(scopeSrc) ? readFileSync(scopeSrc, "utf-8") : "{}";
-    writeFileSync(scopeDst, scopeContent, "utf-8");
-
-    // Copy designs directory
-    const designsSrc = path.join(epicDirectory, "designs");
-    const designsDst = path.join(vDir, "designs");
-    if (existsSync(designsSrc)) {
-      cpSync(designsSrc, designsDst, { recursive: true });
-    }
-
-    // Compute hashes
-    const definitionHash = this.hashContent(defContent);
-    const scopeHash = this.hashContent(scopeContent);
-    const designDocHashes: Record<string, string> = {};
-
-    if (existsSync(designsDst)) {
-      const designFiles = readdirSync(designsDst).filter((f) => f.endsWith(".md"));
-      for (const file of designFiles) {
-        const docContent = readFileSync(path.join(designsDst, file), "utf-8");
-        const docId = file.replace(/\.md$/, "");
-        designDocHashes[docId] = this.hashContent(docContent);
+      let maxVersion = 0;
+      for (const version of index.versions) maxVersion = Math.max(maxVersion, version.version);
+      const nextVersion = assertPositiveSafeInteger(maxVersion + 1, "epic version number");
+      for (const version of index.versions) {
+        if (version.status === "draft" || version.status === "in-review") version.status = "superseded";
       }
-    }
 
-    const version: EpicVersion = {
-      version: nextVersion,
-      createdAt: new Date().toISOString(),
-      createdBy: opts.createdBy ?? "user",
-      label: opts.label,
-      note: opts.note,
-      definitionHash,
-      designDocHashes,
-      scopeHash,
-      status: "draft",
-    };
-
-    index.versions.push(version);
-    this.writeIndex(projectDir, epicId, index);
-
-    // Update epic's currentVersion
-    const epicMetaPath = path.join(epicDirectory, "epic.json");
-    if (existsSync(epicMetaPath)) {
+      const versionsRoot = this.versionsDir(projectDir, epicId);
+      const publishedDir = this.versionDir(projectDir, epicId, nextVersion);
+      const stagingDir = assertStrictDescendant(
+        versionsRoot,
+        path.join(versionsRoot, `.v${nextVersion}.stage.${crypto.randomUUID()}`),
+        "epic version staging directory",
+      );
       try {
-        const meta = JSON.parse(readFileSync(epicMetaPath, "utf-8"));
-        meta.currentVersion = nextVersion;
-        meta.updatedAt = new Date().toISOString();
-        writeFileSync(epicMetaPath, JSON.stringify(meta, null, 2), "utf-8");
-      } catch { /* ignore */ }
-    }
+        await this.snapshotFs.mkdir(versionsRoot, { recursive: true });
+        await this.snapshotFs.mkdir(stagingDir, {});
+        const scopeContent = existsSync(path.join(epicDirectory, "scope.json"))
+          ? readFileSync(path.join(epicDirectory, "scope.json"), "utf-8")
+          : "{}";
+        await this.snapshotFs.writeFile(path.join(stagingDir, "definition.md"), defContent, "utf-8");
+        await this.snapshotFs.writeFile(path.join(stagingDir, "scope.json"), scopeContent, "utf-8");
 
-    return version;
+        const designsSrc = path.join(epicDirectory, "designs");
+        const designsDst = path.join(stagingDir, "designs");
+        if (existsSync(designsSrc)) await this.snapshotFs.cp(designsSrc, designsDst, { recursive: true, errorOnExist: true });
+
+        const designDocHashes: Record<string, string> = {};
+        if (existsSync(designsDst)) {
+          for (const doc of this.readSnapshotDesignDocs(designsDst)) {
+            designDocHashes[doc.id] = this.hashContent(doc.content);
+          }
+        }
+
+        const version: EpicVersion = {
+          version: nextVersion,
+          createdAt: new Date().toISOString(),
+          createdBy: opts.createdBy ?? "user",
+          label: opts.label,
+          note: opts.note,
+          definitionHash: this.hashContent(defContent),
+          designDocHashes,
+          scopeHash: this.hashContent(scopeContent),
+          status: "draft",
+        };
+
+        await this.snapshotFs.rename(stagingDir, publishedDir);
+        index.versions.push(version);
+        try {
+          await this.writeIndex(projectDir, epicId, index);
+        } catch (error) {
+          await this.snapshotFs.rm(publishedDir, { recursive: true, force: true });
+          throw error;
+        }
+
+        const nextMeta = {
+          ...previousMeta,
+          currentVersion: nextVersion,
+          updatedAt: new Date().toISOString(),
+        };
+        try {
+          await this.persistence.writeJson(
+            epicMetaPath,
+            nextMeta,
+            { storage: "epic_metadata", epicId },
+          );
+        } catch (error) {
+          try {
+            if (previousIndexBytes) {
+              await this.persistence.writeFile(
+                indexPath,
+                previousIndexBytes,
+                { storage: "epic_versions", epicId },
+              );
+            } else {
+              await this.snapshotFs.rm(indexPath, { force: true });
+            }
+            await this.snapshotFs.rm(publishedDir, { recursive: true, force: true });
+          } catch {
+            throw new CodaScopePersistenceError({
+              storage: "epic_versions",
+              epicId,
+              recovery: "operator_required",
+            });
+          }
+          throw error;
+        }
+
+        return version;
+      } catch (error) {
+        try {
+          await this.snapshotFs.rm(stagingDir, { recursive: true, force: true });
+        } catch {
+          throw new CodaScopePersistenceError({
+            storage: "epic_version_snapshot",
+            epicId,
+            recovery: "operator_required",
+          });
+        }
+        if (isPersistenceDomainError(error)) throw error;
+        throw new CodaScopePersistenceError({ storage: "epic_version_snapshot", epicId });
+      }
+    });
   }
 
   /** Get a version snapshot's contents. */
@@ -253,31 +401,26 @@ export class CodaScopeVersionService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const index = this.readIndex(projectDir, epicId);
+    const index = await this.readIndex(projectDir, epicId);
     const versionMeta = index.versions.find((v) => v.version === safeVersion);
     if (!versionMeta) return null;
 
     const vDir = this.versionDir(projectDir, epicId, safeVersion);
-    if (!existsSync(vDir)) return null;
-
-    const defPath = path.join(vDir, "definition.md");
-    const definition = existsSync(defPath) ? readFileSync(defPath, "utf-8") : "";
-
-    const scopePath = path.join(vDir, "scope.json");
-    const scope = existsSync(scopePath) ? readFileSync(scopePath, "utf-8") : "{}";
-
-    const designDocs: Array<{ id: string; filename: string; content: string }> = [];
-    const designDir = path.join(vDir, "designs");
-    if (existsSync(designDir)) {
-      const files = readdirSync(designDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        designDocs.push({
-          id: file.replace(/\.md$/, ""),
-          filename: file,
-          content: readFileSync(path.join(designDir, file), "utf-8"),
-        });
-      }
+    if (!existsSync(vDir)) {
+      throw new CodaScopePersistenceCorruptError({ storage: "epic_versions", epicId });
     }
+
+    const definition = this.readRequiredFile(
+      path.join(vDir, "definition.md"),
+      { storage: "epic_versions", epicId },
+    );
+    const scope = this.readRequiredFile(
+      path.join(vDir, "scope.json"),
+      { storage: "epic_versions", epicId },
+    );
+
+    const designDir = path.join(vDir, "designs");
+    const designDocs = this.readSnapshotDesignDocs(designDir);
 
     return { version: versionMeta, definition, scope, designDocs };
   }
@@ -372,4 +515,28 @@ export class CodaScopeVersionService {
 
     return result;
   }
+}
+
+function validateVersionsIndex(value: unknown): VersionsIndex {
+  assertVersionIndex(value, "version", "epic version number");
+  if (!isRecord(value) || !Array.isArray(value.versions)) throw new Error("invalid epic version index");
+  for (const version of value.versions) {
+    if (!isRecord(version)
+      || typeof version.createdAt !== "string"
+      || typeof version.createdBy !== "string"
+      || (version.label !== undefined && typeof version.label !== "string")
+      || (version.note !== undefined && typeof version.note !== "string")
+      || typeof version.definitionHash !== "string"
+      || !isRecord(version.designDocHashes)
+      || !Object.values(version.designDocHashes).every((hash) => typeof hash === "string")
+      || typeof version.scopeHash !== "string"
+      || !new Set(["draft", "in-review", "approved", "superseded"]).has(String(version.status))) {
+      throw new Error("invalid epic version record");
+    }
+  }
+  return value as unknown as VersionsIndex;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

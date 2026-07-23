@@ -273,7 +273,11 @@ app.use((err: HttpError, _req: express.Request, res: express.Response, _next: ex
   const status = err.status ?? 500;
   const code = err.code ?? "internal_error";
   if (status >= 500) {
-    console.error("[aishell] Server error:", err);
+    if (code === "persistence_corrupt" || code === "persistence_failed") {
+      console.error("[aishell] CodaScope persistence error:", { code, message: err.message });
+    } else {
+      console.error("[aishell] Server error:", err);
+    }
   }
   res.status(status).json({ error: err.message, code });
 });

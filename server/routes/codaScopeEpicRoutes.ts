@@ -12,6 +12,7 @@ import {
   handlePreStreamError,
 } from "./utils/ssePipelineHelper.js";
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
+import { isPersistenceDomainError } from "../services/codaScopePersistence.js";
 
 export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, principal, upload } = ctx;
@@ -471,7 +472,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError("content is required.", 400, "invalid_input");
     }
     // Create a version snapshot before saving (best effort — don't fail the save)
-    try { await designDocSvc.createVersion(id, epicId, docId, "user", "Manual save"); } catch { /* ignore */ }
+    try {
+      await designDocSvc.createVersion(id, epicId, docId, "user", "Manual save");
+    } catch (error) {
+      if (isPersistenceDomainError(error)) throw error;
+    }
     const result = await designDocSvc.updateDesignDoc(id, epicId, docId, content, expectedHash);
     if (!result) throw httpError("Design doc not found.", 404, "not_found");
     if ("conflict" in result) {
@@ -528,7 +533,11 @@ export function registerEpicRoutes(ctx: CodaScopeRouteContext): void {
 
     // Create a version snapshot before destructive deletes (best effort)
     if (isDelete) {
-      try { await designDocSvc.createVersion(id, epicId, docId, "user", `Delete ${body.type.replace("delete-", "")}`); } catch { /* ignore */ }
+      try {
+        await designDocSvc.createVersion(id, epicId, docId, "user", `Delete ${body.type.replace("delete-", "")}`);
+      } catch (error) {
+        if (isPersistenceDomainError(error)) throw error;
+      }
     }
 
     const result = await designDocSvc.applyResizeMetadata(id, epicId, docId, resizeOp);

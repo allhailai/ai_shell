@@ -5,19 +5,15 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import crypto from "node:crypto";
 import { CodaScopeEpicService } from "./codaScopeEpicService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
-  return path.join(
-    process.cwd(),
-    ".test-tmp",
-    `epic-svc-${crypto.randomBytes(4).toString("hex")}`,
-  );
+  return mkdtempSync(path.join(os.tmpdir(), "codascope-epic-svc-"));
 }
 
 /** Scaffold a minimal project directory. */

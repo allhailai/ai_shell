@@ -24,6 +24,15 @@ import {
   assertSafePathSegment,
   assertStrictDescendant,
 } from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistence,
+  codaScopePersistence,
+} from "./codaScopePersistence.js";
+import {
+  epicStorageMutationKey,
+  readActiveEpicsIndex,
+  validateEpicsIndex,
+} from "./codaScopeEpicStorage.js";
 
 const MANIFEST_FILENAME = "codascope-epic-manifest.json";
 const PAYLOAD_DIRECTORY = "epic";
@@ -61,7 +70,10 @@ export interface EpicBundleExport {
 }
 
 export class CodaScopeEpicBundleService {
-  constructor(private projectSvc: CodaScopeProjectService) {}
+  constructor(
+    private projectSvc: CodaScopeProjectService,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+  ) {}
 
   /** Build a ZIP stream for one active epic, excluding locks and chat history. */
   createExport(projectId: string, epicId: string): EpicBundleExport | null {
@@ -124,39 +136,38 @@ export class CodaScopeEpicBundleService {
         throw new Error("Invalid epic archive: source project identity does not match epic metadata.");
       }
 
-      const newEpicId = this.newEpicId(projectDir);
-      this.rebasePayloadIdentifiers(
-        sourceEpicDir,
-        manifest.source.projectId,
-        manifest.source.epicId,
-        projectId,
-        newEpicId,
-      );
-      const importedMetadata = this.readMetadata(sourceMetadataPath);
-      if (!importedMetadata) throw new Error("Invalid epic archive: rebased metadata could not be read.");
-      const importedAt = new Date().toISOString();
-      importedMetadata.id = newEpicId;
-      importedMetadata.projectId = projectId;
-      importedMetadata.conversationId = null;
-      // An import is a fork, not a historical replacement for the source.
-      // Its lifecycle begins in the destination project.
-      importedMetadata.createdAt = importedAt;
-      importedMetadata.updatedAt = importedAt;
-      await writeFile(sourceMetadataPath, JSON.stringify(importedMetadata, null, 2), "utf-8");
-      assertSafeImportedPathTree(sourceEpicDir, "epic");
+      return await this.persistence.withMutation(epicStorageMutationKey(projectDir, this.persistence), async () => {
+        const index = await this.readIndex(projectDir, projectId);
+        const newEpicId = this.newEpicId(projectDir);
+        this.rebasePayloadIdentifiers(
+          sourceEpicDir,
+          manifest.source.projectId,
+          manifest.source.epicId,
+          projectId,
+          newEpicId,
+        );
+        const importedMetadata = this.readMetadata(sourceMetadataPath);
+        if (!importedMetadata) throw new Error("Invalid epic archive: rebased metadata could not be read.");
+        const importedAt = new Date().toISOString();
+        importedMetadata.id = newEpicId;
+        importedMetadata.projectId = projectId;
+        importedMetadata.conversationId = null;
+        importedMetadata.createdAt = importedAt;
+        importedMetadata.updatedAt = importedAt;
+        await writeFile(sourceMetadataPath, JSON.stringify(importedMetadata, null, 2), "utf-8");
+        assertSafeImportedPathTree(sourceEpicDir, "epic");
 
-      const epicsDir = path.join(projectDir, "epics");
-      await mkdir(epicsDir, { recursive: true });
-      await assertAvailableSpace(projectDir, archive.totalUncompressedBytes);
-      const targetEpicDir = assertStrictDescendant(
-        epicsDir,
-        path.join(epicsDir, assertSafePathSegment(newEpicId, "epic ID")),
-        "epic import target",
-      );
-      await moveDirectory(sourceEpicDir, targetEpicDir);
+        const epicsDir = path.join(projectDir, "epics");
+        await mkdir(epicsDir, { recursive: true });
+        await assertAvailableSpace(projectDir, archive.totalUncompressedBytes);
+        const targetEpicDir = assertStrictDescendant(
+          epicsDir,
+          path.join(epicsDir, assertSafePathSegment(newEpicId, "epic ID")),
+          "epic import target",
+        );
+        await moveDirectory(sourceEpicDir, targetEpicDir);
 
-      try {
-        const index = this.readIndex(projectDir);
+        try {
         const { conversationId: _conversationId, ...epic } = importedMetadata;
         index.epics.push(epic);
         await this.writeIndex(projectDir, index);
@@ -164,10 +175,11 @@ export class CodaScopeEpicBundleService {
           epic,
           unresolvedScopeEntries: this.getUnresolvedScopeEntries(projectDir, targetEpicDir),
         };
-      } catch (error) {
-        await rm(targetEpicDir, { recursive: true, force: true });
-        throw error;
-      }
+        } catch (error) {
+          await rm(targetEpicDir, { recursive: true, force: true });
+          throw error;
+        }
+      });
     } finally {
       await rm(stagingRoot, { recursive: true, force: true });
     }
@@ -236,26 +248,14 @@ export class CodaScopeEpicBundleService {
     }
   }
 
-  private readIndex(projectDir: string): EpicsIndex {
-    const indexPath = path.join(projectDir, "epics", "epics.json");
-    if (!existsSync(indexPath)) return { epics: [] };
-    try {
-      const parsed = JSON.parse(readFileSync(indexPath, "utf-8"));
-      if (isRecord(parsed) && Array.isArray(parsed.epics)) {
-        return { epics: parsed.epics as EpicDesign[] };
-      }
-    } catch {
-      // Fall through to a deliberate failure below rather than overwriting
-      // existing project metadata with a one-item import index.
-    }
-    throw new Error("Destination epic index is invalid; repair it before importing an epic.");
+  private readIndex(projectDir: string, projectId: string): Promise<EpicsIndex> {
+    return readActiveEpicsIndex(this.persistence, projectDir, projectId);
   }
 
   private async writeIndex(projectDir: string, index: EpicsIndex): Promise<void> {
     const indexPath = path.join(projectDir, "epics", "epics.json");
-    const temporaryPath = `${indexPath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporaryPath, JSON.stringify(index, null, 2), "utf-8");
-    await rename(temporaryPath, indexPath);
+    validateEpicsIndex(index);
+    await this.persistence.writeJson(indexPath, index, { storage: "epic_index" });
   }
 
   /** Rewrite only values that explicitly refer to the source project or epic. */

@@ -13,7 +13,8 @@
      fires curation reasons on definition changes
    ──────────────────────────────────────────────────────────────────── */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, renameSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import type {
@@ -26,23 +27,37 @@ import type {
   EpicScope,
   EpicScopeEntry,
   ScopeDiff,
-  EpicDesignDoc,
-  EpicVersion,
 } from "../../src/apps/codascope/codaScopeTypes.js";
 import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeLockService } from "./codaScopeLockService.js";
 import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+import { CodaScopeVersionService } from "./codaScopeVersionService.js";
+import {
+  CodaScopePersistence,
+  CodaScopePersistenceCorruptError,
+  CodaScopePersistenceError,
+  codaScopePersistence,
+  isPersistenceDomainError,
+} from "./codaScopePersistence.js";
+import {
+  epicStorageMutationKey,
+  readActiveEpicsIndex,
+  readEpicMetadata,
+  validateEpicMetadataAtLocation,
+  validateEpicsIndex,
+  type EpicMetadata,
+  type EpicsIndex,
+} from "./codaScopeEpicStorage.js";
 
-/* ── Storage Schema ────────────────────────────────────────────────── */
-
-interface EpicsIndex {
-  epics: EpicDesign[];
+export interface CodaScopeEpicLifecycleFileSystem {
+  mkdir(directory: string, options: { recursive: true }): Promise<unknown>;
+  rename(source: string, target: string): Promise<void>;
+  rm(target: string, options: { recursive?: boolean; force?: boolean }): Promise<void>;
 }
 
-interface EpicMetadata extends EpicDesign {
-  conversationId: string | null;
-}
+const epicLifecycleFileSystem: CodaScopeEpicLifecycleFileSystem = { mkdir, rename, rm };
 
 /* ── Service ────────────────────────────────────────────────────────── */
 
@@ -51,12 +66,20 @@ export class CodaScopeEpicService {
   private knowledgeService: CodaScopeEpicKnowledgeService;
   private curationService: CodaScopeCurationService;
   private lockService: CodaScopeLockService;
+  private designDocService: CodaScopeDesignDocService;
+  private versionService: CodaScopeVersionService;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+    private readonly lifecycleFs: CodaScopeEpicLifecycleFileSystem = epicLifecycleFileSystem,
+  ) {
     this.root = root;
     this.knowledgeService = new CodaScopeEpicKnowledgeService(root);
     this.curationService = new CodaScopeCurationService(root);
     this.lockService = new CodaScopeLockService(root);
+    this.designDocService = new CodaScopeDesignDocService(root, persistence);
+    this.versionService = new CodaScopeVersionService(root, persistence);
   }
 
   setRoot(root: string): void {
@@ -64,6 +87,8 @@ export class CodaScopeEpicService {
     this.knowledgeService.setRoot(root);
     this.curationService.setRoot(root);
     this.lockService.setRoot(root);
+    this.designDocService.setRoot(root);
+    this.versionService.setRoot(root);
   }
 
   /* ── Path helpers ──────────────────────────────────────────────────── */
@@ -120,36 +145,92 @@ export class CodaScopeEpicService {
 
   /* ── Index helpers ─────────────────────────────────────────────────── */
 
-  private readIndex(projectDir: string): EpicsIndex {
-    const p = this.indexPath(projectDir);
-    if (!existsSync(p)) return { epics: [] };
+  private readIndex(projectDir: string, projectId: string): Promise<EpicsIndex> {
+    return readActiveEpicsIndex(this.persistence, projectDir, projectId);
+  }
+
+  private writeIndex(projectDir: string, index: EpicsIndex): Promise<void> {
+    validateEpicsIndex(index);
+    return this.persistence.writeJson(
+      this.indexPath(projectDir),
+      index,
+      { storage: "epic_index" },
+    );
+  }
+
+  private readEpicMeta(projectDir: string, projectId: string, epicId: string): Promise<EpicMetadata> {
+    return readEpicMetadata(this.persistence, projectDir, projectId, epicId);
+  }
+
+  private writeEpicMeta(projectDir: string, projectId: string, epicId: string, meta: EpicMetadata): Promise<void> {
+    validateEpicMetadataAtLocation(meta, projectId, epicId);
+    return this.persistence.writeJson(
+      this.epicMetaPath(projectDir, epicId),
+      meta,
+      { storage: "epic_metadata", projectId, epicId },
+    );
+  }
+
+  private mutationKey(projectDir: string): string {
+    return epicStorageMutationKey(projectDir, this.persistence);
+  }
+
+  private async withEpicMutation<T>(
+    projectDir: string,
+    context: { projectId: string; epicId?: string; operation: string },
+    operation: () => Promise<T>,
+  ): Promise<T> {
     try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return { epics: [] };
+      return await this.persistence.withMutation(this.mutationKey(projectDir), operation);
+    } catch (error) {
+      if (isPersistenceDomainError(error)) throw error;
+      throw new CodaScopePersistenceError({ storage: "epic_lifecycle", ...context });
     }
   }
 
-  private writeIndex(projectDir: string, index: EpicsIndex): void {
-    const dir = this.epicsDir(projectDir);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.indexPath(projectDir), JSON.stringify(index, null, 2), "utf-8");
-  }
-
-  private readEpicMeta(projectDir: string, epicId: string): EpicMetadata | null {
-    const p = this.epicMetaPath(projectDir, epicId);
-    if (!existsSync(p)) return null;
+  private readRequiredDefinition(projectDir: string, projectId: string, epicId: string): string {
     try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return null;
+      return readFileSync(this.definitionPath(projectDir, epicId), "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new CodaScopePersistenceCorruptError({ storage: "epic_definition", projectId, epicId });
+      }
+      throw new CodaScopePersistenceError({ storage: "epic_definition", projectId, epicId });
     }
   }
 
-  private writeEpicMeta(projectDir: string, epicId: string, meta: EpicMetadata): void {
-    const dir = this.epicDir(projectDir, epicId);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(this.epicMetaPath(projectDir, epicId), JSON.stringify(meta, null, 2), "utf-8");
+  private readScopeFile(projectDir: string, epicId: string): Promise<EpicScope | null> {
+    const scopePath = this.scopePath(projectDir, epicId);
+    if (!existsSync(scopePath)) return Promise.resolve(null);
+    return this.persistence.readJson(scopePath, {
+      context: { storage: "epic_scope", epicId },
+      validate: validateEpicScope,
+    });
+  }
+
+  private async setScopeUnlocked(projectDir: string, projectId: string, epicId: string, scope: EpicScope): Promise<boolean> {
+    validateEpicScope(scope);
+    const index = await this.readIndex(projectDir, projectId);
+    if (!index.epics.some((epic) => epic.id === epicId)) return false;
+    const epicDirectory = this.epicDir(projectDir, epicId);
+    if (!existsSync(epicDirectory)) return false;
+    const metaPath = this.epicMetaPath(projectDir, epicId);
+    const meta = await this.readEpicMeta(projectDir, projectId, epicId);
+    const scopePath = this.scopePath(projectDir, epicId);
+    const previousScope = existsSync(scopePath) ? readFileSync(scopePath) : null;
+    await this.persistence.writeJson(scopePath, scope, { storage: "epic_scope", epicId });
+    meta.updatedAt = new Date().toISOString();
+    try {
+      await this.writeEpicMeta(projectDir, projectId, epicId, meta);
+    } catch (error) {
+      if (previousScope) {
+        await this.persistence.writeFile(scopePath, previousScope, { storage: "epic_scope", epicId });
+      } else {
+        await this.lifecycleFs.rm(scopePath, { force: true });
+      }
+      throw error;
+    }
+    return true;
   }
 
   /* ── CRUD ──────────────────────────────────────────────────────────── */
@@ -158,7 +239,7 @@ export class CodaScopeEpicService {
   async listEpics(projectId: string): Promise<(EpicDesign & { health: EpicHealthInfo })[]> {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return [];
-    const index = this.readIndex(projectDir);
+    const index = await this.readIndex(projectDir, projectId);
     return index.epics.map((epic) => ({
       ...epic,
       health: this.computeHealth(epic),
@@ -174,84 +255,78 @@ export class CodaScopeEpicService {
     const projectDir = this.projectDir(projectId);
     if (!projectDir) throw new Error("Project not found");
 
-    const now = new Date().toISOString();
-    const id = `epic_${crypto.randomBytes(6).toString("hex")}`;
-
-    const epic: EpicDesign = {
-      id,
-      projectId,
-      title: opts.title,
-      status: opts.status ?? "defining",
-      createdAt: now,
-      updatedAt: now,
-      createdBy: opts.createdBy ?? "user",
-      collaborators: [opts.createdBy ?? "user"],
-      currentVersion: 0,
-    };
-
-    // Create epic directory
-    const epicDirectory = this.epicDir(projectDir, id);
-    mkdirSync(epicDirectory, { recursive: true });
-
-    // Write metadata
-    const meta: EpicMetadata = { ...epic, conversationId: null };
-    this.writeEpicMeta(projectDir, id, meta);
-
-    // Write empty definition
-    writeFileSync(this.definitionPath(projectDir, id), "", "utf-8");
-
-    // Initialize knowledge/ and curation/ directory structures
-    this.knowledgeService.initializeKnowledgeDir(epicDirectory);
-    this.curationService.initializeCurationDir(epicDirectory);
-
-    // Update index
-    const index = this.readIndex(projectDir);
-    index.epics.push(epic);
-    this.writeIndex(projectDir, index);
-
-    return epic;
+    return this.withEpicMutation(projectDir, { projectId, operation: "create" }, async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      const now = new Date().toISOString();
+      const id = `epic_${crypto.randomBytes(6).toString("hex")}`;
+      const epic: EpicDesign = {
+        id,
+        projectId,
+        title: opts.title,
+        status: opts.status ?? "defining",
+        createdAt: now,
+        updatedAt: now,
+        createdBy: opts.createdBy ?? "user",
+        collaborators: [opts.createdBy ?? "user"],
+        currentVersion: 0,
+      };
+      const epicsRoot = this.epicsDir(projectDir);
+      const finalDirectory = this.epicDir(projectDir, id);
+      const stagingDirectory = assertStrictDescendant(
+        epicsRoot,
+        path.join(epicsRoot, `.${id}.create.${crypto.randomUUID()}`),
+        "epic creation staging directory",
+      );
+      await this.lifecycleFs.mkdir(stagingDirectory, { recursive: true });
+      try {
+        const meta: EpicMetadata = { ...epic, conversationId: null };
+        await this.persistence.writeJson(
+          path.join(stagingDirectory, "epic.json"),
+          meta,
+          { storage: "epic_metadata", epicId: id },
+        );
+        writeFileSync(path.join(stagingDirectory, "definition.md"), "", "utf-8");
+        this.knowledgeService.initializeKnowledgeDir(stagingDirectory);
+        this.curationService.initializeCurationDir(stagingDirectory);
+        await this.lifecycleFs.rename(stagingDirectory, finalDirectory);
+        index.epics.push(epic);
+        try {
+          await this.writeIndex(projectDir, index);
+        } catch (error) {
+          await this.lifecycleFs.rm(finalDirectory, { recursive: true, force: true });
+          throw error;
+        }
+        return epic;
+      } catch (error) {
+        await this.lifecycleFs.rm(stagingDirectory, { recursive: true, force: true });
+        throw error;
+      }
+    });
   }
 
   /** Get full epic detail (assembled read model). */
   async getEpic(projectId: string, epicId: string): Promise<EpicDesignDetail | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (!meta) return null;
+    const index = await this.readIndex(projectDir, projectId);
+    if (!index.epics.some((epic) => epic.id === epicId)) return null;
+    const meta = await this.readEpicMeta(projectDir, projectId, epicId);
 
-    // Read definition
-    const defPath = this.definitionPath(projectDir, epicId);
-    const definition = existsSync(defPath) ? readFileSync(defPath, "utf-8") : "";
+    const definition = this.readRequiredDefinition(projectDir, projectId, epicId);
 
     // Read scope if present
     const scopeFilePath = this.scopePath(projectDir, epicId);
-    let scope: EpicScope | null = null;
-    if (existsSync(scopeFilePath)) {
-      try {
-        scope = JSON.parse(readFileSync(scopeFilePath, "utf-8"));
-      } catch { /* corrupted scope.json — treat as unscoped */ }
-    }
-
-    // Read design docs index if present
-    const designsIndexPath = path.join(this.epicDir(projectDir, epicId), "designs", "designs.json");
-    let designDocs: EpicDesignDoc[] = [];
-    if (existsSync(designsIndexPath)) {
-      try {
-        const designsData = JSON.parse(readFileSync(designsIndexPath, "utf-8"));
-        designDocs = designsData.docs ?? [];
-      } catch { /* corrupted designs.json */ }
-    }
-
-    // Read versions index if present
-    const versionsIndexPath = path.join(this.epicDir(projectDir, epicId), "versions", "versions.json");
-    let versions: EpicVersion[] = [];
-    if (existsSync(versionsIndexPath)) {
-      try {
-        const versionsData = JSON.parse(readFileSync(versionsIndexPath, "utf-8"));
-        versions = versionsData.versions ?? [];
-      } catch { /* corrupted versions.json */ }
-    }
+    const scope = existsSync(scopeFilePath)
+      ? await this.persistence.readJson(scopeFilePath, {
+        context: { storage: "epic_scope", epicId },
+        validate: validateEpicScope,
+      })
+      : null;
+    const epicDirectory = this.epicDir(projectDir, epicId);
+    const designDocs = await this.designDocService.readDesignsIndex(epicDirectory);
+    const versions = await this.versionService.readVersionsIndex(epicDirectory);
 
     const detail: EpicDesignDetail = {
       ...meta,
@@ -271,144 +346,171 @@ export class CodaScopeEpicService {
     status?: EpicStatus;
     collaborators?: string[];
   }): Promise<EpicDesign | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (!meta) return null;
-
-    if (updates.title !== undefined) meta.title = updates.title;
-    if (updates.status !== undefined) meta.status = updates.status;
-    if (updates.collaborators !== undefined) meta.collaborators = updates.collaborators;
-    meta.updatedAt = new Date().toISOString();
-
-    this.writeEpicMeta(projectDir, epicId, meta);
-
-    // Update index entry
-    const index = this.readIndex(projectDir);
-    const idx = index.epics.findIndex((e) => e.id === epicId);
-    if (idx >= 0) {
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "update" }, async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      const idx = index.epics.findIndex((epic) => epic.id === epicId);
+      if (idx < 0) return null;
+      const meta = await this.readEpicMeta(projectDir, projectId, epicId);
+      const previousMeta = readFileSync(this.epicMetaPath(projectDir, epicId));
+      if (updates.title !== undefined) meta.title = updates.title;
+      if (updates.status !== undefined) meta.status = updates.status;
+      if (updates.collaborators !== undefined) meta.collaborators = updates.collaborators;
+      meta.updatedAt = new Date().toISOString();
+      await this.writeEpicMeta(projectDir, projectId, epicId, meta);
       const { conversationId: _, ...epicData } = meta;
       index.epics[idx] = epicData;
-      this.writeIndex(projectDir, index);
-    }
-
-    const { conversationId: _, ...result } = meta;
-    return result;
+      try {
+        await this.writeIndex(projectDir, index);
+      } catch (error) {
+        await this.persistence.writeFile(
+          this.epicMetaPath(projectDir, epicId),
+          previousMeta,
+          { storage: "epic_metadata", epicId },
+        );
+        throw error;
+      }
+      return epicData;
+    });
   }
 
   /** Delete an epic and all its data. */
   async deleteEpic(projectId: string, epicId: string): Promise<boolean> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const epicsRoot = this.epicsDir(projectDir);
-    const epicDirectory = assertStrictDescendant(
-      epicsRoot,
-      this.epicDir(projectDir, epicId),
-      "epic delete target",
-    );
-    if (!existsSync(epicDirectory)) return false;
-
-    rmSync(epicDirectory, { recursive: true, force: true });
-
-    // Update index
-    const index = this.readIndex(projectDir);
-    index.epics = index.epics.filter((e) => e.id !== epicId);
-    this.writeIndex(projectDir, index);
-
-    return true;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "delete" }, async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      const indexPosition = index.epics.findIndex((epic) => epic.id === epicId);
+      const epicsRoot = this.epicsDir(projectDir);
+      const epicDirectory = assertStrictDescendant(epicsRoot, this.epicDir(projectDir, epicId), "epic delete target");
+      if (!existsSync(epicDirectory)) return false;
+      if (indexPosition < 0) throw new CodaScopePersistenceCorruptError({ storage: "epic_index", epicId });
+      const tombstone = assertStrictDescendant(
+        epicsRoot,
+        path.join(epicsRoot, `.${epicId}.delete.${crypto.randomUUID()}`),
+        "epic delete tombstone",
+      );
+      await this.lifecycleFs.rename(epicDirectory, tombstone);
+      index.epics.splice(indexPosition, 1);
+      try {
+        await this.writeIndex(projectDir, index);
+      } catch (error) {
+        try {
+          if (existsSync(tombstone) && !existsSync(epicDirectory)) await this.lifecycleFs.rename(tombstone, epicDirectory);
+        } catch {
+          throw new CodaScopePersistenceError({ storage: "epic_index", epicId, recovery: "operator_required" });
+        }
+        throw error;
+      }
+      try {
+        await this.lifecycleFs.rm(tombstone, { recursive: true });
+      } catch {
+        throw new CodaScopePersistenceError({
+          storage: "epic_delete",
+          epicId,
+          recovery: "orphan_tombstone",
+        });
+      }
+      return true;
+    });
   }
 
   /* ── Archive / Restore ─────────────────────────────────────────────── */
 
   /** Move an epic to the _archive directory. Preserves all data. */
   async archiveEpic(projectId: string, epicId: string): Promise<boolean> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const epicsRoot = this.epicsDir(projectDir);
-    const epicDirectory = assertStrictDescendant(
-      epicsRoot,
-      this.epicDir(projectDir, epicId),
-      "epic archive source",
-    );
-    if (!existsSync(epicDirectory)) return false;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "archive" }, async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      const position = index.epics.findIndex((epic) => epic.id === epicId);
+      const epicsRoot = this.epicsDir(projectDir);
+      const epicDirectory = assertStrictDescendant(epicsRoot, this.epicDir(projectDir, epicId), "epic archive source");
+      if (!existsSync(epicDirectory)) return false;
+      if (position < 0) throw new CodaScopePersistenceCorruptError({ storage: "epic_index", epicId });
+      const meta = await this.readEpicMeta(projectDir, projectId, epicId);
+      const previousMeta = readFileSync(this.epicMetaPath(projectDir, epicId));
+      const archiveDirectory = this.archiveDir(projectDir);
+      const archiveDirectoryExisted = existsSync(archiveDirectory);
+      const destDir = assertStrictDescendant(archiveDirectory, this.archivedEpicDir(projectDir, epicId), "epic archive target");
+      if (existsSync(destDir)) throw new CodaScopePersistenceCorruptError({ storage: "epic_archive", epicId });
 
-    // Update status to archived before moving
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (meta) {
       meta.status = "archived";
       meta.updatedAt = new Date().toISOString();
-      this.writeEpicMeta(projectDir, epicId, meta);
-    }
-
-    // Ensure archive directory exists
-    const archiveDirectory = this.archiveDir(projectDir);
-    if (!existsSync(archiveDirectory)) mkdirSync(archiveDirectory, { recursive: true });
-
-    // Move epic dir to archive
-    const destDir = assertStrictDescendant(
-      archiveDirectory,
-      this.archivedEpicDir(projectDir, epicId),
-      "epic archive target",
-    );
-    try {
-      renameSync(epicDirectory, destDir);
-    } catch {
-      // Cross-device fallback: copy then delete
-      cpSync(epicDirectory, destDir, { recursive: true });
-      rmSync(epicDirectory, { recursive: true, force: true });
-    }
-
-    // Remove from active index
-    const index = this.readIndex(projectDir);
-    index.epics = index.epics.filter((e) => e.id !== epicId);
-    this.writeIndex(projectDir, index);
-
-    return true;
+      await this.writeEpicMeta(projectDir, projectId, epicId, meta);
+      try {
+        await this.lifecycleFs.mkdir(archiveDirectory, { recursive: true });
+        await this.lifecycleFs.rename(epicDirectory, destDir);
+        index.epics.splice(position, 1);
+        await this.writeIndex(projectDir, index);
+      } catch (error) {
+        try {
+          if (existsSync(destDir) && !existsSync(epicDirectory)) await this.lifecycleFs.rename(destDir, epicDirectory);
+          await this.persistence.writeFile(
+            this.epicMetaPath(projectDir, epicId),
+            previousMeta,
+            { storage: "epic_metadata", epicId },
+          );
+          if (!archiveDirectoryExisted && existsSync(archiveDirectory)) {
+            await this.lifecycleFs.rm(archiveDirectory, { recursive: true, force: true });
+          }
+        } catch {
+          throw new CodaScopePersistenceError({ storage: "epic_archive", epicId, recovery: "operator_required" });
+        }
+        throw error;
+      }
+      return true;
+    });
   }
 
   /** Restore an epic from the _archive directory back to active. */
   async restoreEpic(projectId: string, epicId: string): Promise<EpicDesign | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const archiveDirectory = this.archiveDir(projectDir);
-    const archivedDir = assertStrictDescendant(
-      archiveDirectory,
-      this.archivedEpicDir(projectDir, epicId),
-      "epic restore source",
-    );
-    if (!existsSync(archivedDir)) return null;
-
-    // Move back to active epics
-    const destDir = assertStrictDescendant(
-      this.epicsDir(projectDir),
-      this.epicDir(projectDir, epicId),
-      "epic restore target",
-    );
-    try {
-      renameSync(archivedDir, destDir);
-    } catch {
-      cpSync(archivedDir, destDir, { recursive: true });
-      rmSync(archivedDir, { recursive: true, force: true });
-    }
-
-    // Update status from archived → defining
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (!meta) return null;
-    meta.status = "defining";
-    meta.updatedAt = new Date().toISOString();
-    this.writeEpicMeta(projectDir, epicId, meta);
-
-    // Add back to active index
-    const index = this.readIndex(projectDir);
-    const { conversationId: _, ...epicData } = meta;
-    index.epics.push(epicData);
-    this.writeIndex(projectDir, index);
-
-    return epicData;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "restore" }, async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      if (index.epics.some((epic) => epic.id === epicId)) {
+        throw new CodaScopePersistenceCorruptError({ storage: "epic_index", epicId });
+      }
+      const archiveDirectory = this.archiveDir(projectDir);
+      const archivedDir = assertStrictDescendant(archiveDirectory, this.archivedEpicDir(projectDir, epicId), "epic restore source");
+      if (!existsSync(archivedDir)) return null;
+      const destDir = assertStrictDescendant(this.epicsDir(projectDir), this.epicDir(projectDir, epicId), "epic restore target");
+      if (existsSync(destDir)) throw new CodaScopePersistenceCorruptError({ storage: "epic_archive", epicId });
+      const archivedMetaPath = path.join(archivedDir, "epic.json");
+      const meta = await this.persistence.readJson(archivedMetaPath, {
+        context: { storage: "epic_metadata", projectId, epicId },
+        validate: (value) => validateEpicMetadataAtLocation(value, projectId, epicId),
+      });
+      const previousMeta = readFileSync(archivedMetaPath);
+      meta.status = "defining";
+      meta.updatedAt = new Date().toISOString();
+      await this.persistence.writeJson(archivedMetaPath, meta, { storage: "epic_metadata", epicId });
+      try {
+        await this.lifecycleFs.rename(archivedDir, destDir);
+        const { conversationId: _, ...epicData } = meta;
+        index.epics.push(epicData);
+        await this.writeIndex(projectDir, index);
+        return epicData;
+      } catch (error) {
+        try {
+          if (existsSync(destDir) && !existsSync(archivedDir)) await this.lifecycleFs.rename(destDir, archivedDir);
+          await this.persistence.writeFile(archivedMetaPath, previousMeta, { storage: "epic_metadata", epicId });
+        } catch {
+          throw new CodaScopePersistenceError({ storage: "epic_archive", epicId, recovery: "operator_required" });
+        }
+        throw error;
+      }
+    });
   }
 
   /** List all archived epics for a project. */
@@ -424,14 +526,14 @@ export class CodaScopeEpicService {
 
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      assertSafePathSegment(entry.name, "epic ID");
       const metaPath = path.join(archiveDirectory, entry.name, "epic.json");
-      if (existsSync(metaPath)) {
-        try {
-          const data = JSON.parse(readFileSync(metaPath, "utf-8"));
-          const { conversationId: _, ...epicData } = data;
-          epics.push(epicData);
-        } catch { /* skip corrupted */ }
-      }
+      const data = await this.persistence.readJson(metaPath, {
+        context: { storage: "epic_metadata", projectId, epicId: entry.name },
+        validate: (value) => validateEpicMetadataAtLocation(value, projectId, entry.name),
+      });
+      const { conversationId: _, ...epicData } = data;
+      epics.push(epicData);
     }
 
     return epics;
@@ -441,39 +543,57 @@ export class CodaScopeEpicService {
 
   /** Get the definition markdown for an epic. */
   async getDefinition(projectId: string, epicId: string): Promise<string | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const defPath = this.definitionPath(projectDir, epicId);
-    if (!existsSync(defPath)) return null;
-    return readFileSync(defPath, "utf-8");
+    const index = await this.readIndex(projectDir, projectId);
+    if (!index.epics.some((epic) => epic.id === epicId)) return null;
+    return this.readRequiredDefinition(projectDir, projectId, epicId);
   }
 
   /** Update the definition markdown for an epic. */
   async updateDefinition(projectId: string, epicId: string, content: string): Promise<boolean> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const defPath = this.definitionPath(projectDir, epicId);
-    const epicDirectory = this.epicDir(projectDir, epicId);
-    if (!existsSync(epicDirectory)) return false;
-
-    writeFileSync(defPath, content, "utf-8");
-
-    // Touch updatedAt
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (meta) {
+    const saved = await this.withEpicMutation(
+      projectDir,
+      { projectId, epicId, operation: "update_definition" },
+      async () => {
+      const index = await this.readIndex(projectDir, projectId);
+      const idx = index.epics.findIndex((epic) => epic.id === epicId);
+      const epicDirectory = this.epicDir(projectDir, epicId);
+      if (!existsSync(epicDirectory)) return false;
+      if (idx < 0) throw new CodaScopePersistenceCorruptError({ storage: "epic_index", epicId });
+      const meta = await this.readEpicMeta(projectDir, projectId, epicId);
+      const defPath = this.definitionPath(projectDir, epicId);
+      const previousDefinition = Buffer.from(this.readRequiredDefinition(projectDir, projectId, epicId));
+      const previousMeta = readFileSync(this.epicMetaPath(projectDir, epicId));
+      await this.persistence.writeFile(defPath, content, { storage: "epic_definition", epicId });
       meta.updatedAt = new Date().toISOString();
-      this.writeEpicMeta(projectDir, epicId, meta);
-
-      // Update index
-      const index = this.readIndex(projectDir);
-      const idx = index.epics.findIndex((e) => e.id === epicId);
-      if (idx >= 0) {
+      try {
+        await this.writeEpicMeta(projectDir, projectId, epicId, meta);
         index.epics[idx].updatedAt = meta.updatedAt;
-        this.writeIndex(projectDir, index);
+        await this.writeIndex(projectDir, index);
+      } catch (error) {
+        try {
+          await this.persistence.writeFile(
+            this.epicMetaPath(projectDir, epicId),
+            previousMeta,
+            { storage: "epic_metadata", epicId },
+          );
+          await this.persistence.writeFile(defPath, previousDefinition, { storage: "epic_definition", epicId });
+        } catch {
+          throw new CodaScopePersistenceError({ storage: "epic_definition", epicId, recovery: "operator_required" });
+        }
+        throw error;
       }
-    }
+      return true;
+      },
+    );
+    if (!saved) return false;
 
     // Fire curation reason for definition change
     try {
@@ -573,12 +693,13 @@ export class CodaScopeEpicService {
 
   /** Get computed health for a specific epic. */
   async getHealth(projectId: string, epicId: string): Promise<EpicHealthInfo | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (!meta) return null;
-
+    const index = await this.readIndex(projectDir, projectId);
+    if (!index.epics.some((epic) => epic.id === epicId)) return null;
+    const meta = await this.readEpicMeta(projectDir, projectId, epicId);
     return this.computeHealth(meta);
   }
 
@@ -586,79 +707,75 @@ export class CodaScopeEpicService {
 
   /** Get the scope for an epic. Returns null if not yet scoped. */
   async getScope(projectId: string, epicId: string): Promise<EpicScope | null> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
 
-    const p = this.scopePath(projectDir, epicId);
-    if (!existsSync(p)) return null;
-    try {
-      return JSON.parse(readFileSync(p, "utf-8"));
-    } catch {
-      return null;
-    }
+    const index = await this.readIndex(projectDir, projectId);
+    if (!index.epics.some((epic) => epic.id === epicId)) return null;
+    return this.readScopeFile(projectDir, epicId);
   }
 
   /** Set the full scope for an epic. */
   async setScope(projectId: string, epicId: string, scope: EpicScope): Promise<boolean> {
+    assertSafePathSegment(epicId, "epic ID");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return false;
 
-    const epicDirectory = this.epicDir(projectDir, epicId);
-    if (!existsSync(epicDirectory)) return false;
-
-    writeFileSync(this.scopePath(projectDir, epicId), JSON.stringify(scope, null, 2), "utf-8");
-
-    // Touch updatedAt
-    const meta = this.readEpicMeta(projectDir, epicId);
-    if (meta) {
-      meta.updatedAt = new Date().toISOString();
-      this.writeEpicMeta(projectDir, epicId, meta);
-    }
-
-    return true;
+    return this.withEpicMutation(
+      projectDir,
+      { projectId, epicId, operation: "set_scope" },
+      () => this.setScopeUnlocked(projectDir, projectId, epicId, scope),
+    );
   }
 
   /** Update a single scope entry by topicId. */
   async updateScopeEntry(projectId: string, epicId: string, topicId: string, changes: Partial<EpicScopeEntry>): Promise<EpicScopeEntry | null> {
-    const scope = await this.getScope(projectId, epicId);
-    if (!scope) return null;
-
-    const entry = scope.entries.find((e) => e.topicId === topicId);
-    if (!entry) return null;
-
-    Object.assign(entry, changes);
-    scope.lastScopedAt = new Date().toISOString();
-    await this.setScope(projectId, epicId, scope);
-    return entry;
+    assertSafePathSegment(epicId, "epic ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "update_scope" }, async () => {
+      const scope = await this.readScopeFile(projectDir, epicId);
+      if (!scope) return null;
+      const entry = scope.entries.find((candidate) => candidate.topicId === topicId);
+      if (!entry) return null;
+      Object.assign(entry, changes);
+      scope.lastScopedAt = new Date().toISOString();
+      await this.setScopeUnlocked(projectDir, projectId, epicId, scope);
+      return entry;
+    });
   }
 
   /** Add a new topic to the scope. */
   async addScopeEntry(projectId: string, epicId: string, entry: EpicScopeEntry): Promise<boolean> {
-    let scope = await this.getScope(projectId, epicId);
-    if (!scope) {
-      scope = { entries: [], lastScopedAt: null, lastScopedBy: null };
-    }
-
-    // Don't add duplicates
-    if (scope.entries.some((e) => e.topicId === entry.topicId)) return false;
-
-    scope.entries.push(entry);
-    scope.lastScopedAt = new Date().toISOString();
-    scope.lastScopedBy = entry.source;
-    return this.setScope(projectId, epicId, scope);
+    assertSafePathSegment(epicId, "epic ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "add_scope" }, async () => {
+      const scope = await this.readScopeFile(projectDir, epicId)
+        ?? { entries: [], lastScopedAt: null, lastScopedBy: null };
+      if (scope.entries.some((candidate) => candidate.topicId === entry.topicId)) return false;
+      scope.entries.push(entry);
+      scope.lastScopedAt = new Date().toISOString();
+      scope.lastScopedBy = entry.source;
+      return this.setScopeUnlocked(projectDir, projectId, epicId, scope);
+    });
   }
 
   /** Remove a topic from scope by topicId. */
   async removeScopeEntry(projectId: string, epicId: string, topicId: string): Promise<boolean> {
-    const scope = await this.getScope(projectId, epicId);
-    if (!scope) return false;
-
-    const before = scope.entries.length;
-    scope.entries = scope.entries.filter((e) => e.topicId !== topicId);
-    if (scope.entries.length === before) return false;
-
-    scope.lastScopedAt = new Date().toISOString();
-    return this.setScope(projectId, epicId, scope);
+    assertSafePathSegment(epicId, "epic ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return false;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "remove_scope" }, async () => {
+      const scope = await this.readScopeFile(projectDir, epicId);
+      if (!scope) return false;
+      const before = scope.entries.length;
+      scope.entries = scope.entries.filter((entry) => entry.topicId !== topicId);
+      if (scope.entries.length === before) return false;
+      scope.lastScopedAt = new Date().toISOString();
+      return this.setScopeUnlocked(projectDir, projectId, epicId, scope);
+    });
   }
 
   /** Apply an approved scope diff. Only applies items the user has accepted. */
@@ -667,10 +784,12 @@ export class CodaScopeEpicService {
     removedTopicIds: string[];
     changedTopicIds: string[];
   }, fullDiff: ScopeDiff): Promise<EpicScope | null> {
-    let scope = await this.getScope(projectId, epicId);
-    if (!scope) {
-      scope = { entries: [], lastScopedAt: null, lastScopedBy: null };
-    }
+    assertSafePathSegment(epicId, "epic ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+    return this.withEpicMutation(projectDir, { projectId, epicId, operation: "apply_scope_diff" }, async () => {
+    let scope = await this.readScopeFile(projectDir, epicId);
+    if (!scope) scope = { entries: [], lastScopedAt: null, lastScopedBy: null };
 
     // Apply accepted additions
     for (const entry of fullDiff.added) {
@@ -701,7 +820,41 @@ export class CodaScopeEpicService {
 
     scope.lastScopedAt = new Date().toISOString();
     scope.lastScopedBy = "agent";
-    await this.setScope(projectId, epicId, scope);
+    await this.setScopeUnlocked(projectDir, projectId, epicId, scope);
     return scope;
+    });
   }
+}
+
+function validateEpicScope(value: unknown): EpicScope {
+  if (!isRecord(value)
+    || !Array.isArray(value.entries)
+    || (value.lastScopedAt !== null && typeof value.lastScopedAt !== "string")
+    || (value.lastScopedBy !== null && typeof value.lastScopedBy !== "string")) {
+    throw new Error("invalid epic scope");
+  }
+  const topicIds = new Set<string>();
+  const depths = new Set(["none", "stub", "outline", "developed", "comprehensive"]);
+  for (const entry of value.entries) {
+    if (!isRecord(entry)
+      || typeof entry.topicId !== "string"
+      || typeof entry.topicTitle !== "string"
+      || (entry.type !== "existing-wiki" && entry.type !== "new")
+      || (entry.source !== "agent" && entry.source !== "user")
+      || typeof entry.included !== "boolean"
+      || (entry.previousDepth !== undefined && !depths.has(String(entry.previousDepth)))
+      || (entry.targetDepth !== undefined && !depths.has(String(entry.targetDepth)))
+      || (entry.currentDepth !== undefined && !depths.has(String(entry.currentDepth)))
+      || (entry.enrichedAt !== undefined && typeof entry.enrichedAt !== "string")
+      || (entry.enrichmentRunId !== undefined && typeof entry.enrichmentRunId !== "string")
+      || topicIds.has(entry.topicId)) {
+      throw new Error("invalid epic scope entry");
+    }
+    topicIds.add(entry.topicId);
+  }
+  return value as unknown as EpicScope;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

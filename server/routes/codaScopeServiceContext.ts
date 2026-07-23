@@ -48,6 +48,7 @@ import {
   isPathValidationError,
   isSameOrDescendantPath,
 } from "../services/codaScopePathSafety.js";
+import { isPersistenceDomainError } from "../services/codaScopePersistence.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -414,6 +415,15 @@ export function createRouteContext(app: Express, deps: CodaScopeRoutesDeps): Cod
       fn(req, res).catch((error: unknown) => {
         if (isPathValidationError(error)) {
           next(httpError(error.message, 400, "invalid_input"));
+          return;
+        }
+        if (isPersistenceDomainError(error)) {
+          const { storage, projectId, epicId, documentId, recovery } = error.context;
+          console.error("[CodaScope] persistence boundary failure", {
+            code: error.code,
+            context: { storage, projectId, epicId, documentId, recovery },
+          });
+          next(httpError(error.message, error.status, error.code));
           return;
         }
         next(error);
