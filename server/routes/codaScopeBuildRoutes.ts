@@ -8,7 +8,8 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { ensureReposMapped } from "./codaScopeCoreRoutes.js";
 import type { TokenUsageRecord } from "../services/codaScopeBuildStateService.js";
 import { buildBaseVars, loadCommandOrSkill } from "../services/codaScopeCommandLoader.js";
-import { runAnalyzePipeline, runDeepRunPipeline } from "../services/codaScopeBuildOrchestrator.js";
+import { runAnalyzePipeline } from "../services/codaScopeBuildOrchestrator.js";
+import { runDeepRunPipeline } from "../services/codaScopeDeepRunOrchestrator.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createSseTerminalWriter } from "./utils/ssePipelineHelper.js";
 

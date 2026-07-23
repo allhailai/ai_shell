@@ -136,7 +136,7 @@ server/
 │   ├── codaScopeServiceContext.ts      # Shared service context, ensureServices(), helpers (271 lines)
 │   ├── codaScopeCoreRoutes.ts          # Config, projects, repositories, models, API key (158 lines)
 │   ├── codaScopeWikiRoutes.ts          # Wiki CRUD, state, pending deletions, code map (136 lines)
-│   ├── codaScopeBuildRoutes.ts         # Skills, runs, build status, log streaming, analyze (480 lines)
+│   ├── codaScopeBuildRoutes.ts         # Build route composition root: runs, Analyze, Deep Run, logs
 │   ├── codaScopeChatRoutes.ts          # Conversations, messages, assistant, images (490 lines)
 │   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief (779 lines)
 │   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution (284 lines)
@@ -152,7 +152,9 @@ server/
     ├── codaScopeToolDefinitions.ts     # Tool facade — purpose-based composition (90 lines)
     ├── codaScopeToolServiceFactory.ts  # Tool service instantiation factory (51 lines)
     ├── codaScopeBuildStateService.ts   # Build state tracking (in-memory + disk) (614 lines)
-    ├── codaScopeBuildOrchestrator.ts   # Multi-step build pipeline orchestration (1021 lines)
+    ├── codaScopeBuildOrchestrator.ts   # Standard Analyze + epic-deepen pipeline orchestration
+    ├── codaScopeDeepRunOrchestrator.ts # Deep Run pipeline orchestration
+    ├── codaScopeBuildPipelineShared.ts # Neutral pipeline contracts + pure shared helpers
     ├── codaScopeChatService.ts         # Conversation CRUD, auto-title, streaming detection (585 lines)
     ├── codaScopeChatOrchestrator.ts    # Chat prompt assembly + streaming dispatch (188 lines)
     ├── codaScopeChatPromptHelpers.ts   # System prompt assembly & context formatting (471 lines)
@@ -285,6 +287,36 @@ Analysis runs through a multi-step pipeline orchestrated by the `analyze` endpoi
 2. **Wiki Generation** — builds topic pages from code map → `wiki/*.md`
 
 Each step emits SSE events that the frontend renders as a live pipeline progress visualization.
+
+### Build Pipeline Dependency Direction
+
+The standard Analyze/epic-deepen orchestrator and the Deep Run orchestrator
+are sibling pipeline modules:
+
+```
+codaScopeBuildRoutes.ts
+├── codaScopeBuildOrchestrator.ts
+│   └── codaScopeBuildPipelineShared.ts
+└── codaScopeDeepRunOrchestrator.ts
+    └── codaScopeBuildPipelineShared.ts
+```
+
+`codaScopeBuildRoutes.ts` is the composition root and imports each pipeline
+directly from its owning module. An orchestrator must never import,
+dynamically import, or re-export a sibling; future pipelines follow the same
+direct-import rule rather than hiding behind a barrel.
+
+`codaScopeBuildPipelineShared.ts` is a side-effect-free leaf. It owns the
+neutral `BuildPipelineCallbacks` and `BuildPipelineCoreServices` contracts,
+plus `extractTokenUsage` and `countSubstantiveWikiTopics`. Service dependencies
+in that leaf are type-only. Analyze-specific optional curation and epic
+services remain local extensions in `codaScopeBuildOrchestrator.ts`.
+
+This dependency split does not change SSE ownership. Analyze, Deep Run, and
+epic-deepen orchestrators persist their normal completion/cancellation state
+and emit `done` or `cancelled`; the route's exactly-once writer still owns
+thrown-error conversion and missing-terminal fail-closed handling. Event names,
+payloads, ordering, build scopes, and reconnectable logs remain unchanged.
 
 ---
 

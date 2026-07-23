@@ -112,6 +112,27 @@ Each service file has one clear domain:
 - Don't add unrelated functionality to an existing service
 - Services are instantiated per-import (module singletons), not dependency-injected
 
+### Build Pipeline Dependency Direction
+
+- `codaScopeBuildOrchestrator.ts` (standard analyze and epic-deepen) and
+  `codaScopeDeepRunOrchestrator.ts` (Deep Run) are sibling pipeline modules.
+  Neither may import, dynamically import, or re-export the other.
+- `codaScopeBuildRoutes.ts` is their composition root. It must import every
+  pipeline entry point directly from the module that owns it; do not use one
+  orchestrator as a barrel for another or introduce a replacement barrel.
+- `codaScopeBuildPipelineShared.ts` is the leaf shared by the siblings. It owns
+  the neutral build-pipeline callback/core-service contracts and the pure
+  token-usage and substantive-wiki-topic helpers. Its service imports remain
+  type-only, and it must not depend on orchestrators, routes, or service
+  composition.
+- Analyze-only optional services stay in the build orchestrator. Future
+  pipelines must expose their own options and entry point from their owning
+  module and be composed through a direct route import.
+- Preserve terminal ownership when changing pipeline structure: Analyze,
+  Deep Run, and epic-deepen orchestrators own normal `done`/`cancelled`
+  emission after build-state persistence; routes own thrown-error and
+  missing-terminal fail-closed handling through the exactly-once writer.
+
 ### Filesystem Path Safety and Destructive Operations
 
 - Treat every route parameter, tool argument, imported metadata field, and

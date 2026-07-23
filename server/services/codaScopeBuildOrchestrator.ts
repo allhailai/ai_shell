@@ -8,15 +8,16 @@
    options, and delegates all pipeline logic here.
    ──────────────────────────────────────────────────────────────────── */
 
-import type { CodaScopeAgentService } from "./codaScopeAgentService.js";
-import type { CodaScopeProjectService } from "./codaScopeProjectService.js";
-import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
-import type { CodaScopeBuildStateService, TokenUsageRecord } from "./codaScopeBuildStateService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import type { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
+import {
+  countSubstantiveWikiTopics,
+  extractTokenUsage,
+  type BuildPipelineCallbacks,
+  type BuildPipelineCoreServices,
+} from "./codaScopeBuildPipelineShared.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -27,40 +28,9 @@ export interface AnalyzeOptions {
   scope?: string | { path: string };
 }
 
-export interface AnalyzeSseCallbacks {
-  sendEvent: (event: string, data: unknown) => void;
-  sendMessage: (msg: unknown) => void;
-  isAborted: () => boolean;
-}
-
-export interface AnalyzeServices {
-  agentSvc: CodaScopeAgentService;
-  projectSvc: CodaScopeProjectService;
-  wikiSvc: CodaScopeWikiService;
-  buildSvc: CodaScopeBuildStateService;
-  codeMapSvc: CodaScopeCodeMapService;
-  wikiStateSvc: CodaScopeWikiStateService;
+export interface AnalyzeServices extends BuildPipelineCoreServices {
   curationSvc?: CodaScopeCurationService;
   epicSvc?: CodaScopeEpicService;
-}
-
-// ── Token Usage Helper ──────────────────────────────────────────────
-
-export function extractTokenUsage(result: { usage?: Record<string, number> } | undefined): TokenUsageRecord | undefined {
-  if (!result?.usage) return undefined;
-  return {
-    inputTokens: result.usage.inputTokens,
-    outputTokens: result.usage.outputTokens,
-    cacheReadTokens: result.usage.cacheReadTokens,
-    cacheWriteTokens: result.usage.cacheWriteTokens,
-    totalTokens: result.usage.totalTokens,
-    reasoningTokens: result.usage.reasoningTokens,
-  };
-}
-
-/** Count pages that demonstrate a wiki build produced actual topic content. */
-export function countSubstantiveWikiTopics(topics: Array<{ id: string }>): number {
-  return topics.filter((topic) => topic.id !== "index" && !topic.id.startsWith("_")).length;
 }
 
 // ── Build Orchestrator ──────────────────────────────────────────────
@@ -77,7 +47,7 @@ export function countSubstantiveWikiTopics(topics: Array<{ id: string }>): numbe
  */
 export async function runAnalyzePipeline(
   options: AnalyzeOptions,
-  callbacks: AnalyzeSseCallbacks,
+  callbacks: BuildPipelineCallbacks,
   services: AnalyzeServices,
   runId: string,
 ): Promise<void> {
@@ -405,7 +375,10 @@ export interface EpicDeepenOptions {
   }>;
 }
 
-export interface EpicDeepenServices extends Omit<AnalyzeServices, "epicSvc"> {
+export interface EpicDeepenServices extends Pick<
+  BuildPipelineCoreServices,
+  "agentSvc" | "projectSvc" | "wikiSvc" | "buildSvc"
+> {
   epicSvc: { updateScopeEntry: (pid: string, eid: string, tid: string, changes: Record<string, unknown>) => Promise<unknown> };
 }
 
@@ -420,7 +393,7 @@ export interface EpicDeepenServices extends Omit<AnalyzeServices, "epicSvc"> {
  */
 export async function runEpicDeepenPipeline(
   options: EpicDeepenOptions,
-  callbacks: AnalyzeSseCallbacks,
+  callbacks: BuildPipelineCallbacks,
   services: EpicDeepenServices,
   runId: string,
   buildScope?: string,
@@ -569,9 +542,3 @@ export async function runEpicDeepenPipeline(
     });
   }
 }
-
-// ── Deep Run Pipeline (extracted) ───────────────────────────────────
-// Re-exported from codaScopeDeepRunOrchestrator.ts so existing imports
-// from this file continue to work unchanged.
-
-export { runDeepRunPipeline, type DeepRunOptions } from "./codaScopeDeepRunOrchestrator.js";

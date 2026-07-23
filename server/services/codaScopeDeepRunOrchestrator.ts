@@ -4,15 +4,19 @@
    Extracted from codaScopeBuildOrchestrator.ts to separate the deep run
    pipeline (6 phases) from the standard analyze and epic deepen pipelines.
 
-   Shared types and helpers (AnalyzeSseCallbacks, AnalyzeServices,
-   extractTokenUsage) are imported from the original orchestrator.
+   Shared contracts and pure helpers come from the build-pipeline leaf
+   module so this orchestrator remains independent of its siblings.
    ──────────────────────────────────────────────────────────────────── */
 
-import type { AnalyzeSseCallbacks, AnalyzeServices } from "./codaScopeBuildOrchestrator.js";
-import { countSubstantiveWikiTopics, extractTokenUsage } from "./codaScopeBuildOrchestrator.js";
 import type { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
 import { buildBaseVars, loadCommandOrSkill } from "./codaScopeCommandLoader.js";
+import {
+  countSubstantiveWikiTopics,
+  extractTokenUsage,
+  type BuildPipelineCallbacks,
+  type BuildPipelineCoreServices,
+} from "./codaScopeBuildPipelineShared.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -87,8 +91,8 @@ async function buildWikiLinkIndex(
  */
 export async function runDeepRunPipeline(
   options: DeepRunOptions,
-  callbacks: AnalyzeSseCallbacks,
-  services: AnalyzeServices,
+  callbacks: BuildPipelineCallbacks,
+  services: BuildPipelineCoreServices,
   runId: string,
 ): Promise<void> {
   const { projectId, modelId } = options;
