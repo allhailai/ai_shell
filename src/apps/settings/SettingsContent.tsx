@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import {
   EMPTY_KEYBINDING_PROFILE,
   captureKeyboardShortcut,
@@ -126,6 +126,25 @@ function KeybindingsSection() {
     setCaptureId(null);
     setCaptureError(null);
   }, [draft]);
+
+  useEffect(() => {
+    if (!captureId || pendingReplacement) return;
+
+    const captureShortcut = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const captured = captureKeyboardShortcut(event, platform);
+      if (!captured.shortcut) {
+        setCaptureError(captured.error ?? "Invalid shortcut.");
+        return;
+      }
+      setCaptureError(null);
+      attemptCustomShortcut(captureId, captured.shortcut);
+    };
+
+    window.addEventListener("keydown", captureShortcut, true);
+    return () => window.removeEventListener("keydown", captureShortcut, true);
+  }, [attemptCustomShortcut, captureId, pendingReplacement, platform]);
 
   const confirmReplacement = useCallback(() => {
     if (!pendingReplacement) return;
@@ -277,12 +296,6 @@ function KeybindingsSection() {
                 platform={platform}
                 capturing={captureId === command.id}
                 captureError={captureId === command.id ? captureError : null}
-                onCapture={(event) => {
-                  event.preventDefault();
-                  const captured = captureKeyboardShortcut(event.nativeEvent, platform);
-                  if (!captured.shortcut) { setCaptureError(captured.error ?? "Invalid shortcut."); return; }
-                  attemptCustomShortcut(command.id, captured.shortcut);
-                }}
                 onStartCapture={() => { setCaptureId(command.id); setCaptureError(null); }}
                 onDisable={() => updateOverride(command.id, { mode: "disabled" })}
                 onReset={() => updateOverride(command.id, undefined)}
@@ -346,14 +359,13 @@ function KeybindingsSection() {
 }
 
 function KeybindingRow({
-  command, override, platform, capturing, captureError, onCapture, onStartCapture, onDisable, onReset,
+  command, override, platform, capturing, captureError, onStartCapture, onDisable, onReset,
 }: {
   command: KeybindingCommand;
   override: CommandOverride | undefined;
   platform: ReturnType<typeof detectKeybindingPlatform>;
   capturing: boolean;
   captureError: string | null;
-  onCapture: (event: ReactKeyboardEvent<HTMLButtonElement>) => void;
   onStartCapture: () => void;
   onDisable: () => void;
   onReset: () => void;
@@ -367,7 +379,7 @@ function KeybindingRow({
         <span>{command.description}</span>
       </div>
       <div className="settings-command-shortcut">
-        <button className="settings-capture" onClick={onStartCapture} onKeyDown={capturing ? onCapture : undefined} type="button">
+        <button className="settings-capture" onClick={onStartCapture} type="button">
           {capturing ? "Press shortcut…" : override?.mode === "disabled" ? "Disabled" : shortcut ? formatShortcut(shortcut, platform) : "Unassigned"}
         </button>
         {captureError || validation?.error ? <span className="settings-field-error">{captureError ?? validation?.error}</span> : null}
