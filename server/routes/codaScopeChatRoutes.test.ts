@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { RequestHandler } from "express";
+import type { Express, RequestHandler } from "express";
 
 const orchestrator = vi.hoisted(() => ({
   streamAssistantResponse: vi.fn(),
@@ -11,7 +11,11 @@ vi.mock("../services/codaScopeChatOrchestrator.js", async (importOriginal) => ({
 }));
 
 import { registerChatRoutes } from "./codaScopeChatRoutes.js";
-import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
+import {
+  createRouteContext,
+  type CodaScopeRouteContext,
+} from "./codaScopeServiceContext.js";
+import { CodaScopePersistenceCorruptError } from "../services/codaScopePersistence.js";
 
 type RouteRegistration = { method: string; path: string; handlers: Array<RequestHandler | undefined> };
 
@@ -19,12 +23,14 @@ interface RouteOptions {
   services?: Record<string, unknown>;
   principal?: { username: string; isAdmin: boolean };
   getUser?: (username: string) => Promise<unknown>;
+  wrap?: CodaScopeRouteContext["wrap"];
 }
 
 function registeredRoutes({
   services = {},
   principal = { username: "alice", isAdmin: false },
   getUser = async (username: string) => ({ username }),
+  wrap,
 }: RouteOptions = {}): RouteRegistration[] {
   const routes: RouteRegistration[] = [];
   const app = new Proxy({}, {
@@ -41,7 +47,7 @@ function registeredRoutes({
     httpError,
     repoRoot: "/tmp",
     ensureServices: async () => services,
-    wrap: (handler: RequestHandler) => handler,
+    wrap: wrap ?? ((handler: RequestHandler) => handler),
     param: (req: { params?: Record<string, string | string[]> }, name: string) => {
       const value = req.params?.[name];
       return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -140,17 +146,93 @@ function statefulChatService(initial = chatConversation()) {
     conversation = cloneConversation(next);
     return cloneConversation(conversation);
   });
+  const completeAssistantMessage = vi.fn(async (
+    _projectId: string,
+    _conversationId: string,
+    _actorId: string,
+    messageId: string,
+    completion: { content: string; metadata?: Record<string, unknown> },
+  ) => {
+    if (!conversation) return null;
+    const messageIndex = conversation.messages.findIndex((message) =>
+      message.id === messageId
+      && message.role === "assistant"
+      && message.status === "streaming"
+    );
+    if (messageIndex < 0) return null;
+    const messages = [...conversation.messages];
+    messages[messageIndex] = {
+      ...messages[messageIndex],
+      content: completion.content,
+      status: "complete",
+      updatedAt: "2026-07-23T00:00:02.000Z",
+      metadata: {
+        ...(messages[messageIndex].metadata ?? {}),
+        ...(completion.metadata ?? {}),
+      },
+    };
+    conversation = {
+      ...conversation,
+      messages,
+      updatedAt: "2026-07-23T00:00:02.000Z",
+    };
+    return cloneConversation(conversation);
+  });
+  const recordAssistantMessageError = vi.fn(async (
+    _projectId: string,
+    _conversationId: string,
+    _actorId: string,
+    message: { id: string; content: string; modelId?: string | null },
+    options: { appendIfMissing?: boolean } = {},
+  ) => {
+    if (!conversation) return null;
+    const existingIndex = conversation.messages.findIndex((candidate) => candidate.id === message.id);
+    const messages = [...conversation.messages];
+    if (existingIndex >= 0) {
+      const existing = messages[existingIndex];
+      if (existing.role !== "assistant") return null;
+      const { actions: _actions, ...remainingMetadata } = existing.metadata ?? {};
+      messages[existingIndex] = {
+        ...existing,
+        content: message.content,
+        status: "error",
+        updatedAt: "2026-07-23T00:00:03.000Z",
+        metadata: Object.keys(remainingMetadata).length > 0 ? remainingMetadata : undefined,
+      };
+    } else {
+      if (!options.appendIfMissing) return null;
+      messages.push({
+        id: message.id,
+        role: "assistant",
+        content: message.content,
+        status: "error",
+        createdAt: "2026-07-23T00:00:03.000Z",
+        updatedAt: "2026-07-23T00:00:03.000Z",
+        modelId: message.modelId,
+      });
+    }
+    conversation = {
+      ...conversation,
+      messages,
+      updatedAt: "2026-07-23T00:00:03.000Z",
+    };
+    return cloneConversation(conversation);
+  });
 
   return {
     service: {
       readConversation,
       appendMessage,
       writeConversation,
+      completeAssistantMessage,
+      recordAssistantMessageError,
       createConversation: vi.fn(async () => chatConversation()),
     },
     readConversation,
     appendMessage,
     writeConversation,
+    completeAssistantMessage,
+    recordAssistantMessageError,
     getConversation: () => cloneConversation(conversation),
     setConversation: (next: TestConversation | null) => {
       conversation = cloneConversation(next);
@@ -312,6 +394,79 @@ describe("CodaScope chat route custody", () => {
     expect(getUser).toHaveBeenCalledWith("bob");
     expect(assignLegacyConversationOwner).toHaveBeenCalledWith("proj", "conv_legacy", "bob");
   });
+
+  it("maps chat-index corruption through the real route boundary without leaking storage or parser details", async () => {
+    const rawPath = "/private/tmp/codascope-secret/conversations/conversations.json";
+    const listConversations = vi.fn(async () => {
+      throw new CodaScopePersistenceCorruptError({
+        storage: "conversation_index",
+        projectId: "proj",
+        path: rawPath,
+        parser: "Unexpected token at position 3",
+      });
+    });
+    const httpError = (message: string, status: number, code: string) =>
+      Object.assign(new Error(message), { status, code });
+    const boundary = createRouteContext({} as Express, {
+      secretService: {} as never,
+      authService: {} as never,
+      authMiddleware: {},
+      httpError,
+      repoRoot: "/not-used",
+    }).wrap;
+    const routes = registeredRoutes({
+      services: { chatSvc: { listConversations } },
+      wrap: boundary,
+    });
+    const next = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    route(routes, "get", "/api/codascope/projects/:id/conversations")(
+      { params: { id: "proj" } } as never,
+      { json: vi.fn() } as never,
+      next,
+    );
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+
+    const mapped = next.mock.calls[0][0] as Error & { status?: number; code?: string };
+    expect(mapped).toMatchObject({
+      status: 500,
+      code: "persistence_corrupt",
+      message: "Persisted CodaScope data is corrupt. Repair or restore it and retry.",
+    });
+    const publicResponse = JSON.stringify({ error: mapped.message, code: mapped.code });
+    expect(publicResponse).not.toContain(rawPath);
+    expect(publicResponse).not.toContain("Unexpected token");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(rawPath);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("Unexpected token");
+    consoleError.mockRestore();
+  });
+
+  it("does not start or complete SSE when an authoritative conversation read fails closed", async () => {
+    const corruption = new CodaScopePersistenceCorruptError({
+      storage: "conversation_index",
+      projectId: "proj",
+    });
+    const readConversation = vi.fn(async () => { throw corruption; });
+    const appendMessage = vi.fn();
+    const routes = registeredRoutes({
+      services: {
+        chatSvc: { readConversation, appendMessage },
+        agentSvc: {},
+        epicSvc: {},
+        imageSvc: {},
+      },
+    });
+    const res = sseResponse();
+    const next = vi.fn();
+
+    route(routes, "post", messagesPath)(streamRequest as never, res as never, next);
+    await vi.waitFor(() => expect(next).toHaveBeenCalledWith(corruption));
+
+    expect(res.writeHead).not.toHaveBeenCalled();
+    expect(terminalFrames(res)).toEqual([]);
+    expect(appendMessage).not.toHaveBeenCalled();
+  });
 });
 
 describe("CodaScope chat SSE completion persistence", () => {
@@ -322,18 +477,18 @@ describe("CodaScope chat SSE completion persistence", () => {
   it("persists the exact conversation placeholder before one done terminal", async () => {
     const timeline: string[] = [];
     const chat = statefulChatService();
+    const completeNormally = chat.completeAssistantMessage.getMockImplementation()!;
     let releaseWrite: (() => void) | undefined;
     const writeGate = new Promise<void>((resolve) => {
       releaseWrite = resolve;
     });
-    chat.writeConversation.mockImplementation(async (_projectId, _actorId, next) => {
-      const assistant = next.messages.find((message) => message.role === "assistant");
-      expect(assistant?.status).toBe("complete");
+    chat.completeAssistantMessage.mockImplementation(async (...args) => {
+      expect(args[4]).toMatchObject({ content: "Durable answer" });
       timeline.push("persist:complete:start");
       await writeGate;
-      chat.setConversation(next);
+      const result = await completeNormally(...args);
       timeline.push("persist:complete:resolved");
-      return next;
+      return result;
     });
     orchestrator.streamAssistantResponse.mockResolvedValueOnce({
       fullResponse: "Durable answer",
@@ -361,6 +516,7 @@ describe("CodaScope chat SSE completion persistence", () => {
     ]);
     expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
       .toMatchObject({ content: "Durable answer", status: "complete" });
+    expect(chat.writeConversation).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -402,12 +558,7 @@ describe("CodaScope chat SSE completion persistence", () => {
 
   it("downgrades generated text to error when the conversation completion write throws", async () => {
     const chat = statefulChatService();
-    chat.writeConversation.mockImplementation(async (_projectId, _actorId, next) => {
-      const assistant = next.messages.find((message) => message.role === "assistant");
-      if (assistant?.status === "complete") throw new Error("completion write failed");
-      chat.setConversation(next);
-      return next;
-    });
+    chat.completeAssistantMessage.mockRejectedValueOnce(new Error("completion write failed"));
     orchestrator.streamAssistantResponse.mockResolvedValueOnce({
       fullResponse: "Generated answer",
       actions: [{ type: "completed_operation", attributes: { operation: "test" } }],
@@ -423,25 +574,17 @@ describe("CodaScope chat SSE completion persistence", () => {
     expect(terminalFrames(res)).toEqual([
       "event: error\ndata: {\"error\":\"completion write failed\"}\n\n",
     ]);
-    expect(chat.writeConversation).toHaveBeenCalledTimes(2);
+    expect(chat.completeAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(chat.recordAssistantMessageError).toHaveBeenCalledTimes(1);
     expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
       .toMatchObject({ content: "Generated answer", status: "error", metadata: undefined });
+    expect(chat.writeConversation).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["conversation disappears", true],
-    ["expected placeholder is missing", false],
-  ])("emits only error when the %s before completion", async (_label, disappears) => {
+  it("emits only error when the exact placeholder transition fails closed", async () => {
     const chat = statefulChatService();
-    chat.readConversation.mockImplementation(async () => {
-      const current = chat.getConversation();
-      if (chat.readConversation.mock.calls.length < 3) return current;
-      if (disappears) return null;
-      return current
-        ? { ...current, messages: current.messages.filter((message) => message.role !== "assistant") }
-        : null;
-    });
+    chat.completeAssistantMessage.mockResolvedValueOnce(null);
     orchestrator.streamAssistantResponse.mockResolvedValueOnce({
       fullResponse: "Generated answer",
       actions: [],
@@ -454,12 +597,12 @@ describe("CodaScope chat SSE completion persistence", () => {
     route(routes, "post", messagesPath)(streamRequest as never, res as never, next);
     await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
 
-    const expectedError = disappears
-      ? "Conversation disappeared before assistant completion could be persisted."
-      : "Expected assistant streaming placeholder was not found.";
     expect(terminalFrames(res)).toEqual([
-      `event: error\ndata: ${JSON.stringify({ error: expectedError })}\n\n`,
+      "event: error\ndata: {\"error\":\"Expected assistant streaming placeholder was not found.\"}\n\n",
     ]);
+    expect(chat.recordAssistantMessageError).toHaveBeenCalledTimes(1);
+    expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ content: "Generated answer", status: "error" });
     expect(chat.writeConversation).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
@@ -499,14 +642,111 @@ describe("CodaScope chat SSE completion persistence", () => {
     expect(terminalFrames(res)).toEqual([
       `event: error\ndata: ${JSON.stringify({ error: expectedError, conversationId: "conv-1" })}\n\n`,
     ]);
+    const attemptedCompletionId = chat.appendMessage.mock.calls
+      .find((call) => call[3].role === "assistant" && call[3].status === "complete")?.[3].id;
+    const persistedErrorId = chat.recordAssistantMessageError.mock.calls[0]?.[3].id;
+    expect(attemptedCompletionId).toBeTruthy();
+    expect(persistedErrorId).toBe(attemptedCompletionId);
     expect(chat.getConversation()?.messages.at(-1))
       .toMatchObject({ role: "assistant", content: "Generated answer", status: "error" });
+    expect(chat.getConversation()?.messages.filter((candidate) => candidate.id === attemptedCompletionId))
+      .toHaveLength(1);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rewrites a partially committed backwards-compatible completion under the same stable ID", async () => {
+    const chat = statefulChatService();
+    const appendNormally = chat.appendMessage.getMockImplementation()!;
+    chat.appendMessage.mockImplementation(async (...args) => {
+      const result = await appendNormally(...args);
+      const message = args[3];
+      if (message.role === "assistant" && message.status === "complete") {
+        throw new Error("completion acknowledgement failed");
+      }
+      return result;
+    });
+    orchestrator.streamAssistantResponse.mockResolvedValueOnce({
+      fullResponse: "Generated answer",
+      actions: [{ type: "completed_operation" }],
+      agentResult: {},
+    });
+    const routes = registeredRoutes({ services: streamingServices(chat.service) });
+    const res = sseResponse();
+    const next = vi.fn();
+
+    route(routes, "post", assistantPath)({
+      params: { id: "proj" },
+      body: { message: "Hello", modelId: "model", conversationId: "conv-1" },
+    } as never, res as never, next);
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
+
+    const attemptedCompletionId = chat.appendMessage.mock.calls
+      .find((call) => call[3].role === "assistant" && call[3].status === "complete")?.[3].id;
+    expect(terminalFrames(res)).toEqual([
+      "event: error\ndata: {\"error\":\"completion acknowledgement failed\",\"conversationId\":\"conv-1\"}\n\n",
+    ]);
+    expect(chat.recordAssistantMessageError.mock.calls[0]?.[3].id).toBe(attemptedCompletionId);
+    expect(chat.getConversation()?.messages.filter((candidate) => candidate.id === attemptedCompletionId))
+      .toHaveLength(1);
+    expect(chat.getConversation()?.messages.find((candidate) => candidate.id === attemptedCompletionId))
+      .toMatchObject({
+        content: "Generated answer",
+        status: "error",
+        metadata: undefined,
+      });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rewrites a committed backwards-compatible completion when done publication fails before ownership", async () => {
+    const chat = statefulChatService();
+    orchestrator.streamAssistantResponse.mockResolvedValueOnce({
+      fullResponse: "Generated answer",
+      actions: [{ type: "completed_operation" }],
+      agentResult: {},
+    });
+    const routes = registeredRoutes({ services: streamingServices(chat.service) });
+    const timeline: string[] = [];
+    const res = sseResponse(timeline);
+    const writeNormally = res.write.getMockImplementation()!;
+    let rejectedDone = false;
+    res.write.mockImplementation((frame: string) => {
+      if (!rejectedDone && frame.startsWith("event: done\n")) {
+        rejectedDone = true;
+        throw new Error("done publication failed");
+      }
+      return writeNormally(frame);
+    });
+    const next = vi.fn();
+
+    route(routes, "post", assistantPath)({
+      params: { id: "proj" },
+      body: { message: "Hello", modelId: "model", conversationId: "conv-1" },
+    } as never, res as never, next);
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
+
+    const committedCompletionId = chat.appendMessage.mock.calls
+      .find((call) => call[3].role === "assistant" && call[3].status === "complete")?.[3].id;
+    expect(timeline).toEqual(["terminal:error"]);
+    expect(terminalFrames(res).at(-1)).toBe(
+      "event: error\ndata: {\"error\":\"done publication failed\",\"conversationId\":\"conv-1\"}\n\n",
+    );
+    expect(chat.recordAssistantMessageError.mock.calls[0]?.[3].id).toBe(committedCompletionId);
+    expect(chat.getConversation()?.messages.filter((candidate) => candidate.id === committedCompletionId))
+      .toHaveLength(1);
+    expect(chat.getConversation()?.messages.find((candidate) => candidate.id === committedCompletionId))
+      .toMatchObject({
+        content: "Generated answer",
+        status: "error",
+        metadata: undefined,
+      });
+    expect(res.end).toHaveBeenCalledTimes(1);
     expect(next).not.toHaveBeenCalled();
   });
 
   it("still emits one error and ends once when error-state persistence also fails", async () => {
     const chat = statefulChatService();
-    chat.writeConversation.mockRejectedValue(new Error("all writes failed"));
+    chat.completeAssistantMessage.mockRejectedValueOnce(new Error("completion write failed"));
+    chat.recordAssistantMessageError.mockRejectedValueOnce(new Error("error-state write failed"));
     orchestrator.streamAssistantResponse.mockResolvedValueOnce({
       fullResponse: "Generated answer",
       actions: [],
@@ -520,9 +760,10 @@ describe("CodaScope chat SSE completion persistence", () => {
     await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
 
     expect(terminalFrames(res)).toEqual([
-      "event: error\ndata: {\"error\":\"all writes failed\"}\n\n",
+      "event: error\ndata: {\"error\":\"completion write failed\"}\n\n",
     ]);
-    expect(chat.writeConversation).toHaveBeenCalledTimes(2);
+    expect(chat.completeAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(chat.recordAssistantMessageError).toHaveBeenCalledTimes(1);
     expect(res.end).toHaveBeenCalledTimes(1);
     expect(next).not.toHaveBeenCalled();
   });
@@ -546,10 +787,11 @@ describe("CodaScope chat SSE completion persistence", () => {
     expect(terminalFrames(res)).toEqual([
       "event: error\ndata: {\"error\":\"Server could not serialize done terminal payload.\"}\n\n",
     ]);
-    expect(chat.writeConversation).toHaveBeenCalledTimes(1);
-    const attemptedAssistant = chat.writeConversation.mock.calls[0][2].messages
-      .find((message) => message.role === "assistant");
-    expect(attemptedAssistant).toMatchObject({ content: "Generated answer", status: "error" });
+    expect(chat.completeAssistantMessage).not.toHaveBeenCalled();
+    expect(chat.recordAssistantMessageError).toHaveBeenCalledTimes(1);
+    expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ content: "Generated answer", status: "error" });
+    expect(chat.writeConversation).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -568,13 +810,11 @@ describe("CodaScope chat SSE completion persistence", () => {
     expect(terminalFrames(res)).toEqual([
       "event: error\ndata: {\"error\":\"agent stream failed\"}\n\n",
     ]);
-    expect(chat.writeConversation).toHaveBeenCalledTimes(1);
-    for (const call of chat.writeConversation.mock.calls) {
-      const assistant = call[2].messages.find((message) => message.role === "assistant");
-      expect(assistant?.status).toBe("error");
-    }
+    expect(chat.completeAssistantMessage).not.toHaveBeenCalled();
+    expect(chat.recordAssistantMessageError).toHaveBeenCalledTimes(1);
     expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
       .toMatchObject({ content: "Partial answer", status: "error" });
+    expect(chat.writeConversation).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 });

@@ -29,6 +29,8 @@ import {
   CodaScopePersistenceError,
   codaScopePersistence,
 } from "./codaScopePersistence.js";
+import { CodaScopeEpicService } from "./codaScopeEpicService.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 
 const ANNOTATIONS_VERSION = 2 as const;
 const ANNOTATIONS_SUFFIX = "-annotations.json";
@@ -90,12 +92,16 @@ export class CodaScopeAnnotationService {
   constructor(
     root: string,
     private readonly persistence: CodaScopePersistence = codaScopePersistence,
+    private readonly epicService = new CodaScopeEpicService(root, persistence),
+    private readonly designDocService = new CodaScopeDesignDocService(root, persistence),
   ) {
     this.root = root;
   }
 
   setRoot(root: string): void {
     this.root = root;
+    this.epicService.setRoot(root);
+    this.designDocService.setRoot(root);
   }
 
   /* ── Path helpers ──────────────────────────────────────────────── */
@@ -133,28 +139,22 @@ export class CodaScopeAnnotationService {
     return this.persistence.canonicalKey("epic-annotations", this.annotationsDir(projectDir, epicId));
   }
 
-  /** Match the authoritative writers' key so document saves cannot interleave with reattachment. */
+  /** Match the authoritative writers' key for coordinated document/annotation operations. */
   private documentMutationKey(projectDir: string, epicId: string, documentId: string): string {
     return documentId === "definition"
       ? this.persistence.canonicalKey("epic-storage", path.join(projectDir, "epics"))
       : this.persistence.canonicalKey("design-index", path.join(this.epicDir(projectDir, epicId), "designs"));
   }
 
-  private readDocumentContent(projectDir: string, epicId: string, documentId: string): string | null {
-    const filePath = documentId === "definition"
-      ? path.join(this.epicDir(projectDir, epicId), "definition.md")
-      : path.join(
-          this.epicDir(projectDir, epicId),
-          "designs",
-          assertSafePathSegment(documentId, "document ID"),
-          "content.md",
-        );
-    try {
-      return readFileSync(filePath, "utf-8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw new CodaScopePersistenceError({ storage: "annotation_document", epicId, documentId });
+  private async readDocumentContent(
+    projectId: string,
+    epicId: string,
+    documentId: string,
+  ): Promise<string | null> {
+    if (documentId === "definition") {
+      return this.epicService.getDefinition(projectId, epicId);
     }
+    return (await this.designDocService.getDesignDoc(projectId, epicId, documentId))?.content ?? null;
   }
 
   private annotationDocumentIds(projectDir: string, epicId: string): string[] {
@@ -316,6 +316,10 @@ export class CodaScopeAnnotationService {
   /**
    * List a document's annotations. If content is supplied, attachment state
    * is reconciled and persisted. Anchors are never substituted or moved.
+   *
+   * Callers that need reconciliation against the authoritative document must
+   * use listCurrentDocumentAnnotations() so the document read is coordinated
+   * with its writer.
    */
   async listAnnotations(
     projectId: string,
@@ -327,16 +331,47 @@ export class CodaScopeAnnotationService {
     if (!projectDir) return [];
 
     return this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
-      const catalog = await this.readEpicCatalog(projectDir, epicId, documentId);
-      const loaded = catalog.documents.get(documentId)!;
-      const reconciled = documentContent === undefined
-        ? false
-        : this.reconcileAttachments(loaded.file.annotations, this.computeBlockIds(documentContent));
-      if (loaded.legacy || reconciled) {
-        await this.writeAnnotations(projectDir, epicId, documentId, loaded.file);
-      }
-      return loaded.file.annotations;
+      return this.listAnnotationsUnlocked(projectDir, epicId, documentId, documentContent);
     });
+  }
+
+  /**
+   * List and reconcile annotations against a document snapshot read while the
+   * authoritative writer and annotation sidecar are both excluded.
+   */
+  async listCurrentDocumentAnnotations(
+    projectId: string,
+    epicId: string,
+    documentId: string,
+  ): Promise<Annotation[] | null> {
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    return this.persistence.withMutation(
+      this.documentMutationKey(projectDir, epicId, documentId),
+      () => this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
+        const currentContent = await this.readDocumentContent(projectId, epicId, documentId);
+        if (currentContent === null) return null;
+        return this.listAnnotationsUnlocked(projectDir, epicId, documentId, currentContent);
+      }),
+    );
+  }
+
+  private async listAnnotationsUnlocked(
+    projectDir: string,
+    epicId: string,
+    documentId: string,
+    documentContent?: string,
+  ): Promise<Annotation[]> {
+    const catalog = await this.readEpicCatalog(projectDir, epicId, documentId);
+    const loaded = catalog.documents.get(documentId)!;
+    const reconciled = documentContent === undefined
+      ? false
+      : this.reconcileAttachments(loaded.file.annotations, this.computeBlockIds(documentContent));
+    if (loaded.legacy || reconciled) {
+      await this.writeAnnotations(projectDir, epicId, documentId, loaded.file);
+    }
+    return loaded.file.annotations;
   }
 
   private reconcileAttachments(annotations: Annotation[], blocks: BlockInfo[]): boolean {
@@ -401,47 +436,119 @@ export class CodaScopeAnnotationService {
     if (!projectDir) throw new Error("Project not found");
 
     return this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
-      const catalog = await this.readEpicCatalog(projectDir, epicId, documentId);
-      const loaded = catalog.documents.get(documentId)!;
-      const parent = data.parentId
-        ? catalog.byId.get(data.parentId)?.annotation
-        : undefined;
-      if (data.parentId && (!parent || parent.documentId !== documentId || parent.parentId)) {
-        throw invalidInput("parentId must identify a root annotation in this document.");
-      }
-
-      const now = new Date().toISOString();
-      let annotationId = "";
-      for (let attempt = 0; attempt < 32 && !annotationId; attempt += 1) {
-        const candidate = `ann_${crypto.randomBytes(12).toString("hex")}`;
-        if (!catalog.byId.has(candidate)) annotationId = candidate;
-      }
-      if (!annotationId) {
-        throw new CodaScopePersistenceError({ storage: "epic_annotations", epicId, operation: "allocate_id" });
-      }
-      const annotation: Annotation = {
-        id: annotationId,
-        epicId,
-        documentId,
-        documentVersion: data.documentVersion ?? parent?.documentVersion ?? 0,
-        anchor: { ...(parent?.anchor ?? data.anchor!) },
-        author: trustedActor.username,
-        origin: trustedActor.origin,
-        ownership: "owned",
-        createdAt: now,
+      return this.createAnnotationUnlocked(projectDir, epicId, documentId, trustedActor, {
+        anchor: data.anchor,
         body,
         parentId: data.parentId,
-        status: parent?.status ?? "open",
-        reactions: [],
-        attachmentState: parent?.attachmentState ?? "attached",
-        ...(parent?.detachedReason ? { detachedReason: parent.detachedReason } : {}),
-        ...(parent?.detachedAt ? { detachedAt: parent.detachedAt } : {}),
-        ...(parent?.reattachedAt ? { reattachedAt: parent.reattachedAt } : {}),
-      };
-      loaded.file.annotations.push(annotation);
-      await this.writeAnnotations(projectDir, epicId, documentId, loaded.file);
-      return annotation;
+        documentVersion: data.documentVersion,
+      });
     });
+  }
+
+  /**
+   * Create a root annotation only if its exact block still exists in the
+   * authoritative document after acquiring the document and sidecar locks.
+   */
+  async createAnnotationForCurrentDocument(
+    projectId: string,
+    epicId: string,
+    documentId: string,
+    actor: AnnotationActor,
+    data: {
+      targetBlockId: string;
+      body: string;
+      documentVersion?: number;
+    },
+  ): Promise<Annotation | null> {
+    assertMutationFields(data, ["targetBlockId", "body", "documentVersion"]);
+    const trustedActor = validateActor(actor);
+    const body = validateBody(data.body);
+    if (!data.targetBlockId || typeof data.targetBlockId !== "string") {
+      throw invalidInput("targetBlockId must be a non-empty string.");
+    }
+    if (data.documentVersion !== undefined
+      && (!Number.isSafeInteger(data.documentVersion) || data.documentVersion < 0)) {
+      throw invalidInput("documentVersion must be a non-negative integer.");
+    }
+
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    return this.persistence.withMutation(
+      this.documentMutationKey(projectDir, epicId, documentId),
+      () => this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
+        const currentContent = await this.readDocumentContent(projectId, epicId, documentId);
+        if (currentContent === null) return null;
+        const targetBlock = this.computeBlockIds(currentContent)
+          .find((block) => block.blockId === data.targetBlockId);
+        if (!targetBlock) throw invalidInput("The selected annotation block no longer exists.");
+
+        return this.createAnnotationUnlocked(projectDir, epicId, documentId, trustedActor, {
+          anchor: {
+            blockId: targetBlock.blockId,
+            sectionSlug: targetBlock.sectionSlug,
+            anchorText: targetBlock.content,
+            lineNumber: targetBlock.lineStart,
+          },
+          body,
+          documentVersion: data.documentVersion,
+        });
+      }),
+    );
+  }
+
+  private async createAnnotationUnlocked(
+    projectDir: string,
+    epicId: string,
+    documentId: string,
+    actor: AnnotationActor,
+    data: {
+      anchor?: BlockAnchor;
+      body: string;
+      parentId?: string;
+      documentVersion?: number;
+    },
+  ): Promise<Annotation> {
+    const catalog = await this.readEpicCatalog(projectDir, epicId, documentId);
+    const loaded = catalog.documents.get(documentId)!;
+    const parent = data.parentId
+      ? catalog.byId.get(data.parentId)?.annotation
+      : undefined;
+    if (data.parentId && (!parent || parent.documentId !== documentId || parent.parentId)) {
+      throw invalidInput("parentId must identify a root annotation in this document.");
+    }
+
+    const now = new Date().toISOString();
+    let annotationId = "";
+    for (let attempt = 0; attempt < 32 && !annotationId; attempt += 1) {
+      const candidate = `ann_${crypto.randomBytes(12).toString("hex")}`;
+      if (!catalog.byId.has(candidate)) annotationId = candidate;
+    }
+    if (!annotationId) {
+      throw new CodaScopePersistenceError({ storage: "epic_annotations", epicId, operation: "allocate_id" });
+    }
+    const annotation: Annotation = {
+      id: annotationId,
+      epicId,
+      documentId,
+      documentVersion: data.documentVersion ?? parent?.documentVersion ?? 0,
+      anchor: { ...(parent?.anchor ?? data.anchor!) },
+      author: actor.username,
+      origin: actor.origin,
+      ownership: "owned",
+      createdAt: now,
+      body: data.body,
+      parentId: data.parentId,
+      status: parent?.status ?? "open",
+      reactions: [],
+      attachmentState: parent?.attachmentState ?? "attached",
+      ...(parent?.detachedReason ? { detachedReason: parent.detachedReason } : {}),
+      ...(parent?.detachedAt ? { detachedAt: parent.detachedAt } : {}),
+      ...(parent?.reattachedAt ? { reattachedAt: parent.reattachedAt } : {}),
+    };
+    loaded.file.annotations.push(annotation);
+    await this.writeAnnotations(projectDir, epicId, documentId, loaded.file);
+    return annotation;
   }
 
   async updateAnnotation(
@@ -604,7 +711,7 @@ export class CodaScopeAnnotationService {
       this.documentMutationKey(projectDir, epicId, documentId),
       () => this.persistence.withMutation(this.mutationKey(projectDir, epicId), async () => {
         const catalog = await this.readEpicCatalog(projectDir, epicId, documentId);
-        const currentContent = this.readDocumentContent(projectDir, epicId, documentId);
+        const currentContent = await this.readDocumentContent(projectId, epicId, documentId);
         if (currentContent === null) return null;
         if (hashContent(currentContent) !== expectedContentHash) {
           throw conflict("Document content changed. Reload before reattaching the annotation.");

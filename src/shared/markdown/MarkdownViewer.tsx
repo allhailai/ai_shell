@@ -7,8 +7,9 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useRef, useCallback } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { normalizeMarkdownLinkHref } from "./linkDestination";
 
 interface MarkdownViewerProps {
   /** The markdown string to render. */
@@ -27,6 +28,12 @@ interface MarkdownViewerProps {
   onImageDelete?: (index: number) => void;
   /** Callback when user deletes a code block. index = occurrence order (excludes mermaid). */
   onCodeBlockDelete?: (index: number) => void;
+}
+
+function transformMarkdownUrl(value: string, key: string): string {
+  return key === "href"
+    ? normalizeMarkdownLinkHref(value)
+    : defaultUrlTransform(value);
 }
 
 // ── Mermaid CDN loader (shared singleton) ───────────────────────────
@@ -562,7 +569,12 @@ export function MarkdownViewer({
 
   return (
     <div ref={containerRef} className={`shared-md-viewer ${className ?? ""}`.trim()}>
-      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]} skipHtml>
+      <ReactMarkdown
+        components={components}
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        urlTransform={transformMarkdownUrl}
+      >
         {processedContent}
       </ReactMarkdown>
     </div>

@@ -10,7 +10,11 @@ import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync
 import os from "node:os";
 import path from "node:path";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
-import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
+import {
+  CodaScopeDirectiveError,
+  CodaScopeDirectiveService,
+} from "./codaScopeDirectiveService.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 
 type LegacyTestService = Omit<CodaScopeAnnotationService, "createAnnotation" | "updateAnnotation" | "deleteAnnotation"> & {
   createAnnotation(projectId: string, epicId: string, documentId: string, data: any): ReturnType<CodaScopeAnnotationService["createAnnotation"]>;
@@ -38,6 +42,21 @@ function scaffoldProject(root: string, projectId: string, epicId: string): strin
   mkdirSync(epicDir, { recursive: true });
 
   return projectDir;
+}
+
+async function createDesignDoc(
+  root: string,
+  projectId: string,
+  epicId: string,
+  content: string,
+): Promise<{ id: string; service: CodaScopeDesignDocService }> {
+  const service = new CodaScopeDesignDocService(root);
+  const doc = await service.createDesignDoc(projectId, epicId, {
+    title: "Directive design",
+    content,
+    createdBy: "alice",
+  });
+  return { id: doc.id, service };
 }
 
 /* ── Tests ────────────────────────────────────────────────────────── */
@@ -440,6 +459,44 @@ describe("CodaScopeAnnotationService", () => {
       expect(updated!.generatedContent).toBe("# Generated Heading\n\nGenerated content.");
     });
 
+    it("rejects generic attempts to forge controlled directive fields", async () => {
+      const projectDir = scaffoldProject(root, "proj-controlled", "epic-controlled");
+      const dir = await svc.createDirective("proj-controlled", "epic-controlled", "doc1", {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Original",
+        author: "user",
+      });
+      const sidecarPath = path.join(
+        projectDir,
+        "epics",
+        "epic-controlled",
+        "directives",
+        "doc1-directives.json",
+      );
+      const before = readFileSync(sidecarPath);
+
+      await expect(svc.updateDirective(
+        "proj-controlled",
+        "epic-controlled",
+        dir.id,
+        "doc1",
+        {
+          id: "dir_forged",
+          epicId: "epic-controlled",
+          documentId: "doc1",
+          author: "mallory",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          status: "applied",
+          preApplySnapshot: "forged predecessor",
+          appliedContentHash: "0".repeat(64),
+          linePositionAdjustments: [],
+          appliedAt: "2026-01-01T00:00:00.000Z",
+        },
+      )).rejects.toMatchObject({ status: 409, code: "conflict" });
+      expect(readFileSync(sidecarPath)).toEqual(before);
+    });
+
     it("deletes a directive", async () => {
       scaffoldProject(root, "proj-dir4", "epic-d4");
       const dir = await svc.createDirective("proj-dir4", "epic-d4", "doc1", {
@@ -455,6 +512,88 @@ describe("CodaScopeAnnotationService", () => {
       const list = await svc.listDirectives("proj-dir4", "epic-d4", "doc1");
       expect(list).toHaveLength(0);
     });
+
+    it("deletes a rejected directive", async () => {
+      scaffoldProject(root, "proj-dir-rejected", "epic-dir-rejected");
+      const dir = await svc.createDirective(
+        "proj-dir-rejected",
+        "epic-dir-rejected",
+        "doc1",
+        {
+          type: "insert",
+          afterLine: 1,
+          instruction: "Reject then delete",
+          author: "user",
+        },
+      );
+      await svc.executeDirective(
+        "proj-dir-rejected",
+        "epic-dir-rejected",
+        "doc1",
+        dir.id,
+        "Generated",
+      );
+      await svc.rejectDirective(
+        "proj-dir-rejected",
+        "epic-dir-rejected",
+        "doc1",
+        dir.id,
+      );
+
+      await expect(svc.deleteDirective(
+        "proj-dir-rejected",
+        "epic-dir-rejected",
+        dir.id,
+        "doc1",
+      )).resolves.toBe(true);
+    });
+
+    it("completes, rejects, and deliberately deletes persisted generating directives", async () => {
+      const projectDir = scaffoldProject(root, "proj-generating", "epic-generating");
+      const dir = await svc.createDirective("proj-generating", "epic-generating", "doc1", {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Generating",
+        author: "user",
+      });
+      const sidecarPath = path.join(
+        projectDir,
+        "epics",
+        "epic-generating",
+        "directives",
+        "doc1-directives.json",
+      );
+      const markGenerating = () => {
+        const sidecar = JSON.parse(readFileSync(sidecarPath, "utf-8"));
+        sidecar.directives[0].status = "generating";
+        delete sidecar.directives[0].generatedContent;
+        writeFileSync(sidecarPath, JSON.stringify(sidecar, null, 2), "utf-8");
+      };
+
+      markGenerating();
+      await expect(svc.executeDirective(
+        "proj-generating",
+        "epic-generating",
+        "doc1",
+        dir.id,
+        "Generated",
+      )).resolves.toMatchObject({ status: "pending", generatedContent: "Generated" });
+
+      markGenerating();
+      await expect(svc.rejectDirective(
+        "proj-generating",
+        "epic-generating",
+        "doc1",
+        dir.id,
+      )).resolves.toMatchObject({ status: "rejected", generatedContent: undefined });
+      markGenerating();
+      await expect(svc.deleteDirective(
+        "proj-generating",
+        "epic-generating",
+        dir.id,
+        "doc1",
+      )).resolves.toBe(true);
+    });
   });
 
   // ── Directive Apply / Undo / Reject ─────────────────────────
@@ -468,7 +607,8 @@ describe("CodaScopeAnnotationService", () => {
 
     it("applies an insert directive", async () => {
       scaffoldProject(root, "proj-apply", "epic-a");
-      const dir = await svc.createDirective("proj-apply", "epic-a", "doc1", {
+      const design = await createDesignDoc(root, "proj-apply", "epic-a", "Line 1\nLine 2\nLine 3");
+      const dir = await svc.createDirective("proj-apply", "epic-a", design.id, {
         type: "insert",
         afterLine: 1,
         instruction: "Add content after line 1",
@@ -476,23 +616,25 @@ describe("CodaScopeAnnotationService", () => {
       });
 
       // Set generated content
-      await svc.updateDirective("proj-apply", "epic-a", dir.id, "doc1", {
+      await svc.updateDirective("proj-apply", "epic-a", dir.id, design.id, {
         generatedContent: "INSERTED LINE",
       });
 
-      let docContent = "Line 1\nLine 2\nLine 3";
-      const getDoc = async () => docContent;
-      const setDoc = async (c: string) => { docContent = c; };
-
-      const result = await svc.applyDirective("proj-apply", "epic-a", "doc1", dir.id, getDoc, setDoc);
+      const result = await svc.applyDirective("proj-apply", "epic-a", design.id, dir.id, "alice");
       expect(result).not.toBeNull();
       expect(result!.newContent).toBe("Line 1\nINSERTED LINE\nLine 2\nLine 3");
       expect(result!.directive.status).toBe("applied");
+      expect(result!.directive.preApplySnapshot).toBe("Line 1\nLine 2\nLine 3");
+      expect(result!.directive.appliedContentHash).toMatch(/^[a-f0-9]{64}$/);
+      expect((await design.service.getDesignDoc("proj-apply", "epic-a", design.id))?.content)
+        .toBe(result!.newContent);
+      expect(await design.service.listDocVersions("proj-apply", "epic-a", design.id)).toHaveLength(1);
     });
 
     it("applies a replace directive", async () => {
       scaffoldProject(root, "proj-apply2", "epic-a2");
-      const dir = await svc.createDirective("proj-apply2", "epic-a2", "doc1", {
+      const design = await createDesignDoc(root, "proj-apply2", "epic-a2", "Line 1\nLine 2\nLine 3\nLine 4");
+      const dir = await svc.createDirective("proj-apply2", "epic-a2", design.id, {
         type: "replace",
         afterLine: 2,
         startLine: 2,
@@ -501,46 +643,43 @@ describe("CodaScopeAnnotationService", () => {
         author: "user",
       });
 
-      await svc.updateDirective("proj-apply2", "epic-a2", dir.id, "doc1", {
+      await svc.updateDirective("proj-apply2", "epic-a2", dir.id, design.id, {
         generatedContent: "REPLACED",
       });
 
-      let docContent = "Line 1\nLine 2\nLine 3\nLine 4";
-      const getDoc = async () => docContent;
-      const setDoc = async (c: string) => { docContent = c; };
-
-      const result = await svc.applyDirective("proj-apply2", "epic-a2", "doc1", dir.id, getDoc, setDoc);
+      const result = await svc.applyDirective("proj-apply2", "epic-a2", design.id, dir.id, "alice");
       expect(result).not.toBeNull();
       expect(result!.newContent).toBe("Line 1\nREPLACED\nLine 4");
     });
 
     it("undoes an applied directive by restoring snapshot", async () => {
       scaffoldProject(root, "proj-undo", "epic-u");
-      const dir = await svc.createDirective("proj-undo", "epic-u", "doc1", {
+      const design = await createDesignDoc(root, "proj-undo", "epic-u", "Original");
+      const dir = await svc.createDirective("proj-undo", "epic-u", design.id, {
         type: "insert",
         afterLine: 1,
         instruction: "Undoable insert",
         author: "user",
       });
 
-      await svc.updateDirective("proj-undo", "epic-u", dir.id, "doc1", {
+      await svc.updateDirective("proj-undo", "epic-u", dir.id, design.id, {
         generatedContent: "INSERTED",
       });
 
-      let docContent = "Original";
-      const getDoc = async () => docContent;
-      const setDoc = async (c: string) => { docContent = c; };
+      await svc.applyDirective("proj-undo", "epic-u", design.id, dir.id, "alice");
+      expect((await design.service.getDesignDoc("proj-undo", "epic-u", design.id))?.content)
+        .toContain("INSERTED");
 
-      await svc.applyDirective("proj-undo", "epic-u", "doc1", dir.id, getDoc, setDoc);
-      expect(docContent).toContain("INSERTED");
-
-      const undone = await svc.undoDirective("proj-undo", "epic-u", "doc1", dir.id, setDoc);
+      const undone = await svc.undoDirective("proj-undo", "epic-u", design.id, dir.id, "alice");
       expect(undone).not.toBeNull();
       expect(undone!.status).toBe("pending");
-      expect(docContent).toBe("Original");
+      expect(undone!.preApplySnapshot).toBeUndefined();
+      expect(undone!.appliedContentHash).toBeUndefined();
+      expect((await design.service.getDesignDoc("proj-undo", "epic-u", design.id))?.content)
+        .toBe("Original");
     });
 
-    it("rejects a directive by clearing generated content", async () => {
+    it("rejects a generated pending directive and can regenerate it", async () => {
       scaffoldProject(root, "proj-reject", "epic-rej");
       const dir = await svc.createDirective("proj-reject", "epic-rej", "doc1", {
         type: "insert",
@@ -555,25 +694,90 @@ describe("CodaScopeAnnotationService", () => {
 
       const rejected = await svc.rejectDirective("proj-reject", "epic-rej", "doc1", dir.id);
       expect(rejected).not.toBeNull();
-      expect(rejected!.status).toBe("pending");
+      expect(rejected!.status).toBe("rejected");
       expect(rejected!.generatedContent).toBeUndefined();
+
+      const regenerated = await svc.executeDirective(
+        "proj-reject",
+        "epic-rej",
+        "doc1",
+        dir.id,
+        "REGENERATED",
+      );
+      expect(regenerated).toMatchObject({
+        status: "pending",
+        generatedContent: "REGENERATED",
+      });
     });
 
-    it("returns null when applying directive without generated content", async () => {
+    it("returns a conflict when applying without generated content", async () => {
       scaffoldProject(root, "proj-no-gen", "epic-ng");
-      const dir = await svc.createDirective("proj-no-gen", "epic-ng", "doc1", {
+      const design = await createDesignDoc(root, "proj-no-gen", "epic-ng", "doc");
+      const dir = await svc.createDirective("proj-no-gen", "epic-ng", design.id, {
         type: "insert",
         afterLine: 1,
         instruction: "No content yet",
         author: "user",
       });
 
-      const result = await svc.applyDirective(
-        "proj-no-gen", "epic-ng", "doc1", dir.id,
-        async () => "doc",
-        async () => {},
-      );
-      expect(result).toBeNull();
+      await expect(svc.applyDirective(
+        "proj-no-gen", "epic-ng", design.id, dir.id, "alice",
+      )).rejects.toEqual(expect.objectContaining({
+        name: "CodaScopeDirectiveError",
+        status: 409,
+        code: "conflict",
+      }));
+      expect(await design.service.listDocVersions("proj-no-gen", "epic-ng", design.id)).toEqual([]);
+    });
+
+    it("returns a conflict when undoing before apply", async () => {
+      scaffoldProject(root, "proj-undo-pending", "epic-up");
+      const design = await createDesignDoc(root, "proj-undo-pending", "epic-up", "Original");
+      const dir = await svc.createDirective("proj-undo-pending", "epic-up", design.id, {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Not applied",
+        author: "user",
+      });
+
+      await expect(svc.undoDirective(
+        "proj-undo-pending",
+        "epic-up",
+        design.id,
+        dir.id,
+        "alice",
+      )).rejects.toBeInstanceOf(CodaScopeDirectiveError);
+      expect((await design.service.getDesignDoc(
+        "proj-undo-pending",
+        "epic-up",
+        design.id,
+      ))?.content).toBe("Original");
+      expect(await design.service.listDocVersions(
+        "proj-undo-pending",
+        "epic-up",
+        design.id,
+      )).toEqual([]);
+    });
+
+    it("keeps missing directive IDs distinguishable from transition conflicts", async () => {
+      scaffoldProject(root, "proj-missing-dir", "epic-md");
+      const design = await createDesignDoc(root, "proj-missing-dir", "epic-md", "Original");
+
+      await expect(svc.executeDirective(
+        "proj-missing-dir", "epic-md", design.id, "missing", "Generated",
+      )).resolves.toBeNull();
+      await expect(svc.rejectDirective(
+        "proj-missing-dir", "epic-md", design.id, "missing",
+      )).resolves.toBeNull();
+      await expect(svc.applyDirective(
+        "proj-missing-dir", "epic-md", design.id, "missing", "alice",
+      )).resolves.toBeNull();
+      await expect(svc.undoDirective(
+        "proj-missing-dir", "epic-md", design.id, "missing", "alice",
+      )).resolves.toBeNull();
+      await expect(svc.deleteDirective(
+        "proj-missing-dir", "epic-md", "missing", design.id,
+      )).resolves.toBe(false);
     });
   });
 
@@ -588,113 +792,64 @@ describe("CodaScopeAnnotationService", () => {
 
     it("applies all pending directives top-to-bottom", async () => {
       scaffoldProject(root, "proj-batch", "epic-b");
+      const design = await createDesignDoc(
+        root,
+        "proj-batch",
+        "epic-b",
+        "Line 1\nLine 2\nLine 3\nLine 4",
+      );
 
       // Create two insert directives
-      const dir1 = await svc.createDirective("proj-batch", "epic-b", "doc1", {
+      const dir1 = await svc.createDirective("proj-batch", "epic-b", design.id, {
         type: "insert",
         afterLine: 1,
         instruction: "Insert after line 1",
         author: "user",
       });
-      const dir2 = await svc.createDirective("proj-batch", "epic-b", "doc1", {
+      const dir2 = await svc.createDirective("proj-batch", "epic-b", design.id, {
         type: "insert",
         afterLine: 3,
         instruction: "Insert after line 3",
         author: "user",
       });
 
-      await svc.updateDirective("proj-batch", "epic-b", dir1.id, "doc1", {
+      await svc.updateDirective("proj-batch", "epic-b", dir1.id, design.id, {
         generatedContent: "INSERTED_1",
       });
-      await svc.updateDirective("proj-batch", "epic-b", dir2.id, "doc1", {
+      await svc.updateDirective("proj-batch", "epic-b", dir2.id, design.id, {
         generatedContent: "INSERTED_2",
       });
 
-      let docContent = "Line 1\nLine 2\nLine 3\nLine 4";
-      const getDoc = async () => docContent;
-      const setDoc = async (c: string) => { docContent = c; };
-
-      const result = await svc.executeBatchDirectives("proj-batch", "epic-b", "doc1", getDoc, setDoc);
+      const result = await svc.executeBatchDirectives("proj-batch", "epic-b", design.id, "alice");
       expect(result).not.toBeNull();
       expect(result!.applied).toHaveLength(2);
 
       // Both insertions should be in the document
-      expect(docContent).toContain("INSERTED_1");
-      expect(docContent).toContain("INSERTED_2");
+      expect(result!.newContent).toContain("INSERTED_1");
+      expect(result!.newContent).toContain("INSERTED_2");
+      expect(await design.service.listDocVersions("proj-batch", "epic-b", design.id)).toHaveLength(1);
     });
 
-    it("rolls back on error during batch", async () => {
+    it("keeps a no-content batch unchanged", async () => {
       scaffoldProject(root, "proj-batch2", "epic-b2");
-
-      // Create two directives so the batch processes multiple items
-      const dir1 = await svc.createDirective("proj-batch2", "epic-b2", "doc1", {
-        type: "insert",
-        afterLine: 1,
-        instruction: "Insert first",
-        author: "user",
-      });
-      const dir2 = await svc.createDirective("proj-batch2", "epic-b2", "doc1", {
-        type: "insert",
-        afterLine: 3,
-        instruction: "Insert second",
-        author: "user",
-      });
-
-      await svc.updateDirective("proj-batch2", "epic-b2", dir1.id, "doc1", {
-        generatedContent: "INSERTED_1",
-      });
-      await svc.updateDirective("proj-batch2", "epic-b2", dir2.id, "doc1", {
-        generatedContent: "INSERTED_2",
-      });
-
-      const originalContent = "Line 1\nLine 2\nLine 3\nLine 4";
-      let docContent = originalContent;
-      const getDoc = async () => docContent;
-
-      // setDoc throws on first call (success persist) but succeeds on second
-      // (rollback restore). This exercises the catch block properly.
-      let setDocCalls = 0;
-      const setDoc = async (c: string) => {
-        setDocCalls++;
-        if (setDocCalls === 1) throw new Error("Disk write failed");
-        docContent = c;
-      };
-
-      await expect(
-        svc.executeBatchDirectives("proj-batch2", "epic-b2", "doc1", getDoc, setDoc),
-      ).rejects.toThrow("Disk write failed");
-
-      // After rollback, the directives should be back to pending
-      const directives = await svc.listDirectives("proj-batch2", "epic-b2", "doc1");
-      for (const d of directives) {
-        expect(d.status).toBe("pending");
-        expect(d.preApplySnapshot).toBeUndefined();
-      }
-      // Document should be restored
-      expect(docContent).toBe(originalContent);
-    });
-
-    it("returns empty applied list when no pending directives have content", async () => {
-      scaffoldProject(root, "proj-batch3", "epic-b3");
+      const design = await createDesignDoc(root, "proj-batch2", "epic-b2", "Original");
 
       // Create a directive with no generated content
-      await svc.createDirective("proj-batch3", "epic-b3", "doc1", {
+      await svc.createDirective("proj-batch2", "epic-b2", design.id, {
         type: "insert",
         afterLine: 1,
         instruction: "Pending without content",
         author: "user",
       });
 
-      let docContent = "Original";
       const result = await svc.executeBatchDirectives(
-        "proj-batch3", "epic-b3", "doc1",
-        async () => docContent,
-        async (c) => { docContent = c; },
+        "proj-batch2", "epic-b2", design.id, "alice",
       );
 
       expect(result).not.toBeNull();
       expect(result!.applied).toHaveLength(0);
       expect(result!.newContent).toBe("Original");
+      expect(await design.service.listDocVersions("proj-batch2", "epic-b2", design.id)).toEqual([]);
     });
   });
 });

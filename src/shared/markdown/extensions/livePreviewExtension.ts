@@ -19,6 +19,7 @@
 import { syntaxTree } from "@codemirror/language";
 import { type EditorState, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { normalizeMarkdownLinkHref } from "../linkDestination";
 import { parseMarkdownTableBlock } from "./markdownTableExtension";
 
 // ── Heading level → node name mapping ───────────────────────────────
@@ -109,7 +110,6 @@ const TEXT_COLOR_RE = /<span\s+style="color:\s*([^"]+)">([\s\S]*?)<\/span>/g;
 // ── Bare URL regex ──────────────────────────────────────────────────
 // Matches https:// or http:// URLs that are NOT already inside [text](url)
 const BARE_URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
-const MARKDOWN_LINK_RE = /(?<!!)(?:\[([^\]\n]*)\])\((https?:\/\/[^)\s]+)\)/g;
 
 // ── Link widget for bare URLs ───────────────────────────────────────
 
@@ -151,23 +151,23 @@ class BareURLWidget extends WidgetType {
 class MarkdownLinkWidget extends WidgetType {
   constructor(
     private readonly label: string,
-    private readonly url: string,
+    private readonly href: string,
   ) {
     super();
   }
 
   eq(other: MarkdownLinkWidget) {
-    return this.label === other.label && this.url === other.url;
+    return this.label === other.label && this.href === other.href;
   }
 
   toDOM() {
     const link = document.createElement("a");
     link.className = "cm-live-markdown-link";
-    link.href = this.url;
+    link.href = this.href;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = this.label;
-    link.title = this.url;
+    link.title = this.href;
     link.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -175,7 +175,12 @@ class MarkdownLinkWidget extends WidgetType {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      window.open(this.url, "_blank", "noopener,noreferrer");
+      if (this.href.startsWith("/codascope/")) {
+        window.history.pushState(null, "", this.href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        return;
+      }
+      window.open(this.href, "_blank", "noopener,noreferrer");
     });
     return link;
   }
@@ -259,7 +264,69 @@ function tableLineNumbers(state: EditorState): Set<number> {
 
 type DecorationEntry = { from: number; to: number; decoration: Decoration };
 
-function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
+export interface MarkdownLinkPreview {
+  from: number;
+  to: number;
+  label: string;
+  destination: string;
+  href: string;
+}
+
+/**
+ * Returns parsed inline Markdown links in a document range. Using the Markdown
+ * syntax tree keeps live preview aligned with the read-only Markdown viewer for
+ * relative, scheme-less, titled, and parenthesized destinations.
+ */
+export function findMarkdownLinkPreviews(
+  state: EditorState,
+  from = 0,
+  to = state.doc.length,
+): MarkdownLinkPreview[] {
+  const links: MarkdownLinkPreview[] = [];
+
+  syntaxTree(state).iterate({
+    from,
+    to,
+    enter(ref) {
+      if (ref.name !== "Link") return;
+
+      const urlNode = ref.node.getChild("URL");
+      if (!urlNode) return false;
+
+      const linkMarks = [];
+      let child = ref.node.firstChild;
+      while (child) {
+        if (child.name === "LinkMark") linkMarks.push(child);
+        child = child.nextSibling;
+      }
+      if (linkMarks.length < 4) return false;
+
+      let destination = state.doc.sliceString(urlNode.from, urlNode.to);
+      if (destination.startsWith("<") && destination.endsWith(">")) {
+        destination = destination.slice(1, -1);
+      }
+
+      const href = normalizeMarkdownLinkHref(destination);
+      if (!href) return false;
+
+      const rawLabel = state.doc.sliceString(linkMarks[0].to, linkMarks[1].from);
+      links.push({
+        from: ref.from,
+        to: ref.to,
+        label: rawLabel || destination,
+        destination,
+        href,
+      });
+      return false;
+    },
+  });
+
+  return links;
+}
+
+type LivePreviewView = Pick<EditorView, "state" | "visibleRanges">;
+
+export function buildLivePreviewDecorations(view: LivePreviewView, editable: boolean): DecorationSet {
   const { state } = view;
   const cursorLines = cursorLineNumbers(state, editable);
   const tableLines = tableLineNumbers(state);
@@ -332,22 +399,30 @@ function buildDecorations(view: EditorView, editable: boolean): DecorationSet {
   }
 
   // ── Standard Markdown links ────────────────────────────────────────
+  const seenLinkRanges = new Set<string>();
   for (const { from, to } of view.visibleRanges) {
-    const text = state.doc.sliceString(from, to);
-    MARKDOWN_LINK_RE.lastIndex = 0;
+    for (const link of findMarkdownLinkPreviews(state, from, to)) {
+      const rangeKey = `${link.from}:${link.to}`;
+      if (seenLinkRanges.has(rangeKey)) continue;
+      seenLinkRanges.add(rangeKey);
 
-    for (const match of text.matchAll(MARKDOWN_LINK_RE)) {
-      const line = state.doc.lineAt(from + (match.index ?? 0));
-      if (cursorLines.has(line.number) || tableLines.has(line.number)) continue;
+      const startLine = state.doc.lineAt(link.from).number;
+      const endLine = state.doc.lineAt(Math.max(link.from, link.to - 1)).number;
+      let excluded = false;
+      for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
+        if (cursorLines.has(lineNumber) || tableLines.has(lineNumber)) {
+          excluded = true;
+          break;
+        }
+      }
+      if (excluded) continue;
 
-      const label = match[1];
-      const url = match[2];
-      if (!url) continue;
-      const matchFrom = from + (match.index ?? 0);
       entries.push({
-        from: matchFrom,
-        to: matchFrom + match[0].length,
-        decoration: Decoration.replace({ widget: new MarkdownLinkWidget(label || url, url) }),
+        from: link.from,
+        to: link.to,
+        decoration: Decoration.replace({
+          widget: new MarkdownLinkWidget(link.label, link.href),
+        }),
       });
     }
   }
@@ -545,7 +620,7 @@ export function buildLivePreviewExtension({ editable }: { editable: boolean }): 
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, editable);
+        this.decorations = buildLivePreviewDecorations(view, editable);
       }
       update(update: ViewUpdate) {
         if (
@@ -554,7 +629,7 @@ export function buildLivePreviewExtension({ editable }: { editable: boolean }): 
           update.viewportChanged ||
           syntaxTree(update.state) !== syntaxTree(update.startState)
         ) {
-          this.decorations = buildDecorations(update.view, editable);
+          this.decorations = buildLivePreviewDecorations(update.view, editable);
         }
       }
     },

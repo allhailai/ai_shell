@@ -10,6 +10,7 @@ import {
   isLocalSandboxUnsupportedError,
   startRunWithSandboxFallback,
 } from "./codaScopeAgentService.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteDocumentService } from "./codaScopeNoteDocumentService.js";
@@ -134,6 +135,42 @@ describe("CodaScopeAgentService actor isolation", () => {
       const args = { scope: "codascope", visibility: "private", path: "private.md" };
       await expect(aliceTools.list_note_documents.execute(args, {} as any)).resolves.toContain("secret.txt");
       await expect(bobTools.list_note_documents.execute(args, {} as any)).resolves.not.toContain("secret.txt");
+      await service.shutdown();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("assembles every epic-mutation purpose with the authenticated initiating actor", async () => {
+    const root = tmpDir();
+    const projectDir = path.join(root, "project-dir");
+    mkdirSync(path.join(projectDir, "epics", "epic"), { recursive: true });
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: "project",
+      name: "Project",
+      repositories: [],
+    }));
+
+    try {
+      const service = new CodaScopeAgentService({} as any, root);
+      for (const purpose of ["assistant", "chat", "research", "curation"] as const) {
+        const tools = (service as any).getToolsForPurpose(
+          "project",
+          purpose,
+          undefined,
+          "alice",
+        );
+        await tools.create_design_doc.execute({
+          epicId: "epic",
+          title: `${purpose} design`,
+          content: "Authenticated content",
+        }, {} as any);
+      }
+
+      const docs = await new CodaScopeDesignDocService(root)
+        .listDesignDocs("project", "epic");
+      expect(docs).toHaveLength(4);
+      expect(docs.every((doc) => doc.createdBy === "alice")).toBe(true);
       await service.shutdown();
     } finally {
       rmSync(root, { recursive: true, force: true });

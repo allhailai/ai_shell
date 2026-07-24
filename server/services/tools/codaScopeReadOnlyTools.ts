@@ -99,11 +99,6 @@ export function buildReadOnlyTools(
     annotation: annotationService,
   } = services;
 
-  const loadAnnotationDocument = async (epicId: string, documentId: string): Promise<string | null> => {
-    if (documentId === "definition") return epicService.getDefinition(projectId, epicId);
-    return (await designDocService.getDesignDoc(projectId, epicId, documentId))?.content ?? null;
-  };
-
   return {
     list_wiki_topics: {
       description:
@@ -539,8 +534,9 @@ export function buildReadOnlyTools(
     read_design_doc: {
       description:
         "Read the full content of a specific design document. Returns the document " +
-        "metadata and full markdown content. Use list_design_docs first to discover " +
-        "available document IDs for an epic.",
+        "metadata, exact current content hash, and full markdown content. Retain the " +
+        "content hash and pass it as expectedContentHash to a subsequent full-document " +
+        "edit_design_doc call. Use list_design_docs first to discover available document IDs for an epic.",
       inputSchema: {
         type: "object",
         properties: {
@@ -563,6 +559,7 @@ export function buildReadOnlyTools(
           const result = await designDocService.getDesignDoc(projectId, epicId, docId);
           if (result === null) return `Design doc "${docId}" not found in epic "${epicId}".`;
           return `# ${result.doc.title}\n\n` +
+            `Content hash: ${result.contentHash}\n\n` +
             `_Words: ${result.doc.wordCount} | Updated: ${result.doc.updatedAt}_\n\n` +
             result.content;
         } catch {
@@ -595,9 +592,12 @@ export function buildReadOnlyTools(
         const documentId = args.documentId as string;
         if (!epicId || !documentId) return "epicId and documentId are required.";
         try {
-          const documentContent = await loadAnnotationDocument(epicId, documentId);
-          if (documentContent === null) throw new Error("document not found");
-          const annotations = await annotationService.listAnnotations(projectId, epicId, documentId, documentContent);
+          const annotations = await annotationService.listCurrentDocumentAnnotations(
+            projectId,
+            epicId,
+            documentId,
+          );
+          if (annotations === null) throw new Error("document not found");
           if (annotations.length === 0) {
             return `No annotations on document "${documentId}" in epic "${epicId}".`;
           }
@@ -660,9 +660,12 @@ export function buildReadOnlyTools(
           return "epicId, documentId, and annotationId are required.";
         }
         try {
-          const documentContent = await loadAnnotationDocument(epicId, documentId);
-          if (documentContent === null) throw new Error("document not found");
-          const allAnnotations = await annotationService.listAnnotations(projectId, epicId, documentId, documentContent);
+          const allAnnotations = await annotationService.listCurrentDocumentAnnotations(
+            projectId,
+            epicId,
+            documentId,
+          );
+          if (allAnnotations === null) throw new Error("document not found");
           const root = allAnnotations.find((a) => a.id === annotationId);
           if (!root) return `Annotation "${annotationId}" not found.`;
 

@@ -12,7 +12,10 @@ import {
 import { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeAnnotationService } from "./codaScopeAnnotationService.js";
 import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
-import { CodaScopeDirectiveService } from "./codaScopeDirectiveService.js";
+import {
+  CodaScopeDirectiveError,
+  CodaScopeDirectiveService,
+} from "./codaScopeDirectiveService.js";
 import { CodaScopeVersionService } from "./codaScopeVersionService.js";
 
 const roots: string[] = [];
@@ -65,6 +68,54 @@ function scaffoldEpic(projectDir: string, projectId = "project-id", epicId = "ep
   return epicDir;
 }
 
+async function scaffoldDirectiveDesign(
+  root: string,
+  content = "Original content.",
+): Promise<{
+  projectDir: string;
+  epicDir: string;
+  designService: CodaScopeDesignDocService;
+  directiveService: CodaScopeDirectiveService;
+  documentId: string;
+  directiveId: string;
+}> {
+  const projectDir = scaffoldProject(root);
+  const epicDir = scaffoldEpic(projectDir);
+  const designService = new CodaScopeDesignDocService(root);
+  const doc = await designService.createDesignDoc(
+    "project-id",
+    "epic-safe",
+    { title: "Directive design", content, createdBy: "alice" },
+  );
+  const directiveService = new CodaScopeDirectiveService(root);
+  const directive = await directiveService.createDirective(
+    "project-id",
+    "epic-safe",
+    doc.id,
+    {
+      type: "insert",
+      afterLine: 1,
+      instruction: "Insert generated content",
+      author: "alice",
+    },
+  );
+  await directiveService.updateDirective(
+    "project-id",
+    "epic-safe",
+    directive.id,
+    doc.id,
+    { generatedContent: "Generated content." },
+  );
+  return {
+    projectDir,
+    epicDir,
+    designService,
+    directiveService,
+    documentId: doc.id,
+    directiveId: directive.id,
+  };
+}
+
 function treeSnapshot(root: string): Record<string, string> {
   const snapshot: Record<string, string> = {};
   const visit = (directory: string) => {
@@ -81,6 +132,165 @@ function treeSnapshot(root: string): Record<string, string> {
   };
   visit(root);
   return snapshot;
+}
+
+type AppliedDirectiveFixture = {
+  kind: "design" | "definition";
+  projectDir: string;
+  epicDir: string;
+  documentId: string;
+  directiveId: string;
+  documentPath: string;
+  sidecarPath: string;
+  metadataPaths: string[];
+  versionsDir: string;
+  designService: CodaScopeDesignDocService;
+  directiveService: CodaScopeDirectiveService;
+};
+
+async function scaffoldAppliedDirective(
+  root: string,
+  kind: AppliedDirectiveFixture["kind"],
+): Promise<AppliedDirectiveFixture> {
+  if (kind === "design") {
+    const setup = await scaffoldDirectiveDesign(root);
+    await setup.directiveService.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "apply-author",
+    );
+    const documentDir = path.join(setup.epicDir, "designs", setup.documentId);
+    return {
+      kind,
+      projectDir: setup.projectDir,
+      epicDir: setup.epicDir,
+      documentId: setup.documentId,
+      directiveId: setup.directiveId,
+      documentPath: path.join(documentDir, "content.md"),
+      sidecarPath: path.join(
+        setup.epicDir,
+        "directives",
+        `${setup.documentId}-directives.json`,
+      ),
+      metadataPaths: [
+        path.join(setup.epicDir, "designs", "designs.json"),
+        path.join(setup.epicDir, "epic.json"),
+      ],
+      versionsDir: path.join(documentDir, "versions"),
+      designService: setup.designService,
+      directiveService: setup.directiveService,
+    };
+  }
+
+  const projectDir = scaffoldProject(root);
+  const epicDir = scaffoldEpic(projectDir);
+  const designService = new CodaScopeDesignDocService(root);
+  const directiveService = new CodaScopeDirectiveService(root);
+  const directive = await directiveService.createDirective(
+    "project-id",
+    "epic-safe",
+    "definition",
+    {
+      type: "insert",
+      afterLine: 1,
+      instruction: "Insert generated definition",
+      author: "alice",
+    },
+  );
+  await directiveService.executeDirective(
+    "project-id",
+    "epic-safe",
+    "definition",
+    directive.id,
+    "Generated definition.",
+  );
+  await directiveService.applyDirective(
+    "project-id",
+    "epic-safe",
+    "definition",
+    directive.id,
+    "apply-author",
+  );
+  return {
+    kind,
+    projectDir,
+    epicDir,
+    documentId: "definition",
+    directiveId: directive.id,
+    documentPath: path.join(epicDir, "definition.md"),
+    sidecarPath: path.join(epicDir, "directives", "definition-directives.json"),
+    metadataPaths: [
+      path.join(projectDir, "epics", "epics.json"),
+      path.join(epicDir, "epic.json"),
+    ],
+    versionsDir: path.join(epicDir, "versions"),
+    designService,
+    directiveService,
+  };
+}
+
+function appliedDirectiveSnapshot(fixture: AppliedDirectiveFixture) {
+  return {
+    document: readFileSync(fixture.documentPath),
+    sidecar: readFileSync(fixture.sidecarPath),
+    metadata: fixture.metadataPaths.map((filePath) => readFileSync(filePath)),
+    versionIndex: existsSync(path.join(fixture.versionsDir, "versions.json"))
+      ? readFileSync(path.join(fixture.versionsDir, "versions.json"))
+      : null,
+    versionSnapshots: existsSync(fixture.versionsDir)
+      ? treeSnapshot(fixture.versionsDir)
+      : null,
+    completeProject: treeSnapshot(fixture.projectDir),
+  };
+}
+
+function forbiddenAppliedOperation(
+  fixture: AppliedDirectiveFixture,
+  operation: "execute" | "reject" | "delete" | "update" | "apply",
+): Promise<unknown> {
+  if (operation === "execute") {
+    return fixture.directiveService.executeDirective(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+      fixture.directiveId,
+      "Regenerated content.",
+    );
+  }
+  if (operation === "reject") {
+    return fixture.directiveService.rejectDirective(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+      fixture.directiveId,
+    );
+  }
+  if (operation === "delete") {
+    return fixture.directiveService.deleteDirective(
+      "project-id",
+      "epic-safe",
+      fixture.directiveId,
+      fixture.documentId,
+    );
+  }
+  if (operation === "update") {
+    return fixture.directiveService.updateDirective(
+      "project-id",
+      "epic-safe",
+      fixture.directiveId,
+      fixture.documentId,
+      { instruction: "Mutated after apply" },
+    );
+  }
+  return fixture.directiveService.applyDirective(
+    "project-id",
+    "epic-safe",
+    fixture.documentId,
+    fixture.directiveId,
+    "apply-again-author",
+  );
 }
 
 class FailOncePersistence extends CodaScopePersistence {
@@ -504,6 +714,694 @@ describe("annotation persistence integration", () => {
   });
 });
 
+describe("directive document transaction integration", () => {
+  it.each([
+    ["design", "execute"],
+    ["design", "reject"],
+    ["design", "delete"],
+    ["design", "update"],
+    ["design", "apply"],
+    ["definition", "execute"],
+    ["definition", "reject"],
+    ["definition", "delete"],
+    ["definition", "update"],
+    ["definition", "apply"],
+  ] as const)(
+    "rejects %s applied directive %s without changing any persisted byte",
+    async (kind, operation) => {
+      const root = tempRoot();
+      const fixture = await scaffoldAppliedDirective(root, kind);
+      const before = appliedDirectiveSnapshot(fixture);
+
+      const error = await forbiddenAppliedOperation(fixture, operation)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(CodaScopeDirectiveError);
+      expect(error).toMatchObject({ status: 409, code: "conflict" });
+
+      expect(appliedDirectiveSnapshot(fixture)).toEqual(before);
+    },
+  );
+
+  it("keeps undo intact after every forbidden applied transition and permits deletion afterward", async () => {
+    const root = tempRoot();
+    const fixture = await scaffoldAppliedDirective(root, "design");
+    const applied = appliedDirectiveSnapshot(fixture);
+
+    for (const operation of ["execute", "reject", "delete", "update", "apply"] as const) {
+      await expect(forbiddenAppliedOperation(fixture, operation))
+        .rejects.toMatchObject({ status: 409, code: "conflict" });
+      expect(appliedDirectiveSnapshot(fixture)).toEqual(applied);
+    }
+
+    const versionsBeforeUndo = await fixture.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+    );
+    expect(versionsBeforeUndo).toHaveLength(1);
+    const undone = await fixture.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+      fixture.directiveId,
+      "principal-alice",
+    );
+
+    expect(readFileSync(fixture.documentPath, "utf-8")).toBe("Original content.");
+    expect(undone).toMatchObject({
+      status: "pending",
+      generatedContent: "Generated content.",
+      preApplySnapshot: undefined,
+      appliedContentHash: undefined,
+      linePositionAdjustments: undefined,
+      appliedAt: undefined,
+    });
+    const persistedUndone = JSON.parse(readFileSync(fixture.sidecarPath, "utf-8"))
+      .directives[0];
+    expect(persistedUndone).not.toHaveProperty("preApplySnapshot");
+    expect(persistedUndone).not.toHaveProperty("appliedContentHash");
+    expect(persistedUndone).not.toHaveProperty("linePositionAdjustments");
+    expect(persistedUndone).not.toHaveProperty("appliedAt");
+    const versionsAfterUndo = await fixture.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+    );
+    expect(versionsAfterUndo).toHaveLength(2);
+    expect(versionsAfterUndo.at(-1)?.author).toBe("principal-alice");
+    expect((await fixture.designService.getDocVersion(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+      versionsAfterUndo.at(-1)!.number,
+    ))?.content).toBe("Original content.\nGenerated content.");
+
+    await expect(fixture.directiveService.deleteDirective(
+      "project-id",
+      "epic-safe",
+      fixture.directiveId,
+      fixture.documentId,
+    )).resolves.toBe(true);
+    await expect(fixture.directiveService.listDirectives(
+      "project-id",
+      "epic-safe",
+      fixture.documentId,
+    )).resolves.toEqual([]);
+  });
+
+  it("serializes apply behind a concurrent design edit and transforms the committed content", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root, "Original.");
+    const persistence = new BarrierDesignContentPersistence();
+    const designService = new CodaScopeDesignDocService(root, persistence);
+    const directiveService = new CodaScopeDirectiveService(
+      root,
+      persistence,
+      designService,
+      new CodaScopeEpicService(root, persistence),
+    );
+
+    const concurrentEdit = designService.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      "Original.\nConcurrent edit.",
+      { author: "bob", summary: "Concurrent edit" },
+    );
+    await persistence.blockedWriteReached;
+    const apply = directiveService.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    persistence.release();
+
+    const [editResult, applyResult] = await Promise.all([concurrentEdit, apply]);
+    expect(editResult && "conflict" in editResult).toBe(false);
+    expect(applyResult?.newContent).toBe("Original.\nGenerated content.\nConcurrent edit.");
+    expect((await designService.getDesignDoc(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    ))?.content).toBe("Original.\nGenerated content.\nConcurrent edit.");
+    const versions = await designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    );
+    expect(versions).toHaveLength(2);
+    expect(versions[1].author).toBe("alice");
+    expect((await designService.getDocVersion(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      versions[1].number,
+    ))?.content).toBe("Original.\nConcurrent edit.");
+  });
+
+  it("uses document-before-sidecar lock ordering for design and definition mutations", async () => {
+    const designRoot = tempRoot();
+    const designSetup = await scaffoldDirectiveDesign(designRoot);
+    const designPersistence = new RecordingMutationOrderPersistence();
+    const designService = new CodaScopeDirectiveService(
+      designRoot,
+      designPersistence,
+      new CodaScopeDesignDocService(designRoot, designPersistence),
+      new CodaScopeEpicService(designRoot, designPersistence),
+    );
+    await designService.applyDirective(
+      "project-id",
+      "epic-safe",
+      designSetup.documentId,
+      designSetup.directiveId,
+      "alice",
+    );
+    expect(designPersistence.acquisitions.find((keys) => keys.length === 3))
+      .toEqual([
+        expect.stringMatching(/^design-index:/),
+        expect.stringMatching(/^design-versions:/),
+        expect.stringMatching(/^epic-directives:/),
+      ]);
+
+    const definitionRoot = tempRoot();
+    const definitionProjectDir = scaffoldProject(definitionRoot);
+    scaffoldEpic(definitionProjectDir);
+    const normal = new CodaScopeDirectiveService(definitionRoot);
+    const definitionDirective = await normal.createDirective(
+      "project-id",
+      "epic-safe",
+      "definition",
+      {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Definition insert",
+        author: "alice",
+      },
+    );
+    await normal.updateDirective(
+      "project-id",
+      "epic-safe",
+      definitionDirective.id,
+      "definition",
+      { generatedContent: "Generated definition." },
+    );
+    const definitionPersistence = new RecordingMutationOrderPersistence();
+    const definitionService = new CodaScopeDirectiveService(
+      definitionRoot,
+      definitionPersistence,
+      new CodaScopeDesignDocService(definitionRoot, definitionPersistence),
+      new CodaScopeEpicService(definitionRoot, definitionPersistence),
+    );
+    await definitionService.applyDirective(
+      "project-id",
+      "epic-safe",
+      "definition",
+      definitionDirective.id,
+      "alice",
+    );
+    expect(definitionPersistence.acquisitions.find((keys) => keys.length === 2))
+      .toEqual([
+        expect.stringMatching(/^epic-storage:/),
+        expect.stringMatching(/^epic-directives:/),
+      ]);
+  });
+
+  it.each([
+    ["content publication", "writeFile", "design_content"],
+    ["design index publication", "writeJson", "design_index"],
+    ["version snapshot publication", "writeFile", "design_version_snapshot"],
+    ["version index publication", "writeJson", "design_versions"],
+  ] as const)(
+    "leaves apply pending with no ghost version when %s fails",
+    async (_name, method, storage) => {
+      const root = tempRoot();
+      const setup = await scaffoldDirectiveDesign(root);
+      const docDir = path.join(
+        setup.epicDir,
+        "designs",
+        setup.documentId,
+      );
+      const sidecarPath = path.join(
+        setup.epicDir,
+        "directives",
+        `${setup.documentId}-directives.json`,
+      );
+      const beforeDoc = treeSnapshot(docDir);
+      const beforeSidecar = readFileSync(sidecarPath);
+      const persistence = new FailOncePersistence(method, storage);
+      const designService = new CodaScopeDesignDocService(root, persistence);
+      const service = new CodaScopeDirectiveService(
+        root,
+        persistence,
+        designService,
+        new CodaScopeEpicService(root, persistence),
+      );
+
+      await expect(service.applyDirective(
+        "project-id",
+        "epic-safe",
+        setup.documentId,
+        setup.directiveId,
+        "alice",
+      )).rejects.toMatchObject({ code: "persistence_failed" });
+
+      expect(treeSnapshot(docDir)).toEqual(beforeDoc);
+      expect(readFileSync(sidecarPath)).toEqual(beforeSidecar);
+      expect(await setup.designService.listDocVersions(
+        "project-id",
+        "epic-safe",
+        setup.documentId,
+      )).toEqual([]);
+      const storedDirective = (await setup.directiveService.listDirectives(
+        "project-id",
+        "epic-safe",
+        setup.documentId,
+      ))[0];
+      expect(storedDirective.status).toBe("pending");
+      expect(storedDirective).not.toHaveProperty("preApplySnapshot");
+      expect(storedDirective).not.toHaveProperty("appliedContentHash");
+    },
+  );
+
+  it("rolls document, index, version, and sidecar back when sidecar publication fails", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    const docDir = path.join(setup.epicDir, "designs", setup.documentId);
+    const sidecarPath = path.join(
+      setup.epicDir,
+      "directives",
+      `${setup.documentId}-directives.json`,
+    );
+    const beforeDoc = treeSnapshot(docDir);
+    const beforeSidecar = readFileSync(sidecarPath);
+    const persistence = new FailOncePersistence("writeJson", "epic_directives");
+    const designService = new CodaScopeDesignDocService(root, persistence);
+    const service = new CodaScopeDirectiveService(
+      root,
+      persistence,
+      designService,
+      new CodaScopeEpicService(root, persistence),
+    );
+
+    await expect(service.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    )).rejects.toMatchObject({
+      code: "persistence_failed",
+      context: { storage: "epic_directives" },
+    });
+
+    expect(treeSnapshot(docDir)).toEqual(beforeDoc);
+    expect(readFileSync(sidecarPath)).toEqual(beforeSidecar);
+    expect(await setup.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toEqual([]);
+  });
+
+  it("rolls an entire batch back when its single sidecar publication fails", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root, "Line 1\nLine 2\nLine 3");
+    const second = await setup.directiveService.createDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      {
+        type: "insert",
+        afterLine: 3,
+        instruction: "Second batch insert",
+        author: "alice",
+      },
+    );
+    await setup.directiveService.updateDirective(
+      "project-id",
+      "epic-safe",
+      second.id,
+      setup.documentId,
+      { generatedContent: "SECOND" },
+    );
+    const before = treeSnapshot(setup.projectDir);
+    const persistence = new FailOncePersistence("writeJson", "epic_directives");
+    const service = new CodaScopeDirectiveService(
+      root,
+      persistence,
+      new CodaScopeDesignDocService(root, persistence),
+      new CodaScopeEpicService(root, persistence),
+    );
+
+    await expect(service.executeBatchDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      "alice",
+    )).rejects.toMatchObject({ code: "persistence_failed" });
+    expect(treeSnapshot(setup.projectDir)).toEqual(before);
+    expect(await setup.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toEqual([]);
+  });
+
+  it("rejects undo after a later design edit without changing any state", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    await setup.directiveService.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    await setup.designService.updateDesignDocWithVersion(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      "Later legitimate edit.",
+      { author: "bob", summary: "Later edit" },
+    );
+    const before = treeSnapshot(setup.projectDir);
+
+    await expect(setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    )).rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect(treeSnapshot(setup.projectDir)).toEqual(before);
+  });
+
+  it("fails closed when a legacy applied directive has no applied-content hash", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    await setup.directiveService.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    const sidecarPath = path.join(
+      setup.epicDir,
+      "directives",
+      `${setup.documentId}-directives.json`,
+    );
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf-8"));
+    delete sidecar.directives[0].appliedContentHash;
+    writeJson(sidecarPath, sidecar);
+    const before = treeSnapshot(setup.projectDir);
+
+    await expect(setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    )).rejects.toMatchObject({ code: "conflict", status: 409 });
+    expect(treeSnapshot(setup.projectDir)).toEqual(before);
+  });
+
+  it("restores the exact predecessor and peer positions on successful undo", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root, "Line 1\nLine 2\nLine 3");
+    const peer = await setup.directiveService.createDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      {
+        type: "insert",
+        afterLine: 3,
+        instruction: "Peer directive",
+        author: "alice",
+      },
+    );
+    await setup.directiveService.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    expect((await setup.directiveService.listDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).find((directive) => directive.id === peer.id)?.afterLine).toBe(4);
+
+    const undone = await setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+
+    expect(undone).toMatchObject({
+      status: "pending",
+      preApplySnapshot: undefined,
+      appliedContentHash: undefined,
+    });
+    expect((await setup.designService.getDesignDoc(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    ))?.content).toBe("Line 1\nLine 2\nLine 3");
+    expect((await setup.directiveService.listDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).find((directive) => directive.id === peer.id)?.afterLine).toBe(3);
+    expect(await setup.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toHaveLength(2);
+  });
+
+  it("creates one batch version and enforces hash-ordered individual undo", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root, "Line 1\nLine 2\nLine 3\nLine 4");
+    const second = await setup.directiveService.createDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      {
+        type: "insert",
+        afterLine: 3,
+        instruction: "Second insert",
+        author: "alice",
+      },
+    );
+    await setup.directiveService.updateDirective(
+      "project-id",
+      "epic-safe",
+      second.id,
+      setup.documentId,
+      { generatedContent: "SECOND" },
+    );
+
+    const batch = await setup.directiveService.executeBatchDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      "alice",
+    );
+    expect(batch?.applied.map((directive) => directive.id))
+      .toEqual([setup.directiveId, second.id]);
+    expect(await setup.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toHaveLength(1);
+
+    await expect(setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    )).rejects.toMatchObject({ code: "conflict" });
+    await setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      second.id,
+      "alice",
+    );
+    expect((await setup.designService.getDesignDoc(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    ))?.content).toContain("Generated content.");
+    expect((await setup.designService.getDesignDoc(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    ))?.content).not.toContain("SECOND");
+    await setup.directiveService.undoDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    expect((await setup.designService.getDesignDoc(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    ))?.content).toBe("Line 1\nLine 2\nLine 3\nLine 4");
+    expect(await setup.designService.listDocVersions(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toHaveLength(3);
+  });
+
+  it("serializes directive CRUD behind apply without losing either sidecar mutation", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    const persistence = new BarrierDesignContentPersistence();
+    const designService = new CodaScopeDesignDocService(root, persistence);
+    const service = new CodaScopeDirectiveService(
+      root,
+      persistence,
+      designService,
+      new CodaScopeEpicService(root, persistence),
+    );
+    const apply = service.applyDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      setup.directiveId,
+      "alice",
+    );
+    await persistence.blockedWriteReached;
+    const create = service.createDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      {
+        type: "insert",
+        afterLine: 2,
+        instruction: "Concurrent CRUD",
+        author: "bob",
+      },
+    );
+    persistence.release();
+    const [, created] = await Promise.all([apply, create]);
+
+    const directives = await service.listDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    );
+    expect(directives).toHaveLength(2);
+    expect(directives.find((directive) => directive.id === setup.directiveId)?.status)
+      .toBe("applied");
+    expect(directives.find((directive) => directive.id === created.id)?.author).toBe("bob");
+  });
+
+  it("serializes concurrent directive creates without losing records", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    await Promise.all(Array.from({ length: 20 }, (_, index) => (
+      setup.directiveService.createDirective(
+        "project-id",
+        "epic-safe",
+        setup.documentId,
+        {
+          type: "insert",
+          afterLine: index,
+          instruction: `Concurrent ${index}`,
+          author: "alice",
+        },
+      )
+    )));
+    expect(await setup.directiveService.listDirectives(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+    )).toHaveLength(21);
+  });
+
+  it("preserves malformed directive bytes and fails closed on mutation", async () => {
+    const root = tempRoot();
+    const setup = await scaffoldDirectiveDesign(root);
+    const sidecarPath = path.join(
+      setup.epicDir,
+      "directives",
+      `${setup.documentId}-directives.json`,
+    );
+    const corrupt = "{ malformed-directives";
+    writeFileSync(sidecarPath, corrupt, "utf-8");
+    const beforeDoc = treeSnapshot(path.join(setup.epicDir, "designs", setup.documentId));
+
+    await expect(setup.directiveService.createDirective(
+      "project-id",
+      "epic-safe",
+      setup.documentId,
+      {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Must not overwrite corruption",
+        author: "alice",
+      },
+    )).rejects.toMatchObject({ code: "persistence_corrupt" });
+    expect(readFileSync(sidecarPath, "utf-8")).toBe(corrupt);
+    expect(treeSnapshot(path.join(setup.epicDir, "designs", setup.documentId))).toEqual(beforeDoc);
+  });
+
+  it("rolls definition content and epic metadata back when directive publication fails", async () => {
+    const root = tempRoot();
+    const projectDir = scaffoldProject(root);
+    const epicDir = scaffoldEpic(projectDir);
+    const normal = new CodaScopeDirectiveService(root);
+    const directive = await normal.createDirective(
+      "project-id",
+      "epic-safe",
+      "definition",
+      {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Definition insert",
+        author: "alice",
+      },
+    );
+    await normal.updateDirective(
+      "project-id",
+      "epic-safe",
+      directive.id,
+      "definition",
+      { generatedContent: "Generated definition." },
+    );
+    const before = treeSnapshot(projectDir);
+    const persistence = new FailOncePersistence("writeJson", "epic_directives");
+    const service = new CodaScopeDirectiveService(
+      root,
+      persistence,
+      new CodaScopeDesignDocService(root, persistence),
+      new CodaScopeEpicService(root, persistence),
+    );
+
+    await expect(service.applyDirective(
+      "project-id",
+      "epic-safe",
+      "definition",
+      directive.id,
+      "alice",
+    )).rejects.toMatchObject({ code: "persistence_failed" });
+    expect(treeSnapshot(projectDir)).toEqual(before);
+    expect(readFileSync(path.join(epicDir, "definition.md"), "utf-8")).toBe("# Original\n");
+  });
+});
+
 describe("version persistence integration", () => {
   it("fails closed on malformed design and epic version indexes before mutation", async () => {
     const root = tempRoot();
@@ -775,36 +1673,35 @@ describe("version persistence integration", () => {
         { generatedContent: "Generated content." },
       );
       const docDir = path.join(projectDir, "epics", "epic-safe", "designs", doc.id);
+      const sidecarPath = path.join(
+        projectDir,
+        "epics",
+        "epic-safe",
+        "directives",
+        `${doc.id}-directives.json`,
+      );
       const before = treeSnapshot(docDir);
-      const failing = new CodaScopeDesignDocService(
+      const beforeSidecar = readFileSync(sidecarPath);
+      const failingPersistence = new FailOncePersistence(method, storage);
+      const failing = new CodaScopeDesignDocService(root, failingPersistence);
+      const failingDirectives = new CodaScopeDirectiveService(
         root,
-        new FailOncePersistence(method, storage),
+        failingPersistence,
+        failing,
+        new CodaScopeEpicService(root, failingPersistence),
       );
-      const getDocContent = async (): Promise<string> => (
-        (await failing.getDesignDoc("project-id", "epic-safe", doc.id))?.content ?? ""
-      );
-      const setDocContent = async (content: string): Promise<void> => {
-        const updated = await failing.updateDesignDocWithVersion(
-          "project-id",
-          "epic-safe",
-          doc.id,
-          content,
-          { author: "alice", summary: "Apply directive batch" },
-        );
-        if (!updated || "conflict" in updated) throw new Error("Unexpected design update result");
-      };
 
-      await expect(directives.executeBatchDirectives(
+      await expect(failingDirectives.executeBatchDirectives(
         "project-id",
         "epic-safe",
         doc.id,
-        getDocContent,
-        setDocContent,
+        "alice",
       )).rejects.toMatchObject({
         code: "persistence_failed",
         context: { storage },
       });
       expect(treeSnapshot(docDir)).toEqual(before);
+      expect(readFileSync(sidecarPath)).toEqual(beforeSidecar);
       expect((await normal.getDesignDoc("project-id", "epic-safe", doc.id))?.content)
         .toBe("Original content.");
       expect((await normal.listDocVersions("project-id", "epic-safe", doc.id)).map((version) => version.number))
@@ -833,11 +1730,18 @@ describe("version persistence integration", () => {
     const before = await service.listDocVersions("project-id", "epic-safe", doc.id);
     persistence.acquisitions.length = 0;
 
-    const reverted = await service.revertToVersion("project-id", "epic-safe", doc.id, 1);
+    const reverted = await service.revertToVersion(
+      "project-id",
+      "epic-safe",
+      doc.id,
+      1,
+      "alice",
+    );
 
     expect(reverted?.content).toBe("Initial content.");
     const after = await service.listDocVersions("project-id", "epic-safe", doc.id);
     expect(after).toHaveLength(before.length + 1);
+    expect(after.at(-1)?.author).toBe("alice");
     expect((await service.getDocVersion("project-id", "epic-safe", doc.id, after.at(-1)!.number))?.content)
       .toBe("Modified content.");
     const nestedAcquisitions = persistence.acquisitions.filter((keys) => keys.length === 2);

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { createAuthMiddleware } from "../middleware/auth.js";
 import type { SecretService } from "../services/secretService.js";
+import { codaScopePersistence } from "../services/codaScopePersistence.js";
 import {
   changeProjectsRoot,
   createRouteContext,
@@ -77,6 +78,7 @@ describe("CodaScope root-bound service lifecycle", () => {
     });
 
     const servicesA = await context.ensureServices();
+    expect((servicesA.chatSvc as any).persistence).toBe(codaScopePersistence);
     const close = vi.fn();
     const cancel = vi.fn(async () => undefined);
     const wait = vi.fn(async () => undefined);

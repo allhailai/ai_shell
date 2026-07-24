@@ -66,7 +66,7 @@ interface DesignVersionTransaction {
   previousIndexBytes: Buffer | null;
   snapshotPath: string;
   versionsDirectoryExisted: boolean;
-  prune: DesignDocVersion[];
+  prune: DesignSnapshotBackup[];
 }
 
 export interface DesignDocVersionedEditOptions {
@@ -80,10 +80,33 @@ export interface DesignDocMutationVersion {
   summary: string;
 }
 
+export interface CompanionPublication<T> {
+  value: T;
+  rollback: () => Promise<void>;
+}
+
+export type DesignDocCompanionMutation<T> =
+  | { kind: "noop"; value: T }
+  | {
+    kind: "commit";
+    content: string;
+    publish: () => Promise<CompanionPublication<T>>;
+  };
+
+export type DesignDocCompanionMutationResult<T> =
+  | { doc: EpicDesignDoc; contentHash: string; companion: T }
+  | null;
+
 export type DesignDocUpdateResult =
   | { doc: EpicDesignDoc; contentHash: string }
   | { conflict: true; currentHash: string; currentContent: string }
   | null;
+
+interface DesignSnapshotBackup {
+  version: DesignDocVersion;
+  filePath: string;
+  content: Buffer;
+}
 
 interface DesignContentMutationState {
   index: DesignsIndex;
@@ -298,6 +321,25 @@ export class CodaScopeDesignDocService {
     ));
   }
 
+  /**
+   * Canonical multi-file ordering for directive-backed design mutations:
+   * design index/content -> document versions -> directive sidecar.
+   * No caller may acquire the trailing sidecar key and then enter this method.
+   */
+  private withDesignVersionCompanionMutation<T>(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    companionMutationKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.persistence.withMutation(this.designsMutationKey(projectDir, epicId), () => (
+      this.persistence.withMutation(this.versionMutationKey(projectDir, epicId, docId), () => (
+        this.persistence.withMutation(companionMutationKey, operation)
+      ))
+    ));
+  }
+
   private assertDesignIndexStorage(designsDir: string, epicId: string, index: DesignsIndex): void {
     for (const doc of index.docs) {
       if (doc.epicId !== epicId) {
@@ -474,6 +516,49 @@ export class CodaScopeDesignDocService {
     throw error;
   }
 
+  private async rollbackCommittedContentMutation(
+    projectDir: string,
+    epicId: string,
+    docId: string,
+    state: DesignContentMutationState,
+    transaction: DesignVersionTransaction,
+    publication: CompanionPublication<unknown> | null,
+    error: unknown,
+  ): Promise<never> {
+    let rollbackFailed = false;
+    if (publication) {
+      try {
+        await publication.rollback();
+      } catch {
+        rollbackFailed = true;
+      }
+    }
+    try {
+      await this.persistence.writeFile(
+        state.filePath,
+        state.previousContent,
+        { storage: "design_content", epicId, documentId: docId },
+      );
+      await this.writeIndex(projectDir, epicId, state.previousIndex);
+    } catch {
+      rollbackFailed = true;
+    }
+    try {
+      await this.rollbackCreatedVersion(projectDir, epicId, docId, transaction);
+    } catch {
+      rollbackFailed = true;
+    }
+    if (rollbackFailed) {
+      throw new CodaScopePersistenceError({
+        storage: "design_directive_transaction",
+        epicId,
+        documentId: docId,
+        recovery: "operator_required",
+      });
+    }
+    throw error;
+  }
+
   /* ── CRUD ─────────────────────────────────────────────────────────── */
 
   /** List all design docs for an epic. */
@@ -619,6 +704,92 @@ export class CodaScopeDesignDocService {
       await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
       return updated;
     });
+  }
+
+  /**
+   * Transform the current document and publish one companion sidecar while
+   * holding the complete design/version/sidecar boundary. The transformation
+   * sees content read after all locks are held. Companion publication is last;
+   * any publication or snapshot-pruning failure rolls content, metadata,
+   * version state, and the companion back to their exact predecessors.
+   */
+  async mutateDesignDocWithVersionAndCompanion<T>(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    companionMutationKey: string,
+    options: DesignDocMutationVersion,
+    prepare: (currentContent: string) => Promise<DesignDocCompanionMutation<T>>,
+  ): Promise<DesignDocCompanionMutationResult<T>> {
+    assertSafePathSegment(docId, "document ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    return this.withDesignVersionCompanionMutation(
+      projectDir,
+      epicId,
+      docId,
+      companionMutationKey,
+      async () => {
+        const state = await this.readContentMutationState(projectDir, epicId, docId);
+        if (!state) return null;
+        const prepared = await prepare(state.previousContent);
+        if (prepared.kind === "noop") {
+          return {
+            doc: state.doc,
+            contentHash: this.computeHash(state.previousContent),
+            companion: prepared.value,
+          };
+        }
+
+        const transaction = await this.createVersionUnlocked(
+          projectDir,
+          epicId,
+          docId,
+          options.author,
+          options.summary,
+          state.previousContent,
+        );
+        try {
+          await this.persistContentMutation(
+            projectDir,
+            epicId,
+            docId,
+            state,
+            prepared.content,
+          );
+        } catch (error) {
+          return this.rollbackVersionAfterMutationFailure(
+            projectDir,
+            epicId,
+            docId,
+            transaction,
+            error,
+          );
+        }
+
+        let publication: CompanionPublication<T> | null = null;
+        try {
+          publication = await prepared.publish();
+          await this.pruneCommittedDesignSnapshots(projectDir, epicId, docId, transaction.prune);
+        } catch (error) {
+          return this.rollbackCommittedContentMutation(
+            projectDir,
+            epicId,
+            docId,
+            state,
+            transaction,
+            publication,
+            error,
+          );
+        }
+        return {
+          doc: state.doc,
+          contentHash: this.computeHash(prepared.content),
+          companion: publication.value,
+        };
+      },
+    );
   }
 
   /** Archive a design doc (soft delete — preserves file on disk). Also clears pin. */
@@ -1017,7 +1188,16 @@ export class CodaScopeDesignDocService {
    * 3. Updates the doc metadata
    * Returns the restored content.
    */
-  async revertToVersion(projectId: string, epicId: string, docId: string, versionNum: number): Promise<{ content: string; revertVersion: DesignDocVersion } | null> {
+  async revertToVersion(
+    projectId: string,
+    epicId: string,
+    docId: string,
+    versionNum: number,
+    author: string,
+  ): Promise<{ content: string; revertVersion: DesignDocVersion } | null> {
+    if (typeof author !== "string" || !author.trim()) {
+      throw new Error("Design document revert requires an authenticated author.");
+    }
     const safeVersion = assertPositiveSafeInteger(versionNum, "design version number");
     const projectDir = this.projectDir(projectId);
     if (!projectDir) return null;
@@ -1041,7 +1221,7 @@ export class CodaScopeDesignDocService {
         projectDir,
         epicId,
         docId,
-        "user",
+        author,
         `Reverted to version ${safeVersion}`,
         state.previousContent,
       );
@@ -1093,9 +1273,25 @@ export class CodaScopeDesignDocService {
       maxVersions: MAX_VERSIONS,
       versions: [...previousIndex.versions, version],
     };
-    const prune = nextIndex.versions.length > MAX_VERSIONS
+    const pruneVersions = nextIndex.versions.length > MAX_VERSIONS
       ? nextIndex.versions.slice(0, nextIndex.versions.length - MAX_VERSIONS)
       : [];
+    const versionDirectory = this.versionsDir(projectDir, epicId, docId);
+    const prune = pruneVersions.map((prunedVersion) => {
+      const filePath = this.versionFilePath(versionDirectory, prunedVersion.number);
+      if (!existsSync(filePath)) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "design_versions",
+          epicId,
+          documentId: docId,
+        });
+      }
+      return {
+        version: prunedVersion,
+        filePath,
+        content: readFileSync(filePath),
+      };
+    });
     nextIndex.versions = nextIndex.versions.slice(-MAX_VERSIONS);
 
     await this.persistence.writeFile(
@@ -1106,7 +1302,19 @@ export class CodaScopeDesignDocService {
     try {
       await this.writeVersionsIndex(projectDir, epicId, docId, nextIndex);
     } catch (error) {
-      await rm(snapshotPath, { force: true });
+      try {
+        await rm(snapshotPath, { force: true });
+        if (!versionsDirectoryExisted) {
+          await rmdir(this.versionsDir(projectDir, epicId, docId));
+        }
+      } catch {
+        throw new CodaScopePersistenceError({
+          storage: "design_versions",
+          epicId,
+          documentId: docId,
+          recovery: "operator_required",
+        });
+      }
       throw error;
     }
     return {
@@ -1124,6 +1332,15 @@ export class CodaScopeDesignDocService {
     docId: string,
     transaction: DesignVersionTransaction,
   ): Promise<void> {
+    for (const backup of transaction.prune) {
+      if (!existsSync(backup.filePath)) {
+        await this.persistence.writeFile(
+          backup.filePath,
+          backup.content,
+          { storage: "design_version_snapshot", epicId, documentId: docId },
+        );
+      }
+    }
     const indexPath = this.versionsIndexPath(projectDir, epicId, docId);
     if (transaction.previousIndexBytes) {
       await this.persistence.writeFile(
@@ -1144,11 +1361,11 @@ export class CodaScopeDesignDocService {
     projectDir: string,
     epicId: string,
     docId: string,
-    versions: DesignDocVersion[],
+    snapshots: DesignSnapshotBackup[],
   ): Promise<void> {
     try {
-      for (const version of versions) {
-        await rm(this.versionFilePath(this.versionsDir(projectDir, epicId, docId), version.number), { force: true });
+      for (const snapshot of snapshots) {
+        await rm(snapshot.filePath, { force: true });
       }
     } catch {
       throw new CodaScopePersistenceError({

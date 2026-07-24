@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -12,6 +12,8 @@ import {
   CodaScopePersistenceError,
   type PersistenceContext,
 } from "./codaScopePersistence.js";
+import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+import { CodaScopeEpicService } from "./codaScopeEpicService.js";
 
 const ALICE: AnnotationActor = { username: "alice", origin: "user" };
 const BOB: AnnotationActor = { username: "bob", origin: "user" };
@@ -24,6 +26,24 @@ function scaffold(projectId = "project", epicId = "epic"): { root: string; fileP
   const projectDir = path.join(root, "project-dir");
   mkdirSync(path.join(projectDir, "epics", epicId, "annotations"), { recursive: true });
   writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({ id: projectId, name: "Project" }), "utf-8");
+  const now = "2026-01-01T00:00:00.000Z";
+  const epic = {
+    id: epicId,
+    projectId,
+    title: "Epic",
+    status: "designing",
+    createdAt: now,
+    updatedAt: now,
+    createdBy: "alice",
+    collaborators: ["alice"],
+    currentVersion: 0,
+  };
+  writeFileSync(path.join(projectDir, "epics", "epics.json"), JSON.stringify({ epics: [epic] }), "utf-8");
+  writeFileSync(
+    path.join(projectDir, "epics", epicId, "epic.json"),
+    JSON.stringify({ ...epic, conversationId: null }),
+    "utf-8",
+  );
   writeFileSync(path.join(projectDir, "epics", epicId, "definition.md"), "# Heading\n\nTarget paragraph.", "utf-8");
   return {
     root,
@@ -343,6 +363,132 @@ describe("epic annotation attachment reconciliation", () => {
     expect((await service.listAnnotations("project", "epic", "definition"))
       .every((annotation) => JSON.stringify(annotation.anchor) === JSON.stringify(rootAnnotation.anchor)))
       .toBe(true);
+  });
+});
+
+describe("epic annotation document-writer coordination", () => {
+  it("waits for a definition writer before reconciling attachment state", async () => {
+    const { root } = scaffold();
+    const persistence = new CodaScopePersistence();
+    const epicService = new CodaScopeEpicService(root, persistence);
+    const service = new CodaScopeAnnotationService(root, persistence, epicService);
+    await createRoot(service, ALICE);
+    const projectDir = path.join(root, "project-dir");
+    const documentKey = persistence.canonicalKey("epic-storage", path.join(projectDir, "epics"));
+
+    let writerEntered!: () => void;
+    let releaseWriter!: () => void;
+    const entered = new Promise<void>((resolve) => { writerEntered = resolve; });
+    const release = new Promise<void>((resolve) => { releaseWriter = resolve; });
+    const writer = persistence.withMutation(documentKey, async () => {
+      writerEntered();
+      await release;
+      await epicService.updateDefinition("project", "epic", "# Changed\n\nReplacement paragraph.");
+    });
+    await entered;
+
+    let settled = false;
+    const listing = service.listCurrentDocumentAnnotations("project", "epic", "definition")
+      .finally(() => { settled = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    releaseWriter();
+    await writer;
+    const annotations = await listing;
+    expect(annotations?.[0]).toMatchObject({
+      attachmentState: "orphaned",
+      detachedReason: "block_missing_no_match",
+    });
+  });
+
+  it("rejects a stale design-doc block after the writer releases without creating a sidecar", async () => {
+    const { root } = scaffold();
+    const persistence = new CodaScopePersistence();
+    const service = new CodaScopeAnnotationService(root, persistence);
+    const projectDir = path.join(root, "project-dir");
+    const designsDir = path.join(projectDir, "epics", "epic", "designs");
+    const original = "# Original\n\nOld target.";
+    const designService = new CodaScopeDesignDocService(root, persistence);
+    const design = await designService.createDesignDoc("project", "epic", {
+      title: "Design",
+      content: original,
+      createdBy: "alice",
+    });
+    const documentId = design.id;
+    const annotationPath = path.join(projectDir, "epics", "epic", "annotations", `${documentId}-annotations.json`);
+    const staleBlock = service.computeBlockIds(original).find((block) => block.content === "Old target.")!;
+    const documentKey = persistence.canonicalKey("design-index", designsDir);
+
+    let writerEntered!: () => void;
+    let releaseWriter!: () => void;
+    const entered = new Promise<void>((resolve) => { writerEntered = resolve; });
+    const release = new Promise<void>((resolve) => { releaseWriter = resolve; });
+    const writer = persistence.withMutation(documentKey, async () => {
+      writerEntered();
+      await release;
+      await designService.updateDesignDoc(
+        "project",
+        "epic",
+        documentId,
+        "# Changed\n\nNew target.",
+      );
+    });
+    await entered;
+
+    let settled = false;
+    const creation = service.createAnnotationForCurrentDocument(
+      "project",
+      "epic",
+      documentId,
+      ALICE,
+      { targetBlockId: staleBlock.blockId, body: "Stale comment" },
+    ).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    ).finally(() => { settled = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    releaseWriter();
+    await writer;
+    const outcome = await creation;
+    expect(outcome).toHaveProperty("error");
+    expect((outcome as { error: unknown }).error).toMatchObject({
+      code: "invalid_input",
+      message: "The selected annotation block no longer exists.",
+    });
+    expect(existsSync(annotationPath)).toBe(false);
+  });
+
+  it("does not treat unindexed design content as an authoritative annotation document", async () => {
+    const { root } = scaffold();
+    const projectDir = path.join(root, "project-dir");
+    const designsDir = path.join(projectDir, "epics", "epic", "designs");
+    const documentId = "orphan";
+    const content = "# Orphan\n\nUnindexed target.";
+    mkdirSync(path.join(designsDir, documentId), { recursive: true });
+    writeFileSync(path.join(designsDir, "designs.json"), JSON.stringify({ docs: [] }), "utf-8");
+    writeFileSync(path.join(designsDir, documentId, "content.md"), content, "utf-8");
+    const service = new CodaScopeAnnotationService(root);
+    const block = service.computeBlockIds(content).find((candidate) => candidate.content === "Unindexed target.")!;
+
+    await expect(service.listCurrentDocumentAnnotations("project", "epic", documentId))
+      .resolves.toBeNull();
+    await expect(service.createAnnotationForCurrentDocument(
+      "project",
+      "epic",
+      documentId,
+      ALICE,
+      { targetBlockId: block.blockId, body: "Must not be stored" },
+    )).resolves.toBeNull();
+    expect(existsSync(path.join(
+      projectDir,
+      "epics",
+      "epic",
+      "annotations",
+      `${documentId}-annotations.json`,
+    ))).toBe(false);
   });
 });
 

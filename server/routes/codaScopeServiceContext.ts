@@ -48,7 +48,10 @@ import {
   isPathValidationError,
   isSameOrDescendantPath,
 } from "../services/codaScopePathSafety.js";
-import { isPersistenceDomainError } from "../services/codaScopePersistence.js";
+import {
+  codaScopePersistence,
+  isPersistenceDomainError,
+} from "../services/codaScopePersistence.js";
 import multer from "multer";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -304,7 +307,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
   projectSvc.setDirResolver(dirResolver);
 
   const wikiSvc = new CodaScopeWikiService(root);
-  const chatSvc = new CodaScopeChatService(root);
+  const chatSvc = new CodaScopeChatService(root, codaScopePersistence);
   const skillSvc = new CodaScopeSkillService(root);
   const buildSvc = new CodaScopeBuildStateService(root);
   const codeMapSvc = new CodaScopeCodeMapService(root);
@@ -312,7 +315,12 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
   const epicSvc = new CodaScopeEpicService(root);
   const designDocSvc = new CodaScopeDesignDocService(root);
   const versionSvc = new CodaScopeVersionService(root);
-  const annotationSvc = new CodaScopeAnnotationService(root);
+  const annotationSvc = new CodaScopeAnnotationService(
+    root,
+    codaScopePersistence,
+    epicSvc,
+    designDocSvc,
+  );
   const renderSvc = new CodaScopeEpicRenderService(root);
   const epicKnowledgeSvc = new CodaScopeEpicKnowledgeService(root);
   const curationSvc = new CodaScopeCurationService(root);
@@ -322,7 +330,12 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
   const artifactAnnotationSvc = new CodaScopeArtifactAnnotationService(root);
   const artifactVersionSvc = new CodaScopeArtifactVersionService(root);
   const lockSvc = new CodaScopeLockService(root);
-  const directiveSvc = new CodaScopeDirectiveService(root);
+  const directiveSvc = new CodaScopeDirectiveService(
+    root,
+    codaScopePersistence,
+    designDocSvc,
+    epicSvc,
+  );
   const noteSvc = new CodaScopeNoteService(root, dirResolver);
   const noteAnnotationSvc = new CodaScopeNoteAnnotationService(noteSvc);
   const noteBundleSvc = new CodaScopeNoteBundleService(noteSvc, noteAnnotationSvc);

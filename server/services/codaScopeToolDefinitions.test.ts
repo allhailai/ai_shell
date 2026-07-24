@@ -5,7 +5,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -17,6 +17,7 @@ import {
   buildNoteReadTools,
   buildNoteWriteTools,
   getToolsForPurpose,
+  ToolResultCollectorHolder,
   type AgentPurpose,
 } from "./codaScopeToolDefinitions.js";
 import { createToolServices } from "./codaScopeToolServiceFactory.js";
@@ -26,6 +27,24 @@ import { createToolServices } from "./codaScopeToolServiceFactory.js";
 const PROJECT_ID = "test-project";
 const PROJECTS_ROOT = "/tmp/nonexistent-projects-root";
 const services = createToolServices(PROJECTS_ROOT);
+
+function treeSnapshot(root: string): Record<string, string> {
+  const snapshot: Record<string, string> = {};
+  const visit = (directory: string): void => {
+    for (const name of readdirSync(directory).sort()) {
+      const entryPath = path.join(directory, name);
+      const relative = path.relative(root, entryPath);
+      if (statSync(entryPath).isDirectory()) {
+        snapshot[`${relative}/`] = "directory";
+        visit(entryPath);
+      } else {
+        snapshot[relative] = readFileSync(entryPath).toString("base64");
+      }
+    }
+  };
+  visit(root);
+  return snapshot;
+}
 
 /* ── Tier counts ─────────────────────────────────────────────────── */
 
@@ -135,7 +154,12 @@ describe("tool tier builders", () => {
       ...services,
       designDoc: { createDesignDoc },
     };
-    const tool = buildEpicTools(PROJECT_ID, contractServices as any).create_design_doc;
+    const tool = buildEpicTools(
+      PROJECT_ID,
+      contractServices as any,
+      undefined,
+      "alice",
+    ).create_design_doc;
     const schema = tool.inputSchema as {
       properties: Record<string, unknown>;
       required: string[];
@@ -154,11 +178,11 @@ describe("tool tier builders", () => {
     expect(createDesignDoc).toHaveBeenCalledWith(PROJECT_ID, "epic-1", {
       title: "Scheduling Design",
       content: "# Scheduling Design\n\nComplete context-grounded content.",
-      createdBy: "agent",
+      createdBy: "alice",
     });
   });
 
-  it("routes full-document agent edits through the combined versioned edit boundary", async () => {
+  it("requires an observed hash and authenticated author for full-document edits", async () => {
     const updateDesignDocWithVersion = vi.fn(async () => ({
       doc: { id: "doc-1", title: "Design", wordCount: 4 },
       contentHash: "new-hash",
@@ -167,13 +191,26 @@ describe("tool tier builders", () => {
       ...services,
       designDoc: { updateDesignDocWithVersion },
     };
-    const tool = buildEpicTools(PROJECT_ID, contractServices as any).edit_design_doc;
+    const tool = buildEpicTools(
+      PROJECT_ID,
+      contractServices as any,
+      undefined,
+      "alice",
+    ).edit_design_doc;
+    const schema = tool.inputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+
+    expect(Object.keys(schema.properties)).toContain("expectedContentHash");
+    expect(schema.required).toContain("expectedContentHash");
 
     const result = await tool.execute({
       epicId: "epic-1",
       docId: "doc-1",
       content: "# Updated\n\nComplete replacement.",
       editSummary: "Replace the design",
+      expectedContentHash: "observed-hash",
     }, {} as any);
 
     expect(String(result)).toContain("Updated design document");
@@ -182,9 +219,81 @@ describe("tool tier builders", () => {
       "epic-1",
       "doc-1",
       "# Updated\n\nComplete replacement.",
-      { author: "agent", summary: "Replace the design" },
+      {
+        author: "alice",
+        summary: "Replace the design",
+        expectedHash: "observed-hash",
+      },
     );
   });
+
+  it("fails all design mutation tools closed without an authenticated actor", async () => {
+    const createDesignDoc = vi.fn();
+    const getDesignDoc = vi.fn();
+    const updateDesignDocWithVersion = vi.fn();
+    const collector = new ToolResultCollectorHolder();
+    const actorlessTools = buildEpicTools(
+      PROJECT_ID,
+      {
+        ...services,
+        designDoc: { createDesignDoc, getDesignDoc, updateDesignDocWithVersion },
+      } as any,
+      collector,
+    );
+
+    await expect(actorlessTools.create_design_doc.execute({
+      epicId: "epic",
+      title: "Design",
+      content: "Content",
+    }, {} as any)).resolves.toContain("authenticated initiating actor is required");
+    await expect(actorlessTools.edit_design_doc.execute({
+      epicId: "epic",
+      docId: "doc",
+      content: "Replacement",
+      editSummary: "Replace",
+      expectedContentHash: "observed-hash",
+    }, {} as any)).resolves.toContain("authenticated initiating actor is required");
+    await expect(actorlessTools.edit_design_doc_section.execute({
+      epicId: "epic",
+      docId: "doc",
+      startLine: 1,
+      endLine: 1,
+      newContent: "Replacement",
+      editSummary: "Replace section",
+    }, {} as any)).resolves.toContain("authenticated initiating actor is required");
+
+    expect(createDesignDoc).not.toHaveBeenCalled();
+    expect(getDesignDoc).not.toHaveBeenCalled();
+    expect(updateDesignDocWithVersion).not.toHaveBeenCalled();
+    expect(collector.current.drain()).toEqual([]);
+  });
+
+  it.each([undefined, "", "   "])(
+    "rejects missing or empty full-edit hashes without mutation or completion collection",
+    async (expectedContentHash) => {
+      const updateDesignDocWithVersion = vi.fn();
+      const collector = new ToolResultCollectorHolder();
+      const tool = buildEpicTools(
+        PROJECT_ID,
+        {
+          ...services,
+          designDoc: { updateDesignDocWithVersion },
+        } as any,
+        collector,
+        "alice",
+      ).edit_design_doc;
+
+      await expect(tool.execute({
+        epicId: "epic",
+        docId: "doc",
+        content: "Replacement",
+        editSummary: "Replace",
+        expectedContentHash,
+      } as any, {} as any)).resolves.toContain("expectedContentHash is required");
+      expect(updateDesignDocWithVersion).not.toHaveBeenCalled();
+      expect(collector.current.drain()).toEqual([]);
+    },
+  );
 
   it("conflicts a stale section edit instead of clobbering the concurrent content", async () => {
     const root = path.join(os.tmpdir(), `codascope-design-section-${crypto.randomBytes(6).toString("hex")}`);
@@ -224,6 +333,8 @@ describe("tool tier builders", () => {
       const tool = buildEpicTools(
         PROJECT_ID,
         { ...liveServices, designDoc: racingDesignDoc } as any,
+        undefined,
+        "alice",
       ).edit_design_doc_section;
 
       const result = await tool.execute({
@@ -281,32 +392,165 @@ describe("tool tier builders", () => {
     expect(read).not.toContain("api-spec");
     expect(read).not.toMatch(/template/i);
     expect(read).toContain("Legacy content.");
+    expect(read).toContain("Content hash: hash");
+  });
+
+  it("protects a stale full-document tool edit and records the authenticated retry author", async () => {
+    const root = path.join(os.tmpdir(), `codascope-design-full-${crypto.randomBytes(6).toString("hex")}`);
+    const projectId = "project";
+    const epicId = "epic";
+    const projectDir = path.join(root, "project-dir");
+    mkdirSync(path.join(projectDir, "epics", epicId), { recursive: true });
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: projectId,
+      name: "Project",
+      repositories: [],
+    }));
+
+    try {
+      const liveServices = createToolServices(root);
+      const designDoc = liveServices.designDoc;
+      const doc = await designDoc.createDesignDoc(projectId, epicId, {
+        title: "Concurrency design",
+        content: "Content A",
+        createdBy: "alice",
+      });
+      const collector = new ToolResultCollectorHolder();
+      const tools = getToolsForPurpose(projectId, root, "assistant", collector, "alice");
+
+      const readA = String(await tools.read_design_doc.execute({ epicId, docId: doc.id }, {} as any));
+      const observedA = await designDoc.getDesignDoc(projectId, epicId, doc.id);
+      expect(observedA).not.toBeNull();
+      expect(readA).toContain(`Content hash: ${observedA!.contentHash}`);
+      expect(readA).toContain("Content A");
+
+      await designDoc.updateDesignDocWithVersion(
+        projectId,
+        epicId,
+        doc.id,
+        "Content B",
+        {
+          author: "bob",
+          summary: "Newer user save",
+          expectedHash: observedA!.contentHash,
+        },
+      );
+      const designsDir = path.join(projectDir, "epics", epicId, "designs");
+      const authoritativeAfterB = treeSnapshot(designsDir);
+      collector.current.drain();
+
+      const stale = await tools.edit_design_doc.execute({
+        epicId,
+        docId: doc.id,
+        content: "Content C",
+        editSummary: "Stale replacement",
+        expectedContentHash: observedA!.contentHash,
+      }, {} as any);
+
+      expect(stale).toContain("modified concurrently");
+      expect((await designDoc.getDesignDoc(projectId, epicId, doc.id))?.content).toBe("Content B");
+      expect(treeSnapshot(designsDir)).toEqual(authoritativeAfterB);
+      expect(collector.current.drain()).toEqual([]);
+
+      const readB = String(await tools.read_design_doc.execute({ epicId, docId: doc.id }, {} as any));
+      const observedB = await designDoc.getDesignDoc(projectId, epicId, doc.id);
+      expect(observedB).not.toBeNull();
+      expect(readB).toContain(`Content hash: ${observedB!.contentHash}`);
+      const retry = await tools.edit_design_doc.execute({
+        epicId,
+        docId: doc.id,
+        content: "Content C",
+        editSummary: "Fresh replacement",
+        expectedContentHash: observedB!.contentHash,
+      }, {} as any);
+
+      expect(retry).toContain("Updated design document");
+      expect((await designDoc.getDesignDoc(projectId, epicId, doc.id))?.content).toBe("Content C");
+      const versions = await designDoc.listDocVersions(projectId, epicId, doc.id);
+      expect(versions).toHaveLength(2);
+      expect(versions.at(-1)).toMatchObject({ author: "alice", summary: "Fresh replacement" });
+      expect((await designDoc.getDocVersion(projectId, epicId, doc.id, versions.at(-1)!.number))?.content)
+        .toBe("Content B");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves design authorship through assistant, chat, research, and curation assemblies", async () => {
+    const root = path.join(os.tmpdir(), `codascope-design-actors-${crypto.randomBytes(6).toString("hex")}`);
+    const projectId = "project";
+    const epicId = "epic";
+    const projectDir = path.join(root, "project-dir");
+    mkdirSync(path.join(projectDir, "epics", epicId), { recursive: true });
+    writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({
+      id: projectId,
+      name: "Project",
+      repositories: [],
+    }));
+
+    try {
+      const designDoc = createToolServices(root).designDoc;
+      for (const purpose of ["assistant", "chat", "research", "curation"] as const) {
+        const tools = getToolsForPurpose(projectId, root, purpose, undefined, "alice");
+        const created = String(await tools.create_design_doc.execute({
+          epicId,
+          title: `${purpose} design`,
+          content: "Content A",
+        }, {} as any));
+        const docId = created.match(/\(ID: ([^)]+)\)/)?.[1];
+        if (!docId) throw new Error(`Design tool did not return a document ID: ${created}`);
+        const observed = await designDoc.getDesignDoc(projectId, epicId, docId);
+        await tools.edit_design_doc.execute({
+          epicId,
+          docId,
+          content: "Content B",
+          editSummary: "Full edit",
+          expectedContentHash: observed!.contentHash,
+        }, {} as any);
+        await tools.edit_design_doc_section.execute({
+          epicId,
+          docId,
+          startLine: 1,
+          endLine: 1,
+          newContent: "Content C",
+          editSummary: "Section edit",
+        }, {} as any);
+      }
+
+      const docs = await designDoc.listDesignDocs(projectId, epicId);
+      expect(docs).toHaveLength(4);
+      expect(docs.every((doc) => doc.createdBy === "alice")).toBe(true);
+      for (const doc of docs) {
+        const versions = await designDoc.listDocVersions(projectId, epicId, doc.id);
+        expect(versions.map((version) => version.author)).toEqual(["alice", "alice"]);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("fails agent annotation creation closed without an actor and records actor provenance when present", async () => {
-    const createAnnotation = vi.fn(async () => ({ id: "ann-agent" }));
+    const createAnnotationForCurrentDocument = vi.fn(async () => ({ id: "ann-agent" }));
     const actorServices = {
       ...services,
-      epic: { ...services.epic, getDefinition: vi.fn(async () => "# Heading\n\nTarget") },
       annotation: {
         ...services.annotation,
-        computeBlockIds: vi.fn(() => [{ blockId: "block", sectionSlug: "heading", lineStart: 3, lineEnd: 3, content: "Target" }]),
-        createAnnotation,
+        createAnnotationForCurrentDocument,
       },
     };
     const args = { epicId: "epic", documentId: "definition", blockId: "block", body: "Agent review" };
 
     const unowned = await buildEpicTools(PROJECT_ID, actorServices as any).create_annotation.execute(args, {} as any);
     expect(unowned).toContain("authenticated initiating actor is required");
-    expect(createAnnotation).not.toHaveBeenCalled();
+    expect(createAnnotationForCurrentDocument).not.toHaveBeenCalled();
 
     await buildEpicTools(PROJECT_ID, actorServices as any, undefined, "alice").create_annotation.execute(args, {} as any);
-    expect(createAnnotation).toHaveBeenCalledWith(
+    expect(createAnnotationForCurrentDocument).toHaveBeenCalledWith(
       PROJECT_ID,
       "epic",
       "definition",
       { username: "alice", origin: "agent" },
-      expect.objectContaining({ body: "Agent review" }),
+      expect.objectContaining({ body: "Agent review", targetBlockId: "block" }),
     );
   });
 
@@ -396,15 +640,10 @@ describe("tool tier builders", () => {
       { ...base, id: "reply", parentId: "root", createdAt: "2026-01-01T00:01:00.000Z", body: "Reply" },
       { ...base, id: "grandchild", parentId: "reply", createdAt: "2026-01-01T00:02:00.000Z", body: "Grandchild" },
     ];
-    const listAnnotations = vi.fn(async () => annotations);
+    const listCurrentDocumentAnnotations = vi.fn(async () => annotations);
     const readServices = {
       ...services,
-      epic: { ...services.epic, getDefinition: vi.fn(async () => "# Definition") },
-      designDoc: {
-        ...services.designDoc,
-        getDesignDoc: vi.fn(async () => ({ content: "# Design", contentHash: "hash", doc: {} })),
-      },
-      annotation: { ...services.annotation, listAnnotations },
+      annotation: { ...services.annotation, listCurrentDocumentAnnotations },
     };
     const tools = buildReadOnlyTools(PROJECT_ID, readServices as any);
 
@@ -415,8 +654,8 @@ describe("tool tier builders", () => {
       annotationId: "root",
     }, {} as any);
 
-    expect(listAnnotations).toHaveBeenNthCalledWith(1, PROJECT_ID, "epic", "definition", "# Definition");
-    expect(listAnnotations).toHaveBeenNthCalledWith(2, PROJECT_ID, "epic", "design", "# Design");
+    expect(listCurrentDocumentAnnotations).toHaveBeenNthCalledWith(1, PROJECT_ID, "epic", "definition");
+    expect(listCurrentDocumentAnnotations).toHaveBeenNthCalledWith(2, PROJECT_ID, "epic", "design");
     expect(JSON.parse(String(threadResult)).thread.map((annotation: { id: string }) => annotation.id))
       .toEqual(["root", "reply", "grandchild"]);
   });
@@ -689,7 +928,7 @@ describe("getToolsForPurpose", () => {
     writeFileSync(path.join(projectDir, "project.sentinel"), "project-sentinel");
 
     try {
-      const tools = getToolsForPurpose(projectId, root, "assistant");
+      const tools = getToolsForPurpose(projectId, root, "assistant", undefined, "alice");
       const designResult = await tools.create_design_doc.execute({
         epicId: "../..",
         title: "Escaped design",

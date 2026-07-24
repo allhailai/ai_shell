@@ -45,6 +45,55 @@ const TYPE_OPTIONS: { value: DirectiveType; label: string; Icon: React.FC<{ size
   { value: "expand", label: "Expand", Icon: IconExpand },
 ];
 
+export async function deleteInsertionDirective(
+  endpoint: string,
+  onUpdate: () => void,
+  onClose: () => void,
+  fetchRequest: typeof fetch = fetch,
+): Promise<boolean> {
+  try {
+    const response = await fetchRequest(endpoint, { method: "DELETE" });
+    if (!response.ok) return false;
+    onUpdate();
+    onClose();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function cleanupGeneratedInsertionDirective(
+  endpoint: string,
+  setGenerating: (generating: boolean) => void,
+  onUpdate: () => void,
+  onClose: () => void,
+  fetchRequest: typeof fetch = fetch,
+): Promise<boolean> {
+  const deleted = await deleteInsertionDirective(
+    endpoint,
+    () => {
+      setGenerating(false);
+      onUpdate();
+    },
+    onClose,
+    fetchRequest,
+  );
+  if (!deleted) setGenerating(false);
+  return deleted;
+}
+
+export async function activateInsertionPromptHeaderControl(
+  directive: InsertionDirective | undefined,
+  onClose: () => void,
+  onDelete: () => Promise<void>,
+): Promise<void> {
+  if (!directive || directive.status === "applied") {
+    onClose();
+    return;
+  }
+  await onDelete();
+}
+
 /* ── Component ───────────────────────────────────────────────────────── */
 
 export function InsertionPrompt({
@@ -152,15 +201,12 @@ export function InsertionPrompt({
       // When the agent edits this document while we're generating, auto-cleanup
       if (payload.docId === documentId && generatingDirIdRef.current) {
         // Delete the directive since the agent applied the edit directly
-        try {
-          await fetch(
-            `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${generatingDirIdRef.current}`,
-            { method: "DELETE" },
-          );
-        } catch { /* best effort */ }
-        setGenerating(false);
-        onUpdate();
-        onClose();
+        await cleanupGeneratedInsertionDirective(
+          `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${generatingDirIdRef.current}`,
+          setGenerating,
+          onUpdate,
+          onClose,
+        );
       }
     }) as (payload: unknown) => void);
     return unsub;
@@ -223,15 +269,16 @@ export function InsertionPrompt({
 
   const handleDelete = useCallback(async () => {
     if (!directive) return;
-    try {
-      await fetch(
-        `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${directive.id}`,
-        { method: "DELETE" },
-      );
-      onUpdate();
-      onClose();
-    } catch { /* ignore */ }
+    await deleteInsertionDirective(
+      `/api/codascope/projects/${projectId}/epics/${epicId}/docs/${documentId}/directives/${directive.id}`,
+      onUpdate,
+      onClose,
+    );
   }, [projectId, epicId, documentId, directive, onUpdate, onClose]);
+
+  const handleHeaderControl = useCallback(async () => {
+    await activateInsertionPromptHeaderControl(directive, onClose, handleDelete);
+  }, [directive, onClose, handleDelete]);
 
   /* ── Render ──────────────────────────────────────────────────────── */
 
@@ -255,9 +302,9 @@ export function InsertionPrompt({
         </div>
         <button
           className="codascope-btn codascope-btn-ghost codascope-btn-xs"
-          onClick={directive ? handleDelete : onClose}
+          onClick={handleHeaderControl}
           type="button"
-          title={directive ? "Delete directive" : "Cancel"}
+          title={isApplied ? "Close" : directive ? "Delete directive" : "Cancel"}
         >
           <IconClose size={12} />
         </button>

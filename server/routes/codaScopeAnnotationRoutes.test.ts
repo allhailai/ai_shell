@@ -7,6 +7,7 @@ import path from "node:path";
 import { registerAnnotationRoutes } from "./codaScopeAnnotationRoutes.js";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { CodaScopeAnnotationError, CodaScopeAnnotationService } from "../services/codaScopeAnnotationService.js";
+import { CodaScopeDirectiveError } from "../services/codaScopeDirectiveService.js";
 
 type RegisteredRoute = { method: string; path: string; handlers: Array<RequestHandler | undefined> };
 
@@ -51,12 +52,29 @@ const params = { id: "project", epicId: "epic", docId: "doc", annId: "ann" };
 const block = { blockId: "block", sectionSlug: "section", lineStart: 2, lineEnd: 2, content: "Target" };
 
 describe("CodaScope epic annotation routes", () => {
+  it("delegates list reconciliation to the document-coordinated service operation", async () => {
+    const listCurrentDocumentAnnotations = vi.fn(async () => [{ id: "ann" }]);
+    const routes = register({ annotationSvc: { listCurrentDocumentAnnotations } });
+    const handler = route(routes, "get", "/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations");
+    const res = response();
+
+    await handler({ params } as never, res as never, (() => undefined) as never);
+
+    expect(listCurrentDocumentAnnotations).toHaveBeenCalledWith("project", "epic", "doc");
+    expect(res.json).toHaveBeenCalledWith({ annotations: [{ id: "ann" }] });
+
+    listCurrentDocumentAnnotations.mockResolvedValueOnce(null as never);
+    await expect(handler(
+      { params } as never,
+      response() as never,
+      (() => undefined) as never,
+    )).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
   it("derives creation identity from the principal and rejects client-authored identity", async () => {
-    const createAnnotation = vi.fn(async () => ({ id: "ann" }));
+    const createAnnotationForCurrentDocument = vi.fn(async () => ({ id: "ann" }));
     const routes = register({
-      annotationSvc: { computeBlockIds: () => [block], createAnnotation },
-      designDocSvc: { getDesignDoc: async () => ({ content: "Target", contentHash: "hash" }) },
-      epicSvc: {},
+      annotationSvc: { createAnnotationForCurrentDocument },
     });
     const handler = route(routes, "post", "/api/codascope/projects/:id/epics/:epicId/docs/:docId/annotations");
 
@@ -65,21 +83,21 @@ describe("CodaScope epic annotation routes", () => {
       response() as never,
       (() => undefined) as never,
     )).rejects.toMatchObject({ status: 400, code: "invalid_input" });
-    expect(createAnnotation).not.toHaveBeenCalled();
+    expect(createAnnotationForCurrentDocument).not.toHaveBeenCalled();
 
     await handler(
       { params, body: { anchor: { blockId: "block", sectionSlug: "forged", anchorText: "forged", lineNumber: 999 }, body: "Comment" } } as never,
       response() as never,
       (() => undefined) as never,
     );
-    expect(createAnnotation).toHaveBeenCalledWith(
+    expect(createAnnotationForCurrentDocument).toHaveBeenCalledWith(
       "project",
       "epic",
       "doc",
       { username: "alice", origin: "user" },
       expect.objectContaining({
         body: "Comment",
-        anchor: { blockId: "block", sectionSlug: "section", anchorText: "Target", lineNumber: 2 },
+        targetBlockId: "block",
       }),
     );
   });
@@ -189,6 +207,24 @@ describe("CodaScope epic annotation routes", () => {
     const annotationPath = path.join(projectDir, "epics", "epic", "annotations", "definition-annotations.json");
     mkdirSync(path.dirname(annotationPath), { recursive: true });
     writeFileSync(path.join(projectDir, "project.json"), JSON.stringify({ id: "project", name: "Project" }), "utf-8");
+    const now = "2026-01-01T00:00:00.000Z";
+    const epic = {
+      id: "epic",
+      projectId: "project",
+      title: "Epic",
+      status: "designing",
+      createdAt: now,
+      updatedAt: now,
+      createdBy: "alice",
+      collaborators: ["alice"],
+      currentVersion: 0,
+    };
+    writeFileSync(path.join(projectDir, "epics", "epics.json"), JSON.stringify({ epics: [epic] }), "utf-8");
+    writeFileSync(
+      path.join(projectDir, "epics", "epic", "epic.json"),
+      JSON.stringify({ ...epic, conversationId: null }),
+      "utf-8",
+    );
     writeFileSync(definitionPath, "# Original\n\nTarget.", "utf-8");
 
     try {
@@ -255,5 +291,146 @@ describe("CodaScope epic annotation routes", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("uses the bounded directive API and preserves unsafe undo conflicts as 409", async () => {
+    const applyDirective = vi.fn(async () => ({
+      directive: { id: "dir" },
+      newContent: "Applied.",
+    }));
+    const undoDirective = vi.fn(async () => {
+      throw new CodaScopeDirectiveError("Document content changed after this directive was applied.");
+    });
+    const executeBatchDirectives = vi.fn(async () => ({
+      applied: [],
+      newContent: "Current.",
+    }));
+    const getDesignDoc = vi.fn();
+    const updateDesignDocWithVersion = vi.fn();
+    const routes = register({
+      directiveSvc: { applyDirective, undoDirective, executeBatchDirectives },
+      designDocSvc: { getDesignDoc, updateDesignDocWithVersion },
+      epicSvc: {},
+    });
+    const directiveParams = {
+      id: "project",
+      epicId: "epic",
+      docId: "doc",
+      dirId: "dir",
+    };
+
+    await route(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/apply",
+    )({ params: directiveParams } as never, response() as never, (() => undefined) as never);
+    await expect(route(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/undo",
+    )({ params: directiveParams } as never, response() as never, (() => undefined) as never))
+      .rejects.toMatchObject({ status: 409, code: "conflict" });
+    await route(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/batch",
+    )({ params: directiveParams } as never, response() as never, (() => undefined) as never);
+
+    expect(applyDirective).toHaveBeenCalledWith("project", "epic", "doc", "dir", "alice");
+    expect(undoDirective).toHaveBeenCalledWith("project", "epic", "doc", "dir", "alice");
+    expect(executeBatchDirectives).toHaveBeenCalledWith("project", "epic", "doc", "alice");
+    expect(getDesignDoc).not.toHaveBeenCalled();
+    expect(updateDesignDocWithVersion).not.toHaveBeenCalled();
+  });
+
+  it("maps every directive transition conflict to one sanitized 409 and preserves missing 404s", async () => {
+    const transitionMessage = "Directive state does not allow this operation.";
+    const conflict = () => {
+      throw new CodaScopeDirectiveError(transitionMessage);
+    };
+    const conflictServices = {
+      executeDirective: vi.fn(conflict),
+      rejectDirective: vi.fn(conflict),
+      deleteDirective: vi.fn(conflict),
+      applyDirective: vi.fn(conflict),
+      undoDirective: vi.fn(conflict),
+    };
+    const conflictRoutes = register({ directiveSvc: conflictServices });
+    const directiveParams = {
+      id: "project",
+      epicId: "epic",
+      docId: "doc",
+      dirId: "dir",
+    };
+    const endpoints = [
+      {
+        method: "post",
+        path: "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/execute",
+        request: { params: directiveParams, body: { generatedContent: "Generated" } },
+        call: conflictServices.executeDirective,
+      },
+      {
+        method: "post",
+        path: "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/reject",
+        request: { params: directiveParams },
+        call: conflictServices.rejectDirective,
+      },
+      {
+        method: "delete",
+        path: "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId",
+        request: { params: directiveParams },
+        call: conflictServices.deleteDirective,
+      },
+      {
+        method: "post",
+        path: "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/apply",
+        request: { params: directiveParams },
+        call: conflictServices.applyDirective,
+      },
+      {
+        method: "post",
+        path: "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/undo",
+        request: { params: directiveParams },
+        call: conflictServices.undoDirective,
+      },
+    ];
+
+    for (const endpoint of endpoints) {
+      const caught = await Promise.resolve(route(
+        conflictRoutes,
+        endpoint.method,
+        endpoint.path,
+      )(
+        endpoint.request as never,
+        response() as never,
+        (() => undefined) as never,
+      )).catch((error: unknown) => error);
+      expect(caught).toMatchObject({
+        status: 409,
+        code: "conflict",
+        message: transitionMessage,
+      });
+      expect(caught).not.toBeInstanceOf(CodaScopeDirectiveError);
+      expect(endpoint.call).toHaveBeenCalledTimes(1);
+    }
+    expect(JSON.stringify(transitionMessage)).not.toContain("/private/");
+    expect(JSON.stringify(transitionMessage)).not.toContain("Generated");
+
+    const missingServices = {
+      executeDirective: vi.fn(async () => null),
+      rejectDirective: vi.fn(async () => null),
+      deleteDirective: vi.fn(async () => false),
+      applyDirective: vi.fn(async () => null),
+      undoDirective: vi.fn(async () => null),
+    };
+    const missingRoutes = register({ directiveSvc: missingServices });
+    for (const endpoint of endpoints) {
+      await expect(route(missingRoutes, endpoint.method, endpoint.path)(
+        endpoint.request as never,
+        response() as never,
+        (() => undefined) as never,
+      )).rejects.toMatchObject({ status: 404, code: "not_found" });
+    }
+    expect(Object.values(missingServices).every((call) => call.mock.calls.length === 1)).toBe(true);
   });
 });

@@ -63,7 +63,7 @@ src/apps/codascope/
 │   ├── EpicBriefExport.tsx     # Epic brief export modal + clipboard (130 lines)
 │   ├── EpicSidebar.tsx         # Collapsible left panel for epic detail (761 lines)
 │   ├── ErrorSourceItem.tsx     # Failed knowledge source resolution UI (326 lines)
-│   ├── InsertionPrompt.tsx     # Inline directive prompt UI (374 lines)
+│   ├── InsertionPrompt.tsx     # Inline directive prompt UI
 │   ├── ModelPicker.tsx         # AI model selection dropdown (235 lines)
 │   ├── PromptChips.tsx         # Quick-action prompt chip suggestions (226 lines)
 │   ├── ScopeBadges.tsx         # Scope status badge components (56 lines)
@@ -139,7 +139,7 @@ server/
 │   ├── codaScopeBuildRoutes.ts         # Build route composition root: runs, Analyze, Deep Run, logs
 │   ├── codaScopeChatRoutes.ts          # Conversations, messages, assistant, images (490 lines)
 │   ├── codaScopeEpicRoutes.ts          # Epic CRUD, scope, designs, versions, rendering, brief (779 lines)
-│   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution (284 lines)
+│   ├── codaScopeAnnotationRoutes.ts    # Annotations, directives, blocks, batch execution
 │   ├── codaScopeKnowledgeRoutes.ts     # Knowledge sources, blocked sources, research, curation (519 lines)
 │   ├── codaScopeArtifactRoutes.ts      # Artifact CRUD, build, preview, sections, annotations, versions (562 lines)
 │   └── codaScopeNoteRoutes.ts          # Note CRUD, images, annotations, versions, templates, search, move (459 lines)
@@ -168,7 +168,7 @@ server/
     ├── codaScopeLockService.ts         # Edit lock management (acquire, heartbeat, release) (223 lines)
     ├── codaScopeDesignDocService.ts    # Design doc CRUD with per-doc versioning (733 lines)
     ├── codaScopeVersionService.ts      # Snapshot-based epic version history (354 lines)
-    ├── codaScopeAnnotationService.ts   # Inline annotations and comment threads (462 lines)
+    ├── codaScopeAnnotationService.ts   # Inline annotations and comment threads
     ├── codaScopeDirectiveService.ts    # Insertion directives and batch execution (412 lines)
     ├── codaScopeEpicRenderService.ts   # HTML rendering + storage (432 lines)
     ├── codaScopeEpicKnowledgeService.ts # Epic knowledge directory + source management (529 lines)
@@ -380,7 +380,9 @@ Icon rules:
 
 - All API calls use try/catch with user-facing error messages
 - Agent runs can be cancelled via `POST /api/codascope/projects/:id/build/cancel` (build pipeline) or `POST /api/codascope/projects/:id/assistant/cancel` (chat)
-- Stale streaming detection: conversations stuck in "streaming" for >10 minutes are auto-recovered
+- Stale streaming detection: assistant messages still marked `streaming` after
+  10 minutes are normalized to `error` with an interruption marker; they are
+  never promoted to `complete`
 
 ---
 
@@ -392,13 +394,16 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 
 **Server**: `codaScopeChatService.ts` provides full conversation CRUD with:
 - Atomic writes (temp → rename) for crash-safety
-- Per-project mutation queue to serialize concurrent writes
+- One process-local mutation queue per project to serialize conversation writes
 - Actor-scoped custody: every new conversation persists the authenticated
   principal as `ownerId`; normal service methods require that actor and treat
   another user's or ownerless record as absent
 - Auto-titling from first user message (truncated to 72 chars)
 - Auto-summary after AI responses (240 chars max)
-- Stale streaming detection (marks stuck conversations as complete after 10 minutes)
+- Stable-ID assistant completion/error transitions that re-read owned state
+  under the queue instead of publishing stale whole-conversation snapshots
+- Stale streaming detection that marks interrupted messages `error` after 10
+  minutes
 
 **Storage layout**:
 ```
@@ -407,6 +412,25 @@ Chat is **not** a standalone view — it is the right-panel `CodaScopeAssistant`
 └── 2026_06_30_conv_<uuid>.json           # Individual files, each with ownerId
 ```
 
+Conversation index versions 1 and 2 are supported. Existing indexes are
+strictly parsed and structurally validated as a whole: every record must be
+valid, duplicate conversation IDs or file references are corruption, and the
+100-record limit is enforced on read rather than by filtering invalid or
+excess records.
+
+Indexed conversation JSON files are strict authoritative records. Their
+conversation ID, project ID, and owner custody must match the selected index
+record, and every message ID must be unique. Missing, malformed, structurally
+invalid, or identity-mismatched indexed files fail as sanitized
+`persistence_corrupt`; their bytes and inventory remain available for operator
+repair. Corruption is detected before mutation or SSE publication.
+
+A missing index is an empty uninitialized store only when no direct
+conversation JSON files exist. Expected actor-image directories do not
+initialize the index. The service checks the selected index record's ownership
+before reading its file, preserving generic absence for unauthorized actors
+even when that authoritative file is corrupt.
+
 New conversation owners always come from `principal(req).username`; client
 payloads never choose an owner. Images use the same service-level conversation
 check before upload, read, or cleanup, so an agent run cannot load another
@@ -414,6 +438,32 @@ user's attachment or history. Existing ownerless records fail closed for normal
 users. Administrators can use the migration endpoints below to list and assign
 those records to an existing AIShell account; assignment is the only supported
 legacy-ownership transition.
+
+### Chat Mutation and Terminal Contract
+
+The conversation-message endpoint persists the user message and then one exact
+assistant placeholder with status `streaming`. After generation, it re-reads
+the owned conversation under the project queue and completes or errors only
+that stable message ID. Unrelated messages committed while generation was in
+flight remain in the conversation. A missing, wrong-role, or non-streaming
+placeholder fails closed rather than appending a replacement completion.
+
+The backwards-compatible assistant endpoint does not use a placeholder. It
+allocates one assistant message ID before streaming and uses that same ID for
+the successful append or for compensating error persistence. If a completion
+was written but its acknowledgement or terminal publication fails, the
+existing stable-ID message is rewritten as `error`, not duplicated. Empty
+successful assistant responses are valid persisted completions.
+
+For both endpoints, the exact proposed `done` object is JSON-preflighted before
+completion persistence. The complete message must be durable before `done` is
+published. Serialization, completion persistence, or terminal-publication
+failure publishes `error`, never `done`; generated or partial text is retained
+as an `error` message when storage permits. That compensating persistence is
+explicitly best effort when storage is unavailable. Error transitions remove
+completion-only `actions` metadata while preserving unrelated metadata. The
+shared terminal writer publishes exactly one standard terminal and ends the
+response once.
 
 **Client**: `CodaScopeAssistant.tsx` manages:
 - `ConversationHeader` — title bar with dropdown history popover, search, and new-conversation button
@@ -499,7 +549,13 @@ The table below is a representative subset of read-only tools:
 | `read_build_status` | Current and historical build state |
 | `list_project_skills` | Available framework commands |
 
-Epic tools include `create_design_doc`, `edit_design_doc`, `edit_design_doc_section`, and epic scope/definition tools. See `codaScopeToolDefinitions.ts` for the full list.
+Epic tools include `create_design_doc`, `edit_design_doc`,
+`edit_design_doc_section`, and epic scope/definition tools.
+`read_design_doc(epicId, docId)` exposes the exact current `contentHash` with
+the document metadata and content. A full replacement requires
+`edit_design_doc(epicId, docId, content, editSummary, expectedContentHash)`;
+the tool forwards the exact observed hash unchanged as the service
+`expectedHash`. See `codaScopeToolDefinitions.ts` for the full list.
 
 ### Action Tags
 
@@ -744,14 +800,15 @@ storage, home directories, or shared fixtures.
 
 ### Atomic Persistence and Corruption Recovery
 
-`server/services/codaScopePersistence.ts` is the shared persistence boundary
-for authoritative CodaScope JSON covered by the epic/design persistence
-contract. Reads distinguish a missing, genuinely uninitialized file from an
-existing malformed or structurally invalid file. A corrupt file fails closed
-with `persistence_corrupt`; its bytes are preserved for explicit operator
-repair or restoration. Atomic I/O failures use `persistence_failed`. HTTP
-responses and logs expose only these stable messages/codes and logical storage
-context, never an absolute path or raw filesystem error.
+`server/services/codaScopePersistence.ts` supplies strict JSON reads and atomic
+replacement I/O for authoritative CodaScope state, including epic/design state
+and chat indexes/conversations. Reads distinguish a missing, genuinely
+uninitialized file from an existing malformed or structurally invalid file. A
+corrupt file fails closed with `persistence_corrupt`; its bytes are preserved
+for explicit operator repair or restoration. Atomic I/O failures use
+`persistence_failed`. HTTP responses and logs expose only these stable
+messages/codes and logical storage context, never an absolute path or raw
+filesystem error.
 
 Atomic replacement writes a unique exclusive same-directory sibling, flushes
 and closes it, renames it over the target, and flushes the parent directory
@@ -760,8 +817,8 @@ post-rename flush fails. Temporary and backup siblings are removed after
 success or failure, and the old target is never truncated or unlinked before
 the publishing rename succeeds.
 
-Read-validate-modify-write operations use the persistence module's keyed,
-re-entrant in-process coordinator:
+The following read-validate-modify-write operations use the persistence
+module's keyed, re-entrant in-process coordinator:
 
 | State | Serialization identity |
 |-------|------------------------|
@@ -769,6 +826,13 @@ re-entrant in-process coordinator:
 | Epic annotations | Epic `annotations/` directory |
 | Design-document versions and revert | Design-document directory |
 | Design index/content metadata and all design edits | Epic `designs/` directory |
+| Directive CRUD | Per-document directive sidecar |
+
+Chat is deliberately not another row in this keyed-coordinator table. It uses
+the persistence module's strict/atomic I/O, while
+`CodaScopeChatService`'s existing process-local per-project queue remains the
+sole coordinator for chat read-modify-write operations. Do not add or imply a
+second epic/design-style persistence mutation coordinator for chat.
 
 The deployed concurrency contract is one AIShell server process. The
 coordinator prevents lost updates between services in that process, including
@@ -783,6 +847,15 @@ standalone design snapshot creation, and revert all use this one acquisition
 order; no supported path acquires those keys in reverse. Unversioned content
 mutations still hold the outer `designs/` key, so they cannot interleave with a
 combined versioned edit.
+
+Directive-backed mutations extend that order instead of creating another
+writer. Design apply/undo/batch acquires `designs/`, then the document-version
+key, then the directive-sidecar key. Definition apply/undo/batch acquires the
+project `epics/` key and then the sidecar key. The transformation re-reads
+document and strict sidecar state only after all keys are held, and the route
+never supplies independent document callbacks. Directive CRUD holds only the
+sidecar key, so concurrent CRUD serializes behind a document mutation without
+reversing the order.
 
 Every operation that can replace an active epic's `epic.json` uses the same
 project `epics/` key, including epic-version creation. Strict reads also bind
@@ -870,7 +943,8 @@ The canonical terminal contract is:
 - Domain events such as `research-complete` describe progress/results but are
   not transport terminals. Research succeeds only after the following `done`.
 - Partial chat text may remain visible after failure, but it is marked
-  incomplete/error and is never persisted or rendered as a completed response.
+  incomplete/error and, when conversation storage is available, is persisted
+  only as an `error` response rather than a completed response.
 
 Terminal ownership is explicit by pipeline family:
 
@@ -930,7 +1004,8 @@ The Epic Design subsystem provides collaborative document authoring for software
 | `codaScopeEpicService.ts` | Epic CRUD, lifecycle, scope management, edit locks, health computation |
 | `codaScopeDesignDocService.ts` | Design document CRUD, per-doc version history, storage migration |
 | `codaScopeVersionService.ts` | Snapshot-based version history for epics |
-| `codaScopeAnnotationService.ts` | Inline annotations (comments), insertion directives, block tracking |
+| `codaScopeAnnotationService.ts` | Inline annotations, actor-bound threads, attachment reconciliation, and block tracking |
+| `codaScopeDirectiveService.ts` | Directive CRUD plus bounded design/definition content-and-sidecar apply, undo, and batch transactions |
 | `codaScopeEpicRenderService.ts` | HTML rendering of design documents (basic + agent-generated) |
 | `codaScopeArtifactService.ts` | Visual artifact spec CRUD, build orchestration, section extraction |
 | `codaScopeArtifactAnnotationService.ts` | Artifact annotation lifecycle (pending → applied/failed/inactive) |
@@ -1035,9 +1110,11 @@ returned in deterministic parent-before-child order and remain covered by
 status, attachment, tombstone, and reattachment operations. Reattachment holds
 the compatible definition/design mutation key through the authoritative hash
 recheck and atomic annotation publication, preventing a concurrent save from
-committing a stale anchor. Phase 3 atomic replacement and
-per-epic serialization remain authoritative for migration, reconciliation,
-reactions, deletion, and reattachment.
+committing a stale anchor. Reconciliation and root creation use the same
+document-then-annotation lock order and read current content only after both
+keys are held; replies inherit the trusted root anchor under the annotation
+key alone. Phase 3 atomic replacement and per-epic serialization remain
+authoritative for migration, sidecar-only reads, reactions, and deletion.
 
 ### Edit Locks (P4 Hardened)
 
@@ -1061,12 +1138,26 @@ template-selection API. The flow:
 1. User navigates to the Design tab or opens chat in an epic context
 2. The chat assistant reads the current definition, scope, existing designs, and relevant research context
 3. For an explicit creation request, it drafts substantial complete markdown and calls `create_design_doc(epicId, title, content)` without a confirmation action card
-4. It uses `edit_design_doc` / `edit_design_doc_section` for later changes
-5. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
-6. Every versioned edit (agent or manual) uses the combined service mutation
+4. Before a full replacement it calls `read_design_doc(epicId, docId)`, keeps
+   the exact returned `contentHash`, and calls
+   `edit_design_doc(epicId, docId, content, editSummary, expectedContentHash)`
+   with the hash from the read that supplied the content being replaced
+5. Targeted changes use `edit_design_doc_section`, which retains its internal
+   read/hash protection
+6. SSE action tags (`design_doc_created`, `design_doc_edited`) trigger auto-navigation and diff highlighting
+7. Every versioned edit (agent or manual) uses the combined service mutation
    boundary, which snapshots the immediately preceding bytes and commits the
    edit under one ordered lock scope
-7. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
+8. Users can undo agent edits via the "Undo" button in the DocumentEditor toolbar
+
+Assistant, chat, research, and curation runs that receive epic mutation tools
+must have an authenticated initiating actor before agent creation. Design
+creation stores that actor as `createdBy`; full and section tool edits store the
+same actor as version author. The tools fail closed without an actor, and
+client/tool arguments cannot select the effective author. The HTTP revert route
+derives its snapshot author from `principal(req).username`. Authenticated tool
+edits and reverts are therefore not attributed to generic `"agent"` or
+`"user"` values. Design versions have no separate execution-origin field.
 
 The optional persisted `EpicDesignDoc.template` property is retained only so
 legacy and imported metadata remains readable and round-trippable. It is not a
@@ -1081,8 +1172,21 @@ Each design doc maintains its own version history within `<docId>/versions/`:
 - **Metadata**: `versions.json` tracks author, timestamp, summary, and word count per version
 - **Max versions**: 10 per document. Oldest are pruned automatically.
 - **Revert**: copies target version content back to `content.md` and creates a NEW version documenting the revert (so reverts are undoable)
-- **Atomic edit boundary**: manual saves, agent full/section edits, directive apply/undo/batch mutations, destructive deletes, and reverts hold `designs/` then the document-version key across hash validation, snapshot publication, and content/index commit
-- **Conflict/no-op/failure behavior**: stale hashes create no snapshot; byte-identical content is a metadata-preserving no-op after hash validation; failed content/index publication rolls the prepared snapshot back before returning a persistence-domain error
+- **Atomic edit boundary**: manual saves, agent full/section edits, destructive
+  deletes, and reverts hold `designs/` then the document-version key across
+  hash validation, snapshot publication, and content/index commit. Directive
+  apply/undo/batch holds those two keys and then the per-document directive
+  sidecar key, publishing one versioned content/index change and the sidecar
+  through the bounded directive transaction.
+- **Hash timing**: the service re-reads current content and compares the
+  supplied hash only after acquiring the design and document-version locks
+- **Conflict/no-op/failure behavior**: stale hashes preserve authoritative
+  bytes, create no snapshot, and emit no completed tool action; the agent must
+  re-read and reconsider its replacement before retrying with the new hash.
+  Byte-identical content is a metadata-preserving no-op after hash validation.
+  Only successful content-changing versioned edits create a version. Failed
+  content/index publication rolls the prepared snapshot back before returning
+  a persistence-domain error
 - **Resize/delete versioning**: cosmetic mermaid/image resizes cannot accept version metadata, while destructive deletes require it and always use the combined boundary
 - **Storage migration**: legacy flat-file docs (`<docId>.md`) are migrated to `<docId>/content.md` on first access
 
@@ -1162,14 +1266,68 @@ Quick-share epic status summaries as clipboard-friendly markdown.
 
 ### Architecture
 
-Insertion directives can be executed in batch, applying all pending directives with generated content top-to-bottom:
+Directive lifecycle is an explicit transition contract:
 
-- **Server**: `CodaScopeAnnotationService.executeBatchDirectives()` handles:
-  - Sorting directives by line position (top-to-bottom)
-  - Cumulative line offset tracking as each directive shifts the document
-  - Atomic execution: all succeed or all roll back to original content
-  - Support for `insert`, `replace`, and `expand` directive types
-- **Client**: `DocumentEditor.tsx` shows a "Apply All" bar when directives are ready
+| Operation | Allowed state | Result |
+|-----------|---------------|--------|
+| Create | — | `pending` |
+| Execute | `pending`, `generating`, `rejected` | generated `pending` |
+| Apply | generated `pending` | `applied` |
+| Reject | generated `pending` or `generating` | `rejected`, generated content cleared |
+| Undo | `applied` only | `pending`, generated content retained |
+| Delete | `pending`, `generating`, `rejected` | record removed |
+| Generic update | non-applied states | status unchanged; controlled fields forbidden |
+| Batch | eligible generated `pending` | `applied` |
+
+The service checks transitions only after acquiring the directive-sidecar lock
+and re-reading authoritative state. Applied directives are immutable except
+through bounded undo. Execute, reject, delete, generic update, or apply-again
+on an applied directive returns sanitized `409 conflict` without mutation.
+Applying an unready existing directive or undoing a non-applied existing
+directive is also 409. Missing projects, documents, or directives remain
+absence/404 rather than being collapsed into transition conflicts.
+
+Generic update cannot forge directive identity, status, author/timestamp,
+predecessor, applied hash, peer adjustments, or applied timestamp. Forbidden
+operations preserve the document, sidecar, metadata, version index, and
+snapshot inventory and create no version. Undo retains generated content, so
+the restored pending directive can be reapplied and can be deleted after undo;
+there is no applied-delete operation that accepts or finalizes a document
+change.
+
+Batch execution applies all eligible generated pending directives
+top-to-bottom:
+
+- **Server owner**: `CodaScopeDirectiveService` owns strict sidecar CRUD and all
+  document mutations. Routes supply `principal(req).username` for design
+  version authorship and do not perform their own read/modify/write cycle.
+- **Process-local ordering**: design mutations acquire epic `designs/` →
+  document versions → directive sidecar; definition mutations acquire project
+  epic storage → directive sidecar. CRUD takes only the sidecar key.
+- **Atomic boundary**: apply and undo re-read document and sidecar after the
+  ordered locks are held. Design operations publish one pre-edit snapshot,
+  content/index metadata, and sidecar; definition operations publish
+  definition, epic metadata/index, and sidecar. Any publication failure rolls
+  the bounded state back to its exact predecessor, or reports operator recovery
+  if rollback itself fails.
+- **Safe undo**: apply stores its exact predecessor, full result SHA-256, and
+  exact peer-position adjustments. Undo restores them only when current content
+  and peer positions still match; later edits, changed peers, or legacy applied
+  records without a hash return `409 conflict` without mutation.
+- **Batch behavior**: pending directives with generated content are ordered by
+  current line position and stable ID, and each transform adjusts later peer
+  positions. A design batch is one transaction with one version and one
+  sidecar publication. Individual undo is therefore hash-ordered; later
+  applied directives must be undone before earlier ones whose result they
+  changed.
+- **Strict persistence**: malformed sidecars, invalid records, and duplicate
+  directive IDs fail as `persistence_corrupt` without replacing the stored
+  bytes.
+- **Types**: `insert`, `replace`, and `expand` are supported.
+- **Client**: `DocumentEditor.tsx` shows an "Apply All" bar when directives are
+  ready. An applied `InsertionPrompt` exposes **Close** in its header and
+  **Undo** as the recovery action, never **Delete**. Failed deletion does not
+  optimistically close the prompt.
 
 ### API Endpoint
 

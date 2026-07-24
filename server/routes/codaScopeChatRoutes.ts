@@ -96,14 +96,6 @@ async function persistThenPublishChatCompletion(options: {
   }
 }
 
-function metadataWithoutActions(
-  metadata: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (!metadata || !Object.prototype.hasOwnProperty.call(metadata, "actions")) return metadata;
-  const { actions: _actions, ...remaining } = metadata;
-  return Object.keys(remaining).length > 0 ? remaining : undefined;
-}
-
 export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   const { app, authService, httpError, ensureServices, wrap, param, principal, upload } = ctx;
 
@@ -417,51 +409,31 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           terminal,
           donePayload,
           persistComplete: async () => {
-            const conv = await chatSvc.readConversation(id, convId, actorId);
-            if (!conv) throw new Error("Conversation disappeared before assistant completion could be persisted.");
-            const placeholderIndex = conv.messages.findIndex((message) =>
-              message.id === assistantMsgId
-              && message.role === "assistant"
-              && message.status === "streaming"
-            );
-            if (placeholderIndex < 0) {
-              throw new Error("Expected assistant streaming placeholder was not found.");
-            }
-            const messages = [...conv.messages];
-            const placeholder = messages[placeholderIndex];
-            messages[placeholderIndex] = {
-              ...placeholder,
-              content: fullResponse,
-              status: "complete" as const,
-              updatedAt: new Date().toISOString(),
-              metadata: {
-                ...(placeholder.metadata ?? {}),
-                ...(actions.length > 0 ? { actions } : {}),
+            const persisted = await chatSvc.completeAssistantMessage(
+              id,
+              convId,
+              actorId,
+              assistantMsgId,
+              {
+                content: fullResponse,
+                metadata: actions.length > 0 ? { actions } : undefined,
               },
-            };
-            const persisted = await chatSvc.writeConversation(id, actorId, {
-              ...conv,
-              messages,
-            });
+            );
             if (!persisted) {
-              throw new Error("Conversation disappeared before assistant completion could be persisted.");
+              throw new Error("Expected assistant streaming placeholder was not found.");
             }
           },
           persistError: async (message) => {
-            const conv = await chatSvc.readConversation(id, convId, actorId);
-            if (!conv) return;
-            const placeholderIndex = conv.messages.findIndex((candidate) => candidate.id === assistantMsgId);
-            if (placeholderIndex < 0) return;
-            const messages = [...conv.messages];
-            const placeholder = messages[placeholderIndex];
-            messages[placeholderIndex] = {
-              ...placeholder,
-              content: fullResponse || `Error: ${message}`,
-              status: "error" as const,
-              updatedAt: new Date().toISOString(),
-              metadata: metadataWithoutActions(placeholder.metadata),
-            };
-            await chatSvc.writeConversation(id, actorId, { ...conv, messages });
+            await chatSvc.recordAssistantMessageError(
+              id,
+              convId,
+              actorId,
+              {
+                id: assistantMsgId,
+                content: fullResponse || `Error: ${message}`,
+                modelId,
+              },
+            );
           },
         });
       } catch (err) {
@@ -470,20 +442,16 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           terminal,
           error: err,
           persistError: async (message) => {
-            const conv = await chatSvc.readConversation(id, convId, actorId);
-            if (!conv) return;
-            const placeholderIndex = conv.messages.findIndex((candidate) => candidate.id === assistantMsgId);
-            if (placeholderIndex < 0) return;
-            const messages = [...conv.messages];
-            const placeholder = messages[placeholderIndex];
-            messages[placeholderIndex] = {
-              ...placeholder,
-              content: partialResponse || `Error: ${message}`,
-              status: "error" as const,
-              updatedAt: new Date().toISOString(),
-              metadata: metadataWithoutActions(placeholder.metadata),
-            };
-            await chatSvc.writeConversation(id, actorId, { ...conv, messages });
+            await chatSvc.recordAssistantMessageError(
+              id,
+              convId,
+              actorId,
+              {
+                id: assistantMsgId,
+                content: partialResponse || `Error: ${message}`,
+                modelId,
+              },
+            );
           },
         });
       }
@@ -563,6 +531,7 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         if (!terminal.isResponseEnding()) aborted = true;
       });
 
+      const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       try {
         const { fullResponse, actions, agentResult } = await streamAssistantResponse({
           projectId: id,
@@ -577,7 +546,6 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
           },
         });
 
-        const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         const donePayload = { ...agentResult as object, conversationId: convId, actions };
         await persistThenPublishChatCompletion({
           terminal,
@@ -596,45 +564,25 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
             }
           },
           persistError: async (message) => {
-            const conv = await chatSvc.readConversation(id, convId!, actorId);
-            const existingIndex = conv?.messages.findIndex((candidate) => candidate.id === assistantMsgId) ?? -1;
-            if (conv && existingIndex >= 0) {
-              const messages = [...conv.messages];
-              const existing = messages[existingIndex];
-              messages[existingIndex] = {
-                ...existing,
-                content: fullResponse || `Error: ${message}`,
-                status: "error" as const,
-                updatedAt: new Date().toISOString(),
-                metadata: metadataWithoutActions(existing.metadata),
-              };
-              await chatSvc.writeConversation(id, actorId, { ...conv, messages });
-              return;
-            }
-            await chatSvc.appendMessage(id, convId!, actorId, {
+            await chatSvc.recordAssistantMessageError(id, convId!, actorId, {
               id: assistantMsgId,
-              role: "assistant",
               content: fullResponse || `Error: ${message}`,
               modelId,
-              status: "error",
-            });
+            }, { appendIfMissing: true });
           },
           errorPayload: (message) => ({ error: message, conversationId: convId }),
         });
       } catch (err) {
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
-        const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         await publishChatFailure({
           terminal,
           error: err,
           persistError: async (message) => {
-            await chatSvc.appendMessage(id, convId!, actorId, {
+            await chatSvc.recordAssistantMessageError(id, convId!, actorId, {
               id: assistantMsgId,
-              role: "assistant",
               content: partialResponse || `Error: ${message}`,
               modelId,
-              status: "error",
-            });
+            }, { appendIfMissing: true });
           },
           errorPayload: (message) => ({ error: message, conversationId: convId }),
         });

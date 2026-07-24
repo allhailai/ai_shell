@@ -447,7 +447,26 @@ export interface InsertionDirective {
   status: DirectiveStatus;
   generatedContent?: string;
   preApplySnapshot?: string;  // document content before apply — enables undo
+  /** Full SHA-256 of the exact content produced by this apply. */
+  appliedContentHash?: string;
+  /**
+   * Exact peer positions changed by this apply. Undo verifies the adjusted
+   * positions before restoring them so later directive edits are never lost.
+   */
+  linePositionAdjustments?: DirectiveLinePositionAdjustment[];
   appliedAt?: string;
+}
+
+export interface DirectiveLinePosition {
+  afterLine: number;
+  startLine?: number;
+  endLine?: number;
+}
+
+export interface DirectiveLinePositionAdjustment {
+  directiveId: string;
+  before: DirectiveLinePosition;
+  after: DirectiveLinePosition;
 }
 
 /** Computed block info for a parsed markdown document */

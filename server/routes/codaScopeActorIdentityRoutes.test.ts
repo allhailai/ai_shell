@@ -112,6 +112,38 @@ describe("CodaScope route audit identities", () => {
     );
   });
 
+  it("derives design revert snapshot authorship from the principal", async () => {
+    const revertToVersion = vi.fn(async () => ({
+      content: "Restored design.",
+      revertVersion: { number: 2, author: "alice" },
+    }));
+    const routes = registerRoutes(registerEpicRoutes, {
+      designDocSvc: { revertToVersion },
+    });
+    const response = { json: vi.fn() };
+
+    await handler(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/designs/:docId/revert/:num",
+    )(
+      {
+        params: { id: "proj", epicId: "epic", docId: "doc", num: "1" },
+        body: { author: "mallory" },
+      } as never,
+      response as never,
+      (() => undefined) as never,
+    );
+
+    expect(revertToVersion).toHaveBeenCalledWith(
+      "proj",
+      "epic",
+      "doc",
+      1,
+      "alice",
+    );
+  });
+
   it("versions destructive resize mutations but leaves cosmetic resizes unversioned", async () => {
     const applyResizeMetadata = vi.fn(async () => ({
       doc: { id: "doc", title: "Design" },
@@ -162,57 +194,55 @@ describe("CodaScope route audit identities", () => {
     );
   });
 
-  it("routes directive apply, undo, and batch design mutations through the combined boundary", async () => {
-    const getDesignDoc = vi.fn(async () => ({
-      doc: { id: "doc", title: "Design" },
-      content: "Original.",
-      contentHash: "hash",
-    }));
-    const updateDesignDocWithVersion = vi.fn(async () => ({
-      doc: { id: "doc", title: "Design" },
-      contentHash: "new-hash",
-    }));
+  it("routes directive document mutations through the bounded service API with principal authorship", async () => {
+    const getDesignDoc = vi.fn();
+    const updateDesignDocWithVersion = vi.fn();
+    const getDefinition = vi.fn();
+    const updateDefinition = vi.fn();
     const applyDirective = vi.fn(async (
       _projectId: string,
       _epicId: string,
       _docId: string,
       dirId: string,
-      getContent: () => Promise<string>,
-      setContent: (content: string) => Promise<void>,
-    ) => {
-      const content = `${await getContent()} Applied.`;
-      await setContent(content);
-      return { directive: { id: dirId }, newContent: content };
-    });
+    ) => ({ directive: { id: dirId }, newContent: "Applied." }));
     const undoDirective = vi.fn(async (
       _projectId: string,
       _epicId: string,
       _docId: string,
       dirId: string,
-      setContent: (content: string) => Promise<void>,
-    ) => {
-      await setContent("Restored.");
-      return { id: dirId };
-    });
-    const executeBatchDirectives = vi.fn(async (
-      _projectId: string,
-      _epicId: string,
-      _docId: string,
-      getContent: () => Promise<string>,
-      setContent: (content: string) => Promise<void>,
-    ) => {
-      const content = `${await getContent()} Batched.`;
-      await setContent(content);
-      return { applied: [], newContent: content };
-    });
+    ) => ({ id: dirId }));
+    const executeBatchDirectives = vi.fn(async () => ({
+      applied: [],
+      newContent: "Batched.",
+    }));
+    const createDirective = vi.fn(async () => ({ id: "created-directive" }));
     const routes = registerRoutes(registerAnnotationRoutes, {
       designDocSvc: { getDesignDoc, updateDesignDocWithVersion },
-      epicSvc: {},
-      directiveSvc: { applyDirective, undoDirective, executeBatchDirectives },
+      epicSvc: { getDefinition, updateDefinition },
+      directiveSvc: {
+        createDirective,
+        applyDirective,
+        undoDirective,
+        executeBatchDirectives,
+      },
     });
-    const response = { json: vi.fn() };
+    const json = vi.fn();
+    const response = { json, status: vi.fn(() => ({ json })) };
     const params = { id: "proj", epicId: "epic", docId: "doc", dirId: "directive-1" };
 
+    await handler(
+      routes,
+      "post",
+      "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives",
+    )({
+      params,
+      body: {
+        type: "insert",
+        afterLine: 1,
+        instruction: "Create directive",
+        author: "mallory",
+      },
+    } as never, response as never, (() => undefined) as never);
     await handler(
       routes,
       "post",
@@ -229,30 +259,23 @@ describe("CodaScope route audit identities", () => {
       "/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/batch",
     )({ params } as never, response as never, (() => undefined) as never);
 
-    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
-      1,
-      "proj",
-      "epic",
-      "doc",
-      "Original. Applied.",
-      { author: "alice", summary: "Apply directive directive-1" },
-    );
-    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
-      2,
-      "proj",
-      "epic",
-      "doc",
-      "Restored.",
-      { author: "alice", summary: "Undo directive directive-1" },
-    );
-    expect(updateDesignDocWithVersion).toHaveBeenNthCalledWith(
-      3,
-      "proj",
-      "epic",
-      "doc",
-      "Original. Batched.",
-      { author: "alice", summary: "Apply directive batch" },
-    );
+    expect(createDirective).toHaveBeenCalledWith("proj", "epic", "doc", {
+      type: "insert",
+      afterLine: 1,
+      startLine: undefined,
+      endLine: undefined,
+      blockId: undefined,
+      anchorText: undefined,
+      instruction: "Create directive",
+      author: "alice",
+    });
+    expect(applyDirective).toHaveBeenCalledWith("proj", "epic", "doc", "directive-1", "alice");
+    expect(undoDirective).toHaveBeenCalledWith("proj", "epic", "doc", "directive-1", "alice");
+    expect(executeBatchDirectives).toHaveBeenCalledWith("proj", "epic", "doc", "alice");
+    expect(getDesignDoc).not.toHaveBeenCalled();
+    expect(updateDesignDocWithVersion).not.toHaveBeenCalled();
+    expect(getDefinition).not.toHaveBeenCalled();
+    expect(updateDefinition).not.toHaveBeenCalled();
   });
 
   it("derives lock ownership from the principal for acquire, heartbeat, and release", async () => {

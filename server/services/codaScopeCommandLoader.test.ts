@@ -90,6 +90,24 @@ describe("loadCommandTemplate", () => {
       expect(prompt).not.toContain(obsoleteId);
     }
   });
+
+  it("keeps the full-document editing prompt hash-protected", () => {
+    const prompt = loadCommandTemplate("do_chat");
+    expect(prompt).not.toBeNull();
+
+    expect(prompt).toContain("read_design_doc(epicId, docId)");
+    expect(prompt).toContain("exact current `contentHash`");
+    expect(prompt).toContain(
+      "edit_design_doc(epicId, docId, content, editSummary, expectedContentHash)",
+    );
+    expect(prompt).toContain("pass the exact `contentHash` from the read that supplied");
+    expect(prompt).toMatch(
+      /concurrent-modification conflict,\s+re-read the document and reconsider/i,
+    );
+    expect(prompt).not.toContain(
+      "edit_design_doc(epicId, docId, content, editSummary)",
+    );
+  });
 });
 
 describe("loadCommandOrSkill", () => {

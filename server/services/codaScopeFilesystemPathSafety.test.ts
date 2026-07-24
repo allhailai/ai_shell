@@ -144,7 +144,7 @@ describe("CodaScope service filesystem boundaries", () => {
     expect(readFileSync(path.join(f.epicDir, "definition.md"), "utf-8")).toBe("legitimate-epic-content");
   });
 
-  it("rejects a hostile persisted conversation file before reading or deleting outside storage", async () => {
+  it("treats a hostile authoritative conversation file reference as corruption before reading or deleting outside storage", async () => {
     const f = fixture();
     const sentinel = path.join(f.projectsRoot, "conversation-sentinel.json");
     writeText(sentinel, "conversation-sentinel");
@@ -164,8 +164,14 @@ describe("CodaScope service filesystem boundaries", () => {
     }));
     const chat = new CodaScopeChatService(f.projectsRoot);
 
-    await expectInvalidInput(chat.readConversation("project-id", "conv_safe", "alice"));
-    await expectInvalidInput(chat.deleteConversation("project-id", "conv_safe", "alice"));
+    await expect(chat.readConversation("project-id", "conv_safe", "alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+      context: { storage: "conversation_index", projectId: "project-id" },
+    });
+    await expect(chat.deleteConversation("project-id", "conv_safe", "alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+      context: { storage: "conversation_index", projectId: "project-id" },
+    });
     expect(readFileSync(sentinel, "utf-8")).toBe("conversation-sentinel");
   });
 

@@ -32,7 +32,10 @@ import { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.j
 import { CodaScopeCurationService } from "./codaScopeCurationService.js";
 import { CodaScopeLockService } from "./codaScopeLockService.js";
 import { assertSafePathSegment, assertStrictDescendant } from "./codaScopePathSafety.js";
-import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
+import {
+  CodaScopeDesignDocService,
+  type CompanionPublication,
+} from "./codaScopeDesignDocService.js";
 import { CodaScopeVersionService } from "./codaScopeVersionService.js";
 import {
   CodaScopePersistence,
@@ -58,6 +61,18 @@ export interface CodaScopeEpicLifecycleFileSystem {
 }
 
 const epicLifecycleFileSystem: CodaScopeEpicLifecycleFileSystem = { mkdir, rename, rm };
+
+export type DefinitionCompanionMutation<T> =
+  | { kind: "noop"; value: T }
+  | {
+    kind: "commit";
+    content: string;
+    publish: () => Promise<CompanionPublication<T>>;
+  };
+
+export type DefinitionCompanionMutationResult<T> =
+  | { content: string; companion: T }
+  | null;
 
 /* ── Service ────────────────────────────────────────────────────────── */
 
@@ -605,6 +620,121 @@ export class CodaScopeEpicService {
     } catch { /* non-fatal — curation dir may not exist for old epics */ }
 
     return true;
+  }
+
+  /**
+   * Transform the current definition and publish one companion sidecar under
+   * the canonical definition ordering: project epic storage -> directive
+   * sidecar. This ordering matches every normal definition writer and keeps
+   * the sidecar outside the epic lifecycle queue until the document lock is
+   * already held.
+   */
+  async mutateDefinitionWithCompanion<T>(
+    projectId: string,
+    epicId: string,
+    companionMutationKey: string,
+    prepare: (currentContent: string) => Promise<DefinitionCompanionMutation<T>>,
+  ): Promise<DefinitionCompanionMutationResult<T>> {
+    assertSafePathSegment(epicId, "epic ID");
+    const projectDir = this.projectDir(projectId);
+    if (!projectDir) return null;
+
+    const transaction = await this.persistence.withMutation(this.mutationKey(projectDir), () => (
+      this.persistence.withMutation(companionMutationKey, async () => {
+        const index = await this.readIndex(projectDir, projectId);
+        const idx = index.epics.findIndex((epic) => epic.id === epicId);
+        const epicDirectory = this.epicDir(projectDir, epicId);
+        if (!existsSync(epicDirectory)) return null;
+        if (idx < 0) {
+          throw new CodaScopePersistenceCorruptError({
+            storage: "epic_index",
+            projectId,
+            epicId,
+          });
+        }
+        const meta = await this.readEpicMeta(projectDir, projectId, epicId);
+        const definition = this.readRequiredDefinition(projectDir, projectId, epicId);
+        const prepared = await prepare(definition);
+        if (prepared.kind === "noop") {
+          return {
+            changed: false,
+            result: { content: definition, companion: prepared.value },
+          };
+        }
+
+        const defPath = this.definitionPath(projectDir, epicId);
+        const metaPath = this.epicMetaPath(projectDir, epicId);
+        const indexPath = this.indexPath(projectDir);
+        let previousDefinition: Buffer;
+        let previousMeta: Buffer;
+        let previousIndex: Buffer;
+        try {
+          previousDefinition = readFileSync(defPath);
+          previousMeta = readFileSync(metaPath);
+          previousIndex = readFileSync(indexPath);
+        } catch {
+          throw new CodaScopePersistenceError({
+            storage: "epic_definition",
+            projectId,
+            epicId,
+          });
+        }
+
+        try {
+          await this.persistence.writeFile(
+            defPath,
+            prepared.content,
+            { storage: "epic_definition", projectId, epicId },
+          );
+          meta.updatedAt = new Date().toISOString();
+          await this.writeEpicMeta(projectDir, projectId, epicId, meta);
+          index.epics[idx].updatedAt = meta.updatedAt;
+          await this.writeIndex(projectDir, index);
+          const publication = await prepared.publish();
+          return {
+            changed: true,
+            result: { content: prepared.content, companion: publication.value },
+          };
+        } catch (error) {
+          try {
+            await this.persistence.writeFile(
+              defPath,
+              previousDefinition,
+              { storage: "epic_definition", projectId, epicId },
+            );
+            await this.persistence.writeFile(
+              metaPath,
+              previousMeta,
+              { storage: "epic_metadata", projectId, epicId },
+            );
+            await this.persistence.writeFile(
+              indexPath,
+              previousIndex,
+              { storage: "epic_index", projectId },
+            );
+          } catch {
+            throw new CodaScopePersistenceError({
+              storage: "epic_directive_transaction",
+              projectId,
+              epicId,
+              recovery: "operator_required",
+            });
+          }
+          throw error;
+        }
+      })
+    ));
+    if (!transaction) return null;
+    if (transaction.changed) {
+      try {
+        await this.curationService.addReason(projectId, epicId, {
+          type: "definition_changed",
+          at: new Date().toISOString(),
+          detail: "Epic definition was updated",
+        });
+      } catch { /* non-fatal — curation dir may not exist for old epics */ }
+    }
+    return transaction.result;
   }
 
   /* ── Edit Lock Management (delegated to CodaScopeLockService) ────── */

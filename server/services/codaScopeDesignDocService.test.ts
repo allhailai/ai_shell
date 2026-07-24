@@ -584,7 +584,13 @@ describe("CodaScopeDesignDocService", () => {
       await svc.createVersion("proj-revert", "epic-revert", doc.id, "user", "After edit");
 
       // Revert to version 1
-      const result = await svc.revertToVersion("proj-revert", "epic-revert", doc.id, 1);
+      const result = await svc.revertToVersion(
+        "proj-revert",
+        "epic-revert",
+        doc.id,
+        1,
+        "alice",
+      );
       expect(result).not.toBeNull();
       expect(result!.content).toBe("Original content.");
 
@@ -592,6 +598,7 @@ describe("CodaScopeDesignDocService", () => {
       const versions = await svc.listDocVersions("proj-revert", "epic-revert", doc.id);
       expect(versions).toHaveLength(3);
       expect(versions[2].summary).toContain("Reverted to version 1");
+      expect(versions[2].author).toBe("alice");
 
       // Current content should be the reverted content
       const current = await svc.getDesignDoc("proj-revert", "epic-revert", doc.id);
@@ -605,7 +612,13 @@ describe("CodaScopeDesignDocService", () => {
         content: "Content.",
       });
 
-      const result = await svc.revertToVersion("proj-revert2", "epic-revert2", doc.id, 99);
+      const result = await svc.revertToVersion(
+        "proj-revert2",
+        "epic-revert2",
+        doc.id,
+        99,
+        "alice",
+      );
       expect(result).toBeNull();
     });
   });

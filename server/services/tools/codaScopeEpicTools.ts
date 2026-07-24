@@ -457,33 +457,20 @@ export function buildEpicTools(
           return "Failed to create annotation: an authenticated initiating actor is required.";
         }
         try {
-          const documentContent = documentId === "definition"
-            ? await epicService.getDefinition(projectId, epicId)
-            : (await designDocService.getDesignDoc(projectId, epicId, documentId))?.content;
-          if (documentContent === null || documentContent === undefined) {
-            return `Failed to create annotation: document "${documentId}" was not found.`;
-          }
-          const target = annotationService.computeBlockIds(documentContent)
-            .find((block) => block.blockId === blockId);
-          if (!target) {
-            return `Failed to create annotation: block "${blockId}" no longer exists in document "${documentId}".`;
-          }
           const categoryPrefix = category ? `[${category}] ` : "";
-          const annotation = await annotationService.createAnnotation(
+          const annotation = await annotationService.createAnnotationForCurrentDocument(
             projectId,
             epicId,
             documentId,
             { username: actorId, origin: "agent" },
             {
-              anchor: {
-                blockId: target.blockId,
-                sectionSlug: target.sectionSlug,
-                anchorText: target.content,
-                lineNumber: target.lineStart,
-              },
+              targetBlockId: blockId,
               body: `${categoryPrefix}${body}`,
             },
           );
+          if (!annotation) {
+            return `Failed to create annotation: document "${documentId}" was not found.`;
+          }
           return completed(
             "create_annotation",
             `Annotation created (ID: ${annotation.id}) on block "${blockId}" in document "${documentId}".`,
@@ -677,11 +664,14 @@ export function buildEpicTools(
         const title = args.title as string;
         const content = args.content as string;
         if (!epicId || !title || !content) return "epicId, title, and content are required.";
+        if (!actorId?.trim()) {
+          return "Failed to create design doc: an authenticated initiating actor is required.";
+        }
         try {
           const doc = await designDocService.createDesignDoc(projectId, epicId, {
             title,
             content,
-            createdBy: "agent",
+            createdBy: actorId,
           });
           // Emit action tag for frontend auto-navigation
           const resultText = `Created design document "${title}" (ID: ${doc.id}) with ${doc.wordCount} words.\n\n` +
@@ -699,7 +689,8 @@ export function buildEpicTools(
     edit_design_doc: {
       description:
         "Replace the entire content of a design document. Use edit_design_doc_section " +
-        "for targeted edits. Always read the document first before editing.",
+        "for targeted edits. Always read the document first and pass the exact content " +
+        "hash returned by read_design_doc as expectedContentHash.",
       inputSchema: {
         type: "object",
         properties: {
@@ -707,16 +698,27 @@ export function buildEpicTools(
           docId: { type: "string", description: "The design document ID" },
           content: { type: "string", description: "Full replacement markdown content" },
           editSummary: { type: "string", description: "Brief description of what changed (for version history)" },
+          expectedContentHash: {
+            type: "string",
+            description: "Exact content hash returned by the read_design_doc call that supplied the content being replaced",
+          },
         },
-        required: ["epicId", "docId", "content", "editSummary"],
+        required: ["epicId", "docId", "content", "editSummary", "expectedContentHash"],
       },
       execute: async (args) => {
         const epicId = args.epicId as string;
         const docId = args.docId as string;
         const content = args.content as string;
         const editSummary = args.editSummary as string;
+        const expectedContentHash = args.expectedContentHash as string;
         if (!epicId || !docId || !content || !editSummary) {
           return "epicId, docId, content, and editSummary are required.";
+        }
+        if (!expectedContentHash?.trim()) {
+          return "expectedContentHash is required for a full-document edit.";
+        }
+        if (!actorId?.trim()) {
+          return "Failed to edit design doc: an authenticated initiating actor is required.";
         }
         try {
           const updated = await designDocService.updateDesignDocWithVersion(
@@ -724,7 +726,11 @@ export function buildEpicTools(
             epicId,
             docId,
             content,
-            { author: "agent", summary: editSummary },
+            {
+              author: actorId,
+              summary: editSummary,
+              expectedHash: expectedContentHash,
+            },
           );
           if (!updated) return `Design doc "${docId}" not found in epic "${epicId}".`;
           if ("conflict" in updated) return `Design doc "${docId}" was modified concurrently. Please re-read and retry.`;
@@ -768,6 +774,9 @@ export function buildEpicTools(
         if (!epicId || !docId || !startLine || !endLine || newContent === undefined || !editSummary) {
           return "epicId, docId, startLine, endLine, newContent, and editSummary are required.";
         }
+        if (!actorId?.trim()) {
+          return "Failed to edit design doc section: an authenticated initiating actor is required.";
+        }
         try {
           const result = await designDocService.getDesignDoc(projectId, epicId, docId);
           if (!result) return `Design doc "${docId}" not found in epic "${epicId}".`;
@@ -783,7 +792,7 @@ export function buildEpicTools(
             docId,
             updatedContent,
             {
-              author: "agent",
+              author: actorId,
               summary: editSummary,
               expectedHash: result.contentHash,
             },

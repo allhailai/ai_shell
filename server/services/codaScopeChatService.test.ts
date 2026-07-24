@@ -6,19 +6,23 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  readdirSync,
+  mkdtempSync,
+} from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
+import os from "node:os";
 import { CodaScopeChatService } from "./codaScopeChatService.js";
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 function tmpRoot(): string {
-  return path.join(
-    process.cwd(),
-    ".test-tmp",
-    `chat-svc-${crypto.randomBytes(4).toString("hex")}`,
-  );
+  return mkdtempSync(path.join(os.tmpdir(), "codascope-chat-svc-"));
 }
 
 /** Scaffold a minimal project directory. */
@@ -31,6 +35,41 @@ function scaffoldProject(root: string, projectId: string): string {
     "utf-8",
   );
   return projectDir;
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function conversationIndexPath(projectDir: string): string {
+  return path.join(projectDir, "conversations", "conversations.json");
+}
+
+function conversationDirectory(projectDir: string): string {
+  return path.join(projectDir, "conversations");
+}
+
+function conversationDataFiles(projectDir: string): string[] {
+  return readdirSync(conversationDirectory(projectDir))
+    .filter((file) => file.endsWith(".json") && file !== "conversations.json")
+    .sort();
+}
+
+async function expectPersistenceCorrupt(
+  operation: Promise<unknown>,
+  storage: "conversation_index" | "conversation",
+  projectId: string,
+): Promise<void> {
+  await expect(operation).rejects.toMatchObject({
+    name: "CodaScopePersistenceCorruptError",
+    code: "persistence_corrupt",
+    message: "Persisted CodaScope data is corrupt. Repair or restore it and retry.",
+    context: { storage, projectId },
+  });
 }
 
 /* ── Tests ────────────────────────────────────────────────────────── */
@@ -185,6 +224,24 @@ describe("CodaScopeChatService", () => {
         role: "user",
         content: "Forged message",
       })).toBeNull();
+      expect(await svc.completeAssistantMessage(
+        "proj-owner",
+        aliceConversation.id,
+        "bob",
+        "assistant-forged",
+        { content: "Forged completion" },
+      )).toBeNull();
+      expect(await svc.recordAssistantMessageError(
+        "proj-owner",
+        aliceConversation.id,
+        "bob",
+        {
+          id: "assistant-forged",
+          content: "Forged error",
+          modelId: "model",
+        },
+        { appendIfMissing: true },
+      )).toBeNull();
       expect(await svc.writeConversation("proj-owner", "bob", {
         ...aliceConversation,
         title: "Forged overwrite",
@@ -415,6 +472,269 @@ describe("CodaScopeChatService", () => {
     });
   });
 
+  // ── Assistant Message Transitions ─────────────────────────────
+
+  describe("assistant message transitions", () => {
+    it("re-reads under the mutation queue so a concurrent append survives completion", async () => {
+      scaffoldProject(root, "proj-assistant-complete-race");
+      const conv = await svc.createConversation("proj-assistant-complete-race", "alice");
+      await svc.appendMessage("proj-assistant-complete-race", conv.id, "alice", {
+        id: "user-1",
+        role: "user",
+        content: "First question",
+        status: "complete",
+      });
+      await svc.appendMessage("proj-assistant-complete-race", conv.id, "alice", {
+        id: "assistant-1",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      });
+
+      const entered = deferred();
+      const release = deferred();
+      const blocker = (svc as unknown as {
+        withMutation: <T>(projectId: string, operation: () => Promise<T>) => Promise<T>;
+      }).withMutation("proj-assistant-complete-race", async () => {
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+
+      const concurrentAppend = svc.appendMessage("proj-assistant-complete-race", conv.id, "alice", {
+        id: "user-2",
+        role: "user",
+        content: "Concurrent question",
+        status: "complete",
+      });
+      let completionSettled = false;
+      const completion = svc.completeAssistantMessage(
+        "proj-assistant-complete-race",
+        conv.id,
+        "alice",
+        "assistant-1",
+        {
+          content: "Finished answer",
+          metadata: { actions: [{ type: "operation_completed" }] },
+        },
+      ).finally(() => {
+        completionSettled = true;
+      });
+
+      await Promise.resolve();
+      expect(completionSettled).toBe(false);
+      release.resolve();
+      await Promise.all([blocker, concurrentAppend, completion]);
+
+      const final = await svc.readConversation("proj-assistant-complete-race", conv.id, "alice");
+      expect(final?.messages.map((message) => message.id)).toEqual([
+        "user-1",
+        "assistant-1",
+        "user-2",
+      ]);
+      expect(final?.messages.find((message) => message.id === "assistant-1")).toMatchObject({
+        content: "Finished answer",
+        status: "complete",
+        metadata: { actions: [{ type: "operation_completed" }] },
+      });
+    });
+
+    it("re-reads under the mutation queue so a concurrent append survives an error transition", async () => {
+      scaffoldProject(root, "proj-assistant-error-race");
+      const conv = await svc.createConversation("proj-assistant-error-race", "alice");
+      await svc.appendMessage("proj-assistant-error-race", conv.id, "alice", {
+        id: "assistant-1",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        metadata: {
+          actions: [{ type: "operation_completed" }],
+          traceId: "keep-me",
+        },
+      });
+
+      const entered = deferred();
+      const release = deferred();
+      const blocker = (svc as unknown as {
+        withMutation: <T>(projectId: string, operation: () => Promise<T>) => Promise<T>;
+      }).withMutation("proj-assistant-error-race", async () => {
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+
+      const concurrentAppend = svc.appendMessage("proj-assistant-error-race", conv.id, "alice", {
+        id: "user-2",
+        role: "user",
+        content: "Concurrent question",
+        status: "complete",
+      });
+      const transition = svc.recordAssistantMessageError(
+        "proj-assistant-error-race",
+        conv.id,
+        "alice",
+        {
+          id: "assistant-1",
+          content: "Partial answer",
+          modelId: "model",
+        },
+      );
+
+      release.resolve();
+      await Promise.all([blocker, concurrentAppend, transition]);
+
+      const final = await svc.readConversation("proj-assistant-error-race", conv.id, "alice");
+      expect(final?.messages.map((message) => message.id)).toEqual([
+        "assistant-1",
+        "user-2",
+      ]);
+      expect(final?.messages[0]).toMatchObject({
+        content: "Partial answer",
+        status: "error",
+        metadata: { traceId: "keep-me" },
+      });
+      expect(final?.messages[0]?.metadata).not.toHaveProperty("actions");
+    });
+
+    it.each([
+      ["missing ID", "missing", "assistant", "streaming"],
+      ["wrong role", "target", "user", "streaming"],
+      ["wrong status", "target", "assistant", "complete"],
+    ] as const)("fails closed for a %s without appending a completed replacement", async (
+      _label,
+      requestedId,
+      role,
+      status,
+    ) => {
+      const projectId = `proj-assistant-exact-${role}-${status}`;
+      scaffoldProject(root, projectId);
+      const conv = await svc.createConversation(projectId, "alice");
+      await svc.appendMessage(projectId, conv.id, "alice", {
+        id: "target",
+        role,
+        content: "Original",
+        status,
+      });
+
+      const result = await svc.completeAssistantMessage(
+        projectId,
+        conv.id,
+        "alice",
+        requestedId,
+        { content: "Must not be appended" },
+      );
+      const final = await svc.readConversation(projectId, conv.id, "alice");
+
+      expect(result).toBeNull();
+      expect(final?.messages).toHaveLength(1);
+      expect(final?.messages[0]).toMatchObject({
+        id: "target",
+        role,
+        content: "Original",
+        status,
+      });
+    });
+
+    it("atomically rewrites an existing stable-ID completion as error", async () => {
+      scaffoldProject(root, "proj-assistant-error-update");
+      const conv = await svc.createConversation("proj-assistant-error-update", "alice");
+      await svc.appendMessage("proj-assistant-error-update", conv.id, "alice", {
+        id: "assistant-stable",
+        role: "assistant",
+        content: "Generated answer",
+        status: "complete",
+        metadata: { actions: [{ type: "operation_completed" }] },
+      });
+
+      const updated = await svc.recordAssistantMessageError(
+        "proj-assistant-error-update",
+        conv.id,
+        "alice",
+        {
+          id: "assistant-stable",
+          content: "Generated answer",
+          modelId: "model",
+        },
+        { appendIfMissing: true },
+      );
+
+      expect(updated?.messages.filter((message) => message.id === "assistant-stable")).toHaveLength(1);
+      expect(updated?.messages.find((message) => message.id === "assistant-stable")).toMatchObject({
+        content: "Generated answer",
+        status: "error",
+      });
+      expect(updated?.messages.find((message) => message.id === "assistant-stable")?.metadata?.actions)
+        .toBeUndefined();
+    });
+
+    it("atomically appends one stable-ID error when no completion committed", async () => {
+      scaffoldProject(root, "proj-assistant-error-append");
+      const conv = await svc.createConversation("proj-assistant-error-append", "alice");
+
+      const updated = await svc.recordAssistantMessageError(
+        "proj-assistant-error-append",
+        conv.id,
+        "alice",
+        {
+          id: "assistant-stable",
+          content: "Error: completion failed",
+          modelId: "model",
+        },
+        { appendIfMissing: true },
+      );
+
+      expect(updated?.messages).toHaveLength(1);
+      expect(updated?.messages[0]).toMatchObject({
+        id: "assistant-stable",
+        role: "assistant",
+        content: "Error: completion failed",
+        status: "error",
+      });
+    });
+
+    it("preserves a concurrent message beside a backwards-compatible stable-ID completion", async () => {
+      scaffoldProject(root, "proj-assistant-backcompat-race");
+      const conv = await svc.createConversation("proj-assistant-backcompat-race", "alice");
+
+      const entered = deferred();
+      const release = deferred();
+      const blocker = (svc as unknown as {
+        withMutation: <T>(projectId: string, operation: () => Promise<T>) => Promise<T>;
+      }).withMutation("proj-assistant-backcompat-race", async () => {
+        entered.resolve();
+        await release.promise;
+      });
+      await entered.promise;
+
+      const concurrentAppend = svc.appendMessage("proj-assistant-backcompat-race", conv.id, "alice", {
+        id: "user-concurrent",
+        role: "user",
+        content: "Concurrent question",
+        status: "complete",
+      });
+      const assistantCompletion = svc.appendMessage("proj-assistant-backcompat-race", conv.id, "alice", {
+        id: "assistant-stable",
+        role: "assistant",
+        content: "",
+        modelId: "model",
+        status: "complete",
+      });
+
+      release.resolve();
+      await Promise.all([blocker, concurrentAppend, assistantCompletion]);
+
+      const final = await svc.readConversation("proj-assistant-backcompat-race", conv.id, "alice");
+      expect(final?.messages.map((message) => message.id)).toEqual([
+        "user-concurrent",
+        "assistant-stable",
+      ]);
+      expect(final?.messages.at(-1)).toMatchObject({
+        content: "",
+        status: "complete",
+      });
+    });
+  });
+
   // ── Stale Streaming Detection ─────────────────────────────────
 
   describe("stale streaming detection", () => {
@@ -640,45 +960,223 @@ describe("CodaScopeChatService", () => {
       expect(list.length).toBeLessThanOrEqual(100);
     });
 
-    it("handles corrupted index gracefully", async () => {
-      const projDir = scaffoldProject(root, "proj-corrupt");
-
-      // Write corrupted index
-      const convDir = path.join(projDir, "conversations");
-      mkdirSync(convDir, { recursive: true });
-      writeFileSync(
-        path.join(convDir, "conversations.json"),
-        "NOT VALID JSON{{{",
-        "utf-8",
+    it("fails closed on a syntax-corrupt authoritative index without publishing, then recovers its queue after repair", async () => {
+      const projectId = "proj-corrupt";
+      const projectDir = scaffoldProject(root, projectId);
+      const first = await svc.createConversation(projectId, "alice", { title: "First" });
+      const second = await svc.createConversation(projectId, "alice", { title: "Second" });
+      const indexPath = conversationIndexPath(projectDir);
+      const validIndexBytes = readFileSync(indexPath, "utf-8");
+      const originalFiles = conversationDataFiles(projectDir);
+      const originalFileBytes = new Map(
+        originalFiles.map((file) => [
+          file,
+          readFileSync(path.join(conversationDirectory(projectDir), file), "utf-8"),
+        ]),
       );
 
-      // Should return empty list, not crash
-      const list = await svc.listConversations("proj-corrupt", "alice");
-      expect(list).toEqual([]);
-    });
+      const corruptBytes = "NOT VALID JSON{{{";
+      writeFileSync(indexPath, corruptBytes, "utf-8");
+      const corruptInventory = readdirSync(conversationDirectory(projectDir)).sort();
 
-    it("normalizes malformed index records", async () => {
-      const projDir = scaffoldProject(root, "proj-malformed");
-
-      // Write index with missing fields
-      const convDir = path.join(projDir, "conversations");
-      mkdirSync(convDir, { recursive: true });
-      writeFileSync(
-        path.join(convDir, "conversations.json"),
-        JSON.stringify({
-          version: 1,
-          conversations: [
-            { id: "conv_abc", file: "conversations/test.json" },
-            { id: "", file: "" }, // invalid — should be filtered out
-          ],
+      await expectPersistenceCorrupt(
+        svc.listConversations(projectId, "alice"),
+        "conversation_index",
+        projectId,
+      );
+      await expectPersistenceCorrupt(
+        svc.createConversation(projectId, "alice", { title: "Must not publish" }),
+        "conversation_index",
+        projectId,
+      );
+      await expectPersistenceCorrupt(
+        svc.appendMessage(projectId, first.id, "alice", {
+          role: "user",
+          content: "Must not publish",
         }),
-        "utf-8",
+        "conversation_index",
+        projectId,
       );
 
-      const list = await svc.listConversations("proj-malformed", "alice");
-      // The syntactically valid record is ownerless, so ordinary users must
-      // not receive its title or infer its existence.
-      expect(list).toEqual([]);
+      expect(readFileSync(indexPath, "utf-8")).toBe(corruptBytes);
+      expect(readdirSync(conversationDirectory(projectDir)).sort()).toEqual(corruptInventory);
+      for (const [file, bytes] of originalFileBytes) {
+        expect(readFileSync(path.join(conversationDirectory(projectDir), file), "utf-8")).toBe(bytes);
+      }
+      expect(conversationDataFiles(projectDir)).toEqual(originalFiles);
+      expect(corruptInventory.some((file) => file.includes(".tmp.") || file.endsWith(".tmp"))).toBe(false);
+
+      // Repair is deliberately external to the failed operation. A rejected
+      // queue entry must not poison the next project mutation.
+      writeFileSync(indexPath, validIndexBytes, "utf-8");
+      const recovered = await svc.createConversation(projectId, "alice", { title: "Recovered" });
+      const recoveredIds = (await svc.listConversations(projectId, "alice"))
+        .map((conversation) => conversation.id);
+      expect(recoveredIds).toEqual(expect.arrayContaining([first.id, second.id, recovered.id]));
+      expect(recoveredIds).toHaveLength(3);
     });
+
+    it.each([
+      ["invalid root", () => []],
+      ["missing conversations", (index: any) => ({ version: index.version })],
+      ["non-array conversations", (index: any) => ({ ...index, conversations: {} })],
+      ["unsupported version", (index: any) => ({ ...index, version: 99 })],
+      ["structurally invalid record", (index: any) => ({
+        ...index,
+        conversations: [index.conversations[0], null],
+      })],
+      ["unsafe record ID", (index: any) => ({
+        ...index,
+        conversations: [
+          { ...index.conversations[0], id: "../unsafe" },
+          ...index.conversations.slice(1),
+        ],
+      })],
+      ["unsafe file reference", (index: any) => ({
+        ...index,
+        conversations: [
+          { ...index.conversations[0], file: "conversations/../unsafe.json" },
+          ...index.conversations.slice(1),
+        ],
+      })],
+      ["duplicate conversation ID", (index: any) => ({
+        ...index,
+        conversations: [
+          index.conversations[0],
+          { ...index.conversations[1], id: index.conversations[0].id },
+        ],
+      })],
+      ["duplicate file reference", (index: any) => ({
+        ...index,
+        conversations: [
+          index.conversations[0],
+          { ...index.conversations[1], file: index.conversations[0].file },
+        ],
+      })],
+    ] as Array<[string, (index: any) => unknown]>)(
+      "rejects %s without retaining the valid subset",
+      async (label, corrupt) => {
+        const projectId = `proj-structural-${label.replaceAll(" ", "-")}`;
+        const projectDir = scaffoldProject(root, projectId);
+        await svc.createConversation(projectId, "alice", { title: "First" });
+        await svc.createConversation(projectId, "alice", { title: "Second" });
+        const indexPath = conversationIndexPath(projectDir);
+        const index = JSON.parse(readFileSync(indexPath, "utf-8"));
+        const corruptBytes = `${JSON.stringify(corrupt(structuredClone(index)), null, 2)}\n`;
+        writeFileSync(indexPath, corruptBytes, "utf-8");
+
+        await expectPersistenceCorrupt(
+          svc.listConversations(projectId, "alice"),
+          "conversation_index",
+          projectId,
+        );
+        expect(readFileSync(indexPath, "utf-8")).toBe(corruptBytes);
+      },
+    );
+
+    it("treats a missing index with conversation files as corruption", async () => {
+      const projectId = "proj-missing-index-initialized";
+      const projectDir = scaffoldProject(root, projectId);
+      await svc.createConversation(projectId, "alice", { title: "Indexed" });
+      const indexPath = conversationIndexPath(projectDir);
+      rmSync(indexPath);
+      const inventory = readdirSync(conversationDirectory(projectDir)).sort();
+
+      await expectPersistenceCorrupt(
+        svc.listConversations(projectId, "alice"),
+        "conversation_index",
+        projectId,
+      );
+      await expectPersistenceCorrupt(
+        svc.createConversation(projectId, "alice", { title: "Must not strand existing data" }),
+        "conversation_index",
+        projectId,
+      );
+      expect(existsSync(indexPath)).toBe(false);
+      expect(readdirSync(conversationDirectory(projectDir)).sort()).toEqual(inventory);
+    });
+
+    it("allows a genuinely uninitialized store and ignores expected image directories", async () => {
+      const projectId = "proj-uninitialized";
+      const projectDir = scaffoldProject(root, projectId);
+      const conversationsDir = conversationDirectory(projectDir);
+      mkdirSync(path.join(conversationsDir, "conv_actor_images", "images"), { recursive: true });
+
+      await expect(svc.listConversations(projectId, "alice")).resolves.toEqual([]);
+      const created = await svc.createConversation(projectId, "alice", { title: "Initialized" });
+      expect(await svc.readConversation(projectId, created.id, "alice")).toMatchObject({
+        id: created.id,
+        title: "Initialized",
+      });
+      expect(existsSync(path.join(conversationsDir, "conv_actor_images", "images"))).toBe(true);
+    });
+  });
+
+  describe("indexed conversation corruption", () => {
+    it.each([
+      ["missing file", "missing"],
+      ["malformed JSON", "malformed"],
+      ["invalid root shape", "invalid-root"],
+      ["identity mismatch", "identity"],
+      ["custody mismatch", "custody"],
+    ] as const)(
+      "fails closed for an authorized actor on %s while unauthorized actors still receive generic absence",
+      async (_label, mode) => {
+        const projectId = `proj-file-corrupt-${mode}`;
+        const projectDir = scaffoldProject(root, projectId);
+        const conversation = await svc.createConversation(projectId, "alice", { title: "Private" });
+        const indexPath = conversationIndexPath(projectDir);
+        const indexBytes = readFileSync(indexPath, "utf-8");
+        const index = JSON.parse(indexBytes);
+        const record = index.conversations.find((candidate: { id: string }) =>
+          candidate.id === conversation.id
+        );
+        const filePath = path.join(projectDir, record.file);
+
+        if (mode === "missing") {
+          rmSync(filePath);
+        } else if (mode === "malformed") {
+          writeFileSync(filePath, "NOT VALID JSON{{{", "utf-8");
+        } else if (mode === "invalid-root") {
+          writeFileSync(filePath, "[]\n", "utf-8");
+        } else {
+          const stored = JSON.parse(readFileSync(filePath, "utf-8"));
+          if (mode === "identity") stored.projectId = "another-project";
+          if (mode === "custody") stored.ownerId = "bob";
+          writeFileSync(filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf-8");
+        }
+
+        const inventory = readdirSync(conversationDirectory(projectDir)).sort();
+        const corruptFileBytes = existsSync(filePath) ? readFileSync(filePath, "utf-8") : null;
+
+        await expect(svc.readConversation(projectId, conversation.id, "bob")).resolves.toBeNull();
+        await expect(svc.appendMessage(projectId, conversation.id, "bob", {
+          role: "user",
+          content: "Must remain unauthorized",
+        })).resolves.toBeNull();
+
+        await expectPersistenceCorrupt(
+          svc.readConversation(projectId, conversation.id, "alice"),
+          "conversation",
+          projectId,
+        );
+        await expectPersistenceCorrupt(
+          svc.appendMessage(projectId, conversation.id, "alice", {
+            role: "user",
+            content: "Must not publish",
+          }),
+          "conversation",
+          projectId,
+        );
+
+        expect(readFileSync(indexPath, "utf-8")).toBe(indexBytes);
+        expect(readdirSync(conversationDirectory(projectDir)).sort()).toEqual(inventory);
+        if (corruptFileBytes === null) {
+          expect(existsSync(filePath)).toBe(false);
+        } else {
+          expect(readFileSync(filePath, "utf-8")).toBe(corruptFileBytes);
+        }
+      },
+    );
   });
 });

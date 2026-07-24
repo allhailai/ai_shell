@@ -7,12 +7,17 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { createHash } from "node:crypto";
 import type { BlockAnchor } from "../../src/apps/codascope/codaScopeTypes.js";
 import { isAnnotationServiceError } from "../services/codaScopeAnnotationService.js";
+import { isDirectiveServiceError } from "../services/codaScopeDirectiveService.js";
 
 export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
   const { app, httpError, ensureServices, wrap, param, principal } = ctx;
 
   const annotationFailure = (error: unknown): never => {
     if (isAnnotationServiceError(error)) throw httpError(error.message, error.status, error.code);
+    throw error;
+  };
+  const directiveFailure = (error: unknown): never => {
+    if (isDirectiveServiceError(error)) throw httpError(error.message, error.status, error.code);
     throw error;
   };
 
@@ -36,9 +41,8 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
 
-    const document = await loadDocument(id, epicId, docId);
-    if (!document) throw httpError("Document not found.", 404, "not_found");
-    const annotations = await annotationSvc.listAnnotations(id, epicId, docId, document.content);
+    const annotations = await annotationSvc.listCurrentDocumentAnnotations(id, epicId, docId);
+    if (!annotations) throw httpError("Document not found.", 404, "not_found");
     res.json({ annotations });
   }));
 
@@ -68,33 +72,35 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     if (parentId && anchor !== undefined) {
       throw httpError("Replies inherit their root thread anchor.", 400, "invalid_input");
     }
-    let trustedAnchor: BlockAnchor | undefined;
     if (!parentId) {
       if (!isBlockAnchor(anchor)) throw httpError("A valid block anchor is required.", 400, "invalid_input");
-      const document = await loadDocument(id, epicId, docId);
-      if (!document) throw httpError("Document not found.", 404, "not_found");
-      const target = annotationSvc.computeBlockIds(document.content).find((block) => block.blockId === anchor.blockId);
-      if (!target) throw httpError("The selected annotation block no longer exists.", 400, "invalid_input");
-      trustedAnchor = {
-        blockId: target.blockId,
-        sectionSlug: target.sectionSlug,
-        anchorText: target.content,
-        lineNumber: target.lineStart,
-      };
     }
     try {
-      const annotation = await annotationSvc.createAnnotation(
-        id,
-        epicId,
-        docId,
-        { username: principal(req).username, origin: "user" },
-        {
-          anchor: trustedAnchor,
-          body,
-          parentId: parentId as string | undefined,
-          documentVersion: documentVersion as number | undefined,
-        },
-      );
+      const actor = { username: principal(req).username, origin: "user" as const };
+      const annotation = parentId
+        ? await annotationSvc.createAnnotation(
+            id,
+            epicId,
+            docId,
+            actor,
+            {
+              body,
+              parentId: parentId as string,
+              documentVersion: documentVersion as number | undefined,
+            },
+          )
+        : await annotationSvc.createAnnotationForCurrentDocument(
+            id,
+            epicId,
+            docId,
+            actor,
+            {
+              targetBlockId: (anchor as BlockAnchor).blockId,
+              body,
+              documentVersion: documentVersion as number | undefined,
+            },
+          );
+      if (!annotation) throw httpError("Document not found.", 404, "not_found");
       res.status(201).json({ annotation });
     } catch (error) {
       annotationFailure(error);
@@ -289,59 +295,41 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
       throw httpError("generatedContent is required.", 400, "invalid_input");
     }
 
-    const directive = await directiveSvc.updateDirective(id, epicId, dirId, docId, {
-      status: "generating",
-    });
-    if (!directive) throw httpError("Directive not found.", 404, "not_found");
-
-    // Store the generated content
-    const updated = await directiveSvc.updateDirective(id, epicId, dirId, docId, {
-      generatedContent,
-      status: "pending", // back to pending — user must Apply
-    });
-
-    res.json({ directive: updated });
+    try {
+      const directive = await directiveSvc.executeDirective(
+        id,
+        epicId,
+        docId,
+        dirId,
+        generatedContent,
+      );
+      if (!directive) throw httpError("Directive not found.", 404, "not_found");
+      res.json({ directive });
+    } catch (error) {
+      directiveFailure(error);
+    }
   }));
 
   // Apply directive to document
   app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/apply", wrap(async (req, res) => {
-    const { directiveSvc, epicSvc, designDocSvc } = await ensureServices();
+    const { directiveSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
     const dirId = param(req, "dirId");
-
-    const getContent = async (): Promise<string> => {
-      if (docId === "definition") {
-        return (await epicSvc.getDefinition(id, epicId)) ?? "";
-      }
-      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
-      return result?.content ?? "";
-    };
-
-    const setContent = async (content: string): Promise<void> => {
-      if (docId === "definition") {
-        await epicSvc.updateDefinition(id, epicId, content);
-      } else {
-        const updated = await designDocSvc.updateDesignDocWithVersion(
-          id,
-          epicId,
-          docId,
-          content,
-          {
-            author: principal(req).username,
-            summary: `Apply directive ${dirId}`,
-          },
-        );
-        if (!updated || "conflict" in updated) {
-          throw httpError("Design doc not found.", 404, "not_found");
-        }
-      }
-    };
-
-    const result = await directiveSvc.applyDirective(id, epicId, docId, dirId, getContent, setContent);
-    if (!result) throw httpError("Directive not found or has no generated content.", 404, "not_found");
-    res.json({ directive: result.directive, content: result.newContent });
+    try {
+      const result = await directiveSvc.applyDirective(
+        id,
+        epicId,
+        docId,
+        dirId,
+        principal(req).username,
+      );
+      if (!result) throw httpError("Document or directive not found.", 404, "not_found");
+      res.json({ directive: result.directive, content: result.newContent });
+    } catch (error) {
+      directiveFailure(error);
+    }
   }));
 
   // Reject directive
@@ -351,42 +339,35 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
     const dirId = param(req, "dirId");
-    const directive = await directiveSvc.rejectDirective(id, epicId, docId, dirId);
-    if (!directive) throw httpError("Directive not found.", 404, "not_found");
-    res.json({ directive });
+    try {
+      const directive = await directiveSvc.rejectDirective(id, epicId, docId, dirId);
+      if (!directive) throw httpError("Directive not found.", 404, "not_found");
+      res.json({ directive });
+    } catch (error) {
+      directiveFailure(error);
+    }
   }));
 
   // Undo applied directive
   app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/:dirId/undo", wrap(async (req, res) => {
-    const { directiveSvc, epicSvc, designDocSvc } = await ensureServices();
+    const { directiveSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
     const dirId = param(req, "dirId");
-
-    const setContent = async (content: string): Promise<void> => {
-      if (docId === "definition") {
-        await epicSvc.updateDefinition(id, epicId, content);
-      } else {
-        const updated = await designDocSvc.updateDesignDocWithVersion(
-          id,
-          epicId,
-          docId,
-          content,
-          {
-            author: principal(req).username,
-            summary: `Undo directive ${dirId}`,
-          },
-        );
-        if (!updated || "conflict" in updated) {
-          throw httpError("Design doc not found.", 404, "not_found");
-        }
-      }
-    };
-
-    const directive = await directiveSvc.undoDirective(id, epicId, docId, dirId, setContent);
-    if (!directive) throw httpError("Directive not found or not applied.", 404, "not_found");
-    res.json({ directive });
+    try {
+      const directive = await directiveSvc.undoDirective(
+        id,
+        epicId,
+        docId,
+        dirId,
+        principal(req).username,
+      );
+      if (!directive) throw httpError("Document or directive not found.", 404, "not_found");
+      res.json({ directive });
+    } catch (error) {
+      directiveFailure(error);
+    }
   }));
 
   // Delete directive
@@ -396,9 +377,13 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
     const dirId = param(req, "dirId");
-    const deleted = await directiveSvc.deleteDirective(id, epicId, dirId, docId);
-    if (!deleted) throw httpError("Directive not found.", 404, "not_found");
-    res.json({ deleted: true });
+    try {
+      const deleted = await directiveSvc.deleteDirective(id, epicId, dirId, docId);
+      if (!deleted) throw httpError("Directive not found.", 404, "not_found");
+      res.json({ deleted: true });
+    } catch (error) {
+      directiveFailure(error);
+    }
   }));
 
   // ── Block IDs ─────────────────────────────────────────────────────
@@ -426,40 +411,16 @@ export function registerAnnotationRoutes(ctx: CodaScopeRouteContext): void {
 
   // Batch execute all pending directives
   app.post("/api/codascope/projects/:id/epics/:epicId/docs/:docId/directives/batch", wrap(async (req, res) => {
-    const { directiveSvc, epicSvc, designDocSvc } = await ensureServices();
+    const { directiveSvc } = await ensureServices();
     const id = param(req, "id");
     const epicId = param(req, "epicId");
     const docId = param(req, "docId");
-
-    const getContent = async (): Promise<string> => {
-      if (docId === "definition") {
-        return (await epicSvc.getDefinition(id, epicId)) ?? "";
-      }
-      const result = await designDocSvc.getDesignDoc(id, epicId, docId);
-      return result?.content ?? "";
-    };
-
-    const setContent = async (content: string): Promise<void> => {
-      if (docId === "definition") {
-        await epicSvc.updateDefinition(id, epicId, content);
-      } else {
-        const updated = await designDocSvc.updateDesignDocWithVersion(
-          id,
-          epicId,
-          docId,
-          content,
-          {
-            author: principal(req).username,
-            summary: "Apply directive batch",
-          },
-        );
-        if (!updated || "conflict" in updated) {
-          throw httpError("Design doc not found.", 404, "not_found");
-        }
-      }
-    };
-
-    const result = await directiveSvc.executeBatchDirectives(id, epicId, docId, getContent, setContent);
+    const result = await directiveSvc.executeBatchDirectives(
+      id,
+      epicId,
+      docId,
+      principal(req).username,
+    );
     if (!result) throw httpError("Document not found.", 404, "not_found");
     res.json({ applied: result.applied, content: result.newContent });
   }));
