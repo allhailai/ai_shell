@@ -33,6 +33,15 @@
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  /*
+   * CodeMirror maps cursor positions to individual source characters. A
+   * multi-character font ligature has only one shaped glyph boundary, which
+   * makes interior and end-of-line caret placement ambiguous. Keep shaping
+   * deterministic in editable text; read-only Markdown retains normal font
+   * features.
+   */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
 }
 
 .shared-md-editor-shell .cm-focused {
