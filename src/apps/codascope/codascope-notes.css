@@ -2133,18 +2133,31 @@
   color: var(--color-warning);
 }
 
-.codascope-notes-note-pin-active,
-.codascope-notes-note-pin-indicator {
+.codascope-notes-pin-active {
   color: var(--color-accent);
 }
 
-.codascope-notes-note-pin-indicator {
-  margin-left: 5px;
-  vertical-align: -1px;
+.codascope-notes-note-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.codascope-notes-note-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-notes-note-title .codascope-notes-unread-dot {
+  margin-left: 0;
 }
 
 .codascope-notes-item:hover .codascope-notes-star-toggle:has(.codascope-notes-star-active),
-.codascope-notes-star-toggle:has(.codascope-notes-star-active) {
+.codascope-notes-star-toggle:has(.codascope-notes-star-active),
+.codascope-notes-item:hover .codascope-notes-star-toggle:has(.codascope-notes-pin-active),
+.codascope-notes-star-toggle:has(.codascope-notes-pin-active) {
   opacity: 1;
 }
 

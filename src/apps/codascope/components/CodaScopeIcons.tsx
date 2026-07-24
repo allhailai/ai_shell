@@ -653,6 +653,16 @@ export function IconPin({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Filled thumbtack — Pinned */
+export function IconPinFilled({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" style={style} className={className}>
+      <path d="M9.5 2.5L13.5 6.5L10 10L9 13L3 7L6 6L9.5 2.5Z" />
+      <line x1="3" y1="13" x2="5.5" y2="10.5" />
+    </svg>
+  );
+}
+
 /** Box with down arrow — Archive */
 export function IconArchive({ size = 16, style, className }: IconProps) {
   return (

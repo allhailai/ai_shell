@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus, IconPin } from "../components/CodaScopeIcons";
+import { IconNotes, IconFolder, IconFile, IconArchive, IconStar, IconStarFilled, IconClock, IconInbox, IconClose, IconTag, IconCheckbox, IconCheckboxChecked, IconDownload, IconUpload, IconDraft, IconCheckCircle, IconMove, IconPlus, IconPin, IconPinFilled } from "../components/CodaScopeIcons";
 import { NoteArchiveBrowser } from "./NoteArchiveBrowser";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import { NoteCreateDialog, type NoteCreateLocation } from "../components/NoteCreateDialog";
@@ -16,6 +16,7 @@ import { NoteExportDialog } from "../components/NoteExportDialog";
 import { NoteImportDialog } from "../components/NoteImportDialog";
 import { ConfirmDialog } from "../../../shared/confirm-dialog/ConfirmDialog";
 import type { NoteScope, NoteVisibility, NoteEntry, StarredNoteRef, RecentNoteRef, NoteTagIndexEntry } from "../codaScopeTypes";
+import { compareNoteEntriesByPriority } from "../noteEntrySort";
 
 /* ── Relative time formatter ─────────────────────────────────────────── */
 
@@ -395,6 +396,11 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
   // ── Filtered notes (local filter for short queries) ─────────────────
   const filteredNotes = useMemo(() => {
     let result = [...notes];
+    const isEntryStarred = (entry: NoteEntry) => Boolean(entry.starred)
+      || starredNotes.some((item) => item.noteId === entry.noteId);
+    const orderByPriority = (entries: NoteEntry[]) => entries.sort(
+      (left, right) => compareNoteEntriesByPriority(left, right, isEntryStarred),
+    );
 
     // Apply starred filter
     if (showStarredOnly) {
@@ -418,24 +424,8 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
       result = result.filter(
         (n) => n.isFolder || n.tags.some((t) => t.toLowerCase().includes(tagQuery)),
       );
-      return result.sort((left, right) => {
-        if (left.isFolder || right.isFolder) return 0;
-        if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
-        const leftStarred = Boolean(left.starred) || starredNotes.some((item) => item.noteId === left.noteId);
-        const rightStarred = Boolean(right.starred) || starredNotes.some((item) => item.noteId === right.noteId);
-        if (leftStarred !== rightStarred) return leftStarred ? -1 : 1;
-        return (right.updated || "").localeCompare(left.updated || "");
-      });
+      return orderByPriority(result);
     }
-
-    const orderByPriority = (entries: NoteEntry[]) => entries.sort((left, right) => {
-      if (left.isFolder || right.isFolder) return 0;
-      if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
-      const leftStarred = Boolean(left.starred) || starredNotes.some((item) => item.noteId === left.noteId);
-      const rightStarred = Boolean(right.starred) || starredNotes.some((item) => item.noteId === right.noteId);
-      if (leftStarred !== rightStarred) return leftStarred ? -1 : 1;
-      return (right.updated || "").localeCompare(left.updated || "");
-    });
 
     if (!search.trim() || search.trim().length >= 3) return orderByPriority(result);
     const q = search.toLowerCase();
@@ -1170,9 +1160,8 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                     <IconFile size={14} />
                   </div>
                   <div className="codascope-notes-item-content">
-                    <div className="codascope-notes-item-title">
-                      {entry.title}
-                      {entry.pinned && <IconPin size={12} className="codascope-notes-note-pin-indicator" aria-label="Pinned for everyone" />}
+                    <div className="codascope-notes-item-title codascope-notes-note-title">
+                      <span className="codascope-notes-note-title-text">{entry.title}</span>
                       {/* Unread dot (shared notes) */}
                       {visibility === "shared" && entry.noteId && (
                         readStatus[entry.noteId] === null || (readStatus[entry.noteId] && entry.lastEditedAt && readStatus[entry.noteId]! < entry.lastEditedAt)
@@ -1204,13 +1193,17 @@ export function NotesBrowser({ scope: propScope, visibility: propVisibility, pro
                   </div>
                 </button>
                 <button
-                  className={`codascope-notes-star-toggle${entry.pinned ? " codascope-notes-note-pin-active" : ""}`}
+                  className="codascope-notes-star-toggle"
                   onClick={(event) => void handlePinToggle(entry, event)}
                   title={entry.pinned ? "Unpin for everyone" : "Pin for everyone"}
                   aria-label={entry.pinned ? "Unpin note for everyone" : "Pin note for everyone"}
                   type="button"
                 >
-                  <IconPin size={14} />
+                  {entry.pinned ? (
+                    <IconPinFilled size={14} className="codascope-notes-pin-active" />
+                  ) : (
+                    <IconPin size={14} />
+                  )}
                 </button>
                 {/* Star toggle */}
                 <button

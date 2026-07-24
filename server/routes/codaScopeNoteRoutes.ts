@@ -9,6 +9,7 @@
 
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import type { AnnotationStatus, NoteScope, NoteVisibility, NoteEntry, NoteArchiveMeta, StarredNoteRef } from "../../src/apps/codascope/codaScopeTypes.js";
+import { compareNoteEntriesByPriority } from "../../src/apps/codascope/noteEntrySort.js";
 import type { NoteResolveOpts } from "../services/codaScopeNoteService.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -507,12 +508,7 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
     const starred = new Set(noteUserPrefsSvc.getStarred(opts.userId ?? "").map((item) => item.noteId));
     const notes: NoteEntry[] = (await noteSvc.listNotes(scope, visibility, opts, folder))
       .map((note) => ({ ...note, starred: note.noteId ? starred.has(note.noteId) || undefined : undefined }))
-      .sort((left, right) => {
-        if (left.isFolder || right.isFolder) return 0;
-        if (Boolean(left.pinned) !== Boolean(right.pinned)) return left.pinned ? -1 : 1;
-        if (Boolean(left.starred) !== Boolean(right.starred)) return left.starred ? -1 : 1;
-        return (right.updated || "").localeCompare(left.updated || "");
-      });
+      .sort(compareNoteEntriesByPriority);
     res.json({ notes });
   }));
 

@@ -47,6 +47,7 @@ import type {
   NoteTagIndexEntry,
   NoteActivityEntry,
 } from "../../src/apps/codascope/codaScopeTypes.js";
+import { compareNoteEntriesByPriority } from "../../src/apps/codascope/noteEntrySort.js";
 import { ProjectDirResolver } from "./codaScopeProjectDirResolver.js";
 import {
   assertSafePathSegment,
@@ -379,7 +380,8 @@ export class CodaScopeNoteService {
     // remain portable when a folder is moved. The public service contract is
     // relative to the library root, so prefix nested-list entries here.
     const indexEntries = this.readIndex(targetDir);
-    const entries = indexEntries ?? this.scanAndIndex(targetDir);
+    const entries = (indexEntries ?? this.scanAndIndex(targetDir))
+      .sort(compareNoteEntriesByPriority);
     if (targetDir === notesDir) return entries;
 
     const folderPrefix = path.relative(notesDir, targetDir).split(path.sep).join("/");
@@ -1405,13 +1407,7 @@ export class CodaScopeNoteService {
       }
     } catch { /* directory unreadable */ }
 
-    // Sort: folders first, then by updated (newest first)
-    entries.sort((a, b) => {
-      if (a.isFolder && !b.isFolder) return -1;
-      if (!a.isFolder && b.isFolder) return 1;
-      if (a.isFolder && b.isFolder) return a.title.localeCompare(b.title);
-      return (b.updated || "").localeCompare(a.updated || "");
-    });
+    entries.sort(compareNoteEntriesByPriority);
 
     return entries;
   }
