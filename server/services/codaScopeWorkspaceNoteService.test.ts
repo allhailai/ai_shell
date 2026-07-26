@@ -4,6 +4,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 import {
   existsSync,
@@ -28,6 +29,12 @@ import {
   WorkspaceNoteInvalidInputError,
   WorkspaceNoteUnavailableError,
 } from "./codaScopeWorkspaceNoteService.js";
+import { buildWorkspaceNoteTools } from "./tools/codaScopeWorkspaceNoteTools.js";
+import { WorkspaceTurnNoteGrantHolder } from "./codaScopeWorkspaceNoteGrant.js";
+import {
+  WorkspaceMutationActionCollector,
+  WorkspaceMutationActionCollectorHolder,
+} from "./codaScopeWorkspaceMutationActions.js";
 
 describe("CodaScopeWorkspaceNoteService", () => {
   let root: string;
@@ -207,6 +214,60 @@ describe("CodaScopeWorkspaceNoteService", () => {
     ].join("\n"), "utf-8");
     await expect(service.resolveActiveNote("alice", created.stableId))
       .rejects.toBeInstanceOf(WorkspaceNoteUnavailableError);
+  });
+
+  it("does not ignore a malformed duplicate raw ID that names a valid target", async () => {
+    const created = await service.createNote("alice", {
+      path: "valid.md",
+      title: "Valid",
+      body: "body",
+    }, { sharedRequested: false });
+    const sharedDir = path.join(root, "_notes", "shared");
+    mkdirSync(sharedDir, { recursive: true });
+    writeFileSync(path.join(sharedDir, "malformed.md"), [
+      "---",
+      `id: ${created.stableId}`,
+      "id: another-id",
+      "title: Malformed",
+      "tags: []",
+      `created: ${new Date().toISOString()}`,
+      `updated: ${new Date().toISOString()}`,
+      "owner: alice",
+      "---",
+      "body",
+    ].join("\n"), "utf-8");
+
+    await expect(service.resolveActiveNote("alice", created.stableId))
+      .rejects.toBeInstanceOf(WorkspaceNoteUnavailableError);
+  });
+
+  it("fails closed for oversized active content and never returns a partial editable body", async () => {
+    const created = await service.createNote("alice", {
+      path: "oversized.md",
+      title: "Oversized",
+      body: "body",
+    }, { sharedRequested: false });
+    const file = path.join(
+      root,
+      "_notes",
+      "private",
+      "alice",
+      created.path,
+    );
+    writeFileSync(
+      file,
+      readFileSync(file, "utf-8") + "x".repeat(200_001),
+      "utf-8",
+    );
+
+    await expect(service.resolveActiveNote("alice", created.stableId))
+      .rejects.toBeInstanceOf(WorkspaceNoteUnavailableError);
+    await expect(service.readForEditing("alice", created.stableId))
+      .rejects.toBeInstanceOf(WorkspaceNoteUnavailableError);
+    expect(await service.resolveExactReference(
+      "alice",
+      `Read ${created.path}.`,
+    )).toBeNull();
   });
 
   it("enforces body hash conflicts and preserves title, path, visibility, and identity", async () => {
@@ -411,5 +472,106 @@ describe("CodaScopeWorkspaceNoteService", () => {
       created.stableId,
     ))).toBe(true);
     expect("deleteNote" in service).toBe(false);
+  });
+
+  it("confirms archive success after the physical move when index refresh throws", async () => {
+    const created = await service.createNote("alice", {
+      path: "partial-failure.md",
+      title: "Partial Failure",
+      body: "body",
+    }, { sharedRequested: false });
+    vi.spyOn(note as any, "refreshIndex")
+      .mockRejectedValueOnce(new Error("derived index failure"));
+
+    const grant = new WorkspaceTurnNoteGrantHolder();
+    grant.replace({
+      create: null,
+      readStableIds: [created.stableId],
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [created.stableId],
+    });
+    const actions = new WorkspaceMutationActionCollectorHolder();
+    actions.current = new WorkspaceMutationActionCollector();
+    const tools = buildWorkspaceNoteTools(
+      "alice",
+      service,
+      grant,
+      actions,
+    );
+
+    const result = await tools.archive_codascope_note.execute({
+      stableId: created.stableId,
+      expectedHash: created.contentHash,
+    } as any, {} as any);
+
+    expect(JSON.parse(String(result))).toMatchObject({
+      ok: true,
+      archived: true,
+      note: { stableId: created.stableId },
+    });
+    expect(await service.resolveActiveNote("alice", created.stableId)).toBeNull();
+    expect(await note.listArchived(
+      "codascope",
+      "private",
+      { userId: "alice" },
+    )).toContainEqual(expect.objectContaining({
+      noteId: created.stableId,
+      originalPath: created.path,
+      originalVisibility: "private",
+      archivedBy: "alice",
+    }));
+    expect(actions.current.drain()).toEqual([
+      expect.objectContaining({
+        type: "operation_completed",
+        attributes: expect.objectContaining({
+          stableId: created.stableId,
+          operation: "archive_codascope_note",
+        }),
+      }),
+    ]);
+  });
+
+  it("emits no receipt when archive fails before the physical move", async () => {
+    const created = await service.createNote("alice", {
+      path: "not-moved.md",
+      title: "Not Moved",
+      body: "body",
+    }, { sharedRequested: false });
+    vi.spyOn(bundle, "archiveNote")
+      .mockRejectedValueOnce(new Error("pre-move failure"));
+    const grant = new WorkspaceTurnNoteGrantHolder();
+    grant.replace({
+      create: null,
+      readStableIds: [created.stableId],
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [created.stableId],
+    });
+    const actions = new WorkspaceMutationActionCollectorHolder();
+    actions.current = new WorkspaceMutationActionCollector();
+    const tools = buildWorkspaceNoteTools(
+      "alice",
+      service,
+      grant,
+      actions,
+    );
+
+    const result = await tools.archive_codascope_note.execute({
+      stableId: created.stableId,
+      expectedHash: created.contentHash,
+    } as any, {} as any);
+
+    expect(String(result)).toBe("The requested CodaScope note is unavailable.");
+    expect(await service.resolveActiveNote("alice", created.stableId))
+      .toMatchObject({ path: created.path });
+    expect(await note.listArchived(
+      "codascope",
+      "private",
+      { userId: "alice" },
+    )).toEqual([]);
+    expect(actions.current.drain()).toEqual([]);
   });
 });

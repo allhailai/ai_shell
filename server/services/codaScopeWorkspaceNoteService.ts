@@ -6,12 +6,15 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import {
+  closeSync,
   existsSync,
-  readFileSync,
+  openSync,
+  readSync,
   readdirSync,
+  statSync,
 } from "node:fs";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   NoteFrontmatter,
   NoteVisibility,
@@ -31,11 +34,19 @@ import {
   assertSafePathSegment,
   resolveContainedRelativePath,
 } from "./codaScopePathSafety.js";
+import {
+  WORKSPACE_NOTE_MAX_BODY,
+  WORKSPACE_NOTE_MAX_PATH,
+  WORKSPACE_NOTE_MAX_STABLE_ID,
+  WORKSPACE_NOTE_MAX_TITLE,
+} from "../../src/apps/codascope/workspaceMutationActionValidation.js";
 
-const MAX_NOTE_PATH = 1_000;
-const MAX_NOTE_TITLE = 300;
-const MAX_NOTE_BODY = 200_000;
+const MAX_NOTE_PATH = WORKSPACE_NOTE_MAX_PATH;
+const MAX_NOTE_TITLE = WORKSPACE_NOTE_MAX_TITLE;
+const MAX_NOTE_BODY = WORKSPACE_NOTE_MAX_BODY;
 const MAX_ARCHIVE_REASON = 500;
+const MAX_FRONTMATTER_SCAN_BYTES = 32_768;
+const MAX_STORED_NOTE_BYTES = MAX_FRONTMATTER_SCAN_BYTES + (MAX_NOTE_BODY * 4);
 
 export interface WorkspaceNoteDto {
   stableId: string;
@@ -154,8 +165,8 @@ export class CodaScopeWorkspaceNoteService {
 
   /**
    * Validate metadata-only current-note context against current active state.
-   * A stale content hash is allowed because the subsequent read/tool hash is
-   * authoritative; identity, scope, visibility, path, and title must match.
+   * Every supplied identity field, including an optional content hash, must
+   * match current authoritative state. Stale context receives no deictic grant.
    */
   async resolveCurrentContext(
     actorId: string,
@@ -168,44 +179,65 @@ export class CodaScopeWorkspaceNoteService {
     return resolved.dto.visibility === current.visibility
       && resolved.dto.path === normalizeNotePath(current.path)
       && resolved.dto.title === current.title
+      && (current.contentHash === undefined
+        || resolved.dto.contentHash === current.contentHash)
       ? resolved.dto
       : null;
   }
 
   /**
-   * Resolve an exact active-note reference from a user turn. Stable IDs and
-   * contained relative paths are exact; titles use bounded word boundaries.
-   * Ambiguous matches fail closed.
+   * Resolve an explicit active-note reference from a user turn. Stable IDs and
+   * contained relative paths are exact token references. Titles match only
+   * quoted/backticked text or explicit "note named/titled" grammar.
    */
   async resolveExactReference(
     actorId: string,
     message: string,
   ): Promise<WorkspaceNoteDto | null> {
     this.assertActive();
-    const normalizedMessage = normalizeReference(message);
-    if (!normalizedMessage) return null;
-    const matches: WorkspaceNoteDto[] = [];
+    if (!message.trim()) return null;
+    const explicitTitles = extractExplicitTitleReferences(message);
+    const matches: ScannedNote[] = [];
+    let relevantMalformed = false;
     for (const candidate of this.scanEligibleActiveNotes(actorId)) {
-      const parsed = this.readScannedStrict(actorId, candidate, false);
-      if (!parsed) continue;
-      const identifiers = [
-        parsed.dto.stableId,
-        parsed.dto.path,
-        parsed.dto.path.replace(/\.md$/i, ""),
-        parsed.dto.title,
-      ].map(normalizeReference).filter(Boolean);
-      if (identifiers.some((identifier) => referenceMentioned(
-        normalizedMessage,
-        identifier,
-      ))) {
-        matches.push(parsed.dto);
+      const frontmatter = safeReadFrontmatter(candidate.absolutePath);
+      if (frontmatter === null) continue;
+      const rawIds = extractRawIdentities(frontmatter);
+      const rawIdReferenced = rawIds.some((id) =>
+        exactTokenMentioned(message, id));
+      const pathReferenced = exactTokenMentioned(message, candidate.path);
+      if (rawIds.length !== 1 && rawIdReferenced) {
+        relevantMalformed = true;
+        continue;
+      }
+      try {
+        const parsed = parseStrictStoredNote(frontmatter);
+        const titleReferenced = explicitTitles.has(
+          normalizeExplicitTitle(parsed.frontmatter.title),
+        );
+        if (rawIdReferenced || pathReferenced || titleReferenced) {
+          matches.push(candidate);
+        }
+      } catch {
+        if (rawIdReferenced || pathReferenced) relevantMalformed = true;
       }
     }
-    const distinct = [...new Map(matches.map((note) => [
-      `${note.visibility}\u0000${note.path}`,
-      note,
+    const distinct = [...new Map(matches.map((candidate) => [
+      `${candidate.visibility}\u0000${candidate.path}`,
+      candidate,
     ])).values()];
-    return distinct.length === 1 ? distinct[0] : null;
+    if (relevantMalformed || distinct.length !== 1) return null;
+    const selected = distinct[0]!;
+    if (!isBoundedStoredNote(selected.absolutePath)) return null;
+    try {
+      return (await this.readAtPath(
+        actorId,
+        selected.visibility,
+        selected.path,
+      ))?.dto ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async createNote(
@@ -427,30 +459,63 @@ export class CodaScopeWorkspaceNoteService {
       actor,
       current,
     ) => {
-      const meta = await this.bundleSvc.archiveNote(
-        "codascope",
-        current.dto.visibility,
-        { userId: actor },
-        current.dto.path,
-        archiveReason,
-      );
-      if (!meta || meta.noteId !== stableId) {
+      try {
+        await this.bundleSvc.archiveNote(
+          "codascope",
+          current.dto.visibility,
+          { userId: actor },
+          current.dto.path,
+          archiveReason,
+        );
+      } catch {
+        // Authoritative active/archive readback below decides the outcome.
+      }
+      if (!await this.confirmArchivedState(actor, current)) {
         throw new WorkspaceNoteUnavailableError();
       }
-      this.linkIndexSvc.removeNote(
-        "codascope",
-        current.dto.visibility,
-        { userId: actor },
-        stableId,
-      );
-      this.audit("note.archived", actor, current.dto, archiveReason
-        ? { reason: archiveReason }
-        : undefined);
-      if (await this.resolveStrict(actor, stableId)) {
-        throw new Error("Archived CodaScope note remained active.");
+      try {
+        this.linkIndexSvc.removeNote(
+          "codascope",
+          current.dto.visibility,
+          { userId: actor },
+          stableId,
+        );
+      } catch {
+        // The recoverable archive is authoritative; indexes are derived.
+      }
+      try {
+        this.audit("note.archived", actor, current.dto, archiveReason
+          ? { reason: archiveReason }
+          : undefined);
+      } catch {
+        // Preserve confirmed archive success after derived audit failure.
       }
       return current.dto;
     });
+  }
+
+  private async confirmArchivedState(
+    actor: string,
+    current: ResolvedWorkspaceNote,
+  ): Promise<boolean> {
+    try {
+      if (await this.resolveStrict(actor, current.dto.stableId)) return false;
+      const archived = await this.noteSvc.listArchived(
+        "codascope",
+        current.dto.visibility,
+        { userId: actor },
+      );
+      const matches = archived.filter((meta) =>
+        meta.kind !== "folder"
+        && meta.noteId === current.dto.stableId
+        && meta.originalScope === "codascope"
+        && meta.originalVisibility === current.dto.visibility
+        && normalizeNotePath(meta.originalPath) === current.dto.path
+        && meta.archivedBy === actor);
+      return matches.length === 1;
+    } catch {
+      return false;
+    }
   }
 
   private async mutateExisting<T>(
@@ -533,11 +598,21 @@ export class CodaScopeWorkspaceNoteService {
     let relevantMalformed = false;
 
     for (const candidate of this.scanEligibleActiveNotes(actor)) {
-      const raw = safeRead(candidate.absolutePath);
-      if (raw === null) continue;
-      const rawId = extractRawIdentity(raw);
-      if (rawId?.toLocaleLowerCase() !== id.toLocaleLowerCase()) continue;
+      const frontmatter = safeReadFrontmatter(candidate.absolutePath);
+      if (frontmatter === null) continue;
+      const rawIds = extractRawIdentities(frontmatter);
+      const matchingRawIds = rawIds.filter((rawId) =>
+        rawId.toLocaleLowerCase() === id.toLocaleLowerCase());
+      if (matchingRawIds.length === 0) continue;
+      if (rawIds.length !== 1 || matchingRawIds.length !== 1) {
+        relevantMalformed = true;
+        continue;
+      }
       try {
+        if (!isBoundedStoredNote(candidate.absolutePath)) {
+          relevantMalformed = true;
+          continue;
+        }
         const parsed = await this.readAtPath(
           actor,
           candidate.visibility,
@@ -568,34 +643,6 @@ export class CodaScopeWorkspaceNoteService {
     );
     if (!result) return null;
     return strictResult(visibility, normalizeNotePath(notePath), result);
-  }
-
-  private readScannedStrict(
-    actorId: string,
-    candidate: ScannedNote,
-    throwOnMalformed: boolean,
-  ): ResolvedWorkspaceNote | null {
-    const content = safeRead(candidate.absolutePath);
-    if (content === null) return null;
-    try {
-      const parsed = parseStrictStoredNote(content);
-      return {
-        dto: {
-          stableId: parsed.frontmatter.id,
-          scope: "codascope",
-          visibility: candidate.visibility,
-          path: candidate.path,
-          title: parsed.frontmatter.title,
-          contentHash: md5(content),
-        },
-        body: parsed.body,
-        content,
-        frontmatter: parsed.frontmatter,
-      };
-    } catch (error) {
-      if (throwOnMalformed) throw error;
-      return null;
-    }
   }
 
   private scanEligibleActiveNotes(actorId: string): ScannedNote[] {
@@ -663,6 +710,7 @@ function strictResult(
   result: NoteReadResult,
 ): ResolvedWorkspaceNote {
   const parsed = parseStrictStoredNote(result.content);
+  const canonicalPath = validateStoredNotePath(notePath);
   if (parsed.frontmatter.id !== result.frontmatter.id) {
     throw new WorkspaceNoteUnavailableError();
   }
@@ -671,7 +719,7 @@ function strictResult(
       stableId: parsed.frontmatter.id,
       scope: "codascope",
       visibility,
-      path: notePath,
+      path: canonicalPath,
       title: parsed.frontmatter.title,
       contentHash: result.contentHash,
     },
@@ -689,6 +737,9 @@ function parseStrictStoredNote(content: string): {
   if (!match) throw new WorkspaceNoteUnavailableError();
   const yaml = match[1] ?? "";
   const body = match[2] ?? "";
+  if (body.length > MAX_NOTE_BODY) {
+    throw new WorkspaceNoteUnavailableError();
+  }
   const id = requiredYamlScalar(yaml, "id");
   const title = requiredYamlScalar(yaml, "title");
   const created = requiredYamlScalar(yaml, "created");
@@ -701,7 +752,12 @@ function parseStrictStoredNote(content: string): {
     throw new WorkspaceNoteUnavailableError();
   }
   assertSafePathSegment(id, "workspace note stable ID");
-  if (!title || title.length > MAX_NOTE_TITLE || !owner || owner.length > 1_000) {
+  if (id.length > WORKSPACE_NOTE_MAX_STABLE_ID
+    || !title
+    || title.length > MAX_NOTE_TITLE
+    || /[\r\n\u0000]/.test(title)
+    || !owner
+    || owner.length > 1_000) {
     throw new WorkspaceNoteUnavailableError();
   }
   if (!validTimestamp(created) || !validTimestamp(updated)) {
@@ -797,7 +853,7 @@ function validateActor(value: string): string {
 }
 
 function validateStableId(value: string): string {
-  if (typeof value !== "string" || value.length > 255) {
+  if (typeof value !== "string" || value.length > WORKSPACE_NOTE_MAX_STABLE_ID) {
     throw new WorkspaceNoteUnavailableError();
   }
   try {
@@ -829,7 +885,13 @@ function validateNotePath(value: string): string {
   } catch {
     throw new WorkspaceNoteInvalidInputError("path must be a contained relative note path.");
   }
-  if (path.basename(normalized).startsWith("_")) {
+  const segments = normalized.split("/");
+  const filename = segments.at(-1) ?? "";
+  if (filename.startsWith("_")
+    || filename.startsWith(".")
+    || segments.slice(0, -1).some((segment) =>
+      segment.startsWith(".")
+      || (segment.startsWith("_") && segment !== "_inbox"))) {
     throw new WorkspaceNoteInvalidInputError("path uses a reserved note filename.");
   }
   return normalized;
@@ -837,6 +899,17 @@ function validateNotePath(value: string): string {
 
 function normalizeNotePath(value: string): string {
   return value.split("\\").join("/");
+}
+
+function validateStoredNotePath(value: string): string {
+  try {
+    const normalized = normalizeNotePath(value);
+    const validated = validateNotePath(value);
+    if (validated !== normalized) throw new Error("noncanonical note path");
+    return validated;
+  } catch {
+    throw new WorkspaceNoteUnavailableError();
+  }
 }
 
 function validateTitle(value: string): string {
@@ -870,19 +943,45 @@ function boundedText(
   return trimmed;
 }
 
-function extractRawIdentity(content: string): string | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return null;
+function extractRawIdentities(content: string): string[] {
+  const match = content.match(/^---\r?\n([\s\S]*?)(?:\r?\n---|$)/);
+  if (!match) return [];
   const values = (match[1] ?? "").match(/^id:\s*(.+)$/gm) ?? [];
-  if (values.length !== 1) return null;
-  return values[0].replace(/^id:\s*/, "").trim().replace(/^["']|["']$/g, "");
+  return values.map((value) =>
+    value.replace(/^id:\s*/, "").trim().replace(/^["']|["']$/g, ""));
 }
 
-function safeRead(filePath: string): string | null {
+function safeReadFrontmatter(filePath: string): string | null {
+  let descriptor: number | undefined;
   try {
-    return readFileSync(filePath, "utf-8");
+    descriptor = openSync(filePath, "r");
+    const buffer = Buffer.alloc(MAX_FRONTMATTER_SCAN_BYTES);
+    const bytesRead = readSync(
+      descriptor,
+      buffer,
+      0,
+      MAX_FRONTMATTER_SCAN_BYTES,
+      0,
+    );
+    return buffer.subarray(0, bytesRead).toString("utf-8");
   } catch {
     return null;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Candidate remains unavailable; no absolute path reaches callers.
+      }
+    }
+  }
+}
+
+function isBoundedStoredNote(filePath: string): boolean {
+  try {
+    return statSync(filePath).size <= MAX_STORED_NOTE_BYTES;
+  } catch {
+    return false;
   }
 }
 
@@ -890,21 +989,37 @@ function validTimestamp(value: string): boolean {
   return Number.isFinite(Date.parse(value));
 }
 
-function normalizeReference(value: string): string {
-  return value.toLocaleLowerCase()
-    .replace(/[’']/g, "")
-    .replace(/[^a-z0-9._/-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function extractExplicitTitleReferences(message: string): Set<string> {
+  const titles = new Set<string>();
+  const add = (value: string | undefined): void => {
+    const normalized = normalizeExplicitTitle(value ?? "");
+    if (normalized) titles.add(normalized);
+  };
+  for (const match of message.matchAll(
+    /`([^`\r\n]+)`|"([^"\r\n]+)"|'([^'\r\n]+)'/g,
+  )) {
+    add(match[1] ?? match[2] ?? match[3]);
+  }
+  for (const match of message.matchAll(
+    /\bnote\s+(?:named|titled)\s+([^,;.!?\r\n]+)(?=[,;.!?\r\n]|$)/gi,
+  )) {
+    add((match[1] ?? "").replace(/^[`"']|[`"']$/g, "").trim());
+  }
+  return titles;
 }
 
-function referenceMentioned(message: string, reference: string): boolean {
+function normalizeExplicitTitle(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function exactTokenMentioned(message: string, reference: string): boolean {
   if (!reference) return false;
-  return ` ${message} `.includes(` ${reference} `);
-}
-
-function md5(value: string): string {
-  return createHash("md5").update(value).digest("hex");
+  const escaped = reference.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const delimiter = "[\\s\"'`()\\[\\]{},:;.!?]";
+  return new RegExp(
+    `(?:^|${delimiter})${escaped}(?=$|${delimiter})`,
+    "i",
+  ).test(message);
 }
 
 function isConflict(

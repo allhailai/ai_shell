@@ -603,17 +603,31 @@ negation forms are evaluated around capability, project, and epic references;
 negated or contradictory signals never widen a grant, while an independently
 affirmed narrower resource can still be isolated.
 
-Phase 5 adds a second immutable one-turn grant dedicated to CodaScope notes.
-It is derived from the authenticated current message plus validated
-metadata-only current-note context, distinguishes create, content edit,
-display-title change, visibility change, archive, and authorized read, and
-binds existing-note operations to freshly resolved stable IDs. Negated,
-hypothetical, quoted, explanatory, ambiguous, inactive, corrupt, duplicated,
-or inaccessible targets receive no destructive grant. Explicit shared
-creation is recorded separately from the default-private create grant. Both
-grant holders are replaced before each pooled-agent run, revalidated at tool
-execution, and cleared after completion, failure, cancellation, agent
-replacement, or root cutover.
+Phase 5 adds a second one-turn grant dedicated to CodaScope notes. It is
+derived from the authenticated current message plus validated metadata-only
+current-note context, distinguishes create, content edit, display-title
+change, visibility change, archive, and authorized read, and binds
+existing-note operations to freshly resolved stable IDs. Deictic `this note`,
+`current note`, `that note`, and applicable `it` references resolve only
+through current-note context and take precedence over named-reference
+discovery; stale or absent context never falls back to a title match. Titles
+resolve only when quoted/backticked or introduced by explicit `note named` /
+`note titled` grammar. Stable IDs and contained relative paths remain exact,
+punctuation-insensitive references. Negated, hypothetical, explanatory,
+ambiguous, inactive, corrupt, duplicated, or inaccessible targets receive no
+destructive grant.
+
+The immutable grant DTO carries bounded budgets, while its actor/pool/run-local
+holder is consumable. A singular create permits one confirmed creation;
+explicit numeric plurals permit that bounded count up to 25; ambiguous plurals
+and mixed visibility plans fail closed. Each existing-note operation/target
+pair permits one confirmed success. Mutation tools atomically reserve both the
+operation budget and one of the 25 trusted-action slots before service I/O,
+commit both after confirmed durable success, and release both for schema,
+authorization, absence, or optimistic-conflict outcomes. Read authority is
+repeatable. Holders are replaced before each pooled-agent run, revalidated at
+tool execution, and cleared after completion, failure, cancellation, agent
+replacement, idle eviction, or root cutover.
 
 `CodaScopeWorkspaceNoteService` is the root-bound sole workspace-assistant
 mutation boundary. It composes the graph's existing note, managed-bundle,
@@ -621,8 +635,13 @@ transfer, annotation, backlink/index, preference, and audit services. Stable
 IDs resolve freshly across only the authenticated actor's active private
 CodaScope root and the active shared CodaScope root. Archives are never
 searched or restored, private roots for other actors are never inspected,
-duplicates and relevant malformed frontmatter fail closed, and callers receive
-only contained relative paths. The canonical DTO is `stableId`, fixed
+duplicates and relevant malformed frontmatter—including duplicate raw `id:`
+fields that name the requested identity—fail closed, and callers receive only
+contained relative paths. Identity/reference scans read only a bounded
+frontmatter prefix. A targeted full read is allowed only for a uniquely
+resolved candidate and rejects bodies above the 200,000-character service
+limit; tools never return a truncated body that could be mistaken for complete
+editable content. The canonical DTO is `stableId`, fixed
 `scope: "codascope"`, private/shared `visibility`, relative `path`, display
 `title`, and `contentHash`.
 
@@ -636,8 +655,14 @@ identity, path, visibility, and unrelated server metadata, reconcile
 annotations/backlinks/indexes, and audit like normal note routes. Visibility
 uses `CodaScopeNoteTransferService` to move the complete bundle and coordinated
 preferences/index/audit state. Archive uses the recoverable managed-bundle
-flow; no workspace tool or stable-ID route exposes permanent deletion,
-restore, project/epic scope, or an arbitrary filesystem path.
+flow. If the underlying archive throws after moving the bundle, the service
+reports success only when authoritative readback proves the stable ID absent
+from all eligible active roots and finds exactly one matching archive record
+for the same actor-authorized library, original path, scope, visibility, and
+stable ID. Active absence alone is never success. Confirmed archives finish
+derived index/audit cleanup best-effort and return the pre-archive canonical
+DTO. No workspace tool or stable-ID route exposes permanent deletion, restore,
+project/epic scope, or an arbitrary filesystem path.
 
 The exact workspace note tool set is `read_codascope_note`,
 `create_codascope_note`, `edit_codascope_note`,
@@ -672,14 +697,19 @@ never recorded. The holder is drained on success and cleared on cancellation,
 error, agent replacement, and root cutover.
 
 Successful workspace note tools also collect typed server-confirmed mutation
-records outside model text. A successful authoritative create/readback emits
-one `note_created` action per distinct stable ID in tool execution order, with
-the complete canonical DTO attributes and a bounded description. Repeated
-delivery of the same created stable ID is suppressed. The generic XML action
-parser deliberately does not accept `note_created`, so assistant prose cannot
-forge this completion. Non-create trusted records remain source-distinguishable
-because workspace conversations persist only actions from the typed collector.
-Persisted action DTOs are structurally validated on every reload.
+records outside model text. Receipt capacity is reserved before mutation, so a
+successful authoritative create/readback always emits exactly one
+`note_created`, and every other confirmed note mutation emits its canonical
+`operation_completed` action in reservation order. The collector never
+silently drops a 26th action; no 26th mutation can begin. Only exact duplicate
+delivery is deduplicated. The generic XML action parser deliberately does not
+accept `note_created`, so assistant prose cannot forge this completion.
+Server persistence/reload and frontend normalization share the canonical
+validator: safe bounded stable ID, fixed scope, visibility, contained
+non-system `.md` path, bounded newline/NUL-free title, hexadecimal content
+hash, bounded description, exact attributes, and one of the four supported
+non-create operation names. One malformed action rejects the complete
+workspace record/action collection.
 
 Workspace images reuse the project-chat MIME allowlist, 5 MB service limit,
 safe generated filenames, and single-segment path validation, but they live

@@ -7,6 +7,7 @@ import path from "node:path";
 import { createAuthMiddleware } from "../middleware/auth.js";
 import type { SecretService } from "../services/secretService.js";
 import { codaScopePersistence } from "../services/codaScopePersistence.js";
+import { WorkspaceTurnReadGrantHolder } from "../services/codaScopeWorkspaceReadGrant.js";
 import {
   changeProjectsRoot,
   createRouteContext,
@@ -121,7 +122,7 @@ describe("CodaScope root-bound service lifecycle", () => {
       lastUsed: Date.now(),
       busy: true,
       collectorHolder: {},
-      workspaceGrantHolder: {},
+      workspaceGrantHolder: new WorkspaceTurnReadGrantHolder(),
     });
     (servicesA.agentSvc as any).allAgents.add(fakeAgent);
     (servicesA.agentSvc as any).allAgents.add(fakeWorkspaceAgent);

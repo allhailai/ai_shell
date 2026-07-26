@@ -12,22 +12,25 @@ import {
   WorkspaceNoteUnavailableError,
 } from "../codaScopeWorkspaceNoteService.js";
 import type { WorkspaceTurnNoteGrantHolder } from "../codaScopeWorkspaceNoteGrant.js";
+import type { WorkspaceNoteGrantReservation } from "../codaScopeWorkspaceNoteGrant.js";
+import type {
+  WorkspaceMutationActionCollectorHolder,
+  WorkspaceMutationActionReservation,
+} from "../codaScopeWorkspaceMutationActions.js";
 import {
-  canArchiveWorkspaceNote,
-  canChangeWorkspaceNoteVisibility,
-  canEditWorkspaceNoteBody,
-  canEditWorkspaceNoteTitle,
-  canReadWorkspaceNote,
-} from "../codaScopeWorkspaceNoteGrant.js";
-import type { WorkspaceMutationActionCollectorHolder } from "../codaScopeWorkspaceMutationActions.js";
+  WORKSPACE_NOTE_MAX_BODY,
+  WORKSPACE_NOTE_MAX_PATH,
+  WORKSPACE_NOTE_MAX_STABLE_ID,
+  WORKSPACE_NOTE_MAX_TITLE,
+} from "../../../src/apps/codascope/workspaceMutationActionValidation.js";
 
 const UNAUTHORIZED =
   "This CodaScope note operation is not authorized for the current turn. Ask the user to clarify the exact note and operation.";
 const UNAVAILABLE = "The requested CodaScope note is unavailable.";
 const INVALID = "The CodaScope note operation input is invalid.";
-const MAX_BODY = 200_000;
-const MAX_TITLE = 300;
-const MAX_PATH = 1_000;
+const MAX_BODY = WORKSPACE_NOTE_MAX_BODY;
+const MAX_TITLE = WORKSPACE_NOTE_MAX_TITLE;
+const MAX_PATH = WORKSPACE_NOTE_MAX_PATH;
 const MAX_REASON = 500;
 
 type ToolArgs = Record<string, unknown>;
@@ -47,12 +50,19 @@ export function buildWorkspaceNoteTools(
       }, ["stableId"]),
       execute: async (rawArgs) => controlled(async () => {
         const args = exactArgs(rawArgs, ["stableId"]);
-        const stableId = requiredString(args, "stableId", 255);
-        if (!canReadWorkspaceNote(grantHolder.current, stableId)) {
+        const stableId = requiredString(
+          args,
+          "stableId",
+          WORKSPACE_NOTE_MAX_STABLE_ID,
+        );
+        if (!grantHolder.canRead(stableId)) {
           throw new WorkspaceNoteGrantRefusal();
         }
         const note = await noteService.readForEditing(actorId, stableId);
         if (!note) throw new WorkspaceNoteUnavailableError();
+        if (typeof note.body !== "string" || note.body.length > MAX_BODY) {
+          throw new WorkspaceNoteUnavailableError();
+        }
         return JSON.stringify(note);
       }),
     },
@@ -86,21 +96,20 @@ export function buildWorkspaceNoteTools(
       }, ["path", "title", "body"]),
       execute: async (rawArgs) => controlled(async () => {
         const args = exactArgs(rawArgs, ["path", "title", "body", "visibility"]);
-        const createGrant = grantHolder.current.create;
-        if (!createGrant?.allowed) throw new WorkspaceNoteGrantRefusal();
         const visibility = optionalVisibility(args, "visibility") ?? "private";
-        if (visibility === "shared" && !createGrant.sharedRequested) {
-          throw new WorkspaceNoteGrantRefusal();
-        }
-        const note = await noteService.createNote(actorId, {
-          path: requiredString(args, "path", MAX_PATH),
-          title: requiredString(args, "title", MAX_TITLE),
-          body: requiredString(args, "body", MAX_BODY, true),
-          visibility,
-        }, {
-          sharedRequested: createGrant.sharedRequested,
-        });
-        actionHolder.collectNoteCreated(note);
+        const note = await withMutationReservations(
+          grantHolder.reserveCreate(visibility),
+          actionHolder,
+          () => noteService.createNote(actorId, {
+            path: requiredString(args, "path", MAX_PATH),
+            title: requiredString(args, "title", MAX_TITLE),
+            body: requiredString(args, "body", MAX_BODY, true),
+            visibility,
+          }, {
+            sharedRequested: visibility === "shared",
+          }),
+          (reservation, created) => reservation.commitNoteCreated(created),
+        );
         return JSON.stringify({ ok: true, note });
       }),
     },
@@ -119,20 +128,25 @@ export function buildWorkspaceNoteTools(
       }, ["stableId", "body", "expectedHash"]),
       execute: async (rawArgs) => controlled(async () => {
         const args = exactArgs(rawArgs, ["stableId", "body", "expectedHash"]);
-        const stableId = requiredString(args, "stableId", 255);
-        if (!canEditWorkspaceNoteBody(grantHolder.current, stableId)) {
-          throw new WorkspaceNoteGrantRefusal();
-        }
-        const note = await noteService.replaceBody(
-          actorId,
-          stableId,
-          requiredString(args, "body", MAX_BODY, true),
-          requiredHash(args),
+        const stableId = requiredString(
+          args,
+          "stableId",
+          WORKSPACE_NOTE_MAX_STABLE_ID,
         );
-        actionHolder.collectNoteMutation(
-          "edit_codascope_note",
-          note,
-          `Updated CodaScope note "${note.title}".`,
+        const note = await withMutationReservations(
+          grantHolder.reserveMutation("edit_codascope_note", stableId),
+          actionHolder,
+          () => noteService.replaceBody(
+            actorId,
+            stableId,
+            requiredString(args, "body", MAX_BODY, true),
+            requiredHash(args),
+          ),
+          (reservation, updated) => reservation.commitNoteMutation(
+            "edit_codascope_note",
+            updated,
+            `Updated CodaScope note "${updated.title}".`,
+          ),
         );
         return JSON.stringify({ ok: true, note });
       }),
@@ -153,20 +167,25 @@ export function buildWorkspaceNoteTools(
       }, ["stableId", "title", "expectedHash"]),
       execute: async (rawArgs) => controlled(async () => {
         const args = exactArgs(rawArgs, ["stableId", "title", "expectedHash"]);
-        const stableId = requiredString(args, "stableId", 255);
-        if (!canEditWorkspaceNoteTitle(grantHolder.current, stableId)) {
-          throw new WorkspaceNoteGrantRefusal();
-        }
-        const note = await noteService.setTitle(
-          actorId,
-          stableId,
-          requiredString(args, "title", MAX_TITLE),
-          requiredHash(args),
+        const stableId = requiredString(
+          args,
+          "stableId",
+          WORKSPACE_NOTE_MAX_STABLE_ID,
         );
-        actionHolder.collectNoteMutation(
-          "set_codascope_note_title",
-          note,
-          `Changed the display title to "${note.title}".`,
+        const note = await withMutationReservations(
+          grantHolder.reserveMutation("set_codascope_note_title", stableId),
+          actionHolder,
+          () => noteService.setTitle(
+            actorId,
+            stableId,
+            requiredString(args, "title", MAX_TITLE),
+            requiredHash(args),
+          ),
+          (reservation, updated) => reservation.commitNoteMutation(
+            "set_codascope_note_title",
+            updated,
+            `Changed the display title to "${updated.title}".`,
+          ),
         );
         return JSON.stringify({ ok: true, note });
       }),
@@ -190,25 +209,30 @@ export function buildWorkspaceNoteTools(
           "visibility",
           "expectedHash",
         ]);
-        const stableId = requiredString(args, "stableId", 255);
-        const visibility = requiredVisibility(args, "visibility");
-        if (!canChangeWorkspaceNoteVisibility(
-          grantHolder.current,
-          stableId,
-          visibility,
-        )) {
-          throw new WorkspaceNoteGrantRefusal();
-        }
-        const note = await noteService.setVisibility(
-          actorId,
-          stableId,
-          visibility,
-          requiredHash(args),
+        const stableId = requiredString(
+          args,
+          "stableId",
+          WORKSPACE_NOTE_MAX_STABLE_ID,
         );
-        actionHolder.collectNoteMutation(
-          "set_codascope_note_visibility",
-          note,
-          `Changed CodaScope note visibility to ${visibility}.`,
+        const visibility = requiredVisibility(args, "visibility");
+        const note = await withMutationReservations(
+          grantHolder.reserveMutation(
+            "set_codascope_note_visibility",
+            stableId,
+            visibility,
+          ),
+          actionHolder,
+          () => noteService.setVisibility(
+            actorId,
+            stableId,
+            visibility,
+            requiredHash(args),
+          ),
+          (reservation, updated) => reservation.commitNoteMutation(
+            "set_codascope_note_visibility",
+            updated,
+            `Changed CodaScope note visibility to ${visibility}.`,
+          ),
         );
         return JSON.stringify({ ok: true, note });
       }),
@@ -228,20 +252,25 @@ export function buildWorkspaceNoteTools(
       }, ["stableId", "expectedHash"]),
       execute: async (rawArgs) => controlled(async () => {
         const args = exactArgs(rawArgs, ["stableId", "expectedHash", "reason"]);
-        const stableId = requiredString(args, "stableId", 255);
-        if (!canArchiveWorkspaceNote(grantHolder.current, stableId)) {
-          throw new WorkspaceNoteGrantRefusal();
-        }
-        const note = await noteService.archiveNote(
-          actorId,
-          stableId,
-          requiredHash(args),
-          optionalString(args, "reason", MAX_REASON),
+        const stableId = requiredString(
+          args,
+          "stableId",
+          WORKSPACE_NOTE_MAX_STABLE_ID,
         );
-        actionHolder.collectNoteMutation(
-          "archive_codascope_note",
-          note,
-          `Archived CodaScope note "${note.title}".`,
+        const note = await withMutationReservations(
+          grantHolder.reserveMutation("archive_codascope_note", stableId),
+          actionHolder,
+          () => noteService.archiveNote(
+            actorId,
+            stableId,
+            requiredHash(args),
+            optionalString(args, "reason", MAX_REASON),
+          ),
+          (reservation, archived) => reservation.commitNoteMutation(
+            "archive_codascope_note",
+            archived,
+            `Archived CodaScope note "${archived.title}".`,
+          ),
         );
         return JSON.stringify({ ok: true, archived: true, note });
       }),
@@ -250,6 +279,44 @@ export function buildWorkspaceNoteTools(
 }
 
 class WorkspaceNoteGrantRefusal extends Error {}
+
+async function withMutationReservations<T>(
+  grantReservation: WorkspaceNoteGrantReservation | null,
+  actionHolder: WorkspaceMutationActionCollectorHolder,
+  mutation: () => Promise<T>,
+  commitReceipt: (
+    reservation: WorkspaceMutationActionReservation,
+    result: T,
+  ) => void,
+): Promise<T> {
+  if (!grantReservation) throw new WorkspaceNoteGrantRefusal();
+  const actionReservation = actionHolder.reserve();
+  if (!actionReservation) {
+    grantReservation.release();
+    throw new WorkspaceNoteGrantRefusal();
+  }
+  try {
+    const result = await mutation();
+    commitReceipt(actionReservation, result);
+    grantReservation.commit();
+    return result;
+  } catch (error) {
+    if (isConfirmedNonMutationFailure(error)) {
+      grantReservation.release();
+      actionReservation.release();
+    } else {
+      grantReservation.commit();
+      actionReservation.abandon();
+    }
+    throw error;
+  }
+}
+
+function isConfirmedNonMutationFailure(error: unknown): boolean {
+  return error instanceof WorkspaceNoteConflictError
+    || error instanceof WorkspaceNoteUnavailableError
+    || error instanceof WorkspaceNoteInvalidInputError;
+}
 
 async function controlled(operation: () => Promise<string>): Promise<string> {
   try {
@@ -337,7 +404,7 @@ function idProperty(): SDKJsonValue {
     type: "string",
     description: "Server-issued stable CodaScope note ID",
     minLength: 1,
-    maxLength: 255,
+    maxLength: WORKSPACE_NOTE_MAX_STABLE_ID,
   };
 }
 

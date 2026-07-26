@@ -365,7 +365,7 @@ describe("assistant conversation API boundary", () => {
     await expect(api.readConversation("conv-1")).resolves.toBeNull();
   });
 
-  it("strictly retains canonical workspace note actions and rejects malformed ones", async () => {
+  it("strictly retains canonical workspace note actions", async () => {
     const action = {
       type: "note_created",
       attributes: {
@@ -378,7 +378,59 @@ describe("assistant conversation API boundary", () => {
       },
       description: 'Created CodaScope note "One".',
     };
+    const operation = {
+      ...action,
+      type: "operation_completed",
+      attributes: {
+        operation: "archive_codascope_note",
+        ...action.attributes,
+      },
+      description: 'Archived CodaScope note "One".',
+    };
     const validApi = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            role: "assistant",
+            metadata: { actions: [action, operation] },
+          })],
+        }),
+      })),
+    );
+    await expect(validApi.readConversation("conv-1")).resolves.toMatchObject({
+      messages: [{
+        metadata: { actions: [action, operation] },
+      }],
+    });
+  });
+
+  it.each([
+    ["traversal stable ID", { stableId: "../note" }],
+    ["absolute path", { path: "/absolute.md" }],
+    ["non-Markdown path", { path: "one.txt" }],
+    ["reserved filename", { path: "notes/_index.md" }],
+    ["oversized title", { title: "x".repeat(301) }],
+    ["invalid hash", { contentHash: "bad" }],
+    ["unknown attribute", { actorId: "mallory" }],
+  ])("rejects an entire workspace record containing %s", async (
+    _label,
+    attributePatch,
+  ) => {
+    const action = {
+      type: "note_created",
+      attributes: {
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "notes/one.md",
+        title: "One",
+        contentHash: "a".repeat(32),
+        ...attributePatch,
+      },
+      description: 'Created CodaScope note "One".',
+    };
+    const api = createAssistantConversationApi(
       workspaceScope,
       vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
         conversation: workspaceConversation({
@@ -389,33 +441,50 @@ describe("assistant conversation API boundary", () => {
         }),
       })),
     );
-    await expect(validApi.readConversation("conv-1")).resolves.toMatchObject({
-      messages: [{
-        metadata: { actions: [action] },
-      }],
-    });
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+  });
 
-    const invalidApi = createAssistantConversationApi(
-      workspaceScope,
-      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
-        conversation: workspaceConversation({
-          messages: [workspaceMessage({
-            role: "assistant",
-            metadata: {
-              actions: [{
-                ...action,
-                attributes: {
-                  ...action.attributes,
-                  scope: "project",
-                  path: "/absolute.md",
-                },
-              }],
-            },
-          })],
-        }),
-      })),
-    );
-    await expect(invalidApi.readConversation("conv-1")).resolves.toBeNull();
+  it("rejects missing fields, oversized descriptions, and unknown receipt operations", async () => {
+    const base = {
+      type: "operation_completed",
+      attributes: {
+        operation: "archive_codascope_note",
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "notes/one.md",
+        title: "One",
+        contentHash: "a".repeat(32),
+      },
+      description: "Archived note.",
+    };
+    const missingPath = {
+      ...base,
+      attributes: Object.fromEntries(
+        Object.entries(base.attributes).filter(([key]) => key !== "path"),
+      ),
+    };
+    for (const action of [
+      missingPath,
+      { ...base, description: "x".repeat(501) },
+      {
+        ...base,
+        attributes: { ...base.attributes, operation: "delete_note" },
+      },
+    ]) {
+      const api = createAssistantConversationApi(
+        workspaceScope,
+        vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+          conversation: workspaceConversation({
+            messages: [workspaceMessage({
+              role: "assistant",
+              metadata: { actions: [action] },
+            })],
+          }),
+        })),
+      );
+      await expect(api.readConversation("conv-1")).resolves.toBeNull();
+    }
   });
 
   it("rejects duplicate message IDs", async () => {

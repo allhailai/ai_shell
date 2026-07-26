@@ -1,6 +1,5 @@
 import type {
   AssistantScope,
-  CodaScopeAction,
   Conversation,
   ConversationMessage,
   ConversationSummary,
@@ -11,6 +10,9 @@ import type {
   WorkspaceRetrievedSourceReference,
 } from "./codaScopeTypes";
 import { getAssistantScopeKey } from "./assistantScope";
+import {
+  normalizeCanonicalWorkspaceMutationActions,
+} from "./workspaceMutationActionValidation";
 
 export interface AssistantEndpointAdapter {
   scope: AssistantScope;
@@ -336,58 +338,9 @@ function normalizeWorkspaceMessageMetadata(
   value: Record<string, unknown>,
 ): Record<string, unknown> | null {
   if (value.actions === undefined) return { ...value };
-  if (!Array.isArray(value.actions) || value.actions.length > 25) return null;
-  const actions: CodaScopeAction[] = [];
-  const created = new Set<string>();
-  for (const candidate of value.actions) {
-    const action = normalizeWorkspaceMutationAction(candidate);
-    if (!action) return null;
-    if (action.type === "note_created") {
-      if (created.has(action.attributes.stableId)) continue;
-      created.add(action.attributes.stableId);
-    }
-    actions.push(action);
-  }
+  const actions = normalizeCanonicalWorkspaceMutationActions(value.actions);
+  if (!actions) return null;
   return { ...value, actions };
-}
-
-function normalizeWorkspaceMutationAction(
-  value: unknown,
-): CodaScopeAction | null {
-  if (!isRecord(value)
-    || !hasOnlyKeys(value, ["type", "attributes", "description"])
-    || (value.type !== "note_created" && value.type !== "operation_completed")
-    || !isRecord(value.attributes)
-    || !isNonEmptyString(value.description)
-    || value.description.length > 500) {
-    return null;
-  }
-  const required = value.type === "note_created"
-    ? ["stableId", "scope", "visibility", "path", "title", "contentHash"]
-    : [
-        "operation",
-        "stableId",
-        "scope",
-        "visibility",
-        "path",
-        "title",
-        "contentHash",
-      ];
-  const attributes = value.attributes;
-  if (!hasOnlyKeys(attributes, required)
-    || required.some((field) => !isNonEmptyString(attributes[field]))
-    || attributes.scope !== "codascope"
-    || (attributes.visibility !== "private"
-      && attributes.visibility !== "shared")
-    || !/^[a-f0-9]{32,128}$/i.test(String(attributes.contentHash))
-    || !isContainedWorkspaceNotePath(attributes.path)) {
-    return null;
-  }
-  return {
-    type: value.type,
-    attributes: { ...(attributes as Record<string, string>) },
-    description: value.description,
-  };
 }
 
 function normalizeConversationSummary(
@@ -719,20 +672,6 @@ function isNullableNonEmptyString(
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
-}
-
-function isContainedWorkspaceNotePath(value: unknown): value is string {
-  if (!isNonEmptyString(value)
-    || value.startsWith("/")
-    || value.startsWith("\\")
-    || /^[a-z]:[\\/]/i.test(value)
-    || value.includes("\\")
-    || value.includes("\u0000")) {
-    return false;
-  }
-  const segments = value.split("/");
-  return segments.every((segment) =>
-    segment.length > 0 && segment !== "." && segment !== "..");
 }
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {

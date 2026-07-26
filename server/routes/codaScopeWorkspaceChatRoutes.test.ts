@@ -129,6 +129,15 @@ const noteCreatedAction = {
   description: 'Created CodaScope note "One".',
 };
 
+const archivedNoteAction = {
+  type: "operation_completed",
+  attributes: {
+    operation: "archive_codascope_note",
+    ...noteCreatedAction.attributes,
+  },
+  description: 'Archived CodaScope note "One".',
+};
+
 function statefulConversationService(timeline: string[] = []) {
   let current = conversation();
   const readConversation = vi.fn(async (
@@ -525,10 +534,10 @@ describe("workspace chat routes", () => {
     async (outcome) => {
       const state = statefulConversationService();
       orchestrator.stream.mockRejectedValueOnce(outcome === "cancelled"
-        ? new WorkspaceAssistantCancelledError("Partial", [noteCreatedAction])
+        ? new WorkspaceAssistantCancelledError("Partial", [archivedNoteAction])
         : Object.assign(new Error("later failure"), {
             fullResponse: "Partial",
-            actions: [noteCreatedAction],
+            actions: [archivedNoteAction],
           }));
       const routes = registeredRoutes({
         services: streamingServices(state.service),
@@ -546,11 +555,11 @@ describe("workspace chat routes", () => {
         (message: any) => message.role === "assistant",
       )).toMatchObject({
         status: "error",
-        metadata: { actions: [noteCreatedAction] },
+        metadata: { actions: [archivedNoteAction] },
       });
       expect(terminals(res)).toHaveLength(1);
       expect(JSON.parse(terminals(res)[0].split("data: ")[1]))
-        .toMatchObject({ actions: [noteCreatedAction] });
+        .toMatchObject({ actions: [archivedNoteAction] });
     },
   );
 

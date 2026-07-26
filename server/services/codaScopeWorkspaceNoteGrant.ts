@@ -1,20 +1,23 @@
 /* ── CodaScope: Workspace Per-Turn Note Grant ───────────────────────
-   Server-generated, operation-specific authorization for one workspace
-   assistant run. Clients and tool arguments never carry this contract.
+   Server-generated, operation-specific, consumable authorization for one
+   workspace assistant run. Clients and tool arguments never carry it.
    ──────────────────────────────────────────────────────────────────── */
 
 import type { NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { WorkspaceNoteMutationOperation } from "../../src/apps/codascope/workspaceMutationActionValidation.js";
+import {
+  WORKSPACE_NOTE_MAX_ACTIONS,
+  WORKSPACE_NOTE_MAX_STABLE_ID,
+} from "../../src/apps/codascope/workspaceMutationActionValidation.js";
 import type {
   CodaScopeWorkspaceNoteService,
   WorkspaceCurrentNoteIdentity,
 } from "./codaScopeWorkspaceNoteService.js";
 import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
-const MAX_GRANTED_NOTES = 25;
-
 export interface WorkspaceNoteCreateGrant {
-  allowed: true;
-  sharedRequested: boolean;
+  maxSuccesses: number;
+  visibility: NoteVisibility;
 }
 
 export interface WorkspaceNoteVisibilityGrant {
@@ -22,6 +25,10 @@ export interface WorkspaceNoteVisibilityGrant {
   visibility: NoteVisibility;
 }
 
+/**
+ * Every stable ID in a mutation list authorizes one confirmed success. The
+ * holder turns this immutable transfer DTO into an isolated consumable session.
+ */
 export interface WorkspaceTurnNoteGrant {
   create: WorkspaceNoteCreateGrant | null;
   readStableIds: readonly string[];
@@ -41,15 +48,95 @@ export const EMPTY_WORKSPACE_TURN_NOTE_GRANT: WorkspaceTurnNoteGrant =
     archiveStableIds: [],
   });
 
+export interface WorkspaceNoteGrantReservation {
+  commit(): void;
+  release(): void;
+}
+
 export class WorkspaceTurnNoteGrantHolder {
   current: WorkspaceTurnNoteGrant = EMPTY_WORKSPACE_TURN_NOTE_GRANT;
+  private session = new ConsumableGrantSession(EMPTY_WORKSPACE_TURN_NOTE_GRANT);
 
   replace(grant: WorkspaceTurnNoteGrant): void {
     this.current = grant;
+    this.session = new ConsumableGrantSession(grant);
   }
 
   clear(): void {
     this.current = EMPTY_WORKSPACE_TURN_NOTE_GRANT;
+    this.session = new ConsumableGrantSession(EMPTY_WORKSPACE_TURN_NOTE_GRANT);
+  }
+
+  canRead(stableId: string): boolean {
+    return this.current.readStableIds.includes(stableId);
+  }
+
+  reserveCreate(visibility: NoteVisibility): WorkspaceNoteGrantReservation | null {
+    return this.session.reserve(`create:${visibility}`);
+  }
+
+  reserveMutation(
+    operation: WorkspaceNoteMutationOperation,
+    stableId: string,
+    visibility?: NoteVisibility,
+  ): WorkspaceNoteGrantReservation | null {
+    return this.session.reserve(mutationBudgetKey(operation, stableId, visibility));
+  }
+}
+
+class ConsumableGrantSession {
+  private readonly remaining = new Map<string, number>();
+
+  constructor(grant: WorkspaceTurnNoteGrant) {
+    if (grant.create) {
+      this.remaining.set(
+        `create:${grant.create.visibility}`,
+        grant.create.maxSuccesses,
+      );
+    }
+    for (const stableId of grant.editBodyStableIds) {
+      this.remaining.set(mutationBudgetKey("edit_codascope_note", stableId), 1);
+    }
+    for (const stableId of grant.editTitleStableIds) {
+      this.remaining.set(
+        mutationBudgetKey("set_codascope_note_title", stableId),
+        1,
+      );
+    }
+    for (const entry of grant.visibilityChanges) {
+      this.remaining.set(
+        mutationBudgetKey(
+          "set_codascope_note_visibility",
+          entry.stableId,
+          entry.visibility,
+        ),
+        1,
+      );
+    }
+    for (const stableId of grant.archiveStableIds) {
+      this.remaining.set(
+        mutationBudgetKey("archive_codascope_note", stableId),
+        1,
+      );
+    }
+  }
+
+  reserve(key: string): WorkspaceNoteGrantReservation | null {
+    const available = this.remaining.get(key) ?? 0;
+    if (available <= 0) return null;
+    this.remaining.set(key, available - 1);
+    let pending = true;
+    return {
+      commit: () => {
+        if (!pending) return;
+        pending = false;
+      },
+      release: () => {
+        if (!pending) return;
+        pending = false;
+        this.remaining.set(key, (this.remaining.get(key) ?? 0) + 1);
+      },
+    };
   }
 }
 
@@ -63,9 +150,9 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
   const clauses = authorizingClauses(options.message);
   if (clauses.length === 0) return EMPTY_WORKSPACE_TURN_NOTE_GRANT;
 
-  const createClause = clauses.find((clause) => isCreateDirective(clause));
+  const create = deriveCreateGrant(clauses);
   const archiveRequested = clauses.some((clause) =>
-    /\barchive\b/.test(clause) && noteTargetLanguage(clause));
+    /\barchive\b/.test(clause) && noteReferenceLanguage(clause));
   const titleRequested = clauses.some((clause) =>
     (
       /\b(?:rename|retitle)\b/.test(clause)
@@ -86,7 +173,7 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
   });
   const readRequested = clauses.some((clause) =>
     /\b(?:read|inspect|review|show|open)\b/.test(clause)
-    && noteTargetLanguage(clause));
+    && noteReferenceLanguage(clause));
 
   const needsTarget = archiveRequested
     || titleRequested
@@ -95,18 +182,20 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
     || readRequested;
   let targetStableId: string | null = null;
   if (needsTarget) {
-    const exact = await options.noteService.resolveExactReference(
-      options.actorId,
-      options.message,
-    );
-    if (exact) {
-      targetStableId = exact.stableId;
-    } else if (options.currentNote && refersToCurrentNote(clauses)) {
-      const current = await options.noteService.resolveCurrentContext(
+    if (refersToCurrentNote(clauses)) {
+      if (options.currentNote) {
+        const current = await options.noteService.resolveCurrentContext(
+          options.actorId,
+          options.currentNote,
+        );
+        targetStableId = current?.stableId ?? null;
+      }
+    } else {
+      const exact = await options.noteService.resolveExactReference(
         options.actorId,
-        options.currentNote,
+        options.message,
       );
-      targetStableId = current?.stableId ?? null;
+      targetStableId = exact?.stableId ?? null;
     }
   }
 
@@ -118,11 +207,8 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
     || archiveRequested
   ) ? [targetStableId] : [];
 
-  return freezeGrant({
-    create: createClause ? {
-      allowed: true,
-      sharedRequested: /\bshared\b/.test(createClause),
-    } : null,
+  return freezeGrant(capGrantToReceiptCapacity({
+    create,
     readStableIds,
     editBodyStableIds: targetStableId && bodyRequested ? [targetStableId] : [],
     editTitleStableIds: targetStableId && titleRequested ? [targetStableId] : [],
@@ -130,7 +216,7 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
       ? [{ stableId: targetStableId, visibility }]
       : [],
     archiveStableIds: targetStableId && archiveRequested ? [targetStableId] : [],
-  });
+  }));
 }
 
 /**
@@ -155,14 +241,17 @@ export async function validateWorkspaceTurnNoteGrant(
   let create: WorkspaceNoteCreateGrant | null = null;
   if (value.create !== null) {
     if (!isRecord(value.create)
-      || hasUnknown(value.create, ["allowed", "sharedRequested"])
-      || value.create.allowed !== true
-      || typeof value.create.sharedRequested !== "boolean") {
+      || hasUnknown(value.create, ["maxSuccesses", "visibility"])
+      || !Number.isSafeInteger(value.create.maxSuccesses)
+      || Number(value.create.maxSuccesses) < 1
+      || Number(value.create.maxSuccesses) > WORKSPACE_NOTE_MAX_ACTIONS
+      || (value.create.visibility !== "private"
+        && value.create.visibility !== "shared")) {
       throw invalidGrant();
     }
     create = {
-      allowed: true,
-      sharedRequested: value.create.sharedRequested,
+      maxSuccesses: Number(value.create.maxSuccesses),
+      visibility: value.create.visibility,
     };
   }
   const readStableIds = validateIds(value.readStableIds);
@@ -170,7 +259,7 @@ export async function validateWorkspaceTurnNoteGrant(
   const editTitleStableIds = validateIds(value.editTitleStableIds);
   const archiveStableIds = validateIds(value.archiveStableIds);
   if (!Array.isArray(value.visibilityChanges)
-    || value.visibilityChanges.length > MAX_GRANTED_NOTES) {
+    || value.visibilityChanges.length > WORKSPACE_NOTE_MAX_ACTIONS) {
     throw invalidGrant();
   }
   const visibilityChanges: WorkspaceNoteVisibilityGrant[] = [];
@@ -210,6 +299,12 @@ export async function validateWorkspaceTurnNoteGrant(
   ]) {
     if (!readStableIds.includes(stableId)) throw invalidGrant();
   }
+  const totalMutationBudget = (create?.maxSuccesses ?? 0)
+    + editBodyStableIds.length
+    + editTitleStableIds.length
+    + visibilityChanges.length
+    + archiveStableIds.length;
+  if (totalMutationBudget > WORKSPACE_NOTE_MAX_ACTIONS) throw invalidGrant();
 
   return freezeGrant({
     create,
@@ -228,34 +323,42 @@ export function canReadWorkspaceNote(
   return grant.readStableIds.includes(stableId);
 }
 
-export function canEditWorkspaceNoteBody(
-  grant: WorkspaceTurnNoteGrant,
-  stableId: string,
-): boolean {
-  return grant.editBodyStableIds.includes(stableId);
+function deriveCreateGrant(
+  clauses: readonly string[],
+): WorkspaceNoteCreateGrant | null {
+  const directives = clauses
+    .filter(isCreateDirective)
+    .map((clause) => parseCreateDirective(clause));
+  if (directives.length !== 1 || !directives[0]) return null;
+  return directives[0];
 }
 
-export function canEditWorkspaceNoteTitle(
-  grant: WorkspaceTurnNoteGrant,
-  stableId: string,
-): boolean {
-  return grant.editTitleStableIds.includes(stableId);
-}
+function parseCreateDirective(
+  clause: string,
+): WorkspaceNoteCreateGrant | null {
+  const privateSignal = /\bprivate\b/.test(clause);
+  const sharedSignal = /\bshared\b/.test(clause);
+  if (privateSignal && sharedSignal) return null;
+  const visibility: NoteVisibility = sharedSignal ? "shared" : "private";
 
-export function canChangeWorkspaceNoteVisibility(
-  grant: WorkspaceTurnNoteGrant,
-  stableId: string,
-  visibility: NoteVisibility,
-): boolean {
-  return grant.visibilityChanges.some((entry) =>
-    entry.stableId === stableId && entry.visibility === visibility);
-}
+  const numeric = clause.match(
+    /\b(?:create|make|start|draft|write)\s+(\d{1,3})\s+(?:new\s+)?(?:shared\s+|private\s+)?(?:codascope\s+)?notes\b/,
+  );
+  if (numeric) {
+    const requested = Number(numeric[1]);
+    if (!Number.isSafeInteger(requested) || requested < 1) return null;
+    return {
+      maxSuccesses: Math.min(requested, WORKSPACE_NOTE_MAX_ACTIONS),
+      visibility,
+    };
+  }
 
-export function canArchiveWorkspaceNote(
-  grant: WorkspaceTurnNoteGrant,
-  stableId: string,
-): boolean {
-  return grant.archiveStableIds.includes(stableId);
+  const singular = /\b(?:create|make|start)\b[\s\S]{0,60}\b(?:a|an|one|new)\s+(?:shared\s+|private\s+)?(?:codascope\s+)?note\b/.test(clause)
+    || /\b(?:create|make|start|draft|write)\s+(?:shared\s+|private\s+)?(?:codascope\s+)?note\b/.test(clause)
+    || /\b(?:draft|write)\b[\s\S]{0,30}\b(?:a|an|one|the|new)\s+(?:shared\s+|private\s+)?(?:codascope\s+)?note\b/.test(clause)
+    || /\bnew (?:shared\s+|private\s+)?(?:codascope\s+)?note\b/.test(clause);
+  if (!singular || /\bnotes\b/.test(clause)) return null;
+  return { maxSuccesses: 1, visibility };
 }
 
 function authorizingClauses(message: string): string[] {
@@ -269,7 +372,7 @@ function authorizingClauses(message: string): string[] {
     .replace(/\b(?:doesn[’']?t|doesnt)\b/g, "does not")
     .replace(/\b(?:can[’']?t|cant|cannot)\b/g, "can not")
     .replace(/\b(?:won[’']?t|wont)\b/g, "will not");
-  return expanded.split(/[;.!?\n]+|\b(?:but|however|instead)\b/)
+  return expanded.split(/[;!?\n]+|\.(?:\s+|$)|\b(?:but|however|instead)\b/)
     .map((clause) => clause.replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .filter((clause) => !/\b(?:do not|does not|did not|can not|will not|should not|never|without|avoid|skip|ignore|no need)\b/.test(clause))
@@ -278,8 +381,8 @@ function authorizingClauses(message: string): string[] {
 
 function isCreateDirective(clause: string): boolean {
   if (!noteTargetLanguage(clause)) return false;
-  return /\b(?:create|make|start)\b[\s\S]{0,60}\b(?:new )?(?:codascope )?note\b/.test(clause)
-    || /\b(?:draft|write)\b[\s\S]{0,30}\b(?:a |the )?(?:new )?(?:codascope )?note\b/.test(clause)
+  return /\b(?:create|make|start)\b[\s\S]{0,60}\b(?:codascope )?note(?:s)?\b/.test(clause)
+    || /\b(?:draft|write)\b[\s\S]{0,30}\b(?:a |an |one |the )?(?:new )?(?:codascope )?note(?:s)?\b/.test(clause)
     || /\bnew (?:codascope )?note\b/.test(clause);
 }
 
@@ -287,12 +390,18 @@ function noteTargetLanguage(clause: string): boolean {
   return /\bnote(?:s)?\b/.test(clause);
 }
 
+function noteReferenceLanguage(clause: string): boolean {
+  return noteTargetLanguage(clause)
+    || /\b[a-z0-9._/-]+\.md\b/.test(clause)
+    || /\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/.test(clause);
+}
+
 function requestedVisibility(
   clauses: readonly string[],
 ): NoteVisibility | null {
   const requested = new Set<NoteVisibility>();
   for (const clause of clauses) {
-    if (!noteTargetLanguage(clause)) continue;
+    if (!noteTargetLanguage(clause) || isCreateDirective(clause)) continue;
     const visibilityDirective = /\b(?:make|set|change|move|publish|share)\b/.test(clause)
       && /\b(?:private|shared|visibility|publish|share)\b/.test(clause);
     if (!visibilityDirective) continue;
@@ -303,13 +412,51 @@ function requestedVisibility(
 }
 
 function refersToCurrentNote(clauses: readonly string[]): boolean {
-  return clauses.some((clause) =>
-    /\b(?:this|current|that)\s+note\b/.test(clause)
-    || /\b(?:edit|update|rename|retitle|archive|read|inspect|share)\s+it\b/.test(clause));
+  return clauses.some((clause) => {
+    const withoutNamedTitle = clause.replace(
+      /\bnote\s+(?:named|titled)\s+[\s\S]*$/g,
+      " ",
+    );
+    return /\b(?:this|current|that)\s+note\b/.test(withoutNamedTitle)
+      || /\b(?:edit|update|rename|retitle|archive|read|inspect|review|show|open|share|publish|move)\s+it\b/.test(withoutNamedTitle);
+  });
+}
+
+function mutationBudgetKey(
+  operation: WorkspaceNoteMutationOperation,
+  stableId: string,
+  visibility?: NoteVisibility,
+): string {
+  return [operation, stableId, visibility ?? ""].join(":");
+}
+
+function capGrantToReceiptCapacity(grant: {
+  create: WorkspaceNoteCreateGrant | null;
+  readStableIds: string[];
+  editBodyStableIds: string[];
+  editTitleStableIds: string[];
+  visibilityChanges: WorkspaceNoteVisibilityGrant[];
+  archiveStableIds: string[];
+}): typeof grant {
+  const existingMutationBudget = grant.editBodyStableIds.length
+    + grant.editTitleStableIds.length
+    + grant.visibilityChanges.length
+    + grant.archiveStableIds.length;
+  const createCapacity = Math.max(
+    0,
+    WORKSPACE_NOTE_MAX_ACTIONS - existingMutationBudget,
+  );
+  if (grant.create) {
+    const maxSuccesses = Math.min(grant.create.maxSuccesses, createCapacity);
+    grant.create = maxSuccesses > 0
+      ? { ...grant.create, maxSuccesses }
+      : null;
+  }
+  return grant;
 }
 
 function validateIds(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > MAX_GRANTED_NOTES) {
+  if (!Array.isArray(value) || value.length > WORKSPACE_NOTE_MAX_ACTIONS) {
     throw invalidGrant();
   }
   const ids = value.map((entry) => {
@@ -320,6 +467,7 @@ function validateIds(value: unknown): string[] {
 }
 
 function safeId(value: string): string {
+  if (value.length > WORKSPACE_NOTE_MAX_STABLE_ID) throw invalidGrant();
   try {
     return assertSafePathSegment(value, "workspace note stable ID");
   } catch {

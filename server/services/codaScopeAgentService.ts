@@ -540,6 +540,7 @@ export class CodaScopeAgentService {
         } catch {
           // ignore close errors
         }
+        this.clearWorkspaceEntryState(entry);
         this.allAgents.delete(entry.agent);
         this.pool.delete(key);
       }
@@ -739,6 +740,7 @@ export class CodaScopeAgentService {
               // The failed agent has no usable run; close errors are harmless.
             }
             this.allAgents.delete(staleEntry.agent);
+            this.clearWorkspaceEntryState(staleEntry);
             this.pool.delete(key);
           }
 
@@ -800,9 +802,11 @@ export class CodaScopeAgentService {
       if (abortController.signal.aborted) {
         runCollector.drain(); // discard collected results on cancel
         workspaceProvenanceCollector.clear();
+        const mutationActions = workspaceMutationActionCollector.drain();
+        activeEntry?.workspaceMutationActionHolder?.clear();
         onError(
           new Error("Agent cancelled by user."),
-          workspaceMutationActionCollector.drain(),
+          mutationActions,
         );
       } else {
         // Forward any tool results collected during execution
@@ -813,10 +817,12 @@ export class CodaScopeAgentService {
             text,
           } as unknown as SDKMessage);
         }
+        const mutationActions = workspaceMutationActionCollector.drain();
+        activeEntry?.workspaceMutationActionHolder?.clear();
         onDone(
           result,
           workspaceProvenanceCollector.drain(),
-          workspaceMutationActionCollector.drain(),
+          mutationActions,
         );
       }
     } catch (err) {
@@ -839,17 +845,21 @@ export class CodaScopeAgentService {
 
       if (abortController.signal.aborted) {
         workspaceProvenanceCollector.clear();
+        const mutationActions = workspaceMutationActionCollector.drain();
+        activeEntry?.workspaceMutationActionHolder?.clear();
         onError(
           new Error("Agent cancelled by user."),
-          workspaceMutationActionCollector.drain(),
+          mutationActions,
         );
       } else if (scope.kind === "workspace") {
         workspaceProvenanceCollector.clear();
+        const mutationActions = workspaceMutationActionCollector.drain();
+        activeEntry?.workspaceMutationActionHolder?.clear();
         // SDK/native errors may contain machine-local details. Workspace
         // callers receive a stable path-free failure instead.
         onError(
           new Error("Workspace assistant run failed."),
-          workspaceMutationActionCollector.drain(),
+          mutationActions,
         );
       } else {
         workspaceProvenanceCollector.clear();
@@ -863,6 +873,13 @@ export class CodaScopeAgentService {
     if (!runs) return;
     runs.delete(run);
     if (runs.size === 0) this.activeRuns.delete(key);
+  }
+
+  private clearWorkspaceEntryState(entry: PoolEntry): void {
+    entry.workspaceGrantHolder?.clear();
+    entry.workspaceNoteGrantHolder?.clear();
+    entry.workspaceProvenanceHolder?.current.clear();
+    entry.workspaceMutationActionHolder?.clear();
   }
 
   /* ── Cleanup ──────────────────────────────────────────────────────── */
@@ -885,6 +902,9 @@ export class CodaScopeAgentService {
     await Promise.allSettled(runs.map((run) => run.cancel()));
     await Promise.allSettled(runs.map((run) => run.wait()));
 
+    for (const entry of this.pool.values()) {
+      this.clearWorkspaceEntryState(entry);
+    }
     for (const agent of this.allAgents) {
       try {
         agent.close();

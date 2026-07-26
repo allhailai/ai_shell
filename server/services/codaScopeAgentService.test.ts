@@ -497,7 +497,7 @@ describe("CodaScopeAgentService actor isolation", () => {
         agentId: "workspace-agent",
         close: vi.fn(),
         send: vi.fn(async () => {
-          mutationHolder.collectNoteCreated({
+          mutationHolder.reserve()?.commitNoteCreated({
             stableId: "note-1",
             scope: "codascope",
             visibility: "private",
@@ -552,7 +552,7 @@ describe("CodaScopeAgentService actor isolation", () => {
         purpose: "workspace-assistant",
         actorId: "alice",
         workspaceNoteGrant: {
-          create: { allowed: true, sharedRequested: false },
+          create: { maxSuccesses: 1, visibility: "private" },
           readStableIds: [],
           editBodyStableIds: [],
           editTitleStableIds: [],

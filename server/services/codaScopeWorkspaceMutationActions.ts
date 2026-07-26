@@ -1,135 +1,126 @@
 /* ── CodaScope: Trusted Workspace Mutation Actions ──────────────────
    Typed server-only completion records. Model-authored action XML never
-   enters this collector.
+   enters this collector. Capacity is reserved before a mutation starts.
    ──────────────────────────────────────────────────────────────────── */
 
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  normalizeCanonicalWorkspaceMutationAction,
+  normalizeCanonicalWorkspaceMutationActions,
+  WORKSPACE_NOTE_MAX_ACTIONS,
+} from "../../src/apps/codascope/workspaceMutationActionValidation.js";
+import type { WorkspaceNoteMutationOperation } from "../../src/apps/codascope/workspaceMutationActionValidation.js";
 import type { WorkspaceNoteDto } from "./codaScopeWorkspaceNoteService.js";
-import { resolveContainedRelativePath } from "./codaScopePathSafety.js";
 
-const MAX_ACTIONS = 25;
-const MAX_DESCRIPTION = 500;
-const MAX_ATTRIBUTE = 1_000;
-
-export class WorkspaceMutationActionCollector {
-  private readonly actions: CodaScopeAction[] = [];
-  private readonly createdStableIds = new Set<string>();
-
-  collectNoteCreated(note: WorkspaceNoteDto): void {
-    if (this.createdStableIds.has(note.stableId)) return;
-    this.createdStableIds.add(note.stableId);
-    this.collect(canonicalAction(
-      "note_created",
-      note,
-      `Created CodaScope note "${note.title}".`,
-    ));
-  }
-
-  collectNoteMutation(
-    operation: string,
+export interface WorkspaceMutationActionReservation {
+  commitNoteCreated(note: WorkspaceNoteDto): void;
+  commitNoteMutation(
+    operation: WorkspaceNoteMutationOperation,
     note: WorkspaceNoteDto,
     description: string,
-  ): void {
-    this.collect(canonicalAction("operation_completed", note, description, {
-      operation,
-    }));
+  ): void;
+  release(): void;
+  abandon(): void;
+}
+
+export class WorkspaceMutationActionCollector {
+  private readonly actions = new Map<number, CodaScopeAction>();
+  private readonly delivered = new Set<string>();
+  private readonly abandoned = new Set<number>();
+  private activeReservations = 0;
+  private nextOrder = 0;
+
+  reserve(): WorkspaceMutationActionReservation | null {
+    if (this.actions.size + this.abandoned.size + this.activeReservations
+      >= WORKSPACE_NOTE_MAX_ACTIONS) {
+      return null;
+    }
+    const order = this.nextOrder++;
+    this.activeReservations += 1;
+    let pending = true;
+
+    const commit = (action: CodaScopeAction): void => {
+      if (!pending) throw new Error("Workspace mutation receipt reservation is closed.");
+      const canonical = validateWorkspaceMutationAction(action);
+      pending = false;
+      this.activeReservations -= 1;
+      const key = deliveryKey(canonical);
+      if (this.delivered.has(key)) return;
+      this.delivered.add(key);
+      this.actions.set(order, canonical);
+    };
+
+    return {
+      commitNoteCreated: (note) => commit(canonicalAction(
+        "note_created",
+        note,
+        `Created CodaScope note "${note.title}".`,
+      )),
+      commitNoteMutation: (operation, note, description) => commit(
+        canonicalAction("operation_completed", note, description, { operation }),
+      ),
+      release: () => {
+        if (!pending) return;
+        pending = false;
+        this.activeReservations -= 1;
+      },
+      abandon: () => {
+        if (!pending) return;
+        pending = false;
+        this.activeReservations -= 1;
+        this.abandoned.add(order);
+      },
+    };
   }
 
   drain(): CodaScopeAction[] {
-    return this.actions.splice(0);
+    const result = [...this.actions.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, action]) => action);
+    this.actions.clear();
+    this.delivered.clear();
+    this.abandoned.clear();
+    this.activeReservations = 0;
+    this.nextOrder = 0;
+    return result;
   }
 
   clear(): void {
-    this.actions.splice(0);
-    this.createdStableIds.clear();
-  }
-
-  private collect(action: CodaScopeAction): void {
-    if (this.actions.length >= MAX_ACTIONS) return;
-    this.actions.push(validateWorkspaceMutationAction(action));
+    this.actions.clear();
+    this.delivered.clear();
+    this.abandoned.clear();
+    this.activeReservations = 0;
+    this.nextOrder = 0;
   }
 }
 
 export class WorkspaceMutationActionCollectorHolder {
   current = new WorkspaceMutationActionCollector();
 
-  collectNoteCreated(note: WorkspaceNoteDto): void {
-    this.current.collectNoteCreated(note);
+  reserve(): WorkspaceMutationActionReservation | null {
+    return this.current.reserve();
   }
 
-  collectNoteMutation(
-    operation: string,
-    note: WorkspaceNoteDto,
-    description: string,
-  ): void {
-    this.current.collectNoteMutation(operation, note, description);
+  clear(): void {
+    this.current.clear();
+    this.current = new WorkspaceMutationActionCollector();
   }
 }
 
 export function validateWorkspaceMutationActions(
   value: unknown,
 ): CodaScopeAction[] {
-  if (!Array.isArray(value) || value.length > MAX_ACTIONS) {
-    throw new Error("Invalid workspace mutation actions.");
-  }
-  const result: CodaScopeAction[] = [];
-  const created = new Set<string>();
-  for (const candidate of value) {
-    const action = validateWorkspaceMutationAction(candidate);
-    if (action.type === "note_created") {
-      const stableId = action.attributes.stableId;
-      if (created.has(stableId)) continue;
-      created.add(stableId);
-    }
-    result.push(action);
-  }
-  return result;
+  const actions = normalizeCanonicalWorkspaceMutationActions(value);
+  if (!actions) throw new Error("Invalid workspace mutation actions.");
+  return actions;
 }
 
 export function validateWorkspaceMutationAction(
   value: unknown,
 ): CodaScopeAction {
-  if (!isRecord(value)
-    || hasUnknown(value, ["type", "attributes", "description"])
-    || (value.type !== "note_created" && value.type !== "operation_completed")
-    || typeof value.description !== "string"
-    || value.description.length === 0
-    || value.description.length > MAX_DESCRIPTION
-    || !isRecord(value.attributes)) {
-    throw new Error("Invalid workspace mutation action.");
-  }
-  const allowed = value.type === "note_created"
-    ? ["stableId", "scope", "visibility", "path", "title", "contentHash"]
-    : [
-        "operation",
-        "stableId",
-        "scope",
-        "visibility",
-        "path",
-        "title",
-        "contentHash",
-      ];
-  const attributes = value.attributes;
-  if (hasUnknown(attributes, allowed)
-    || allowed.some((field) => typeof attributes[field] !== "string")
-    || attributes.scope !== "codascope"
-    || (attributes.visibility !== "private"
-      && attributes.visibility !== "shared")
-    || !/^[a-f0-9]{32,128}$/i.test(String(attributes.contentHash))
-    || Object.values(attributes).some((entry) =>
-      typeof entry !== "string" || entry.length === 0 || entry.length > MAX_ATTRIBUTE)) {
-    throw new Error("Invalid workspace mutation action.");
-  }
-  resolveContainedRelativePath(
-    "/workspace-note-action-root",
-    String(value.attributes.path),
-    "workspace note action path",
-  );
-  return {
-    type: value.type,
-    attributes: { ...(attributes as Record<string, string>) },
-    description: value.description,
-  };
+  const action = normalizeCanonicalWorkspaceMutationAction(value);
+  if (!action) throw new Error("Invalid workspace mutation action.");
+  return action;
 }
 
 function canonicalAction(
@@ -149,18 +140,16 @@ function canonicalAction(
       title: note.title,
       contentHash: note.contentHash,
     },
-    description: description.slice(0, MAX_DESCRIPTION),
+    description,
   };
 }
 
-function hasUnknown(
-  value: Record<string, unknown>,
-  allowed: readonly string[],
-): boolean {
-  const fields = new Set(allowed);
-  return Object.keys(value).some((key) => !fields.has(key));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function deliveryKey(action: CodaScopeAction): string {
+  return [
+    action.type,
+    action.attributes.operation ?? "",
+    action.attributes.stableId,
+    action.attributes.contentHash,
+    action.description,
+  ].join("\u0000");
 }

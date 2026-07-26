@@ -5,6 +5,10 @@ import {
   WorkspaceMutationActionCollector,
   WorkspaceMutationActionCollectorHolder,
 } from "../codaScopeWorkspaceMutationActions.js";
+import {
+  WorkspaceNoteConflictError,
+  WorkspaceNoteUnavailableError,
+} from "../codaScopeWorkspaceNoteService.js";
 
 const baseNote = {
   stableId: "note-1",
@@ -32,7 +36,7 @@ function setup() {
   };
   const grant = new WorkspaceTurnNoteGrantHolder();
   grant.replace({
-    create: { allowed: true, sharedRequested: false },
+    create: { maxSuccesses: 1, visibility: "private" },
     readStableIds: ["note-1"],
     editBodyStableIds: ["note-1"],
     editTitleStableIds: ["note-1"],
@@ -164,24 +168,140 @@ describe("workspace CodaScope note tools", () => {
     );
   });
 
-  it("deduplicates repeated created-note delivery by stable ID and preserves distinct order", async () => {
-    const { tools, actions } = setup();
-    await tools.create_codascope_note.execute({
-      path: "one.md",
-      title: "One",
-      body: "",
+  it("consumes a successful target mutation while allowing a conflict retry", async () => {
+    const { tools, service, actions } = setup();
+    service.replaceBody
+      .mockRejectedValueOnce(new WorkspaceNoteConflictError("b".repeat(32)))
+      .mockResolvedValueOnce(baseNote);
+
+    const conflict = await tools.edit_codascope_note.execute({
+      stableId: "note-1",
+      body: "first",
+      expectedHash: "a".repeat(32),
     } as any, {} as any);
-    await tools.create_codascope_note.execute({
-      path: "one.md",
-      title: "One",
-      body: "",
+    expect(JSON.parse(String(conflict))).toMatchObject({ error: "conflict" });
+
+    await tools.edit_codascope_note.execute({
+      stableId: "note-1",
+      body: "retry",
+      expectedHash: "b".repeat(32),
     } as any, {} as any);
-    await tools.create_codascope_note.execute({
-      path: "two.md",
-      title: "Two",
-      body: "",
+    const replay = await tools.edit_codascope_note.execute({
+      stableId: "note-1",
+      body: "replay",
+      expectedHash: "a".repeat(32),
     } as any, {} as any);
-    expect(actions.current.drain().map((action) => action.attributes.stableId))
-      .toEqual(["note-1", "note-2"]);
+
+    expect(String(replay)).toContain("not authorized");
+    expect(service.replaceBody).toHaveBeenCalledTimes(2);
+    expect(actions.current.drain()).toEqual([
+      expect.objectContaining({
+        type: "operation_completed",
+        attributes: expect.objectContaining({
+          operation: "edit_codascope_note",
+        }),
+      }),
+    ]);
+  });
+
+  it("atomically prevents concurrent reuse of one mutation allowance", async () => {
+    const { tools, service } = setup();
+    let finish!: () => void;
+    service.replaceBody.mockImplementationOnce(() => new Promise((resolve) => {
+      finish = () => resolve(baseNote);
+    }));
+
+    const first = tools.edit_codascope_note.execute({
+      stableId: "note-1",
+      body: "first",
+      expectedHash: "a".repeat(32),
+    } as any, {} as any);
+    const second = await tools.edit_codascope_note.execute({
+      stableId: "note-1",
+      body: "second",
+      expectedHash: "a".repeat(32),
+    } as any, {} as any);
+    finish();
+    await first;
+
+    expect(String(second)).toContain("not authorized");
+    expect(service.replaceBody).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits no receipt before a physical archive and releases that allowance", async () => {
+    const { tools, service, actions } = setup();
+    service.archiveNote
+      .mockRejectedValueOnce(new WorkspaceNoteUnavailableError())
+      .mockResolvedValueOnce(baseNote);
+
+    expect(String(await tools.archive_codascope_note.execute({
+      stableId: "note-1",
+      expectedHash: "a".repeat(32),
+    } as any, {} as any))).toContain("unavailable");
+    expect(actions.current.drain()).toEqual([]);
+
+    expect(JSON.parse(String(await tools.archive_codascope_note.execute({
+      stableId: "note-1",
+      expectedHash: "a".repeat(32),
+    } as any, {} as any)))).toMatchObject({ ok: true, archived: true });
+    expect(service.archiveNote).toHaveBeenCalledTimes(2);
+    expect(actions.current.drain()).toHaveLength(1);
+  });
+
+  it("bounds read output and sanitizes unexpected path-bearing failures", async () => {
+    const { tools, service } = setup();
+    service.readForEditing.mockResolvedValueOnce({
+      ...baseNote,
+      body: "x".repeat(200_001),
+    });
+    const oversized = await tools.read_codascope_note.execute({
+      stableId: "note-1",
+    } as any, {} as any);
+    expect(String(oversized)).toBe("The requested CodaScope note is unavailable.");
+    expect(String(oversized).length).toBeLessThan(100);
+
+    service.readForEditing.mockRejectedValueOnce(
+      new Error("/private/secret/notes/one.md"),
+    );
+    const failed = await tools.read_codascope_note.execute({
+      stableId: "note-1",
+    } as any, {} as any);
+    expect(String(failed)).not.toContain("/private/secret");
+    expect(String(failed)).toBe("The requested CodaScope note is unavailable.");
+  });
+
+  it("caps successful mutations at trusted receipt capacity with no 26th create", async () => {
+    const { tools, service, grant, actions } = setup();
+    grant.replace({
+      create: { maxSuccesses: 25, visibility: "private" },
+      readStableIds: [],
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [],
+    });
+    service.createNote.mockImplementation(async (_actor, input) => ({
+      ...baseNote,
+      stableId: `id-${input.path.replace(".md", "")}`,
+      path: input.path,
+      title: input.title,
+    }));
+
+    const results = [];
+    for (let index = 1; index <= 26; index += 1) {
+      results.push(await tools.create_codascope_note.execute({
+        path: `note-${index}.md`,
+        title: `Note ${index}`,
+        body: "",
+      } as any, {} as any));
+    }
+
+    expect(service.createNote).toHaveBeenCalledTimes(25);
+    expect(String(results[25])).toContain("not authorized");
+    const receipts = actions.current.drain();
+    expect(receipts).toHaveLength(25);
+    expect(receipts.map((action) => action.attributes.stableId)).toEqual(
+      Array.from({ length: 25 }, (_, index) => `id-note-${index + 1}`),
+    );
   });
 });

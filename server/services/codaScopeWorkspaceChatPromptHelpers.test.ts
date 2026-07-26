@@ -94,6 +94,10 @@ describe("workspace prompt", () => {
     expect(prompt).toMatch(/only mutation capability is for CodaScope-level notes/i);
     expect(prompt).toMatch(/New CodaScope notes default private/i);
     expect(prompt).toMatch(/Read before editing.*contentHash/is);
+    expect(prompt).toMatch(/this note.*validated current note/is);
+    expect(prompt).toMatch(/Mutation authority is consumable/i);
+    expect(prompt).toMatch(/server-confirmed trusted receipt/i);
+    expect(prompt).toMatch(/reads are complete but bounded/i);
     expect(prompt).toMatch(/Permanent deletion, restore, arbitrary moves.*unavailable/is);
     expect(prompt).toContain("MANIFEST");
     expect(prompt).toContain("Compare them");
