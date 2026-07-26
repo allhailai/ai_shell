@@ -20,6 +20,7 @@ import { ModelPicker, useModelPicker } from "./components/ModelPicker";
 import { IconAgent, IconUser, IconChat, IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend, IconWarning } from "./components/CodaScopeIcons";
 import { ConversationHeader } from "./components/ConversationHeader";
 import { ActionCardList } from "./components/ActionCard";
+import { WorkspaceActionCardList } from "./components/WorkspaceActionCardList";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
@@ -44,6 +45,12 @@ import {
   rootNoteMatchesRoute,
 } from "./assistantScope";
 import { useRootNoteContext } from "./assistantNoteContext";
+import { createWorkspaceNoteApi } from "./workspaceNoteApi";
+import {
+  claimLiveTurnNavigation,
+  navigateSingleLiveCreatedNote,
+  selectSingleCreatedNoteStableId,
+} from "./workspaceCreatedNote";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -164,6 +171,11 @@ export function CodaScopeAssistant() {
   const autoSendRef = useRef(false); // Prevents double auto-send
   const currentScopeKeyRef = useRef(scopeKey);
   currentScopeKeyRef.current = scopeKey;
+  const activeConversationIdRef = useRef(activeConversationId);
+  activeConversationIdRef.current = activeConversationId;
+  const liveTurnIdRef = useRef(0);
+  const claimedNavigationTurnsRef = useRef(new Set<number>());
+  const workspaceNoteApi = useMemo(() => createWorkspaceNoteApi(), []);
   const visibleInput = inputScopeKeyRef.current === scopeKey ? input : "";
   const visibleAttachments = attachmentsScopeKeyRef.current === scopeKey
     ? attachments
@@ -263,6 +275,7 @@ export function CodaScopeAssistant() {
     }
 
     if (!convId) return;
+    activeConversationIdRef.current = convId;
 
     // Build image URLs from attachments for display in the chat bubble
     const currentAttachments = promptText ? [] : [...visibleAttachments];
@@ -326,6 +339,9 @@ export function CodaScopeAssistant() {
       : undefined;
 
     const isFirstMessage = messages.length === 0;
+    const liveTurnId = ++liveTurnIdRef.current;
+    const turnScopeKey = scopeKey;
+    const knownMessageIds = messages.map((message) => message.id);
     const result = await streamMessage({
       conversationId: convId,
       message: text,
@@ -334,14 +350,22 @@ export function CodaScopeAssistant() {
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       references: referenceAttachments.length > 0 ? referenceAttachments : undefined,
       selectionContext,
+      knownMessageIds,
     });
 
     if (result.discarded) return;
     if (result.conversationId) {
       setActiveConversationId(result.conversationId);
     }
-    if (result.assistantMessage) {
-      setMessages((prev) => [...prev, result.assistantMessage!]);
+    if (result.reconciledMessages) {
+      setMessages(result.reconciledMessages);
+    } else if (result.assistantMessage) {
+      setMessages((prev) => {
+        const withoutDuplicate = prev.filter(
+          (message) => message.id !== result.assistantMessage!.id,
+        );
+        return [...withoutDuplicate, result.assistantMessage!];
+      });
     }
 
     // Auto-update title if this was the first message
@@ -349,9 +373,28 @@ export function CodaScopeAssistant() {
       setActiveTitle(result.newTitle);
     }
 
+    const createdStableId = assistantScope.kind === "workspace"
+      ? selectSingleCreatedNoteStableId(result.liveWorkspaceActions ?? [])
+      : null;
+    if (createdStableId
+      && currentScopeKeyRef.current === turnScopeKey
+      && activeConversationIdRef.current === convId
+      && claimLiveTurnNavigation(
+        claimedNavigationTurnsRef.current,
+        liveTurnId,
+      )) {
+      await navigateSingleLiveCreatedNote(
+        result.liveWorkspaceActions ?? [],
+        workspaceNoteApi,
+        () => currentScopeKeyRef.current === turnScopeKey
+          && activeConversationIdRef.current === convId,
+        navigate,
+      );
+    }
+
     // Refresh conversation list to get updated titles/summaries
     await loadConversationList();
-  }, [visibleInput, streaming, selectedModelId, activeConversationId, visibleAttachments, getContext, messages.length, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages, assistantScope.kind, conversationApi.endpoints, createNewConversation]);
+  }, [visibleInput, streaming, selectedModelId, activeConversationId, visibleAttachments, getContext, messages, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages, assistantScope.kind, conversationApi.endpoints, createNewConversation, navigate, scopeKey, workspaceNoteApi]);
 
   // Wrapper for send button (uses input field text)
   const sendMessage = useCallback(() => {
@@ -913,7 +956,9 @@ export function CodaScopeAssistant() {
             <IconChat size={14} />
           </span>
           <strong>Workspace Assistant</strong>
-          <span className="codascope-assistant-scope-mode">Read only</span>
+          <span className="codascope-assistant-scope-mode">
+            Notes by directive
+          </span>
         </div>
       )}
 
@@ -958,7 +1003,7 @@ export function CodaScopeAssistant() {
             </h3>
             <p>
               {assistantScope.kind === "workspace"
-                ? "Ask read-only questions across your active CodaScope projects."
+                ? "Project knowledge stays read-only. CodaScope Notes can change only when you explicitly ask."
                 : "I help you understand, document, and analyze your codebase."}
             </p>
             <div className="codascope-assistant-welcome-cards">
@@ -1042,8 +1087,8 @@ export function CodaScopeAssistant() {
         )}
 
         {messages.map((msg) => {
-          const actions = assistantScope.kind === "project"
-            ? (msg.metadata?.actions ?? []) as CodaScopeAction[]
+          const actions = Array.isArray(msg.metadata?.actions)
+            ? msg.metadata.actions
             : [];
           // Always strip action tags from assistant messages — even if metadata.actions
           // is empty (e.g. older messages or unrecognized action types)
@@ -1101,7 +1146,9 @@ export function CodaScopeAssistant() {
                 </div>
               </div>
               {actions.length > 0 && (
-                <ActionCardList actions={actions} />
+                assistantScope.kind === "project"
+                  ? <ActionCardList actions={actions as CodaScopeAction[]} />
+                  : <WorkspaceActionCardList actions={actions} />
               )}
             </div>
           );

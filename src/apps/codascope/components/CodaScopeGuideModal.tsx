@@ -214,7 +214,7 @@ function TabChatAgent({ workspaceMode }: { workspaceMode: boolean }) {
           <IntentCard
             icon={<IconPlan size={18} />}
             title="Workspace Safety"
-            description="Workspace chat cannot mutate notes, projects, sources, builds, epics, designs, or research"
+            description="Project knowledge stays read-only; CodaScope Notes change only after an explicit directive"
             slashCommands={["/help", "/commands", "/shortcuts"]}
           />
         </div>

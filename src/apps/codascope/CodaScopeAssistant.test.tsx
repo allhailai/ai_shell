@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const routeState = vi.hoisted(() => ({
   segments: ["notes", "private", "roadmap"] as string[],
+  navigate: vi.fn(),
+}));
+const conversationState = vi.hoisted(() => ({
+  messages: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("../../shell/useAppSubRoute", () => ({
@@ -12,7 +16,7 @@ vi.mock("../../shell/useAppSubRoute", () => ({
     subPath: routeState.segments.join("/"),
     getParam: () => null,
     setParam: vi.fn(),
-    navigate: vi.fn(),
+    navigate: routeState.navigate,
     replace: vi.fn(),
   }),
 }));
@@ -49,7 +53,7 @@ vi.mock("./hooks/useConversationManager", () => ({
     setActiveConversationId: vi.fn(),
     activeTitle: "New conversation",
     setActiveTitle: vi.fn(),
-    messages: [],
+    messages: conversationState.messages,
     setMessages: vi.fn(),
     loadConversationList: vi.fn(),
     createNewConversation: vi.fn(),
@@ -115,12 +119,16 @@ import { CodaScopeAssistant } from "./CodaScopeAssistant";
 describe("CodaScopeAssistant scope rendering", () => {
   beforeEach(() => {
     routeState.segments = ["notes", "private", "roadmap"];
+    routeState.navigate.mockReset();
+    conversationState.messages = [];
   });
 
   it("renders the workspace assistant and root-note context without activeProjectId", () => {
     const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
     expect(html).toContain("Workspace Assistant");
-    expect(html).toContain("Read only");
+    expect(html).toContain("Notes by directive");
+    expect(html).toContain("Project knowledge stays read-only");
+    expect(html).toContain("only when you explicitly ask");
     expect(html).toContain("Roadmap");
     expect(html).toContain("Private");
     expect(html).toContain("Workspace Overview");
@@ -129,12 +137,41 @@ describe("CodaScopeAssistant scope rendering", () => {
     expect(html).not.toContain("@ to add context");
   });
 
+  it("renders a persisted created-note card on reload without automatic navigation", () => {
+    conversationState.messages = [{
+      id: "assistant-server-id",
+      role: "assistant",
+      content: "Created.",
+      status: "complete",
+      metadata: {
+        actions: [{
+          type: "note_created",
+          attributes: {
+            stableId: "note-1",
+            scope: "codascope",
+            visibility: "private",
+            path: "historical.md",
+            title: "Historical title",
+            contentHash: "a".repeat(64),
+          },
+          description: "Created a CodaScope note.",
+        }],
+      },
+    }];
+
+    const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
+    expect(html).toContain("Note created");
+    expect(html).toContain("CodaScope Notes");
+    expect(html).toContain("Loading current note details");
+    expect(routeState.navigate).not.toHaveBeenCalled();
+  });
+
   it("keeps project assistant rendering available on project routes", () => {
     routeState.segments = ["project", "alpha", "dashboard"];
     const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
     expect(html).toContain("CodaScope Assistant");
     expect(html).toContain("Explore Codebase");
     expect(html).toContain("@ to add context");
-    expect(html).not.toContain("Read only");
+    expect(html).not.toContain("Notes by directive");
   });
 });

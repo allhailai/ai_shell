@@ -17,9 +17,50 @@ export const WORKSPACE_NOTE_MUTATION_OPERATIONS = [
 export type WorkspaceNoteMutationOperation =
   typeof WORKSPACE_NOTE_MUTATION_OPERATIONS[number];
 
+export interface CanonicalWorkspaceNoteState {
+  stableId: string;
+  scope: "codascope";
+  visibility: "private" | "shared";
+  path: string;
+  title: string;
+  contentHash: string;
+}
+
 const OPERATION_SET = new Set<string>(WORKSPACE_NOTE_MUTATION_OPERATIONS);
 const ENCODED_SEPARATOR_RE = /%(?:25)*(?:2f|5c)/i;
 const WINDOWS_DRIVE_RE = /^[a-z]:/i;
+
+export function normalizeCanonicalWorkspaceNoteState(
+  value: unknown,
+  expectedStableId?: string,
+): CanonicalWorkspaceNoteState | null {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      "stableId",
+      "scope",
+      "visibility",
+      "path",
+      "title",
+      "contentHash",
+    ])
+    || !isCanonicalStableId(value.stableId)
+    || (expectedStableId !== undefined && value.stableId !== expectedStableId)
+    || value.scope !== "codascope"
+    || (value.visibility !== "private" && value.visibility !== "shared")
+    || !isCanonicalNotePath(value.path)
+    || !isCanonicalNoteTitle(value.title)
+    || !isCanonicalContentHash(value.contentHash)) {
+    return null;
+  }
+  return {
+    stableId: value.stableId,
+    scope: "codascope",
+    visibility: value.visibility,
+    path: value.path,
+    title: value.title,
+    contentHash: value.contentHash,
+  };
+}
 
 export function normalizeCanonicalWorkspaceMutationActions(
   value: unknown,
@@ -71,8 +112,7 @@ export function normalizeCanonicalWorkspaceMutationAction(
       && attributes.visibility !== "shared")
     || !isCanonicalNotePath(attributes.path)
     || !isCanonicalNoteTitle(attributes.title)
-    || typeof attributes.contentHash !== "string"
-    || !/^[a-f0-9]{32,128}$/i.test(attributes.contentHash)
+    || !isCanonicalContentHash(attributes.contentHash)
     || (value.type === "operation_completed"
       && (typeof attributes.operation !== "string"
         || !OPERATION_SET.has(attributes.operation)))) {
@@ -96,7 +136,7 @@ function canonicalDeliveryKey(action: CodaScopeAction): string {
   ].join("\u0000");
 }
 
-function isCanonicalStableId(value: unknown): value is string {
+export function isCanonicalStableId(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= WORKSPACE_NOTE_MAX_STABLE_ID
@@ -109,7 +149,7 @@ function isCanonicalStableId(value: unknown): value is string {
     && !WINDOWS_DRIVE_RE.test(value);
 }
 
-function isCanonicalNotePath(value: unknown): value is string {
+export function isCanonicalNotePath(value: unknown): value is string {
   if (typeof value !== "string"
     || value.length === 0
     || value.length > WORKSPACE_NOTE_MAX_PATH
@@ -132,12 +172,16 @@ function isCanonicalNotePath(value: unknown): value is string {
       || (segment.startsWith("_") && segment !== "_inbox"));
 }
 
-function isCanonicalNoteTitle(value: unknown): value is string {
+export function isCanonicalNoteTitle(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= WORKSPACE_NOTE_MAX_TITLE
     && value.trim() === value
     && !/[\r\n\u0000]/.test(value);
+}
+
+export function isCanonicalContentHash(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{32,128}$/i.test(value);
 }
 
 function isBoundedNonempty(value: unknown, maximum: number): value is string {

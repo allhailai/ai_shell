@@ -584,11 +584,11 @@ source, and other mutation commands are hidden and rejected again at dispatch.
 The project `@` picker is not rendered in workspace scope and its trigger is a
 no-op. Workspace welcome prompts and placeholders omit project-mutation and
 mention affordances, and project-only response actions are discarded. Image
-attachments remain supported. This phase adds no workspace note, project,
-source, build, epic, design, research, or repository mutation capability in
-the frontend. Phase 5 adds the backend CodaScope-note boundary only; the
-created-note card, title controls, visibility confirmation, opening, and
-navigation behavior remain explicitly deferred to Phase 6.
+attachments remain supported. Workspace capability copy distinguishes
+read-only project/workspace knowledge from the narrow CodaScope Notes mutation
+capability, which still requires an explicit user directive. Project, source,
+build, epic, design, research, and repository mutations remain unavailable in
+workspace scope.
 
 Before every run, `CodaScopeWorkspaceIntentService` re-reads active projects,
 epics, designs, curated pages, and ready research sources and deterministically
@@ -732,8 +732,66 @@ principal is the actor; request bodies cannot select scope, project, epic,
 path, owner, or actor. Unknown, archived, corrupt, duplicated, and
 private-other-actor identities share sanitized absence behavior. Mutations
 require `expectedHash`, return the canonical current DTO, and use the same
-workspace note service as assistant tools. No Phase 6 React consumer is
-implemented yet.
+workspace note service as assistant tools. No React consumer may derive paths
+or bypass this boundary.
+
+`workspaceNoteApi.ts` is the frontend boundary for these routes. It validates
+the exact fixed-scope DTO and requested stable identity on every successful
+response, treats sanitized `404` absence separately, parses only the canonical
+hash-bearing `409`, and converts all other or malformed responses to path-free
+user-facing failures.
+
+Phase 6 consumes workspace mutation actions through two trust checks. Live
+`done`, `error`, and `cancelled` terminal payloads pass through
+`workspaceMutationActionValidation.ts`, and persisted workspace conversation
+metadata passes through the same validator in
+`assistantConversationApi.ts`. Model-authored XML cannot enter either path.
+The persisted conversation is authoritative after every workspace terminal:
+the stream layer re-reads it, selects the exact server-supplied assistant
+message ID (or the one new terminal assistant record when terminal identity is
+missing), and replaces the optimistic message list. This retains confirmed
+creations after later generation failure or cancellation, preserves stable
+message identity, and prevents duplicate messages and cards. Bounded
+reconciliation also covers incomplete terminal delivery; scope and
+conversation guards discard obsolete results.
+
+Validated `note_created` receipts render through the dedicated
+`WorkspaceCreatedNoteCard`, keyed and deduplicated by stable note ID. Receipt
+title, path, visibility, and hash are historical only. Each card resolves the
+stable ID on mount and owns the resulting canonical active-note DTO. Its
+request epoch and abort controller suppress unmounted, identity-obsolete, and
+overlapping responses. Missing or archived notes disable mutation and Open,
+while recoverable reads can be retried.
+
+Display-title editing calls only
+`PATCH /api/codascope/workspace/notes/:stableId/title`, applies the shared
+300-character single-line title contract, and forwards the current canonical
+`contentHash` as `expectedHash`; it never derives or changes a path. Visibility
+changes call only the stable-ID visibility endpoint after an inline explicit
+confirmation. Private-to-Shared confirmation explains global CodaScope
+visibility, while Shared-to-Private warns about lost access. Both mutations
+replace card state with the exact validated returned DTO.
+
+A `409` is never retried automatically. The card re-resolves the stable ID,
+replaces local canonical state with the current server DTO, and tells the user
+to review before retrying. Other failures keep a recoverable user-facing
+message without exposing raw server or filesystem details.
+
+Open re-resolves the stable ID immediately before URL navigation, then builds
+`notes/<visibility>/<path-without-final-.md>` for
+`useAppSubRoute("codascope")`. Each nested path segment is encoded separately,
+so the shell produces
+`/codascope/notes/<visibility>/<encoded-nested-path>` without trusting a
+historical receipt location.
+
+Automatic navigation is driven only by the explicit result of one live turn.
+A per-turn token is claimed once when that result contains exactly one
+distinct validated `note_created`; after a fresh stable-ID resolution, the
+assistant navigates to its canonical route and leaves the right panel open.
+Zero or multiple creations do not navigate. Persisted error/cancelled turns
+still qualify when they contain one confirmed creation. Conversation reload,
+message rerender, unavailable notes, and stale scope/conversation results
+cannot claim a live-turn token and therefore never auto-navigate.
 
 ---
 
