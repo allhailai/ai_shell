@@ -6,6 +6,7 @@ import {
   findPersistedWorkspaceAssistantMessage,
   isAssistantRunCurrent,
   reconcilePersistedWorkspaceAssistantTurn,
+  reconcileWorkspaceAssistantOutcome,
   requestAssistantCancellation,
 } from "./useAssistantStream";
 import type {
@@ -15,6 +16,10 @@ import type {
 import type {
   AssistantConversationApi,
 } from "../assistantConversationApi";
+import {
+  navigateSingleLiveCreatedNote,
+} from "../workspaceCreatedNote";
+import type { WorkspaceNoteApi } from "../workspaceNoteApi";
 
 const encoder = new TextEncoder();
 
@@ -149,6 +154,34 @@ describe("consumeAssistantStreamResponse", () => {
       actions: [expect.objectContaining({ type: "note_created" })],
     });
   });
+
+  it.each([
+    ["conversationId", ""],
+    ["conversationId", " ../conversation "],
+    ["conversationId", "x".repeat(256)],
+    ["assistantMessageId", "../assistant"],
+    ["assistantMessageId", "C:%5cassistant"],
+  ])("rejects a malformed workspace %s", async (field, value) => {
+    const outcome = await consumeAssistantStreamResponse(
+      responseFrom([
+        `event: done\ndata: ${JSON.stringify({
+          conversationId: "conv-1",
+          assistantMessageId: "assistant-1",
+          [field]: value,
+          actions: [],
+        })}\n\n`,
+      ]),
+      undefined,
+      () => undefined,
+      { kind: "workspace" },
+    );
+
+    expect(outcome).toMatchObject({
+      status: "error",
+      actions: [],
+      workspaceTerminalIdentityValid: false,
+    });
+  });
 });
 
 describe("workspace persisted turn reconciliation", () => {
@@ -189,6 +222,19 @@ describe("workspace persisted turn reconciliation", () => {
       undefined,
       new Set(["known-user"]),
     )).toEqual(persisted);
+    expect(findPersistedWorkspaceAssistantMessage(
+      [persisted],
+      "assistant-server-id",
+      new Set(["assistant-server-id"]),
+    )).toBeNull();
+    expect(findPersistedWorkspaceAssistantMessage(
+      [
+        persisted,
+        { ...persisted, id: "assistant-second-id" },
+      ],
+      undefined,
+      new Set(),
+    )).toBeNull();
   });
 
   it("uses the authoritative persisted conversation after error or local transport loss", async () => {
@@ -250,6 +296,258 @@ describe("workspace persisted turn reconciliation", () => {
       "known-user",
       "assistant-server-id",
     ]);
+    expect(result?.liveWorkspaceActions).toEqual([createdAction]);
+  });
+
+  it.each([
+    ["complete", "complete"],
+    ["error", "error"],
+    ["cancelled", "error"],
+  ] as const)(
+    "trusts persisted creations for a %s terminal turn",
+    async (terminalStatus, persistedStatus) => {
+      const api = conversationApi(conversationWithAssistants([
+        {
+          id: "assistant-server-id",
+          status: persistedStatus,
+          metadata: { actions: [createdAction] },
+        },
+      ]));
+      const outcome = terminalStatus === "error"
+        ? {
+            status: "error" as const,
+            content: "Partial",
+            error: "Generation failed.",
+            actions: [createdAction],
+            conversationId: "conv-1",
+            assistantMessageId: "assistant-server-id",
+            workspaceTerminalIdentityValid: true,
+          }
+        : {
+            status: terminalStatus,
+            content: "Created it",
+            actions: [createdAction],
+            conversationId: "conv-1",
+            assistantMessageId: "assistant-server-id",
+            workspaceTerminalIdentityValid: true,
+          };
+
+      const resolution = await reconcileWorkspaceAssistantOutcome(
+        api,
+        "conv-1",
+        outcome,
+        new Set(["known-user"]),
+        1,
+      );
+
+      expect(resolution).toMatchObject({
+        status: "authoritative",
+        assistantMessage: {
+          id: "assistant-server-id",
+          status: persistedStatus,
+        },
+        liveWorkspaceActions: [createdAction],
+      });
+    },
+  );
+
+  it("does not trust or navigate a valid terminal action absent from persistence", async () => {
+    const resolution = await reconcileWorkspaceAssistantOutcome(
+      conversationApi(conversationWithAssistants([{
+        id: "assistant-server-id",
+        status: "complete",
+        metadata: {},
+      }])),
+      "conv-1",
+      {
+        status: "complete",
+        content: "Terminal says created",
+        actions: [createdAction],
+        conversationId: "conv-1",
+        assistantMessageId: "assistant-server-id",
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+    const navigate = vi.fn();
+
+    expect(resolution.status).toBe("authoritative");
+    expect(resolution.liveWorkspaceActions).toEqual([]);
+    await expect(navigateSingleLiveCreatedNote(
+      resolution.liveWorkspaceActions,
+      successfulNoteApi(),
+      () => true,
+      navigate,
+    )).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a mismatched terminal conversation identity", async () => {
+    const api = conversationApi(conversationWithAssistants([{
+      id: "assistant-server-id",
+      status: "complete",
+      metadata: { actions: [createdAction] },
+    }]));
+    const resolution = await reconcileWorkspaceAssistantOutcome(
+      api,
+      "conv-1",
+      {
+        status: "complete",
+        content: "Conflicting terminal content",
+        actions: [createdAction],
+        conversationId: "other-conversation",
+        assistantMessageId: "assistant-server-id",
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+
+    expect(api.readConversation).not.toHaveBeenCalled();
+    expect(resolution).toMatchObject({
+      status: "unverified",
+      liveWorkspaceActions: [],
+    });
+    expect(resolution.assistantMessage.content).not.toContain(
+      "Conflicting terminal content",
+    );
+    expect(resolution.assistantMessage.metadata).toBeUndefined();
+    const navigate = vi.fn();
+    await expect(navigateSingleLiveCreatedNote(
+      resolution.liveWorkspaceActions,
+      successfulNoteApi(),
+      () => true,
+      navigate,
+    )).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a mismatched terminal assistant identity", async () => {
+    const resolution = await reconcileWorkspaceAssistantOutcome(
+      conversationApi(conversationWithAssistants([{
+        id: "assistant-server-id",
+        status: "complete",
+        metadata: { actions: [createdAction] },
+      }])),
+      "conv-1",
+      {
+        status: "complete",
+        content: "Wrong assistant content",
+        actions: [createdAction],
+        conversationId: "conv-1",
+        assistantMessageId: "other-assistant",
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+
+    expect(resolution).toMatchObject({
+      status: "unverified",
+      liveWorkspaceActions: [],
+    });
+    expect(resolution.assistantMessage.content).not.toContain(
+      "Wrong assistant content",
+    );
+    expect(resolution.assistantMessage.metadata).toBeUndefined();
+    const navigate = vi.fn();
+    await expect(navigateSingleLiveCreatedNote(
+      resolution.liveWorkspaceActions,
+      successfulNoteApi(),
+      () => true,
+      navigate,
+    )).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("returns a labeled no-action failure when authoritative reads fail", async () => {
+    const api = conversationApi(null);
+    vi.mocked(api.readConversation).mockRejectedValue(
+      new Error("unsafe /conversation/path"),
+    );
+    const resolution = await reconcileWorkspaceAssistantOutcome(
+      api,
+      "conv-1",
+      {
+        status: "error",
+        content: "Partial generated text",
+        error: "unsafe /transport/path",
+        actions: [createdAction],
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+
+    expect(resolution).toMatchObject({
+      status: "unverified",
+      liveWorkspaceActions: [],
+      assistantMessage: {
+        status: "error",
+      },
+    });
+    expect(resolution.assistantMessage.metadata).toBeUndefined();
+    expect(resolution.assistantMessage.content).toContain(
+      "Partial generated text",
+    );
+    expect(resolution.assistantMessage.content).toContain(
+      "finalization could not be verified",
+    );
+    expect(resolution.assistantMessage.content).not.toContain(
+      "/conversation/path",
+    );
+  });
+
+  it("selects only the sole new assistant when terminal identity is missing", async () => {
+    const sole = await reconcileWorkspaceAssistantOutcome(
+      conversationApi(conversationWithAssistants([{
+        id: "assistant-server-id",
+        status: "complete",
+        metadata: { actions: [createdAction] },
+      }])),
+      "conv-1",
+      {
+        status: "complete",
+        content: "Terminal",
+        actions: [createdAction],
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+    const ambiguous = await reconcileWorkspaceAssistantOutcome(
+      conversationApi(conversationWithAssistants([
+        {
+          id: "assistant-server-id",
+          status: "complete",
+          metadata: { actions: [createdAction] },
+        },
+        {
+          id: "assistant-second-id",
+          status: "error",
+          metadata: { actions: [createdAction] },
+        },
+      ])),
+      "conv-1",
+      {
+        status: "complete",
+        content: "Terminal",
+        actions: [createdAction],
+        workspaceTerminalIdentityValid: true,
+      },
+      new Set(["known-user"]),
+      1,
+    );
+
+    expect(sole).toMatchObject({
+      status: "authoritative",
+      assistantMessage: { id: "assistant-server-id" },
+    });
+    expect(ambiguous).toMatchObject({
+      status: "unverified",
+      liveWorkspaceActions: [],
+    });
   });
 });
 
@@ -358,3 +656,73 @@ describe("assistant stream scoping", () => {
     )).toBe(false);
   });
 });
+
+function conversationWithAssistants(
+  assistants: Array<{
+    id: string;
+    status: "complete" | "error";
+    metadata: Record<string, unknown>;
+  }>,
+): Conversation {
+  return {
+    id: "conv-1",
+    scope: { kind: "workspace" },
+    ownerId: "alan",
+    title: "Conversation",
+    summary: "",
+    createdAt: "2026-07-26T10:00:00.000Z",
+    updatedAt: "2026-07-26T10:01:00.000Z",
+    defaultModelId: null,
+    messages: [
+      {
+        id: "known-user",
+        role: "user",
+        content: "Earlier",
+        createdAt: "2026-07-26T10:00:00.000Z",
+        updatedAt: null,
+        modelId: null,
+        status: "complete",
+        context: null,
+        metadata: {},
+      },
+      ...assistants.map((assistant) => ({
+        ...assistant,
+        role: "assistant" as const,
+        content: "Persisted assistant content",
+        createdAt: "2026-07-26T10:01:00.000Z",
+        updatedAt: null,
+        modelId: "model",
+        context: null,
+      })),
+    ],
+  };
+}
+
+function conversationApi(
+  conversation: Conversation | null,
+): AssistantConversationApi {
+  return {
+    endpoints: {
+      displayImage: vi.fn(),
+    },
+    readConversation: vi.fn().mockResolvedValue(conversation),
+  } as unknown as AssistantConversationApi;
+}
+
+function successfulNoteApi(): WorkspaceNoteApi {
+  return {
+    read: vi.fn().mockResolvedValue({
+      status: "success",
+      note: {
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "one.md",
+        title: "One",
+        contentHash: "a".repeat(64),
+      },
+    }),
+    updateTitle: vi.fn(),
+    updateVisibility: vi.fn(),
+  } as unknown as WorkspaceNoteApi;
+}

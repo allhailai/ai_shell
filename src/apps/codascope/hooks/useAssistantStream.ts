@@ -17,6 +17,7 @@ import type {
 import {
   createAssistantConversationApi,
   createAssistantEndpointAdapter,
+  isCanonicalAssistantRecordId,
   restoreAssistantMessages,
   type AssistantConversationApi,
 } from "../assistantConversationApi";
@@ -64,6 +65,7 @@ export type AssistantStreamOutcome =
       actions: CodaScopeAction[];
       conversationId?: string;
       assistantMessageId?: string;
+      workspaceTerminalIdentityValid?: boolean;
     }
   | {
       status: "error";
@@ -72,6 +74,7 @@ export type AssistantStreamOutcome =
       actions: CodaScopeAction[];
       conversationId?: string;
       assistantMessageId?: string;
+      workspaceTerminalIdentityValid?: boolean;
     }
   | {
       status: "cancelled";
@@ -79,6 +82,7 @@ export type AssistantStreamOutcome =
       actions: CodaScopeAction[];
       conversationId?: string;
       assistantMessageId?: string;
+      workspaceTerminalIdentityValid?: boolean;
     };
 
 interface ActiveRun {
@@ -157,6 +161,7 @@ export async function consumeAssistantStreamResponse(
   scope: AssistantScope,
 ): Promise<AssistantStreamOutcome> {
   let accumulated = "";
+  let workspaceTerminalIdentityValid = true;
   try {
     const terminal = await consumeSseResponse(response, {
       onText: (text) => {
@@ -166,14 +171,23 @@ export async function consumeAssistantStreamResponse(
     }, signal);
 
     const conversationId = terminal.data.conversationId;
-    if (conversationId !== undefined && typeof conversationId !== "string") {
+    if (conversationId !== undefined && (
+      scope.kind === "workspace"
+        ? !isCanonicalAssistantRecordId(conversationId)
+        : typeof conversationId !== "string"
+    )) {
+      workspaceTerminalIdentityValid = false;
       throw new SseProtocolError(
         `Malformed ${terminal.type} terminal event payload.`,
       );
     }
     const assistantMessageId = terminal.data.assistantMessageId;
-    if (assistantMessageId !== undefined
-      && typeof assistantMessageId !== "string") {
+    if (assistantMessageId !== undefined && (
+      scope.kind === "workspace"
+        ? !isCanonicalAssistantRecordId(assistantMessageId)
+        : typeof assistantMessageId !== "string"
+    )) {
+      workspaceTerminalIdentityValid = false;
       throw new SseProtocolError(
         `Malformed ${terminal.type} terminal event payload.`,
       );
@@ -201,6 +215,9 @@ export async function consumeAssistantStreamResponse(
       ...(typeof conversationId === "string" ? { conversationId } : {}),
       ...(typeof assistantMessageId === "string"
         ? { assistantMessageId }
+        : {}),
+      ...(scope.kind === "workspace"
+        ? { workspaceTerminalIdentityValid }
         : {}),
     };
 
@@ -236,6 +253,9 @@ export async function consumeAssistantStreamResponse(
       content: accumulated,
       error: error instanceof Error ? error.message : "Network error.",
       actions: [],
+      ...(scope.kind === "workspace"
+        ? { workspaceTerminalIdentityValid }
+        : {}),
     };
   }
 }
@@ -245,15 +265,16 @@ export function findPersistedWorkspaceAssistantMessage(
   assistantMessageId: string | undefined,
   knownMessageIds: ReadonlySet<string>,
 ): AssistantChatMessage | null {
-  const eligible = messages.filter((message) =>
+  const newEligible = messages.filter((message) =>
     message.role === "assistant"
-    && message.status !== "streaming");
+    && (message.status === "complete" || message.status === "error")
+    && !knownMessageIds.has(message.id));
   if (assistantMessageId) {
-    return eligible.find((message) => message.id === assistantMessageId) ?? null;
+    return newEligible.find(
+      (message) => message.id === assistantMessageId,
+    ) ?? null;
   }
-  return [...eligible].reverse().find(
-    (message) => !knownMessageIds.has(message.id),
-  ) ?? null;
+  return newEligible.length === 1 ? newEligible[0] : null;
 }
 
 export async function reconcilePersistedWorkspaceAssistantTurn(
@@ -265,11 +286,19 @@ export async function reconcilePersistedWorkspaceAssistantTurn(
 ): Promise<{
   assistantMessage: AssistantChatMessage;
   messages: AssistantChatMessage[];
+  liveWorkspaceActions: CodaScopeAction[];
 } | null> {
+  if (!isCanonicalAssistantRecordId(conversationId)
+    || (assistantMessageId !== undefined
+      && !isCanonicalAssistantRecordId(assistantMessageId))) {
+    return null;
+  }
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const conversation = await api.readConversation(conversationId);
-      if (conversation) {
+      if (conversation
+        && conversation.id === conversationId
+        && conversation.scope.kind === "workspace") {
         const messages = restoreAssistantMessages(
           conversation,
           api.endpoints,
@@ -279,7 +308,19 @@ export async function reconcilePersistedWorkspaceAssistantTurn(
           assistantMessageId,
           knownMessageIds,
         );
-        if (assistantMessage) return { assistantMessage, messages };
+        if (assistantMessage) {
+          const liveWorkspaceActions =
+            normalizeCanonicalWorkspaceMutationActions(
+              assistantMessage.metadata?.actions ?? [],
+            );
+          if (liveWorkspaceActions) {
+            return {
+              assistantMessage,
+              messages,
+              liveWorkspaceActions,
+            };
+          }
+        }
       }
     } catch {
       // A later bounded attempt may observe the terminal persisted transition.
@@ -291,6 +332,83 @@ export async function reconcilePersistedWorkspaceAssistantTurn(
     }
   }
   return null;
+}
+
+export type WorkspaceAssistantTurnResolution =
+  | {
+      status: "authoritative";
+      assistantMessage: AssistantChatMessage;
+      messages: AssistantChatMessage[];
+      liveWorkspaceActions: CodaScopeAction[];
+    }
+  | {
+      status: "unverified";
+      assistantMessage: AssistantChatMessage;
+      liveWorkspaceActions: [];
+    };
+
+const WORKSPACE_FINALIZATION_FAILURE =
+  "**Response finalization could not be verified. Reload the conversation "
+  + "to check for a persisted result.**";
+
+function createUnverifiedWorkspaceAssistantMessage(
+  partialContent: string,
+  preservePartial: boolean,
+): AssistantChatMessage {
+  return {
+    id: `transport-error-${Date.now()}`,
+    role: "assistant",
+    content: preservePartial && partialContent
+      ? `${partialContent}\n\n${WORKSPACE_FINALIZATION_FAILURE}`
+      : WORKSPACE_FINALIZATION_FAILURE,
+    status: "error",
+  };
+}
+
+export async function reconcileWorkspaceAssistantOutcome(
+  api: AssistantConversationApi,
+  requestedConversationId: string,
+  outcome: AssistantStreamOutcome,
+  knownMessageIds: ReadonlySet<string>,
+  attempts = 3,
+): Promise<WorkspaceAssistantTurnResolution> {
+  const terminalConversationConflict =
+    outcome.conversationId !== undefined
+    && outcome.conversationId !== requestedConversationId;
+  const malformedTerminalIdentity =
+    outcome.workspaceTerminalIdentityValid === false;
+  if (!isCanonicalAssistantRecordId(requestedConversationId)
+    || terminalConversationConflict
+    || malformedTerminalIdentity) {
+    return {
+      status: "unverified",
+      assistantMessage: createUnverifiedWorkspaceAssistantMessage("", false),
+      liveWorkspaceActions: [],
+    };
+  }
+
+  const reconciled = await reconcilePersistedWorkspaceAssistantTurn(
+    api,
+    requestedConversationId,
+    outcome.assistantMessageId,
+    knownMessageIds,
+    attempts,
+  );
+  if (reconciled) {
+    return {
+      status: "authoritative",
+      ...reconciled,
+    };
+  }
+
+  return {
+    status: "unverified",
+    assistantMessage: createUnverifiedWorkspaceAssistantMessage(
+      outcome.content,
+      outcome.assistantMessageId === undefined,
+    ),
+    liveWorkspaceActions: [],
+  };
 }
 
 export interface UseAssistantStreamResult {
@@ -413,44 +531,19 @@ export function useAssistantStream(
       let reconciledMessages: AssistantChatMessage[] | undefined;
       let liveWorkspaceActions: CodaScopeAction[] | undefined;
       if (runScope.kind === "workspace") {
-        const terminalMatchesConversation = outcome.conversationId === undefined
-          || outcome.conversationId === options.conversationId;
-        const assistantMessageId = terminalMatchesConversation
-          ? outcome.assistantMessageId
-          : undefined;
-        const reconciled = await reconcilePersistedWorkspaceAssistantTurn(
+        const resolution = await reconcileWorkspaceAssistantOutcome(
           createAssistantConversationApi(runScope),
           options.conversationId,
-          assistantMessageId,
+          outcome,
           new Set(options.knownMessageIds ?? []),
         );
         if (!isActive()) {
           return { assistantMessage: null, discarded: true };
         }
-        if (reconciled) {
-          assistantMessage = reconciled.assistantMessage;
-          reconciledMessages = reconciled.messages;
-          liveWorkspaceActions =
-            normalizeCanonicalWorkspaceMutationActions(
-              reconciled.assistantMessage.metadata?.actions ?? [],
-            ) ?? [];
-        } else {
-          const actions = terminalMatchesConversation ? outcome.actions : [];
-          const fallbackContent = outcome.status === "complete"
-            ? outcome.content
-            : outcome.status === "cancelled"
-              ? outcome.content || "Workspace assistant response cancelled."
-              : outcome.content
-                ? `${outcome.content}\n\n**Stream failed:** ${outcome.error}`
-                : `**Stream failed:** ${outcome.error}`;
-          assistantMessage = {
-            id: assistantMessageId ?? `error-${Date.now()}`,
-            role: "assistant",
-            content: fallbackContent,
-            status: outcome.status === "complete" ? "complete" : "error",
-            metadata: actions.length > 0 ? { actions } : undefined,
-          };
-          liveWorkspaceActions = actions;
+        assistantMessage = resolution.assistantMessage;
+        liveWorkspaceActions = resolution.liveWorkspaceActions;
+        if (resolution.status === "authoritative") {
+          reconciledMessages = resolution.messages;
         }
       } else if (outcome.status === "error") {
         const failureText = `**Stream failed:** ${outcome.error}`;
@@ -500,33 +593,36 @@ export function useAssistantStream(
         return { assistantMessage: null, discarded: true };
       }
       if (runScope.kind === "workspace") {
-        const reconciled = await reconcilePersistedWorkspaceAssistantTurn(
+        const resolution = await reconcileWorkspaceAssistantOutcome(
           createAssistantConversationApi(runScope),
           options.conversationId,
-          undefined,
+          {
+            status: "error",
+            content: "",
+            error: "Workspace assistant transport failed.",
+            actions: [],
+            workspaceTerminalIdentityValid: true,
+          },
           new Set(options.knownMessageIds ?? []),
         );
         if (!isActive()) {
           return { assistantMessage: null, discarded: true };
         }
-        if (reconciled) {
-          const firstLine = options.message
-            .split("\n")
-            .map((line) => line.trim())
-            .find(Boolean) ?? options.message;
-          return {
-            assistantMessage: reconciled.assistantMessage,
-            reconciledMessages: reconciled.messages,
-            liveWorkspaceActions:
-              normalizeCanonicalWorkspaceMutationActions(
-                reconciled.assistantMessage.metadata?.actions ?? [],
-              ) ?? [],
-            newTitle: firstLine.length > 72
-              ? `${firstLine.slice(0, 69)}...`
-              : firstLine,
-            conversationId: options.conversationId,
-          };
-        }
+        const firstLine = options.message
+          .split("\n")
+          .map((line) => line.trim())
+          .find(Boolean) ?? options.message;
+        return {
+          assistantMessage: resolution.assistantMessage,
+          ...(resolution.status === "authoritative"
+            ? { reconciledMessages: resolution.messages }
+            : {}),
+          liveWorkspaceActions: resolution.liveWorkspaceActions,
+          newTitle: firstLine.length > 72
+            ? `${firstLine.slice(0, 69)}...`
+            : firstLine,
+          conversationId: options.conversationId,
+        };
       }
       return {
         assistantMessage: {

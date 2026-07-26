@@ -14,6 +14,25 @@ import {
   normalizeCanonicalWorkspaceMutationActions,
 } from "./workspaceMutationActionValidation";
 
+export const ASSISTANT_RECORD_ID_MAX_LENGTH = 255;
+
+const ENCODED_PATH_SEPARATOR_RE = /%(?:25)*(?:2f|5c)/i;
+const WINDOWS_DRIVE_PREFIX_RE = /^[a-z]:/i;
+
+export function isCanonicalAssistantRecordId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= ASSISTANT_RECORD_ID_MAX_LENGTH
+    && value.trim() === value
+    && value !== "."
+    && value !== ".."
+    && !value.includes("\0")
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !ENCODED_PATH_SEPARATOR_RE.test(value)
+    && !WINDOWS_DRIVE_PREFIX_RE.test(value);
+}
+
 export interface AssistantEndpointAdapter {
   scope: AssistantScope;
   scopeKey: string;
@@ -247,6 +266,7 @@ function normalizeConversation(
 
   if (expectedScope.kind === "workspace") {
     if (value.version !== 1
+      || !isCanonicalAssistantRecordId(value.id)
       || !matchesExactScope(value.scope, expectedScope)
       || hasOwn(value, "projectId")
       || !isNonEmptyString(value.ownerId)) {
@@ -311,6 +331,10 @@ function normalizeConversationMessage(
     || !isRecord(value.metadata)) {
     return null;
   }
+  if (expectedScope.kind === "workspace"
+    && !isCanonicalAssistantRecordId(value.id)) {
+    return null;
+  }
 
   const context = expectedScope.kind === "workspace"
     ? normalizeWorkspaceMessageContext(value.context)
@@ -360,7 +384,8 @@ function normalizeConversationSummary(
   }
 
   if (expectedScope.kind === "workspace") {
-    if (!matchesExactScope(value.scope, expectedScope)
+    if (!isCanonicalAssistantRecordId(value.id)
+      || !matchesExactScope(value.scope, expectedScope)
       || hasOwn(value, "projectId")) {
       return null;
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createAssistantConversationApi,
+  isCanonicalAssistantRecordId,
   restoreAssistantMessages,
 } from "./assistantConversationApi";
 import type {
@@ -119,6 +120,30 @@ function projectConversation(
 }
 
 describe("assistant conversation API boundary", () => {
+  it.each([
+    "record-1",
+    "record.id",
+    "record:id",
+    "record%20id",
+  ])("accepts bounded canonical assistant identity %s", (id) => {
+    expect(isCanonicalAssistantRecordId(id)).toBe(true);
+  });
+
+  it.each([
+    "",
+    " record-1",
+    "record-1 ",
+    ".",
+    "..",
+    "../record",
+    "record\\child",
+    "record%2fchild",
+    "record%255cchild",
+    "C:record",
+  ])("rejects malformed assistant identity %j", (id) => {
+    expect(isCanonicalAssistantRecordId(id)).toBe(false);
+  });
+
   it("retains valid workspace list scope and sorts by updatedAt", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
       scope: workspaceScope,
@@ -191,6 +216,17 @@ describe("assistant conversation API boundary", () => {
           summary("valid", workspaceScope),
           malformed,
         ],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("rejects a workspace list with a malformed summary identity", async () => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        scope: workspaceScope,
+        conversations: [summary("../conversation", workspaceScope)],
       })),
     );
     await expect(api.listConversations()).resolves.toEqual([]);
@@ -300,6 +336,38 @@ describe("assistant conversation API boundary", () => {
       vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ conversation })),
     );
     await expect(api.createConversation({})).resolves.toBeNull();
+  });
+
+  it.each([
+    "",
+    "../conversation",
+    "conversation%2fchild",
+    "x".repeat(256),
+  ])("rejects workspace record identity %j", async (id) => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({ id }),
+      })),
+    );
+    await expect(api.createConversation({})).resolves.toBeNull();
+  });
+
+  it.each([
+    "",
+    "../message",
+    "message%255cchild",
+    "x".repeat(256),
+  ])("rejects workspace message identity %j", async (id) => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({ id })],
+        }),
+      })),
+    );
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
   });
 
   it("accepts a project record with the adapter project ID and normalizes its scope", async () => {

@@ -1,24 +1,23 @@
 import {
-  useCallback,
   useEffect,
   useId,
-  useRef,
+  useMemo,
   useState,
 } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import type { CodaScopeAction } from "../codaScopeTypes";
 import {
   WORKSPACE_NOTE_MAX_TITLE,
-  isCanonicalNoteTitle,
   normalizeCanonicalWorkspaceMutationAction,
-  type CanonicalWorkspaceNoteState,
 } from "../workspaceMutationActionValidation";
 import {
   createWorkspaceNoteApi,
   type WorkspaceNoteApi,
-  type WorkspaceNoteApiResult,
 } from "../workspaceNoteApi";
-import { buildWorkspaceNoteSubRoute } from "../workspaceCreatedNote";
+import {
+  WorkspaceCreatedNoteCardController,
+  visibilityConfirmationMessage,
+} from "../workspaceCreatedNoteCardController";
 import {
   IconCheck,
   IconClose,
@@ -31,32 +30,9 @@ import {
 
 const defaultWorkspaceNoteApi = createWorkspaceNoteApi();
 
-type CardPhase = "loading" | "ready" | "unavailable" | "error";
-type PendingOperation = "title" | "visibility" | "open" | null;
-
 interface WorkspaceCreatedNoteCardProps {
   action: CodaScopeAction;
   api?: WorkspaceNoteApi;
-}
-
-export function validateWorkspaceDisplayTitle(title: string): string | null {
-  const normalized = title.trim();
-  if (!normalized) return "Enter a display title.";
-  if (normalized.length > WORKSPACE_NOTE_MAX_TITLE) {
-    return `Display titles can be at most ${WORKSPACE_NOTE_MAX_TITLE} characters.`;
-  }
-  if (!isCanonicalNoteTitle(normalized)) {
-    return "Display titles must fit on one line.";
-  }
-  return null;
-}
-
-export function isWorkspaceNoteRequestCurrent(
-  requestId: number,
-  currentRequestId: number,
-  signal: AbortSignal,
-): boolean {
-  return requestId === currentRequestId && !signal.aborted;
 }
 
 export function WorkspaceCreatedNoteCard({
@@ -83,266 +59,32 @@ function TrustedWorkspaceCreatedNoteCard({
 }) {
   const { navigate } = useAppSubRoute("codascope");
   const titleInputId = useId();
-  const [phase, setPhase] = useState<CardPhase>("loading");
-  const [note, setNote] = useState<CanonicalWorkspaceNoteState | null>(null);
-  const [pending, setPending] = useState<PendingOperation>(null);
-  const [editing, setEditing] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [titleError, setTitleError] = useState<string | null>(null);
-  const [confirmation, setConfirmation] = useState<
-    "private" | "shared" | null
-  >(null);
-  const [statusText, setStatusText] = useState("");
-  const requestIdRef = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
-
-  const beginRequest = useCallback(() => {
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    const requestId = ++requestIdRef.current;
-    controllerRef.current = controller;
-    return { controller, requestId };
-  }, []);
-
-  const isCurrent = useCallback((
-    requestId: number,
-    controller: AbortController,
-  ) => isWorkspaceNoteRequestCurrent(
-    requestId,
-    requestIdRef.current,
-    controller.signal,
-  ), []);
-
-  const applyCanonicalNote = useCallback((
-    canonical: CanonicalWorkspaceNoteState,
-  ) => {
-    setNote(canonical);
-    setTitleDraft(canonical.title);
-    setPhase("ready");
-  }, []);
-
-  const applyReadFailure = useCallback((result: WorkspaceNoteApiResult) => {
-    setNote(null);
-    setEditing(false);
-    setConfirmation(null);
-    if (result.status === "absence") {
-      setPhase("unavailable");
-      setStatusText("This note is archived or no longer available.");
-      return;
-    }
-    setPhase("error");
-    setStatusText(
-      result.status === "failure"
-        ? result.message
-        : "The note could not be loaded. Please try again.",
-    );
-  }, []);
-
-  const loadNote = useCallback(async () => {
-    const { controller, requestId } = beginRequest();
-    setPhase("loading");
-    setPending(null);
-    setStatusText("Loading current note details…");
-    try {
-      const result = await api.read(stableId, { signal: controller.signal });
-      if (!isCurrent(requestId, controller)) return;
-      if (result.status === "success") {
-        applyCanonicalNote(result.note);
-        setStatusText("Current note details loaded.");
-      } else {
-        applyReadFailure(result);
-      }
-    } catch (error) {
-      if (!isCurrent(requestId, controller)
-        || (error instanceof Error && error.name === "AbortError")) return;
-      setPhase("error");
-      setStatusText("The note could not be loaded. Please try again.");
-    }
-  }, [
-    api,
-    applyCanonicalNote,
-    applyReadFailure,
-    beginRequest,
-    isCurrent,
-    stableId,
-  ]);
+  const controller = useMemo(
+    () => new WorkspaceCreatedNoteCardController(stableId, api, navigate),
+    [api, navigate, stableId],
+  );
+  const [state, setState] = useState(controller.getState());
 
   useEffect(() => {
-    void loadNote();
+    setState(controller.getState());
+    const unsubscribe = controller.subscribe(setState);
+    void controller.load();
     return () => {
-      requestIdRef.current += 1;
-      controllerRef.current?.abort();
+      unsubscribe();
+      controller.dispose();
     };
-  }, [loadNote]);
+  }, [controller]);
 
-  const reconcileConflict = useCallback(async (
-    requestId: number,
-    controller: AbortController,
-  ) => {
-    const refreshed = await api.read(stableId, { signal: controller.signal });
-    if (!isCurrent(requestId, controller)) return;
-    if (refreshed.status === "success") {
-      applyCanonicalNote(refreshed.note);
-      setEditing(false);
-      setConfirmation(null);
-      setStatusText(
-        "This note changed elsewhere. Review the latest details before retrying.",
-      );
-    } else {
-      applyReadFailure(refreshed);
-    }
-  }, [
-    api,
-    applyCanonicalNote,
-    applyReadFailure,
-    isCurrent,
-    stableId,
-  ]);
-
-  const saveTitle = useCallback(async () => {
-    if (!note || pending) return;
-    const normalizedTitle = titleDraft.trim();
-    const validationError = validateWorkspaceDisplayTitle(normalizedTitle);
-    if (validationError) {
-      setTitleError(validationError);
-      return;
-    }
-    if (normalizedTitle === note.title) {
-      setEditing(false);
-      setTitleError(null);
-      setStatusText("Display title is unchanged.");
-      return;
-    }
-
-    const { controller, requestId } = beginRequest();
-    setPending("title");
-    setTitleError(null);
-    setStatusText("Saving display title…");
-    try {
-      const result = await api.updateTitle(
-        stableId,
-        normalizedTitle,
-        note.contentHash,
-        { signal: controller.signal },
-      );
-      if (!isCurrent(requestId, controller)) return;
-      if (result.status === "success") {
-        applyCanonicalNote(result.note);
-        setEditing(false);
-        setStatusText("Display title saved.");
-      } else if (result.status === "conflict") {
-        await reconcileConflict(requestId, controller);
-      } else if (result.status === "absence") {
-        applyReadFailure(result);
-      } else {
-        setStatusText(result.message);
-      }
-    } catch (error) {
-      if (!isCurrent(requestId, controller)
-        || (error instanceof Error && error.name === "AbortError")) return;
-      setStatusText("The display title could not be saved. Please try again.");
-    } finally {
-      if (isCurrent(requestId, controller)) setPending(null);
-    }
-  }, [
-    applyCanonicalNote,
-    applyReadFailure,
-    beginRequest,
-    isCurrent,
+  const {
+    phase,
     note,
     pending,
-    reconcileConflict,
-    stableId,
+    editing,
     titleDraft,
-    api,
-  ]);
-
-  const confirmVisibility = useCallback(async () => {
-    if (!note || !confirmation || pending) return;
-    const target = confirmation;
-    const { controller, requestId } = beginRequest();
-    setPending("visibility");
-    setStatusText(
-      target === "shared"
-        ? "Sharing note with CodaScope users…"
-        : "Making note private…",
-    );
-    try {
-      const result = await api.updateVisibility(
-        stableId,
-        target,
-        note.contentHash,
-        { signal: controller.signal },
-      );
-      if (!isCurrent(requestId, controller)) return;
-      if (result.status === "success") {
-        applyCanonicalNote(result.note);
-        setConfirmation(null);
-        setStatusText(
-          result.note.visibility === "shared"
-            ? "Note is now Shared."
-            : "Note is now Private.",
-        );
-      } else if (result.status === "conflict") {
-        await reconcileConflict(requestId, controller);
-      } else if (result.status === "absence") {
-        applyReadFailure(result);
-      } else {
-        setStatusText(result.message);
-      }
-    } catch (error) {
-      if (!isCurrent(requestId, controller)
-        || (error instanceof Error && error.name === "AbortError")) return;
-      setStatusText("Visibility could not be changed. Please try again.");
-    } finally {
-      if (isCurrent(requestId, controller)) setPending(null);
-    }
-  }, [
-    api,
-    applyCanonicalNote,
-    applyReadFailure,
-    beginRequest,
+    titleError,
     confirmation,
-    isCurrent,
-    note,
-    pending,
-    reconcileConflict,
-    stableId,
-  ]);
-
-  const openNote = useCallback(async () => {
-    if (!note || pending) return;
-    const { controller, requestId } = beginRequest();
-    setPending("open");
-    setStatusText("Checking the current note location…");
-    try {
-      const result = await api.read(stableId, { signal: controller.signal });
-      if (!isCurrent(requestId, controller)) return;
-      if (result.status === "success") {
-        applyCanonicalNote(result.note);
-        setStatusText("Opening note…");
-        navigate(buildWorkspaceNoteSubRoute(result.note));
-      } else {
-        applyReadFailure(result);
-      }
-    } catch (error) {
-      if (!isCurrent(requestId, controller)
-        || (error instanceof Error && error.name === "AbortError")) return;
-      setStatusText("The note could not be opened. Please try again.");
-    } finally {
-      if (isCurrent(requestId, controller)) setPending(null);
-    }
-  }, [
-    api,
-    applyCanonicalNote,
-    applyReadFailure,
-    beginRequest,
-    isCurrent,
-    navigate,
-    note,
-    pending,
-    stableId,
-  ]);
+    statusText,
+  } = state;
 
   return (
     <article className="codascope-created-note-card">
@@ -374,7 +116,7 @@ function TrustedWorkspaceCreatedNoteCard({
           <span>{statusText}</span>
           <button
             className="codascope-created-note-card-btn"
-            onClick={() => void loadNote()}
+            onClick={() => void controller.retry()}
             type="button"
             aria-label="Retry loading created note"
           >
@@ -401,7 +143,7 @@ function TrustedWorkspaceCreatedNoteCard({
                 className="codascope-created-note-card-title-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void saveTitle();
+                  void controller.saveTitle();
                 }}
               >
                 <label
@@ -416,8 +158,7 @@ function TrustedWorkspaceCreatedNoteCard({
                   value={titleDraft}
                   maxLength={WORKSPACE_NOTE_MAX_TITLE}
                   onChange={(event) => {
-                    setTitleDraft(event.target.value);
-                    setTitleError(null);
+                    controller.setTitleDraft(event.target.value);
                   }}
                   disabled={pending !== null}
                   autoFocus
@@ -437,9 +178,7 @@ function TrustedWorkspaceCreatedNoteCard({
                     type="button"
                     disabled={pending !== null}
                     onClick={() => {
-                      setTitleDraft(note.title);
-                      setTitleError(null);
-                      setEditing(false);
+                      controller.cancelTitleEdit();
                     }}
                     aria-label="Cancel note title editing"
                   >
@@ -467,9 +206,7 @@ function TrustedWorkspaceCreatedNoteCard({
                   type="button"
                   disabled={pending !== null}
                   onClick={() => {
-                    setTitleDraft(note.title);
-                    setEditing(true);
-                    setStatusText("");
+                    controller.beginTitleEdit();
                   }}
                   aria-label={`Edit display title for ${note.title}`}
                 >
@@ -499,10 +236,7 @@ function TrustedWorkspaceCreatedNoteCard({
                   aria-pressed={note.visibility === visibility}
                   aria-label={`Set note visibility to ${visibility}`}
                   onClick={() => {
-                    if (note.visibility !== visibility) {
-                      setConfirmation(visibility);
-                      setStatusText("");
-                    }
+                    controller.selectVisibility(visibility);
                   }}
                 >
                   {visibility === "private" ? "Private" : "Shared"}
@@ -518,16 +252,14 @@ function TrustedWorkspaceCreatedNoteCard({
             >
               <IconWarning size={14} />
               <span>
-                {confirmation === "shared"
-                  ? "This note will become visible to all CodaScope users."
-                  : "Existing CodaScope users will lose access to this note."}
+                {visibilityConfirmationMessage(confirmation)}
               </span>
               <div className="codascope-created-note-card-controls">
                 <button
                   className="codascope-created-note-card-btn codascope-created-note-card-btn-primary"
                   type="button"
                   disabled={pending !== null}
-                  onClick={() => void confirmVisibility()}
+                  onClick={() => void controller.confirmVisibility()}
                   aria-label={`Confirm ${confirmation} note visibility`}
                 >
                   <IconCheck size={13} />
@@ -537,7 +269,7 @@ function TrustedWorkspaceCreatedNoteCard({
                   className="codascope-created-note-card-btn"
                   type="button"
                   disabled={pending !== null}
-                  onClick={() => setConfirmation(null)}
+                  onClick={() => controller.cancelVisibility()}
                   aria-label="Cancel note visibility change"
                 >
                   <IconClose size={13} /> Cancel
@@ -557,7 +289,7 @@ function TrustedWorkspaceCreatedNoteCard({
               className="codascope-created-note-card-btn codascope-created-note-card-btn-primary"
               type="button"
               disabled={pending !== null}
-              onClick={() => void openNote()}
+              onClick={() => void controller.open()}
               aria-label={`Open ${note.title}`}
             >
               <IconLaunch size={13} />

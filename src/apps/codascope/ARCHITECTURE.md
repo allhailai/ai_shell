@@ -741,27 +741,41 @@ response, treats sanitized `404` absence separately, parses only the canonical
 hash-bearing `409`, and converts all other or malformed responses to path-free
 user-facing failures.
 
-Phase 6 consumes workspace mutation actions through two trust checks. Live
-`done`, `error`, and `cancelled` terminal payloads pass through
-`workspaceMutationActionValidation.ts`, and persisted workspace conversation
-metadata passes through the same validator in
-`assistantConversationApi.ts`. Model-authored XML cannot enter either path.
+Phase 6 validates workspace mutation actions at both transport and persistence
+boundaries with `workspaceMutationActionValidation.ts`, but terminal actions
+are provisional only. Model-authored XML cannot enter either path, and no
+terminal-only action is published as a live action or used for navigation.
 The persisted conversation is authoritative after every workspace terminal:
-the stream layer re-reads it, selects the exact server-supplied assistant
-message ID (or the one new terminal assistant record when terminal identity is
-missing), and replaces the optimistic message list. This retains confirmed
-creations after later generation failure or cancellation, preserves stable
-message identity, and prevents duplicate messages and cards. Bounded
-reconciliation also covers incomplete terminal delivery; scope and
-conversation guards discard obsolete results.
+the stream layer validates bounded canonical terminal identities, requires a
+supplied conversation ID to equal the requested conversation, re-reads that
+exact conversation, and selects the supplied assistant message ID only when it
+is the new persisted non-streaming record for the turn. If terminal identity
+is missing, selection succeeds only when the known-message boundary proves
+there is exactly one new non-streaming assistant record. Actions are then
+published solely from that validated persisted record.
+
+Identity conflicts, malformed identities, ambiguous or absent assistant
+records, invalid persisted DTOs, and exhausted bounded reads fail closed. The
+client may display a local error explaining that response finalization could
+not be verified; it carries no mutation metadata, is never presented as a
+persisted success, and includes partial generated text only under that
+explicit incomplete label. Conflicting terminal content is discarded.
+Successful, errored, and cancelled turns retain confirmed creations when
+those actions exist on the authoritative persisted assistant record. Replacing
+the optimistic list with the persisted list preserves stable message identity
+and prevents duplicate messages and cards. Scope and conversation guards
+discard obsolete reconciliation results, while a later reload may reveal a
+record that was not yet provable during bounded reconciliation.
 
 Validated `note_created` receipts render through the dedicated
 `WorkspaceCreatedNoteCard`, keyed and deduplicated by stable note ID. Receipt
 title, path, visibility, and hash are historical only. Each card resolves the
-stable ID on mount and owns the resulting canonical active-note DTO. Its
-request epoch and abort controller suppress unmounted, identity-obsolete, and
-overlapping responses. Missing or archived notes disable mutation and Open,
-while recoverable reads can be retried.
+stable ID on mount and owns the resulting canonical active-note DTO through
+`WorkspaceCreatedNoteCardController`, the same operation state machine used by
+the React component and behavioral tests. Its request epoch, abort controller,
+and dispose boundary suppress unmounted, identity-obsolete, and overlapping
+responses. Missing or archived notes disable mutation and Open, while
+recoverable reads can be retried.
 
 Display-title editing calls only
 `PATCH /api/codascope/workspace/notes/:stableId/title`, applies the shared
