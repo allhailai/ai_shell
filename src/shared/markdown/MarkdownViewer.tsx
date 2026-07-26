@@ -474,6 +474,19 @@ export function MarkdownViewer({
   imageIndexRef.current = 0;
 
   const components: Components = {
+    table({ children }) {
+      return (
+        <div
+          className="shared-md-table-scroll"
+          role="region"
+          aria-label="Scrollable table"
+          tabIndex={0}
+        >
+          <table>{children}</table>
+        </div>
+      );
+    },
+
     // Override img to support resizable images with Obsidian |WxH convention
     img({ alt, src, ...props }) {
       const currentIdx = imageIndexRef.current++;

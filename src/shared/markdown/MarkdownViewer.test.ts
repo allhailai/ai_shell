@@ -29,3 +29,16 @@ describe("MarkdownViewer links", () => {
     expect(markup).toContain('href=""');
   });
 });
+
+describe("MarkdownViewer tables", () => {
+  it("contains rendered tables in a keyboard-accessible horizontal scroll region", () => {
+    const markup = renderToStaticMarkup(createElement(MarkdownViewer, {
+      content: "| ID | Condition |\n| --- | --- |\n| T1 | A very wide condition |",
+    }));
+
+    expect(markup).toContain(
+      '<div class="shared-md-table-scroll" role="region" aria-label="Scrollable table" tabindex="0">',
+    );
+    expect(markup).toContain("<table>");
+  });
+});

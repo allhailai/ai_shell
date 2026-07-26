@@ -6,6 +6,9 @@
 .shared-md-editor-shell {
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   display: grid;
   overflow: hidden;
   background: var(--color-bg-secondary);
@@ -16,23 +19,40 @@
 .shared-md-editor-shell .cm-theme {
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .shared-md-editor-shell .cm-editor {
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   outline: none;
 }
 
 .shared-md-editor-shell .cm-scroller {
   height: 100%;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   overflow: auto;
 }
 
 .shared-md-editor-shell .cm-content {
-  width: 100%;
+  /*
+   * The scroller is a flex row containing both the gutters and the document.
+   * A 100% document width is therefore 100% + the gutter width and lets wide
+   * widgets establish an even larger intrinsic canvas. Flex into the remaining
+   * space so prose wraps at the visible editor edge and block widgets can
+   * contain their own horizontal overflow.
+   */
+  flex: 1 1 0;
+  width: auto;
   min-width: 0;
-  max-width: 100%;
+  max-width: none;
   /*
    * CodeMirror maps cursor positions to individual source characters. A
    * multi-character font ligature has only one shaped glyph boundary, which
@@ -57,6 +77,10 @@
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--leading-relaxed);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -162,9 +186,21 @@
 }
 
 /* Tables */
+.shared-md-table-scroll {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 var(--space-4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  border-radius: var(--radius-md);
+}
+
 .shared-md-viewer table {
   width: 100%;
-  margin: 0 0 var(--space-4);
+  min-width: 100%;
+  margin: 0;
   border-collapse: collapse;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-md);

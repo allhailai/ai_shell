@@ -119,6 +119,9 @@ class TableWidget extends WidgetType {
   toDOM() {
     const wrapper = document.createElement("div");
     wrapper.className = "shared-md-table-wrapper";
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute("role", "region");
+    wrapper.setAttribute("aria-label", "Scrollable table");
 
     const table = document.createElement("table");
     table.className = "shared-md-table";
