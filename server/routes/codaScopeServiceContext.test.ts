@@ -83,6 +83,11 @@ describe("CodaScope root-bound service lifecycle", () => {
       .toBe(codaScopePersistence);
     const workspaceConversationA =
       await servicesA.workspaceConversationSvc.createConversation("alice");
+    const workspaceNoteA = await servicesA.workspaceNoteSvc.createNote(
+      "alice",
+      { path: "root-a.md", title: "Root A", body: "Old root" },
+      { sharedRequested: false },
+    );
     expect(servicesA.workspaceConversationSvc.getRoot()).toBe(rootA);
     const close = vi.fn();
     const closeWorkspace = vi.fn();
@@ -142,6 +147,10 @@ describe("CodaScope root-bound service lifecycle", () => {
     expect(workspaceController.signal.aborted).toBe(true);
     await expect(servicesA.workspaceConversationSvc.listConversations("alice"))
       .rejects.toThrow("disposed");
+    await expect(servicesA.workspaceNoteSvc.resolveActiveNote(
+      "alice",
+      workspaceNoteA.stableId,
+    )).rejects.toThrow("disposed");
     expect((servicesA.agentSvc as any).cleanupTimer).toBeNull();
     expect((servicesA.buildSvc as any).cancelledKeys.has("project")).toBe(true);
     expect(servicesB.activeEntityResolver).not.toBe(servicesA.activeEntityResolver);
@@ -150,10 +159,15 @@ describe("CodaScope root-bound service lifecycle", () => {
       .not.toBe(servicesA.workspaceConversationSvc);
     expect(servicesB.workspaceImageSvc).not.toBe(servicesA.workspaceImageSvc);
     expect(servicesB.workspaceIntentSvc).not.toBe(servicesA.workspaceIntentSvc);
+    expect(servicesB.workspaceNoteSvc).not.toBe(servicesA.workspaceNoteSvc);
     expect(servicesB.workspaceConversationSvc.getRoot()).toBe(rootB);
     expect(await servicesB.workspaceConversationSvc.readConversation(
       "alice",
       workspaceConversationA.id,
+    )).toBeNull();
+    expect(await servicesB.workspaceNoteSvc.resolveActiveNote(
+      "alice",
+      workspaceNoteA.stableId,
     )).toBeNull();
     expect((servicesB.agentSvc as any).workspaceTools).toMatchObject({
       activeResolver: servicesB.activeEntityResolver,
@@ -161,6 +175,7 @@ describe("CodaScope root-bound service lifecycle", () => {
       epic: servicesB.epicSvc,
       designDoc: servicesB.designDocSvc,
       epicKnowledge: servicesB.epicKnowledgeSvc,
+      workspaceNote: servicesB.workspaceNoteSvc,
     });
     expect(servicesB.projectSvc.getRoot()).toBe(rootB);
     expect((servicesB.agentSvc as any).projectsRoot).toBe(rootB);

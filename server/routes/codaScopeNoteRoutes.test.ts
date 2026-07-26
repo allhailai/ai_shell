@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { Express, RequestHandler } from "express";
 import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import { registerNoteRoutes } from "./codaScopeNoteRoutes.js";
+import {
+  WorkspaceNoteConflictError,
+} from "../services/codaScopeWorkspaceNoteService.js";
 
 type RouteRegistration = { method: string; path: string; handlers: RequestHandler[] };
 
@@ -116,5 +119,104 @@ describe("CodaScope note route registration", () => {
     await expect(route!.handlers.at(-1)!({ ...baseRequest, body: { status: "wontfix" } } as never, {} as never, (() => undefined) as never))
       .rejects.toThrow("status transition is not allowed");
     expect(updateAnnotation).not.toHaveBeenCalled();
+  });
+
+  it("rehydrates workspace notes by stable ID with authenticated actor custody", async () => {
+    const dto = {
+      stableId: "note-1",
+      scope: "codascope",
+      visibility: "private",
+      path: "one.md",
+      title: "One",
+      contentHash: "a".repeat(32),
+    };
+    const resolveActiveNote = vi.fn(async () => dto);
+    const route = registeredRoutes({
+      services: { workspaceNoteSvc: { resolveActiveNote } },
+    }).find((candidate) =>
+      candidate.method === "get"
+      && candidate.path === "/api/codascope/workspace/notes/:stableId");
+    const json = vi.fn();
+
+    await route!.handlers.at(-1)!(
+      { params: { stableId: "note-1" } } as never,
+      { json } as never,
+      (() => undefined) as never,
+    );
+    expect(resolveActiveNote).toHaveBeenCalledWith("alice", "note-1");
+    expect(json).toHaveBeenCalledWith(dto);
+  });
+
+  it("updates only workspace display title and rejects client authority fields", async () => {
+    const setTitle = vi.fn(async () => ({
+      stableId: "note-1",
+      scope: "codascope",
+      visibility: "private",
+      path: "fixed.md",
+      title: "Renamed",
+      contentHash: "b".repeat(32),
+    }));
+    const route = registeredRoutes({
+      services: { workspaceNoteSvc: { setTitle } },
+    }).find((candidate) =>
+      candidate.method === "patch"
+      && candidate.path === "/api/codascope/workspace/notes/:stableId/title");
+
+    await expect(route!.handlers.at(-1)!({
+      params: { stableId: "note-1" },
+      body: {
+        title: "Renamed",
+        expectedHash: "a".repeat(32),
+        actorId: "mallory",
+      },
+    } as never, {} as never, (() => undefined) as never))
+      .rejects.toThrow("Invalid workspace note request");
+    expect(setTitle).not.toHaveBeenCalled();
+
+    const json = vi.fn();
+    await route!.handlers.at(-1)!({
+      params: { stableId: "note-1" },
+      body: { title: "Renamed", expectedHash: "a".repeat(32) },
+    } as never, { json } as never, (() => undefined) as never);
+    expect(setTitle).toHaveBeenCalledWith(
+      "alice",
+      "note-1",
+      "Renamed",
+      "a".repeat(32),
+    );
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({
+      path: "fixed.md",
+      title: "Renamed",
+    }));
+  });
+
+  it("returns the canonical conflict shape for stable-ID visibility updates", async () => {
+    const setVisibility = vi.fn(async () => {
+      throw new WorkspaceNoteConflictError("b".repeat(32));
+    });
+    const route = registeredRoutes({
+      services: { workspaceNoteSvc: { setVisibility } },
+    }).find((candidate) =>
+      candidate.method === "patch"
+      && candidate.path === "/api/codascope/workspace/notes/:stableId/visibility");
+    const json = vi.fn();
+    const status = vi.fn(() => ({ json }));
+
+    await route!.handlers.at(-1)!({
+      params: { stableId: "note-1" },
+      body: { visibility: "shared", expectedHash: "a".repeat(32) },
+    } as never, { status } as never, (() => undefined) as never);
+    expect(setVisibility).toHaveBeenCalledWith(
+      "alice",
+      "note-1",
+      "shared",
+      "a".repeat(32),
+    );
+    expect(status).toHaveBeenCalledWith(409);
+    expect(json).toHaveBeenCalledWith({
+      error: "conflict",
+      message: "Note was modified since you loaded it.",
+      currentHash: "b".repeat(32),
+    });
   });
 });

@@ -482,4 +482,111 @@ describe("CodaScopeWorkspaceConversationService", () => {
     expect(existsSync(path.join(root, "_workspace", "conversations"))).toBe(true);
     expect(existsSync(path.join(projectDir, "conversations"))).toBe(false);
   });
+
+  it("durably preserves canonical trusted mutation actions on completion and error", async () => {
+    const root = temporaryRoot();
+    const service = new CodaScopeWorkspaceConversationService(root);
+    const conversation = await service.createConversation("alice");
+    const action = {
+      type: "note_created",
+      attributes: {
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "one.md",
+        title: "One",
+        contentHash: "a".repeat(32),
+      },
+      description: 'Created CodaScope note "One".',
+    };
+    await service.appendMessage("alice", conversation.id, {
+      id: "assistant-action",
+      role: "assistant",
+      content: "",
+      status: "streaming",
+    });
+    await service.completeAssistantMessage(
+      "alice",
+      conversation.id,
+      "assistant-action",
+      { content: "Created.", retrievedSources: [], actions: [action] },
+    );
+    await service.recordAssistantMessageError(
+      "alice",
+      conversation.id,
+      "assistant-action",
+      "Generation failed after creation.",
+      [action],
+    );
+
+    const reloaded = new CodaScopeWorkspaceConversationService(root);
+    expect((await reloaded.readConversation(
+      "alice",
+      conversation.id,
+    ))?.messages.at(-1)).toMatchObject({
+      id: "assistant-action",
+      status: "error",
+      metadata: { actions: [action] },
+    });
+  });
+
+  it("fails closed when persisted note_created metadata is malformed", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const conversation = await service.createConversation("alice");
+    await service.appendMessage("alice", conversation.id, {
+      id: "assistant-action",
+      role: "assistant",
+      content: "Forged",
+      status: "complete",
+      metadata: {
+        actions: [{
+          type: "note_created",
+          attributes: {
+            stableId: "note-1",
+            scope: "project",
+            visibility: "private",
+            path: "/absolute.md",
+            title: "Forged",
+            contentHash: "not-a-hash",
+          },
+          description: "Forged",
+        }],
+      },
+    }).catch(() => undefined);
+
+    // Inject malformed persisted metadata to exercise strict reload rather
+    // than the equally strict append boundary.
+    const recordPath = path.join(
+      service.getActorStorageDirectory("alice"),
+      `${conversation.id}.json`,
+    );
+    const record = JSON.parse(readFileSync(recordPath, "utf-8"));
+    record.messages.push({
+      id: "malformed-action",
+      role: "assistant",
+      content: "Forged",
+      createdAt: new Date().toISOString(),
+      updatedAt: null,
+      modelId: null,
+      status: "complete",
+      context: createWorkspaceMessageContext({}),
+      metadata: {
+        actions: [{
+          type: "note_created",
+          attributes: {
+            stableId: "note-1",
+            scope: "project",
+            visibility: "private",
+            path: "/absolute.md",
+            title: "Forged",
+            contentHash: "not-a-hash",
+          },
+          description: "Forged",
+        }],
+      },
+    });
+    writeFileSync(recordPath, JSON.stringify(record, null, 2));
+    await expect(service.readConversation("alice", conversation.id))
+      .rejects.toThrow();
+  });
 });

@@ -16,12 +16,18 @@ import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import { CodaScopeNoteService } from "./codaScopeNoteService.js";
 import { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import { CodaScopeNoteDocumentService } from "./codaScopeNoteDocumentService.js";
-import { getToolsForPurpose } from "./codaScopeToolDefinitions.js";
+import {
+  getToolsForPurpose,
+  ToolResultCollectorHolder,
+} from "./codaScopeToolDefinitions.js";
 import {
   EMPTY_WORKSPACE_TURN_READ_GRANT,
   WorkspaceTurnReadGrantHolder,
 } from "./codaScopeWorkspaceReadGrant.js";
 import { getWorkspaceTools } from "./codaScopeWorkspaceToolDefinitions.js";
+import { WorkspaceTurnNoteGrantHolder } from "./codaScopeWorkspaceNoteGrant.js";
+import { WorkspaceProvenanceCollectorHolder } from "./codaScopeWorkspaceProvenance.js";
+import { WorkspaceMutationActionCollectorHolder } from "./codaScopeWorkspaceMutationActions.js";
 
 function tmpDir(): string {
   const root = path.join(os.tmpdir(), `agent-actor-${crypto.randomBytes(6).toString("hex")}`);
@@ -477,6 +483,96 @@ describe("CodaScopeAgentService actor isolation", () => {
 
       expect(observedResults[0]).toContain("\"id\":\"epic\"");
       expect(observedResults[1]).toContain("not authorized");
+      await service.shutdown();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns trusted workspace mutation actions when a later SDK failure occurs", async () => {
+    const root = tmpDir();
+    try {
+      const mutationHolder = new WorkspaceMutationActionCollectorHolder();
+      const fakeAgent = {
+        agentId: "workspace-agent",
+        close: vi.fn(),
+        send: vi.fn(async () => {
+          mutationHolder.collectNoteCreated({
+            stableId: "note-1",
+            scope: "codascope",
+            visibility: "private",
+            path: "one.md",
+            title: "One",
+            contentHash: "a".repeat(32),
+          });
+          return {
+            id: "run",
+            cancel: vi.fn(async () => undefined),
+            wait: vi.fn(async () => {
+              throw new Error("later SDK failure");
+            }),
+          };
+        }),
+      };
+      const service = new CodaScopeAgentService(
+        { getAppSecret: vi.fn(async () => "key") } as any,
+        root,
+        {
+          activeResolver: {},
+          catalog: {},
+          epic: {},
+          designDoc: {},
+          epicKnowledge: {},
+          workspaceNote: { resolveActiveNote: vi.fn() },
+        } as any,
+      );
+      const key = (service as any).poolKey(
+        { kind: "workspace" },
+        "workspace-assistant",
+        "alice",
+      );
+      (service as any).pool.set(key, {
+        agent: fakeAgent,
+        scope: { kind: "workspace" },
+        purpose: "workspace-assistant",
+        actorId: "alice",
+        lastUsed: Date.now(),
+        busy: false,
+        collectorHolder: new ToolResultCollectorHolder(),
+        workspaceGrantHolder: new WorkspaceTurnReadGrantHolder(),
+        workspaceNoteGrantHolder: new WorkspaceTurnNoteGrantHolder(),
+        workspaceProvenanceHolder: new WorkspaceProvenanceCollectorHolder(),
+        workspaceMutationActionHolder: mutationHolder,
+      });
+      (service as any).allAgents.add(fakeAgent);
+      const onError = vi.fn();
+
+      await service.send({
+        scope: { kind: "workspace" },
+        purpose: "workspace-assistant",
+        actorId: "alice",
+        workspaceNoteGrant: {
+          create: { allowed: true, sharedRequested: false },
+          readStableIds: [],
+          editBodyStableIds: [],
+          editTitleStableIds: [],
+          visibilityChanges: [],
+          archiveStableIds: [],
+        },
+        message: "Create a note.",
+        modelId: "model",
+        onMessage: vi.fn(),
+        onDone: vi.fn(),
+        onError,
+      });
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Workspace assistant run failed." }),
+        [expect.objectContaining({
+          type: "note_created",
+          attributes: expect.objectContaining({ stableId: "note-1" }),
+        })],
+      );
       await service.shutdown();
     } finally {
       rmSync(root, { recursive: true, force: true });

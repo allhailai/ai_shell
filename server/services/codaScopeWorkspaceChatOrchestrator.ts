@@ -11,6 +11,7 @@ import type {
 } from "./codaScopeWorkspaceConversationService.js";
 import type { CodaScopeWorkspaceIntentService } from "./codaScopeWorkspaceIntentService.js";
 import type { WorkspaceRetrievedSourceReference } from "./codaScopeWorkspaceProvenance.js";
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 import {
   buildWorkspaceAssistantPrompt,
   buildWorkspaceManifestFromCatalog,
@@ -22,16 +23,19 @@ export interface WorkspaceStreamResult {
   fullResponse: string;
   agentResult: unknown;
   retrievedSources: WorkspaceRetrievedSourceReference[];
+  actions: CodaScopeAction[];
 }
 
 export class WorkspaceAssistantCancelledError extends Error {
   readonly cancelled = true;
   readonly fullResponse: string;
+  readonly actions: CodaScopeAction[];
 
-  constructor(fullResponse: string) {
+  constructor(fullResponse: string, actions: CodaScopeAction[] = []) {
     super("Workspace assistant run was cancelled.");
     this.name = "WorkspaceAssistantCancelledError";
     this.fullResponse = fullResponse;
+    this.actions = actions;
   }
 }
 
@@ -54,6 +58,10 @@ export async function streamWorkspaceAssistantResponse(options: {
   const resolution = await options.intentService.resolveTurn(
     options.message,
     options.context.explicitlyReferencedProjectIds,
+    {
+      actorId: options.actorId,
+      currentNote: options.context.currentNote,
+    },
   );
 
   let fullResponse = "";
@@ -66,6 +74,7 @@ export async function streamWorkspaceAssistantResponse(options: {
       modelId: options.modelId,
       systemPrompt: prompt,
       workspaceReadGrant: resolution.grant,
+      workspaceNoteGrant: resolution.noteGrant,
       images: options.images,
       onMessage: (message) => {
         if (message.type === "assistant" && message.message?.content) {
@@ -75,17 +84,17 @@ export async function streamWorkspaceAssistantResponse(options: {
         }
         options.onMessage(message);
       },
-      onDone: (agentResult, retrievedSources = []) => {
-        resolve({ fullResponse, agentResult, retrievedSources });
+      onDone: (agentResult, retrievedSources = [], actions = []) => {
+        resolve({ fullResponse, agentResult, retrievedSources, actions });
       },
-      onError: (error) => {
+      onError: (error, actions = []) => {
         if (error.message === "Agent cancelled by user.") {
-          reject(new WorkspaceAssistantCancelledError(fullResponse));
+          reject(new WorkspaceAssistantCancelledError(fullResponse, actions));
           return;
         }
         reject(Object.assign(
           new Error("Workspace assistant run failed."),
-          { fullResponse },
+          { fullResponse, actions },
         ));
       },
     });

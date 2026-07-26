@@ -5,6 +5,8 @@ import {
   type WorkspaceTurnReadGrant,
 } from "./codaScopeWorkspaceReadGrant.js";
 import { WorkspaceProvenanceCollectorHolder } from "./codaScopeWorkspaceProvenance.js";
+import { WorkspaceTurnNoteGrantHolder } from "./codaScopeWorkspaceNoteGrant.js";
+import { WorkspaceMutationActionCollectorHolder } from "./codaScopeWorkspaceMutationActions.js";
 
 const EXPECTED_WORKSPACE_TOOLS = [
   "get_workspace_status",
@@ -143,6 +145,35 @@ describe("workspace tool allowlist", () => {
     expect(names).not.toMatch(
       /source_file|repositories|write|create|edit|delete|archive|restore|note|annotation|artifact|trigger|search_web|skill/,
     );
+  });
+
+  it("adds only the six dedicated CodaScope-note tools when the root graph provides the note boundary", () => {
+    const fixture = {
+      ...services(),
+      workspaceNote: {},
+    };
+    const tools = getWorkspaceTools(
+      fixture as any,
+      grantHolder(),
+      undefined,
+      new WorkspaceTurnNoteGrantHolder(),
+      new WorkspaceMutationActionCollectorHolder(),
+      "alice",
+    );
+    expect(Object.keys(tools).sort()).toEqual([
+      ...EXPECTED_WORKSPACE_TOOLS,
+      "read_codascope_note",
+      "create_codascope_note",
+      "edit_codascope_note",
+      "set_codascope_note_title",
+      "set_codascope_note_visibility",
+      "archive_codascope_note",
+    ].sort());
+    expect(tools).not.toHaveProperty("create_note");
+    expect(tools).not.toHaveProperty("edit_note");
+    expect(tools).not.toHaveProperty("delete_note");
+    expect(tools).not.toHaveProperty("restore_note");
+    expect(tools).not.toHaveProperty("move_note");
   });
 
   it("uses strict schemas without actor, path, mutation, trigger, archive, or grant inputs", () => {

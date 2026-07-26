@@ -18,6 +18,7 @@ import {
   createSseTerminalWriter,
 } from "./utils/ssePipelineHelper.js";
 import { assertSafePathSegment } from "../services/codaScopePathSafety.js";
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 
 const MAX_ATTACHMENTS = 10;
 const MODEL_ID_MAX = 255;
@@ -237,6 +238,7 @@ async function handleWorkspaceMessage(
   await workspaceIntentSvc.resolveTurn(
     message,
     context.explicitlyReferencedProjectIds,
+    { actorId, currentNote: context.currentNote },
   );
 
   const attachments = validateAttachments(
@@ -353,6 +355,7 @@ async function handleWorkspaceMessage(
         conversationId,
         assistantMessageId,
         retrievedSources: result.retrievedSources,
+        actions: result.actions,
       });
       const persisted = await workspaceConversationSvc.completeAssistantMessage(
         actorId,
@@ -361,6 +364,7 @@ async function handleWorkspaceMessage(
         {
           content: result.fullResponse,
           retrievedSources: result.retrievedSources,
+          actions: result.actions,
         },
       );
       if (!persisted) {
@@ -369,6 +373,7 @@ async function handleWorkspaceMessage(
       terminal.done(donePayload);
     } catch (error) {
       const partial = partialResponse(error) || generatedResponse;
+      const actions = mutationActions(error);
       const failurePersisted = await persistWorkspaceFailure(
         workspaceConversationSvc,
         actorId,
@@ -377,15 +382,29 @@ async function handleWorkspaceMessage(
         error instanceof WorkspaceAssistantCancelledError
           ? partial || "[Workspace assistant response cancelled.]"
           : partial || "Workspace assistant run failed.",
+        actions,
       );
       if (!failurePersisted) {
         terminal.error("Workspace assistant run could not be finalized.");
         return;
       }
       if (error instanceof WorkspaceAssistantCancelledError) {
-        terminal.cancelled({ conversationId, assistantMessageId });
+        terminal.cancelled({
+          conversationId,
+          assistantMessageId,
+          ...(actions.length > 0 ? { actions } : {}),
+        });
       } else {
-        terminal.error("Workspace assistant run failed.");
+        if (actions.length > 0) {
+          terminal.sendEvent("error", {
+            error: "Workspace assistant run failed.",
+            conversationId,
+            assistantMessageId,
+            actions,
+          });
+        } else {
+          terminal.error("Workspace assistant run failed.");
+        }
       }
     }
   } finally {
@@ -400,12 +419,14 @@ async function persistWorkspaceFailure(
       conversationId: string,
       messageId: string,
       content: string,
+      actions: readonly CodaScopeAction[],
     ) => Promise<unknown>;
   },
   actorId: string,
   conversationId: string,
   messageId: string,
   content: string,
+  actions: readonly CodaScopeAction[],
 ): Promise<boolean> {
   if (!messageId) {
     logWorkspaceFailurePersistenceDiagnostic();
@@ -417,6 +438,7 @@ async function persistWorkspaceFailure(
       conversationId,
       messageId,
       content,
+      actions,
     );
     if (persisted) return true;
   } catch {
@@ -470,6 +492,8 @@ function rejectClientAuthorizationInputs(
 ): void {
   for (const field of [
     "workspaceReadGrant",
+    "workspaceNoteGrant",
+    "noteGrant",
     "readGrant",
     "grant",
     "projectId",
@@ -544,6 +568,16 @@ function partialResponse(error: unknown): string {
   return isRecord(error) && typeof error.fullResponse === "string"
     ? error.fullResponse
     : "";
+}
+
+function mutationActions(error: unknown): CodaScopeAction[] {
+  if (!isRecord(error) || !Array.isArray(error.actions)) return [];
+  return error.actions.filter((action): action is CodaScopeAction => (
+    isRecord(action)
+    && typeof action.type === "string"
+    && isRecord(action.attributes)
+    && typeof action.description === "string"
+  ));
 }
 
 function createMessageId(): string {

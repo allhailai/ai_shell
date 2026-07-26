@@ -19,6 +19,11 @@ import multer from "multer";
 import { parseInlineAnnotationAnchors } from "../services/codaScopeNoteAnnotationAnchorService.js";
 import { archiveUpload, removeUploadedArchive } from "./codaScopeArchiveUpload.js";
 import { isPathValidationError } from "../services/codaScopePathSafety.js";
+import {
+  WorkspaceNoteConflictError,
+  WorkspaceNoteInvalidInputError,
+  WorkspaceNoteUnavailableError,
+} from "../services/codaScopeWorkspaceNoteService.js";
 
 const VALID_SCOPES: NoteScope[] = ["codascope", "project", "epic"];
 const VALID_VISIBILITIES: NoteVisibility[] = ["shared", "private"];
@@ -129,6 +134,28 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       return rawPath.slice(0, -suffix.length);
     }
     return rawPath;
+  }
+
+  function workspaceNoteRouteError(
+    error: unknown,
+    res?: { status: (code: number) => { json: (body: unknown) => unknown } },
+  ): void {
+    if (error instanceof WorkspaceNoteConflictError && res) {
+      res.status(409).json({
+        error: "conflict",
+        message: "Note was modified since you loaded it.",
+        currentHash: error.currentHash,
+      });
+      return;
+    }
+    if (error instanceof WorkspaceNoteUnavailableError
+      || error instanceof WorkspaceNoteConflictError) {
+      throw httpError("Note not found.", 404, "not_found");
+    }
+    if (error instanceof WorkspaceNoteInvalidInputError) {
+      throw httpError(error.message, 400, "invalid_input");
+    }
+    throw error;
   }
 
   /** Custom highlight colors are optional CodaScope configuration, not a required secret. */
@@ -497,6 +524,76 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
       noteId,
       contentHash: result.contentHash,
     });
+  }));
+
+  // ── Stable-ID Workspace Note API ───────────────────────────────────
+  // These authenticated endpoints accept no scope, path, project, epic,
+  // owner, or actor authority. They share the workspace assistant's sole
+  // mutation boundary and return canonical active-note DTOs.
+
+  app.get("/api/codascope/workspace/notes/:stableId", wrap(async (req, res) => {
+    const { workspaceNoteSvc } = await ensureServices();
+    try {
+      const note = await workspaceNoteSvc.resolveActiveNote(
+        principal(req).username,
+        param(req, "stableId"),
+      );
+      if (!note) throw new WorkspaceNoteUnavailableError();
+      res.json(note);
+    } catch (error) {
+      workspaceNoteRouteError(error);
+    }
+  }));
+
+  app.patch("/api/codascope/workspace/notes/:stableId/title", wrap(async (req, res) => {
+    const { workspaceNoteSvc } = await ensureServices();
+    const body = strictWorkspaceNoteBody(
+      req.body,
+      ["title", "expectedHash"],
+      httpError,
+    );
+    if (typeof body.title !== "string" || typeof body.expectedHash !== "string") {
+      throw httpError("title and expectedHash are required.", 400, "invalid_input");
+    }
+    try {
+      const note = await workspaceNoteSvc.setTitle(
+        principal(req).username,
+        param(req, "stableId"),
+        body.title,
+        body.expectedHash,
+      );
+      res.json(note);
+    } catch (error) {
+      workspaceNoteRouteError(error, res);
+    }
+  }));
+
+  app.patch("/api/codascope/workspace/notes/:stableId/visibility", wrap(async (req, res) => {
+    const { workspaceNoteSvc } = await ensureServices();
+    const body = strictWorkspaceNoteBody(
+      req.body,
+      ["visibility", "expectedHash"],
+      httpError,
+    );
+    if ((body.visibility !== "private" && body.visibility !== "shared")
+      || typeof body.expectedHash !== "string") {
+      throw httpError(
+        "visibility and expectedHash are required.",
+        400,
+        "invalid_input",
+      );
+    }
+    try {
+      const note = await workspaceNoteSvc.setVisibility(
+        principal(req).username,
+        param(req, "stableId"),
+        body.visibility,
+        body.expectedHash,
+      );
+      res.json(note);
+    } catch (error) {
+      workspaceNoteRouteError(error, res);
+    }
   }));
 
   // ── List Notes ──────────────────────────────────────────────────────
@@ -1726,8 +1823,24 @@ export function registerNoteRoutes(ctx: CodaScopeRouteContext): void {
   }));
 }
 
-function isValidAnnotationStatusTransition(current: AnnotationStatus, next: AnnotationStatus): boolean {
+  function isValidAnnotationStatusTransition(current: AnnotationStatus, next: AnnotationStatus): boolean {
   if (current === next) return true;
   if (current === "open") return next === "resolved" || next === "wontfix";
   return next === "open";
+}
+
+function strictWorkspaceNoteBody(
+  value: unknown,
+  allowed: readonly string[],
+  httpError: CodaScopeRouteContext["httpError"],
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw httpError("Invalid workspace note request.", 400, "invalid_input");
+  }
+  const body = value as Record<string, unknown>;
+  const fields = new Set(allowed);
+  if (Object.keys(body).some((key) => !fields.has(key))) {
+    throw httpError("Invalid workspace note request.", 400, "invalid_input");
+  }
+  return body;
 }

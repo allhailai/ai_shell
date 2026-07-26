@@ -90,8 +90,11 @@ describe("workspace prompt", () => {
     expect(prompt).toMatch(/Never claim.*source files/i);
     expect(prompt).toMatch(/server-generated grant/i);
     expect(prompt).toMatch(/Archived projects, epics, and designs are unavailable/i);
-    expect(prompt).toMatch(/No project-side mutation/i);
-    expect(prompt).toMatch(/note behavior is intentionally deferred/i);
+    expect(prompt).toMatch(/Project\/source\/workspace catalogs remain read-only/i);
+    expect(prompt).toMatch(/only mutation capability is for CodaScope-level notes/i);
+    expect(prompt).toMatch(/New CodaScope notes default private/i);
+    expect(prompt).toMatch(/Read before editing.*contentHash/is);
+    expect(prompt).toMatch(/Permanent deletion, restore, arbitrary moves.*unavailable/is);
     expect(prompt).toContain("MANIFEST");
     expect(prompt).toContain("Compare them");
   });

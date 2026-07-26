@@ -116,6 +116,19 @@ function conversation(messages: any[] = []) {
   };
 }
 
+const noteCreatedAction = {
+  type: "note_created",
+  attributes: {
+    stableId: "note-1",
+    scope: "codascope",
+    visibility: "private",
+    path: "one.md",
+    title: "One",
+    contentHash: "a".repeat(32),
+  },
+  description: 'Created CodaScope note "One".',
+};
+
 function statefulConversationService(timeline: string[] = []) {
   let current = conversation();
   const readConversation = vi.fn(async (
@@ -164,6 +177,9 @@ function statefulConversationService(timeline: string[] = []) {
               ...message.context,
               retrievedSources: completion.retrievedSources,
             },
+            metadata: completion.actions?.length
+              ? { ...message.metadata, actions: completion.actions }
+              : message.metadata,
           }
         : message),
     };
@@ -175,6 +191,7 @@ function statefulConversationService(timeline: string[] = []) {
     _conversationId: string,
     messageId: string,
     content: string,
+    actions: any[] = [],
   ) => {
     current = {
       ...current,
@@ -184,6 +201,9 @@ function statefulConversationService(timeline: string[] = []) {
             content,
             status: "error",
             context: { ...message.context, retrievedSources: [] },
+            metadata: actions.length
+              ? { ...message.metadata, actions }
+              : message.metadata,
           }
         : message),
     };
@@ -383,6 +403,7 @@ describe("workspace chat routes", () => {
         topicUpdatedAt: "2026-01-01T00:00:00.000Z",
         lastWikiBuildAt: null,
       }],
+      actions: [noteCreatedAction],
     });
     const routes = registeredRoutes({
       services: streamingServices(state.service),
@@ -419,7 +440,12 @@ describe("workspace chat routes", () => {
           topicId: "architecture",
         })],
       },
+      metadata: { actions: [noteCreatedAction] },
     });
+    const done = JSON.parse(
+      terminals(res)[0].match(/^event: done\ndata: (.*)\n\n$/s)![1],
+    );
+    expect(done.actions).toEqual([noteCreatedAction]);
   });
 
   it("persists sanitized failure before one error terminal without path leakage", async () => {
@@ -493,6 +519,40 @@ describe("workspace chat routes", () => {
     expect(terminals(res)[0]).toMatch(/^event: cancelled/);
     expect(res.frames.join("")).not.toContain("event: done");
   });
+
+  it.each(["cancelled", "error"] as const)(
+    "preserves confirmed mutation actions through later %s generation",
+    async (outcome) => {
+      const state = statefulConversationService();
+      orchestrator.stream.mockRejectedValueOnce(outcome === "cancelled"
+        ? new WorkspaceAssistantCancelledError("Partial", [noteCreatedAction])
+        : Object.assign(new Error("later failure"), {
+            fullResponse: "Partial",
+            actions: [noteCreatedAction],
+          }));
+      const routes = registeredRoutes({
+        services: streamingServices(state.service),
+      });
+      const res = response();
+
+      route(routes, "post", messagePath)(
+        messageRequest as any,
+        res as any,
+        vi.fn(),
+      );
+      await waitForEnd(res);
+
+      expect(state.get().messages.find(
+        (message: any) => message.role === "assistant",
+      )).toMatchObject({
+        status: "error",
+        metadata: { actions: [noteCreatedAction] },
+      });
+      expect(terminals(res)).toHaveLength(1);
+      expect(JSON.parse(terminals(res)[0].split("data: ")[1]))
+        .toMatchObject({ actions: [noteCreatedAction] });
+    },
+  );
 
   it("emits one sanitized error when completion persistence fails but error persistence succeeds", async () => {
     const timeline: string[] = [];

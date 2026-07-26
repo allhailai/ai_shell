@@ -26,6 +26,10 @@ import {
   validateWorkspaceRetrievedSources,
   type WorkspaceRetrievedSourceReference,
 } from "./codaScopeWorkspaceProvenance.js";
+import {
+  validateWorkspaceMutationActions,
+} from "./codaScopeWorkspaceMutationActions.js";
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 
 const WORKSPACE_CONVERSATION_VERSION = 1;
 const MAX_CONVERSATIONS = 100;
@@ -345,6 +349,7 @@ export class CodaScopeWorkspaceConversationService {
     completion: {
       content: string;
       retrievedSources: readonly WorkspaceRetrievedSourceReference[];
+      actions?: readonly CodaScopeAction[];
     },
   ): Promise<WorkspaceConversation | null> {
     this.assertActive();
@@ -355,6 +360,7 @@ export class CodaScopeWorkspaceConversationService {
       "complete",
       completion.content,
       completion.retrievedSources,
+      completion.actions ?? [],
     );
   }
 
@@ -363,6 +369,7 @@ export class CodaScopeWorkspaceConversationService {
     conversationId: string,
     messageId: string,
     content: string,
+    actions: readonly CodaScopeAction[] = [],
   ): Promise<WorkspaceConversation | null> {
     this.assertActive();
     return this.transitionAssistantMessage(
@@ -372,6 +379,7 @@ export class CodaScopeWorkspaceConversationService {
       "error",
       content,
       [],
+      actions,
     );
   }
 
@@ -419,6 +427,7 @@ export class CodaScopeWorkspaceConversationService {
     status: "complete" | "error",
     content: string,
     retrievedSources: readonly WorkspaceRetrievedSourceReference[],
+    actions: readonly CodaScopeAction[],
   ): Promise<WorkspaceConversation | null> {
     const ownerId = validateOwner(actorId);
     return this.withMutation(ownerId, async () => {
@@ -436,6 +445,7 @@ export class CodaScopeWorkspaceConversationService {
       if (messageIndex < 0) return null;
       const messages = [...state.conversation.messages];
       const placeholder = messages[messageIndex];
+      const canonicalActions = validateWorkspaceMutationActions([...actions]);
       messages[messageIndex] = {
         ...placeholder,
         content: boundedRequiredText(content, MAX_MESSAGE_CONTENT, true),
@@ -450,6 +460,12 @@ export class CodaScopeWorkspaceConversationService {
           },
           status === "complete" ? retrievedSources : [],
         ),
+        metadata: {
+          ...placeholder.metadata,
+          ...(canonicalActions.length > 0
+            ? { actions: canonicalActions }
+            : {}),
+        },
       };
       const next: WorkspaceConversation = {
         ...state.conversation,
@@ -902,7 +918,7 @@ function validatePersistedMessage(value: unknown): WorkspaceConversationMessage 
     status = "error";
     content = `${content.trim()}\n\n[Response was interrupted before completion.]`.trim();
   }
-  const metadata = requireRecord(source.metadata);
+  const metadata = validateWorkspaceMessageMetadata(source.metadata);
   return {
     id: safeId(source.id, "message ID"),
     role: source.role,
@@ -912,7 +928,7 @@ function validatePersistedMessage(value: unknown): WorkspaceConversationMessage 
     modelId: nullableModel(source.modelId),
     status,
     context: validatePersistedContext(source.context),
-    metadata: { ...metadata },
+    metadata,
   };
 }
 
@@ -958,7 +974,9 @@ function normalizeNewMessage(
     modelId: optionalModel(value.modelId ?? undefined),
     status,
     context: createWorkspaceMessageContext(value.context),
-    metadata: value.metadata === undefined ? {} : { ...requireRecord(value.metadata) },
+    metadata: value.metadata === undefined
+      ? {}
+      : validateWorkspaceMessageMetadata(value.metadata),
   };
 }
 
@@ -1136,6 +1154,18 @@ function createId(prefix: string): string {
 function requireRecord(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("Invalid record");
   return value;
+}
+
+function validateWorkspaceMessageMetadata(
+  value: unknown,
+): Record<string, unknown> {
+  const metadata = requireRecord(value);
+  return {
+    ...metadata,
+    ...(metadata.actions === undefined
+      ? {}
+      : { actions: validateWorkspaceMutationActions(metadata.actions) }),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

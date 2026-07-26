@@ -192,7 +192,10 @@ export type CodaScopeActionType =
   | "replace_content"
   | "expand_content"
   // Knowledge & Research
-  | "trigger_research";
+  | "trigger_research"
+  // Trusted server-side completion records
+  | "operation_completed"
+  | "note_created";
 
 // ── Build State ─────────────────────────────────────────────────────
 

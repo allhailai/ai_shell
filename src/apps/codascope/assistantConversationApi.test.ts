@@ -365,6 +365,59 @@ describe("assistant conversation API boundary", () => {
     await expect(api.readConversation("conv-1")).resolves.toBeNull();
   });
 
+  it("strictly retains canonical workspace note actions and rejects malformed ones", async () => {
+    const action = {
+      type: "note_created",
+      attributes: {
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "notes/one.md",
+        title: "One",
+        contentHash: "a".repeat(32),
+      },
+      description: 'Created CodaScope note "One".',
+    };
+    const validApi = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            role: "assistant",
+            metadata: { actions: [action] },
+          })],
+        }),
+      })),
+    );
+    await expect(validApi.readConversation("conv-1")).resolves.toMatchObject({
+      messages: [{
+        metadata: { actions: [action] },
+      }],
+    });
+
+    const invalidApi = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            role: "assistant",
+            metadata: {
+              actions: [{
+                ...action,
+                attributes: {
+                  ...action.attributes,
+                  scope: "project",
+                  path: "/absolute.md",
+                },
+              }],
+            },
+          })],
+        }),
+      })),
+    );
+    await expect(invalidApi.readConversation("conv-1")).resolves.toBeNull();
+  });
+
   it("rejects duplicate message IDs", async () => {
     const api = createAssistantConversationApi(
       projectScope,

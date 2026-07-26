@@ -585,7 +585,10 @@ The project `@` picker is not rendered in workspace scope and its trigger is a
 no-op. Workspace welcome prompts and placeholders omit project-mutation and
 mention affordances, and project-only response actions are discarded. Image
 attachments remain supported. This phase adds no workspace note, project,
-source, build, epic, design, research, or repository mutation capability.
+source, build, epic, design, research, or repository mutation capability in
+the frontend. Phase 5 adds the backend CodaScope-note boundary only; the
+created-note card, title controls, visibility confirmation, opening, and
+navigation behavior remain explicitly deferred to Phase 6.
 
 Before every run, `CodaScopeWorkspaceIntentService` re-reads active projects,
 epics, designs, curated pages, and ready research sources and deterministically
@@ -600,11 +603,59 @@ negation forms are evaluated around capability, project, and epic references;
 negated or contradictory signals never widen a grant, while an independently
 affirmed narrower resource can still be isolated.
 
+Phase 5 adds a second immutable one-turn grant dedicated to CodaScope notes.
+It is derived from the authenticated current message plus validated
+metadata-only current-note context, distinguishes create, content edit,
+display-title change, visibility change, archive, and authorized read, and
+binds existing-note operations to freshly resolved stable IDs. Negated,
+hypothetical, quoted, explanatory, ambiguous, inactive, corrupt, duplicated,
+or inaccessible targets receive no destructive grant. Explicit shared
+creation is recorded separately from the default-private create grant. Both
+grant holders are replaced before each pooled-agent run, revalidated at tool
+execution, and cleared after completion, failure, cancellation, agent
+replacement, or root cutover.
+
+`CodaScopeWorkspaceNoteService` is the root-bound sole workspace-assistant
+mutation boundary. It composes the graph's existing note, managed-bundle,
+transfer, annotation, backlink/index, preference, and audit services. Stable
+IDs resolve freshly across only the authenticated actor's active private
+CodaScope root and the active shared CodaScope root. Archives are never
+searched or restored, private roots for other actors are never inspected,
+duplicates and relevant malformed frontmatter fail closed, and callers receive
+only contained relative paths. The canonical DTO is `stableId`, fixed
+`scope: "codascope"`, private/shared `visibility`, relative `path`, display
+`title`, and `contentHash`.
+
+Creation accepts structured path, title, body, and optional visibility rather
+than client-authored frontmatter. The server owns identity, owner, timestamps,
+pins, and workflow metadata; a body beginning with `---` remains body text.
+Body, title, visibility, and archive mutations are serialized by stable ID.
+Body/title/visibility and assistant archive tools require the current hash,
+with conflicts publishing no mutation. Body and title writes preserve stable
+identity, path, visibility, and unrelated server metadata, reconcile
+annotations/backlinks/indexes, and audit like normal note routes. Visibility
+uses `CodaScopeNoteTransferService` to move the complete bundle and coordinated
+preferences/index/audit state. Archive uses the recoverable managed-bundle
+flow; no workspace tool or stable-ID route exposes permanent deletion,
+restore, project/epic scope, or an arbitrary filesystem path.
+
+The exact workspace note tool set is `read_codascope_note`,
+`create_codascope_note`, `edit_codascope_note`,
+`set_codascope_note_title`, `set_codascope_note_visibility`, and
+`archive_codascope_note`. Their schemas and runtime validators reject unknown
+fields and never accept actor, owner, scope, project, epic, archive-inclusion,
+or permanent-delete authority. The broader project `create_note` and
+`edit_note` tiers are not registered in workspace scope.
+
 The message endpoint persists the user message, then exactly one stable
 assistant `streaming` placeholder before starting the agent. Concurrent sends
-to the same actor/conversation are rejected. Success persists completed text
-and retrieved provenance before `done`; failure rewrites the same assistant ID
-to `error` before `error`; cancellation rewrites it before `cancelled`. The
+to the same actor/conversation are rejected. Success persists completed text,
+retrieved provenance, and trusted mutation actions before `done`; failure
+rewrites the same assistant ID to `error` before `error`; cancellation rewrites
+it before `cancelled`. Confirmed mutation actions survive a later generation
+failure or cancellation and are persisted with that non-success state before
+the single terminal. The terminal and durable metadata carry the same canonical
+actions. The
 normal terminal is emitted only after that transition returns a persisted
 conversation. A rejected or null stable-state transition emits one sanitized
 emergency `error`, never `done` or `cancelled`, and records a fixed path-free
@@ -620,18 +671,39 @@ Repository identities, paths, source filenames, and native locations are
 never recorded. The holder is drained on success and cleared on cancellation,
 error, agent replacement, and root cutover.
 
+Successful workspace note tools also collect typed server-confirmed mutation
+records outside model text. A successful authoritative create/readback emits
+one `note_created` action per distinct stable ID in tool execution order, with
+the complete canonical DTO attributes and a bounded description. Repeated
+delivery of the same created stable ID is suppressed. The generic XML action
+parser deliberately does not accept `note_created`, so assistant prose cannot
+forge this completion. Non-create trusted records remain source-distinguishable
+because workspace conversations persist only actions from the typed collector.
+Persisted action DTOs are structurally validated on every reload.
+
 Workspace images reuse the project-chat MIME allowlist, 5 MB service limit,
 safe generated filenames, and single-segment path validation, but they live
 only below the actor's workspace conversation. Upload, serving, and attachment
 resolution repeat conversation ownership checks and cannot cross into project
 image routes.
 
-Workspace conversation, image, intent, catalog, resolver, and agent state are
-all members of the root-bound service graph. Root replacement first cancels
+Workspace conversation, image, intent, catalog, resolver, workspace-note, and
+agent state are all members of the root-bound service graph. Root replacement first cancels
 workspace runs and closes pooled agents, then disposes the old conversation
 run state; the replacement graph constructs fresh services bound only to the
 new root. `_workspace` is outside every project directory and is therefore
 excluded from the allowlisted portable project export/import format.
+
+The Phase 6 backend surface is path-free at request time and actor-custodied:
+`GET /api/codascope/workspace/notes/:stableId`,
+`PATCH /api/codascope/workspace/notes/:stableId/title`, and
+`PATCH /api/codascope/workspace/notes/:stableId/visibility`. The authenticated
+principal is the actor; request bodies cannot select scope, project, epic,
+path, owner, or actor. Unknown, archived, corrupt, duplicated, and
+private-other-actor identities share sanitized absence behavior. Mutations
+require `expectedHash`, return the canonical current DTO, and use the same
+workspace note service as assistant tools. No Phase 6 React consumer is
+implemented yet.
 
 ---
 
@@ -668,16 +740,18 @@ receiving the assistant's full tool set. User-facing agent pools and note-tool
 closures are also actor-scoped so a private note or document path cannot cross
 users through an agent reuse.
 
-The first-class workspace assistant is a separate read-only boundary. Backend
+The first-class workspace assistant is a separate capability boundary. Backend
 runs use an explicit `workspace` or `project:<id>` assistant scope; workspace
 is never represented by a sentinel project ID. `workspace-assistant` receives
 only the dedicated active-workspace tool builder: compact project/catalog,
 wiki, build-history, and path-scrubbed code-map reads are automatic, while
 epic/design/knowledge/research reads require a server-validated grant replaced
-and cleared for each run. Workspace pools and cancellation are keyed by scope,
-purpose, and authenticated actor. Workspace agents receive no repository
-lookup, repository cwd, project skills, notes, web search, source-file tools,
-mutation tools, or native filesystem workspace.
+and cleared for each run. Its only mutation tools are the six dedicated
+CodaScope-note tools described below; project/epic note tools and every
+project-side mutation tier remain excluded. Workspace pools and cancellation
+are keyed by scope, purpose, and authenticated actor. Workspace agents receive
+no repository lookup, repository cwd, project skills, web search, source-file
+tools, project mutation tools, or native filesystem workspace.
 
 Wiki-builds have a stronger storage boundary: their Cursor SDK workspace is the
 CodaScope project directory and the SDK filesystem sandbox is enabled when the
@@ -733,6 +807,9 @@ by a write tool; it is never deferred to a confirmation card.
 - Validates against `VALID_ACTION_TYPES`: `build_wiki_page`, `build_full_wiki`, `navigate`, `explore_codebase`, `create_epic`, `update_epic_definition`, `scope_epic`, `deepen_wiki`, `create_design_doc`, `update_design_doc`, `create_version`, `insert_content`, `replace_content`, `expand_content`, `design_doc_created`, `design_doc_edited`, `trigger_research`, `artifact_built`, `operation_completed`
 - **Completed-operation tags**: `operation_completed`, `design_doc_created`, `design_doc_edited`, and `artifact_built` are emitted automatically by successful tools. They render as success cards; navigation-capable cards include a View button and never re-run the mutation.
 - Parsed actions are stored in `message.metadata.actions`
+- `note_created` is intentionally absent from `VALID_ACTION_TYPES`. Workspace
+  note creation uses the typed server-only mutation collector described in the
+  workspace conversation plane, never model-authored XML.
 
 **Client-side** (`ActionCard.tsx`):
 - Renders pending actions as interactive cards and successful tool results as durable completion cards

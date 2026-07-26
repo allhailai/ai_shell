@@ -95,6 +95,13 @@ Some text in between.
     expect(extractActions("Hello, this is just normal text.")).toEqual([]);
   });
 
+  it("ignores model-authored note_created tags", () => {
+    expect(extractActions(
+      '<codascope_action type="note_created" stableId="forged">Forged</codascope_action>',
+    )).toEqual([]);
+    expect(VALID_ACTION_TYPES.has("note_created")).toBe(false);
+  });
+
   it("handles multiline descriptions", () => {
     const text = `
 <codascope_action type="build_wiki_page" topic="api-layer">

@@ -7,6 +7,15 @@ import type { CodaScopeActiveEntityResolver } from "./codaScopeActiveEntityResol
 import type { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import type { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
+import type {
+  CodaScopeWorkspaceNoteService,
+  WorkspaceCurrentNoteIdentity,
+} from "./codaScopeWorkspaceNoteService.js";
+import {
+  deriveWorkspaceTurnNoteGrant,
+  EMPTY_WORKSPACE_TURN_NOTE_GRANT,
+  type WorkspaceTurnNoteGrant,
+} from "./codaScopeWorkspaceNoteGrant.js";
 import {
   EMPTY_WORKSPACE_TURN_READ_GRANT,
   validateWorkspaceTurnReadGrant,
@@ -27,6 +36,12 @@ export interface WorkspaceIntentResolution {
   intent: WorkspaceIntentClass;
   resolvedProjectIds: string[];
   grant: WorkspaceTurnReadGrant;
+  noteGrant: WorkspaceTurnNoteGrant;
+}
+
+export interface WorkspaceNoteIntentContext {
+  actorId: string;
+  currentNote?: WorkspaceCurrentNoteIdentity | null;
 }
 
 export class CodaScopeWorkspaceIntentService {
@@ -35,27 +50,37 @@ export class CodaScopeWorkspaceIntentService {
     private readonly epicService: CodaScopeEpicService,
     private readonly designDocService: CodaScopeDesignDocService,
     private readonly epicKnowledgeService: CodaScopeEpicKnowledgeService,
+    private readonly workspaceNoteService?: CodaScopeWorkspaceNoteService,
   ) {}
 
   async resolveTurn(
     message: string,
     explicitlyReferencedProjectIds: readonly string[],
+    noteContext?: WorkspaceNoteIntentContext,
   ): Promise<WorkspaceIntentResolution> {
+    const noteGrant = this.workspaceNoteService
+      ? await deriveWorkspaceTurnNoteGrant({
+          actorId: noteContext?.actorId,
+          message,
+          currentNote: noteContext?.currentNote,
+          noteService: this.workspaceNoteService,
+        })
+      : EMPTY_WORKSPACE_TURN_NOTE_GRANT;
     const language = analyzeMessage(message);
     const normalizedMessage = language.all;
-    if (!normalizedMessage) return emptyResolution();
+    if (!normalizedMessage) return emptyResolution(noteGrant);
 
     const activeProjects = await this.activeResolver.listActiveProjects();
     const explicitProjects = [];
     for (const projectId of [...new Set(explicitlyReferencedProjectIds)].sort()) {
       const active = await this.activeResolver.resolveActiveProject(projectId);
-      if (!active) return emptyResolution();
+      if (!active) return emptyResolution(noteGrant);
       if (projectMentionPolarity(language, active).negative) continue;
       explicitProjects.push(active);
     }
 
     const mentioned = resolveMentionedProjects(language, activeProjects);
-    if (mentioned.ambiguous) return emptyResolution();
+    if (mentioned.ambiguous) return emptyResolution(noteGrant);
     const selectedProjects = deduplicateProjects([
       ...explicitProjects,
       ...mentioned.projects,
@@ -96,11 +121,14 @@ export class CodaScopeWorkspaceIntentService {
         intent: "wiki_first",
         resolvedProjectIds,
         grant: EMPTY_WORKSPACE_TURN_READ_GRANT,
+        noteGrant,
       };
     }
 
     if (planningIntent) {
-      if (selectedProjects.length === 0) return emptyResolution(resolvedProjectIds);
+      if (selectedProjects.length === 0) {
+        return emptyResolution(noteGrant, resolvedProjectIds);
+      }
       const epicResources = [];
       const discoveryIds = [];
       for (const project of selectedProjects) {
@@ -117,6 +145,7 @@ export class CodaScopeWorkspaceIntentService {
           epicDiscoveryProjectIds: discoveryIds,
           epicResources,
         }, this.activeResolver),
+        noteGrant,
       };
     }
 
@@ -125,6 +154,7 @@ export class CodaScopeWorkspaceIntentService {
         intent: "wiki_first",
         resolvedProjectIds,
         grant: EMPTY_WORKSPACE_TURN_READ_GRANT,
+        noteGrant,
       };
     }
 
@@ -144,12 +174,14 @@ export class CodaScopeWorkspaceIntentService {
         }
       }
     }
-    if (matchingEpics.length === 0) return emptyResolution(resolvedProjectIds);
+    if (matchingEpics.length === 0) {
+      return emptyResolution(noteGrant, resolvedProjectIds);
+    }
 
     const isComparison = /\b(?:compare|comparison|versus|vs)\b/.test(normalizedMessage);
     const pluralEpics = /\bepics\b/.test(normalizedMessage);
     if (matchingEpics.length > 1 && !isComparison && !pluralEpics) {
-      return emptyResolution(resolvedProjectIds);
+      return emptyResolution(noteGrant, resolvedProjectIds);
     }
 
     const epicResources = [];
@@ -171,6 +203,7 @@ export class CodaScopeWorkspaceIntentService {
         epicDiscoveryProjectIds: [],
         epicResources,
       }, this.activeResolver),
+      noteGrant,
     };
   }
 
@@ -256,12 +289,14 @@ function intentClass(
 }
 
 function emptyResolution(
+  noteGrant: WorkspaceTurnNoteGrant,
   resolvedProjectIds: string[] = [],
 ): WorkspaceIntentResolution {
   return {
     intent: "wiki_first",
     resolvedProjectIds,
     grant: EMPTY_WORKSPACE_TURN_READ_GRANT,
+    noteGrant,
   };
 }
 

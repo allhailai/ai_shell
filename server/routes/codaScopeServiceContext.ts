@@ -49,6 +49,7 @@ import { CodaScopeNoteImportService } from "../services/codaScopeNoteImportServi
 import { CodaScopeNoteTagSuggestionService } from "../services/codaScopeNoteTagSuggestionService.js";
 import { CodaScopeNoteTransferService } from "../services/codaScopeNoteTransferService.js";
 import { CodaScopeNoteDocumentService } from "../services/codaScopeNoteDocumentService.js";
+import { CodaScopeWorkspaceNoteService } from "../services/codaScopeWorkspaceNoteService.js";
 import {
   isPathValidationError,
   isSameOrDescendantPath,
@@ -93,6 +94,7 @@ export interface CodaScopeServices {
   workspaceConversationSvc: CodaScopeWorkspaceConversationService;
   workspaceImageSvc: CodaScopeWorkspaceImageService;
   workspaceIntentSvc: CodaScopeWorkspaceIntentService;
+  workspaceNoteSvc: CodaScopeWorkspaceNoteService;
 
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
@@ -363,6 +365,15 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     noteLinkIndexSvc,
     noteAuditSvc,
   );
+  const workspaceNoteSvc = new CodaScopeWorkspaceNoteService(
+    noteSvc,
+    noteBundleSvc,
+    noteTransferSvc,
+    noteAnnotationSvc,
+    noteLinkIndexSvc,
+    noteUserPrefsSvc,
+    noteAuditSvc,
+  );
   const activeEntityResolver = new CodaScopeActiveEntityResolver(
     root,
     designDocSvc,
@@ -387,6 +398,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     epicSvc,
     designDocSvc,
     epicKnowledgeSvc,
+    workspaceNoteSvc,
   );
   // Construct the one timer-owning service last so an earlier constructor
   // failure cannot strand an untracked cleanup interval.
@@ -396,6 +408,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     epic: epicSvc,
     designDoc: designDocSvc,
     epicKnowledge: epicKnowledgeSvc,
+    workspaceNote: workspaceNoteSvc,
   });
 
   return {
@@ -414,6 +427,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
       workspaceConversationSvc,
       workspaceImageSvc,
       workspaceIntentSvc,
+      workspaceNoteSvc,
       wikiStateSvc,
       epicSvc,
       epicBundleSvc: new CodaScopeEpicBundleService(projectSvc),
@@ -449,6 +463,7 @@ async function disposeServiceGraph(graph: CodaScopeServiceGraph): Promise<void> 
   graph.services.buildSvc.dispose();
   graph.services.noteExportSvc.dispose();
   await graph.services.agentSvc.shutdown();
+  graph.services.workspaceNoteSvc.dispose();
   graph.services.workspaceConversationSvc.dispose();
 }
 
