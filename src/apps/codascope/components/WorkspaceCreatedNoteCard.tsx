@@ -1,7 +1,7 @@
 import {
   useEffect,
   useId,
-  useMemo,
+  useRef,
   useState,
 } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
@@ -15,9 +15,12 @@ import {
   type WorkspaceNoteApi,
 } from "../workspaceNoteApi";
 import {
-  WorkspaceCreatedNoteCardController,
+  createInitialWorkspaceNoteCardState,
   visibilityConfirmationMessage,
 } from "../workspaceCreatedNoteCardController";
+import {
+  WorkspaceCreatedNoteCardLifecycle,
+} from "../workspaceCreatedNoteCardLifecycle";
 import {
   IconCheck,
   IconClose,
@@ -59,21 +62,21 @@ function TrustedWorkspaceCreatedNoteCard({
 }) {
   const { navigate } = useAppSubRoute("codascope");
   const titleInputId = useId();
-  const controller = useMemo(
-    () => new WorkspaceCreatedNoteCardController(stableId, api, navigate),
-    [api, navigate, stableId],
-  );
-  const [state, setState] = useState(controller.getState());
+  const lifecycleRef = useRef<WorkspaceCreatedNoteCardLifecycle | null>(null);
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new WorkspaceCreatedNoteCardLifecycle();
+  }
+  const lifecycle = lifecycleRef.current;
+  const [state, setState] = useState(createInitialWorkspaceNoteCardState);
 
   useEffect(() => {
-    setState(controller.getState());
-    const unsubscribe = controller.subscribe(setState);
-    void controller.load();
-    return () => {
-      unsubscribe();
-      controller.dispose();
-    };
-  }, [controller]);
+    return lifecycle.attach({
+      stableId,
+      api,
+      navigate,
+      publish: setState,
+    });
+  }, [api, lifecycle, navigate, stableId]);
 
   const {
     phase,
@@ -116,7 +119,9 @@ function TrustedWorkspaceCreatedNoteCard({
           <span>{statusText}</span>
           <button
             className="codascope-created-note-card-btn"
-            onClick={() => void controller.retry()}
+            onClick={() => void lifecycle.dispatch(
+              (controller) => controller.retry(),
+            )}
             type="button"
             aria-label="Retry loading created note"
           >
@@ -143,7 +148,9 @@ function TrustedWorkspaceCreatedNoteCard({
                 className="codascope-created-note-card-title-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void controller.saveTitle();
+                  void lifecycle.dispatch(
+                    (controller) => controller.saveTitle(),
+                  );
                 }}
               >
                 <label
@@ -158,7 +165,10 @@ function TrustedWorkspaceCreatedNoteCard({
                   value={titleDraft}
                   maxLength={WORKSPACE_NOTE_MAX_TITLE}
                   onChange={(event) => {
-                    controller.setTitleDraft(event.target.value);
+                    lifecycle.dispatch(
+                      (controller) =>
+                        controller.setTitleDraft(event.target.value),
+                    );
                   }}
                   disabled={pending !== null}
                   autoFocus
@@ -178,7 +188,9 @@ function TrustedWorkspaceCreatedNoteCard({
                     type="button"
                     disabled={pending !== null}
                     onClick={() => {
-                      controller.cancelTitleEdit();
+                      lifecycle.dispatch(
+                        (controller) => controller.cancelTitleEdit(),
+                      );
                     }}
                     aria-label="Cancel note title editing"
                   >
@@ -206,7 +218,9 @@ function TrustedWorkspaceCreatedNoteCard({
                   type="button"
                   disabled={pending !== null}
                   onClick={() => {
-                    controller.beginTitleEdit();
+                    lifecycle.dispatch(
+                      (controller) => controller.beginTitleEdit(),
+                    );
                   }}
                   aria-label={`Edit display title for ${note.title}`}
                 >
@@ -236,7 +250,10 @@ function TrustedWorkspaceCreatedNoteCard({
                   aria-pressed={note.visibility === visibility}
                   aria-label={`Set note visibility to ${visibility}`}
                   onClick={() => {
-                    controller.selectVisibility(visibility);
+                    lifecycle.dispatch(
+                      (controller) =>
+                        controller.selectVisibility(visibility),
+                    );
                   }}
                 >
                   {visibility === "private" ? "Private" : "Shared"}
@@ -259,7 +276,9 @@ function TrustedWorkspaceCreatedNoteCard({
                   className="codascope-created-note-card-btn codascope-created-note-card-btn-primary"
                   type="button"
                   disabled={pending !== null}
-                  onClick={() => void controller.confirmVisibility()}
+                  onClick={() => void lifecycle.dispatch(
+                    (controller) => controller.confirmVisibility(),
+                  )}
                   aria-label={`Confirm ${confirmation} note visibility`}
                 >
                   <IconCheck size={13} />
@@ -269,7 +288,9 @@ function TrustedWorkspaceCreatedNoteCard({
                   className="codascope-created-note-card-btn"
                   type="button"
                   disabled={pending !== null}
-                  onClick={() => controller.cancelVisibility()}
+                  onClick={() => lifecycle.dispatch(
+                    (controller) => controller.cancelVisibility(),
+                  )}
                   aria-label="Cancel note visibility change"
                 >
                   <IconClose size={13} /> Cancel
@@ -289,7 +310,9 @@ function TrustedWorkspaceCreatedNoteCard({
               className="codascope-created-note-card-btn codascope-created-note-card-btn-primary"
               type="button"
               disabled={pending !== null}
-              onClick={() => void controller.open()}
+              onClick={() => void lifecycle.dispatch(
+                (controller) => controller.open(),
+              )}
               aria-label={`Open ${note.title}`}
             >
               <IconLaunch size={13} />

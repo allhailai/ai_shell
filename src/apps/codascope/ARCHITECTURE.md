@@ -772,10 +772,13 @@ Validated `note_created` receipts render through the dedicated
 title, path, visibility, and hash are historical only. Each card resolves the
 stable ID on mount and owns the resulting canonical active-note DTO through
 `WorkspaceCreatedNoteCardController`, the same operation state machine used by
-the React component and behavioral tests. Its request epoch, abort controller,
-and dispose boundary suppress unmounted, identity-obsolete, and overlapping
-responses. Missing or archived notes disable mutation and Open, while
-recoverable reads can be retried.
+the React component and behavioral tests. A lifecycle attachment creates one
+fresh controller per React effect setup, routes events only to the current
+controller, and permanently disposes that exact controller during cleanup.
+This remains safe under Strict Mode effect replay and identity replacement.
+The controller's request epoch, abort controller, and dispose boundary suppress
+unmounted, identity-obsolete, and overlapping responses. Missing or archived
+notes disable mutation and Open, while recoverable reads can be retried.
 
 Display-title editing calls only
 `PATCH /api/codascope/workspace/notes/:stableId/title`, applies the shared

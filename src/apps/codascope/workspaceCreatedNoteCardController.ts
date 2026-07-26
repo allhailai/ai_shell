@@ -32,6 +32,19 @@ export interface WorkspaceNoteCardState {
   statusText: string;
 }
 
+export function createInitialWorkspaceNoteCardState(): WorkspaceNoteCardState {
+  return {
+    phase: "loading",
+    note: null,
+    pending: null,
+    editing: false,
+    titleDraft: "",
+    titleError: null,
+    confirmation: null,
+    statusText: "",
+  };
+}
+
 export const PRIVATE_TO_SHARED_WARNING =
   "This note will become visible to all CodaScope users.";
 export const SHARED_TO_PRIVATE_WARNING =
@@ -77,16 +90,7 @@ export function isWorkspaceNoteRequestCurrent(
 type StateListener = (state: WorkspaceNoteCardState) => void;
 
 export class WorkspaceCreatedNoteCardController {
-  private state: WorkspaceNoteCardState = {
-    phase: "loading",
-    note: null,
-    pending: null,
-    editing: false,
-    titleDraft: "",
-    titleError: null,
-    confirmation: null,
-    statusText: "",
-  };
+  private state = createInitialWorkspaceNoteCardState();
 
   private readonly listeners = new Set<StateListener>();
   private requestId = 0;

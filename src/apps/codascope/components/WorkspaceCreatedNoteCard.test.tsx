@@ -18,9 +18,13 @@ import {
   SHARED_TO_PRIVATE_WARNING,
   WorkspaceCreatedNoteCardController,
   isWorkspaceNoteRequestCurrent,
+  type WorkspaceNoteCardState,
   validateWorkspaceDisplayTitle,
   visibilityConfirmationMessage,
 } from "../workspaceCreatedNoteCardController";
+import {
+  WorkspaceCreatedNoteCardLifecycle,
+} from "../workspaceCreatedNoteCardLifecycle";
 import {
   WorkspaceCreatedNoteCard,
 } from "./WorkspaceCreatedNoteCard";
@@ -349,6 +353,183 @@ describe("workspace created-note controller rehydration", () => {
     await obsoleteLoad;
     expect(published).toHaveBeenCalledTimes(publicationCount);
     expect(controller.getState().note?.title).toBe("Current");
+  });
+});
+
+describe("workspace created-note production lifecycle", () => {
+  it("creates a fresh live controller after Strict Mode effect replay", async () => {
+    const firstRead = deferred<ReturnType<typeof success>>();
+    const read = vi.fn()
+      .mockReturnValueOnce(firstRead.promise)
+      .mockResolvedValueOnce(success(note({ title: "Replayed canonical" })));
+    const api = noteApiWithRead(read);
+    const navigate = vi.fn();
+    const controllers: WorkspaceCreatedNoteCardController[] = [];
+    const disposeSpies: Array<ReturnType<typeof vi.spyOn>> = [];
+    const states: WorkspaceNoteCardState[] = [];
+    const lifecycle = new WorkspaceCreatedNoteCardLifecycle(
+      (stableId, controllerApi, controllerNavigate) => {
+        const controller = new WorkspaceCreatedNoteCardController(
+          stableId,
+          controllerApi,
+          controllerNavigate,
+        );
+        controllers.push(controller);
+        disposeSpies.push(vi.spyOn(controller, "dispose"));
+        return controller;
+      },
+    );
+
+    const cleanupA = lifecycle.attach({
+      stableId: "note-1",
+      api,
+      navigate,
+      publish: (state) => states.push(state),
+    });
+    expect(controllers).toHaveLength(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    const signalA = read.mock.calls[0][1].signal as AbortSignal;
+
+    cleanupA();
+    expect(signalA.aborted).toBe(true);
+    expect(disposeSpies[0]).toHaveBeenCalledTimes(1);
+
+    const cleanupB = lifecycle.attach({
+      stableId: "note-1",
+      api,
+      navigate,
+      publish: (state) => states.push(state),
+    });
+    expect(states.at(-1)).toMatchObject({
+      phase: "loading",
+      note: null,
+    });
+    await flushAsyncWork();
+
+    expect(controllers).toHaveLength(2);
+    expect(controllers[1]).not.toBe(controllers[0]);
+    expect(states.at(-1)).toMatchObject({
+      phase: "ready",
+      note: { title: "Replayed canonical" },
+    });
+
+    const publicationCount = states.length;
+    firstRead.resolve(success(note({ title: "Obsolete first setup" })));
+    await flushAsyncWork();
+    expect(states).toHaveLength(publicationCount);
+    expect(states.at(-1)?.note?.title).toBe("Replayed canonical");
+    expect(navigate).not.toHaveBeenCalled();
+
+    cleanupB();
+    expect(disposeSpies[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces identity, dispatches to current, and suppresses final cleanup races", async () => {
+    const oldOpen = deferred<ReturnType<typeof success>>();
+    const finalOpen = deferred<ReturnType<typeof success>>();
+    const oldRead = vi.fn()
+      .mockResolvedValueOnce(success(note({ title: "Old identity" })))
+      .mockReturnValueOnce(oldOpen.promise);
+    const newRead = vi.fn()
+      .mockResolvedValueOnce(success(note({
+        stableId: "note-2",
+        title: "New identity",
+      })))
+      .mockReturnValueOnce(finalOpen.promise);
+    const oldApi = noteApiWithRead(oldRead);
+    const newApi = noteApiWithRead(newRead);
+    const navigate = vi.fn();
+    const controllers: WorkspaceCreatedNoteCardController[] = [];
+    const disposeSpies: Array<ReturnType<typeof vi.spyOn>> = [];
+    const states: WorkspaceNoteCardState[] = [];
+    const lifecycle = new WorkspaceCreatedNoteCardLifecycle(
+      (stableId, controllerApi, controllerNavigate) => {
+        const controller = new WorkspaceCreatedNoteCardController(
+          stableId,
+          controllerApi,
+          controllerNavigate,
+        );
+        controllers.push(controller);
+        disposeSpies.push(vi.spyOn(controller, "dispose"));
+        return controller;
+      },
+    );
+
+    const cleanupOld = lifecycle.attach({
+      stableId: "note-1",
+      api: oldApi,
+      navigate,
+      publish: (state) => states.push(state),
+    });
+    await flushAsyncWork();
+    const obsoleteOpening = lifecycle.dispatch(
+      (controller) => controller.open(),
+    );
+    expect(oldRead).toHaveBeenLastCalledWith("note-1", {
+      signal: expect.any(AbortSignal),
+    });
+    const oldOpenSignal = oldRead.mock.calls[1][1].signal as AbortSignal;
+
+    const cleanupCurrent = lifecycle.attach({
+      stableId: "note-2",
+      api: newApi,
+      navigate,
+      publish: (state) => states.push(state),
+    });
+    expect(states.at(-1)).toMatchObject({
+      phase: "loading",
+      note: null,
+    });
+    await flushAsyncWork();
+
+    expect(oldOpenSignal.aborted).toBe(true);
+    expect(disposeSpies[0]).toHaveBeenCalledTimes(1);
+    expect(newRead).toHaveBeenCalledWith("note-2", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(states.at(-1)).toMatchObject({
+      phase: "ready",
+      note: { stableId: "note-2", title: "New identity" },
+    });
+
+    lifecycle.dispatch((controller) => controller.beginTitleEdit());
+    expect(controllers[0].getState().editing).toBe(false);
+    expect(controllers[1].getState().editing).toBe(true);
+
+    const beforeObsoleteResolution = states.length;
+    oldOpen.resolve(success(note({
+      title: "Obsolete navigation",
+      path: "Obsolete.md",
+    })));
+    await obsoleteOpening;
+    await flushAsyncWork();
+    expect(states).toHaveLength(beforeObsoleteResolution);
+    expect(navigate).not.toHaveBeenCalled();
+
+    lifecycle.dispatch((controller) => controller.cancelTitleEdit());
+    const finalOpening = lifecycle.dispatch(
+      (controller) => controller.open(),
+    );
+    const finalSignal = newRead.mock.calls[1][1].signal as AbortSignal;
+    const beforeFinalCleanup = states.length;
+    cleanupCurrent();
+    expect(finalSignal.aborted).toBe(true);
+    expect(disposeSpies[1]).toHaveBeenCalledTimes(1);
+
+    finalOpen.resolve(success(note({
+      stableId: "note-2",
+      title: "Too late",
+      path: "Too late.md",
+    })));
+    await finalOpening;
+    await flushAsyncWork();
+    expect(states).toHaveLength(beforeFinalCleanup);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(lifecycle.dispatch((controller) => controller.getState()))
+      .toBeUndefined();
+
+    cleanupOld();
+    expect(disposeSpies[0]).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -695,4 +876,9 @@ function deferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
 }
