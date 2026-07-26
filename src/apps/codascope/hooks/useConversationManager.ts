@@ -1,208 +1,450 @@
 /* ── useConversationManager ─────────────────────────────────────────
-   Encapsulates conversation CRUD, URL sync, localStorage persistence,
-   and conversation switching for the CodaScope Assistant.
-
-   Extracted from CodaScopeAssistant to reduce component complexity.
+   Scope-isolated conversation CRUD, URL restoration, and history state for
+   the CodaScope assistant.
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { clearRecentViews } from "../contextAssembler";
-import type { ConversationSummary } from "../components/ConversationHeader";
+import {
+  createAssistantConversationApi,
+  restoreAssistantMessages,
+  type AssistantConversationApi,
+} from "../assistantConversationApi";
+import {
+  getAssistantRestorationKey,
+  getAssistantScopeKey,
+} from "../assistantScope";
+import type {
+  AssistantChatMessage,
+  AssistantScope,
+  Conversation,
+  ConversationSummary,
+} from "../codaScopeTypes";
 
-/* ── Types ───────────────────────────────────────────────────────── */
+interface ScopedConversationState {
+  scopeKey: string;
+  conversations: ConversationSummary[];
+  activeConversationId: string | null;
+  activeTitle: string;
+  messages: AssistantChatMessage[];
+}
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  status?: "complete" | "streaming" | "error";
-  createdAt?: string;
-  metadata?: Record<string, unknown>;
-  /** Image attachment URLs (for display in the chat bubble) */
-  images?: Array<{ url: string; filename: string }>;
+export interface ConversationRestorePlan {
+  conversationId: string | null;
+  clearUrlConversation: boolean;
+}
+
+export function isConversationRequestCurrent(
+  request: { scopeKey: string; version: number },
+  current: { scopeKey: string; version: number },
+): boolean {
+  return request.scopeKey === current.scopeKey
+    && request.version === current.version;
+}
+
+export function resolveConversationRestorePlan(
+  conversations: readonly ConversationSummary[],
+  urlConversationId: string | null,
+  storedConversationId: string | null,
+): ConversationRestorePlan {
+  const byId = new Map(conversations.map((conversation) => [
+    conversation.id,
+    conversation,
+  ]));
+  const urlConversation = urlConversationId
+    ? byId.get(urlConversationId)
+    : null;
+  if (urlConversation) {
+    return {
+      conversationId: urlConversation.id,
+      clearUrlConversation: false,
+    };
+  }
+  const storedConversation = storedConversationId
+    ? byId.get(storedConversationId)
+    : null;
+  if (storedConversation) {
+    return {
+      conversationId: storedConversation.id,
+      clearUrlConversation: Boolean(urlConversationId),
+    };
+  }
+  const mostRecent = [...conversations].sort(
+    (a, b) => b.updatedAt.localeCompare(a.updatedAt),
+  )[0];
+  return {
+    conversationId: mostRecent?.id ?? null,
+    clearUrlConversation: Boolean(urlConversationId),
+  };
 }
 
 export interface UseConversationManagerResult {
+  api: AssistantConversationApi;
   conversations: ConversationSummary[];
   activeConversationId: string | null;
   setActiveConversationId: (id: string | null) => void;
   activeTitle: string;
   setActiveTitle: (title: string) => void;
-  messages: ChatMessage[];
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  messages: AssistantChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<AssistantChatMessage[]>>;
   loadConversationList: () => Promise<ConversationSummary[]>;
-  loadConversation: (convId: string) => Promise<void>;
-  createNewConversation: (opts: { streaming: boolean; selectedModelId: string | null }) => Promise<void>;
-  switchConversation: (convId: string, streaming: boolean) => Promise<void>;
+  loadConversation: (conversationId: string) => Promise<Conversation | null>;
+  createNewConversation: (opts: {
+    streaming: boolean;
+    selectedModelId: string | null;
+  }) => Promise<Conversation | null>;
+  updateConversation: (
+    conversationId: string,
+    input: { title?: string; summary?: string },
+  ) => Promise<Conversation | null>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
+  switchConversation: (
+    conversationId: string,
+    streaming: boolean,
+  ) => Promise<void>;
 }
 
-/* ── Hook ────────────────────────────────────────────────────────── */
-
 export function useConversationManager(
-  activeProjectId: string | null,
+  scope: AssistantScope,
+  detachPreviousScope?: () => Promise<void>,
 ): UseConversationManagerResult {
   const { getParam, setParam } = useAppSubRoute("codascope");
+  const scopeKey = getAssistantScopeKey(scope);
+  const restorationKey = getAssistantRestorationKey(scope);
+  const api = useMemo(
+    () => createAssistantConversationApi(scope),
+    [scopeKey],
+  );
+  const [state, setState] = useState<ScopedConversationState>(
+    () => emptyState(scopeKey),
+  );
+  const scopeVersionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const previousScopeKeyRef = useRef<string | null>(null);
+  const getParamRef = useRef(getParam);
+  getParamRef.current = getParam;
 
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [activeTitle, setActiveTitle] = useState("New conversation");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const visibleState = state.scopeKey === scopeKey
+    ? state
+    : emptyState(scopeKey);
 
-  const lastProjectRef = useRef<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const isCurrent = useCallback(
+    (requestScopeKey: string, requestVersion: number) =>
+      mountedRef.current
+      && isConversationRequestCurrent(
+        { scopeKey: requestScopeKey, version: requestVersion },
+        { scopeKey, version: scopeVersionRef.current },
+      ),
+    [scopeKey],
+  );
 
-  // ── Load conversation list ────────────────────────────────────────
+  const applyConversation = useCallback((
+    conversation: Conversation,
+    requestScopeKey = scopeKey,
+    requestVersion = scopeVersionRef.current,
+  ) => {
+    if (!isCurrent(requestScopeKey, requestVersion)) return false;
+    const messages = restoreAssistantMessages(conversation, api.endpoints);
+    setState((current) => {
+      if (current.scopeKey !== requestScopeKey) return current;
+      return {
+        ...current,
+        activeConversationId: conversation.id,
+        activeTitle: conversation.title,
+        messages,
+      };
+    });
+    return true;
+  }, [api.endpoints, isCurrent, scopeKey]);
 
-  const loadConversationList = useCallback(async (): Promise<ConversationSummary[]> => {
-    if (!activeProjectId) return [];
+  const loadConversationList = useCallback(async () => {
+    const requestScopeKey = scopeKey;
+    const requestVersion = scopeVersionRef.current;
     try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`);
-      if (res.ok) {
-        const data = await res.json();
-        setConversations(data.conversations ?? []);
-        return data.conversations ?? [];
-      }
+      const conversations = await api.listConversations();
+      if (!isCurrent(requestScopeKey, requestVersion)) return [];
+      setState((current) => current.scopeKey === requestScopeKey
+        ? { ...current, conversations }
+        : current);
+      return conversations;
     } catch {
-      // silently fail
+      return [];
     }
-    return [];
-  }, [activeProjectId]);
+  }, [api, isCurrent, scopeKey]);
 
-  // ── Load a single conversation ────────────────────────────────────
-
-  const loadConversation = useCallback(async (convId: string) => {
-    if (!activeProjectId) return;
+  const loadConversation = useCallback(async (conversationId: string) => {
+    const requestScopeKey = scopeKey;
+    const requestVersion = scopeVersionRef.current;
     try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations/${convId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const conv = data.conversation;
-        setActiveConversationId(conv.id);
-        setActiveTitle(conv.title);
-        setMessages(
-          conv.messages
-            .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => {
-              // Restore image URLs from metadata for conversation history
-              const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
-              const images = metaImages?.map((img) => ({
-                url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${img.filename}`,
-                filename: img.filename,
-              }));
-              return {
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                status: m.status ?? "complete",
-                createdAt: m.createdAt,
-                metadata: m.metadata,
-                images,
-              };
-            }),
-        );
+      const conversation = await api.readConversation(conversationId);
+      if (!conversation
+        || !applyConversation(
+          conversation,
+          requestScopeKey,
+          requestVersion,
+        )) {
+        return null;
       }
+      return conversation;
     } catch {
-      // silently fail
+      return null;
     }
-  }, [activeProjectId]);
-
-  // ── On mount or project change — load conversations, open most recent ──
+  }, [api, applyConversation, scopeKey]);
 
   useEffect(() => {
-    if (!activeProjectId) return;
-    if (lastProjectRef.current === activeProjectId) return;
-    lastProjectRef.current = activeProjectId;
+    const requestVersion = ++scopeVersionRef.current;
+    const requestScopeKey = scopeKey;
+    const isTransition = previousScopeKeyRef.current !== null
+      && previousScopeKeyRef.current !== scopeKey;
+    previousScopeKeyRef.current = scopeKey;
 
-    // Clear navigation history when switching projects
+    setState(emptyState(scopeKey));
     clearRecentViews();
 
-    let cancelled = false;
     void (async () => {
-      const convs = await loadConversationList();
-      if (cancelled) return;
-
-      // Priority: URL param > localStorage > most recent
-      const urlConvId = getParam("conv");
-      let restoreId: string | null = urlConvId;
-
-      // Fall back to localStorage if no URL param
-      if (!restoreId) {
-        const lastConvKey = `codascope:lastConv:${activeProjectId}`;
-        try { restoreId = localStorage.getItem(lastConvKey); } catch { /* ignore */ }
+      if (isTransition && detachPreviousScope) {
+        await detachPreviousScope();
       }
+      if (!isCurrent(requestScopeKey, requestVersion)) return;
 
-      // Check if the target conversation exists in the list
-      const restoreConv = restoreId && convs.find((c: ConversationSummary) => c.id === restoreId);
-      if (restoreConv) {
-        await loadConversation(restoreConv.id);
-      } else if (convs.length > 0) {
-        await loadConversation(convs[0].id);
-      } else {
-        // No conversations — show welcome
-        setActiveConversationId(null);
-        setActiveTitle("New conversation");
-        setMessages([]);
+      let conversations: ConversationSummary[] = [];
+      try {
+        conversations = await api.listConversations();
+      } catch {
+        conversations = [];
+      }
+      if (!isCurrent(requestScopeKey, requestVersion)) return;
+      setState((current) => current.scopeKey === requestScopeKey
+        ? { ...current, conversations }
+        : current);
+
+      const urlConversationId = getParamRef.current("conv");
+      let storedConversationId: string | null = null;
+      try {
+        storedConversationId = localStorage.getItem(restorationKey);
+      } catch {
+        // Storage is an optional restoration aid.
+      }
+      const plan = resolveConversationRestorePlan(
+        conversations,
+        urlConversationId,
+        storedConversationId,
+      );
+      if (plan.clearUrlConversation) setParam("conv", null);
+      if (!plan.conversationId) return;
+
+      let conversation: Conversation | null = null;
+      try {
+        conversation = await api.readConversation(plan.conversationId);
+      } catch {
+        conversation = null;
+      }
+      if (conversation) {
+        applyConversation(conversation, requestScopeKey, requestVersion);
       }
     })();
-    return () => { cancelled = true; };
-  }, [activeProjectId, loadConversationList, loadConversation, getParam]);
-
-  // ── Persist active conversation to URL + localStorage ─────────────
+  }, [
+    api,
+    applyConversation,
+    detachPreviousScope,
+    isCurrent,
+    restorationKey,
+    scopeKey,
+    setParam,
+  ]);
 
   useEffect(() => {
-    if (!activeProjectId || !activeConversationId) return;
-    // Update URL query param (replaceState — no navigation)
-    setParam("conv", activeConversationId);
-    // Also keep localStorage as fallback
+    if (state.scopeKey !== scopeKey || !state.activeConversationId) return;
+    setParam("conv", state.activeConversationId);
     try {
-      localStorage.setItem(`codascope:lastConv:${activeProjectId}`, activeConversationId);
-    } catch { /* ignore */ }
-  }, [activeProjectId, activeConversationId, setParam]);
-
-  // ── Create new conversation ───────────────────────────────────────
-
-  const createNewConversation = useCallback(async (opts: { streaming: boolean; selectedModelId: string | null }) => {
-    if (!activeProjectId || opts.streaming) return;
-    try {
-      const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: opts.selectedModelId }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const conv = data.conversation;
-        setActiveConversationId(conv.id);
-        setActiveTitle(conv.title);
-        setMessages([]);
-        // Refresh list
-        await loadConversationList();
-        inputRef.current?.focus();
-      }
+      localStorage.setItem(restorationKey, state.activeConversationId);
     } catch {
-      // silently fail
+      // URL state remains authoritative when storage is unavailable.
     }
-  }, [activeProjectId, loadConversationList]);
+  }, [
+    restorationKey,
+    scopeKey,
+    setParam,
+    state.activeConversationId,
+    state.scopeKey,
+  ]);
 
-  // ── Switch conversation ───────────────────────────────────────────
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      scopeVersionRef.current += 1;
+    };
+  }, []);
 
-  const switchConversation = useCallback(async (convId: string, streaming: boolean) => {
+  const setActiveConversationId = useCallback((id: string | null) => {
+    setState((current) => current.scopeKey === scopeKey
+      ? { ...current, activeConversationId: id }
+      : current);
+  }, [scopeKey]);
+
+  const setActiveTitle = useCallback((title: string) => {
+    setState((current) => current.scopeKey === scopeKey
+      ? { ...current, activeTitle: title }
+      : current);
+  }, [scopeKey]);
+
+  const setMessages = useCallback<
+    React.Dispatch<React.SetStateAction<AssistantChatMessage[]>>
+  >((value) => {
+    setState((current) => {
+      if (current.scopeKey !== scopeKey) return current;
+      const messages = typeof value === "function"
+        ? value(current.messages)
+        : value;
+      return { ...current, messages };
+    });
+  }, [scopeKey]);
+
+  const createNewConversation = useCallback(async (opts: {
+    streaming: boolean;
+    selectedModelId: string | null;
+  }) => {
+    if (opts.streaming) return null;
+    const requestScopeKey = scopeKey;
+    const requestVersion = scopeVersionRef.current;
+    try {
+      const conversation = await api.createConversation({
+        modelId: opts.selectedModelId,
+      });
+      if (!conversation
+        || !isCurrent(requestScopeKey, requestVersion)) {
+        return null;
+      }
+      applyConversation(conversation, requestScopeKey, requestVersion);
+      await loadConversationList();
+      return conversation;
+    } catch {
+      return null;
+    }
+  }, [api, applyConversation, isCurrent, loadConversationList, scopeKey]);
+
+  const updateConversation = useCallback(async (
+    conversationId: string,
+    input: { title?: string; summary?: string },
+  ) => {
+    const requestScopeKey = scopeKey;
+    const requestVersion = scopeVersionRef.current;
+    try {
+      const conversation = await api.updateConversation(conversationId, input);
+      if (!conversation
+        || !isCurrent(requestScopeKey, requestVersion)) {
+        return null;
+      }
+      setState((current) => {
+        if (current.scopeKey !== requestScopeKey) return current;
+        return {
+          ...current,
+          activeTitle: current.activeConversationId === conversationId
+            ? conversation.title
+            : current.activeTitle,
+          conversations: current.conversations.map((summary) =>
+            summary.id === conversationId
+              ? {
+                  ...summary,
+                  title: conversation.title,
+                  summary: conversation.summary ?? summary.summary,
+                  updatedAt: conversation.updatedAt ?? summary.updatedAt,
+                }
+              : summary),
+        };
+      });
+      return conversation;
+    } catch {
+      return null;
+    }
+  }, [api, isCurrent, scopeKey]);
+
+  const deleteConversation = useCallback(async (conversationId: string) => {
+    const requestScopeKey = scopeKey;
+    const requestVersion = scopeVersionRef.current;
+    try {
+      if (!await api.deleteConversation(conversationId)
+        || !isCurrent(requestScopeKey, requestVersion)) {
+        return false;
+      }
+      const remaining = await api.listConversations();
+      if (!isCurrent(requestScopeKey, requestVersion)) return false;
+      setState((current) => current.scopeKey === requestScopeKey
+        ? { ...current, conversations: remaining }
+        : current);
+      if (visibleState.activeConversationId !== conversationId) return true;
+
+      setParam("conv", null);
+      try {
+        if (localStorage.getItem(restorationKey) === conversationId) {
+          localStorage.removeItem(restorationKey);
+        }
+      } catch {
+        // Best-effort fallback cleanup.
+      }
+      const next = resolveConversationRestorePlan(remaining, null, null);
+      if (!next.conversationId) {
+        setState(emptyState(requestScopeKey));
+        return true;
+      }
+      const conversation = await api.readConversation(next.conversationId);
+      if (conversation) {
+        applyConversation(conversation, requestScopeKey, requestVersion);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [
+    api,
+    applyConversation,
+    isCurrent,
+    restorationKey,
+    scopeKey,
+    setParam,
+    visibleState.activeConversationId,
+  ]);
+
+  const switchConversation = useCallback(async (
+    conversationId: string,
+    streaming: boolean,
+  ) => {
     if (streaming) return;
-    await loadConversation(convId);
+    await loadConversation(conversationId);
   }, [loadConversation]);
 
   return {
-    conversations,
-    activeConversationId,
+    api,
+    conversations: visibleState.conversations,
+    activeConversationId: visibleState.activeConversationId,
     setActiveConversationId,
-    activeTitle,
+    activeTitle: visibleState.activeTitle,
     setActiveTitle,
-    messages,
+    messages: visibleState.messages,
     setMessages,
     loadConversationList,
     loadConversation,
     createNewConversation,
+    updateConversation,
+    deleteConversation,
     switchConversation,
+  };
+}
+
+function emptyState(scopeKey: string): ScopedConversationState {
+  return {
+    scopeKey,
+    conversations: [],
+    activeConversationId: null,
+    activeTitle: "New conversation",
+    messages: [],
   };
 }

@@ -7,6 +7,8 @@
    - relevance: view-context rules for soft-filtering
    ──────────────────────────────────────────────────────────────────── */
 
+import type { AssistantScopeKind } from "./codaScopeTypes";
+
 // ── Types ───────────────────────────────────────────────────────────
 
 export type CommandCategory =
@@ -30,6 +32,13 @@ export interface SlashCommand {
   description: string;
   category: CommandCategory;
   behavior: "dispatch" | "chat";
+  assistantScopes: AssistantScopeKind[];
+  capability:
+    | "help"
+    | "read-only-chat"
+    | "project-navigation"
+    | "project-build"
+    | "project-mutation";
   /** For chat commands — the prompt injected into the input */
   prompt?: string;
   /** When this command is most relevant (for soft-filtering) */
@@ -41,6 +50,7 @@ export interface SlashCommand {
 }
 
 export interface CommandContext {
+  assistantScope: AssistantScopeKind;
   currentView: string | null;
   hasProject: boolean;
   isEpicView: boolean;
@@ -60,6 +70,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Generate wiki docs from the code map",
     category: "build",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "dashboard" }, { view: "wiki" }],
     requiresProject: true,
   },
@@ -70,6 +82,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Generate or update a single wiki page",
     category: "build",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "wiki" }],
     requiresProject: true,
   },
@@ -80,6 +94,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Map the codebase structure for analysis",
     category: "build",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "dashboard" }],
     requiresProject: true,
   },
@@ -90,6 +106,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Run a full code-to-wiki deep sync",
     category: "build",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "dashboard" }, { view: "wiki" }],
     requiresProject: true,
   },
@@ -100,6 +118,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Create a visual artifact from design docs",
     category: "build",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Build a visual artifact from the current design document",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -114,6 +134,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Map and analyze the codebase structure",
     category: "analyze",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "dashboard" }],
     requiresProject: true,
   },
@@ -124,6 +146,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Find stale wiki pages that need updates",
     category: "analyze",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-build",
     relevance: [{ view: "wiki" }],
     requiresProject: true,
   },
@@ -136,6 +160,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Navigate to the project dashboard",
     category: "navigate",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-navigation",
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
@@ -146,6 +172,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Navigate to the wiki",
     category: "navigate",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-navigation",
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
@@ -157,6 +185,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Navigate to skills",
     category: "navigate",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-navigation",
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
@@ -167,6 +197,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Navigate to the epics list",
     category: "navigate",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-navigation",
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
@@ -177,6 +209,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Navigate to project settings",
     category: "navigate",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-navigation",
     relevance: [{ view: "*" }],
     requiresProject: true,
   },
@@ -189,6 +223,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Start a new epic for feature planning",
     category: "epic",
     behavior: "dispatch",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     relevance: [{ view: "epics" }],
     requiresProject: true,
   },
@@ -199,6 +235,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Run the interactive definition interview",
     category: "epic",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Help me define this epic — let's start with the interview",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -211,6 +249,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Map the epic to relevant code topics",
     category: "epic",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Help me scope this epic to the relevant parts of the codebase",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -223,6 +263,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Process and curate research knowledge",
     category: "epic",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Help me curate the knowledge for this epic — synthesize the research into wiki pages",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -237,6 +279,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Start a new design document",
     category: "design",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Create a design document for this epic. I'd like to cover the key technical decisions, architecture approach, and implementation plan.",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -249,6 +293,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Get feedback on a design document",
     category: "design",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Review the current design document and provide feedback on completeness, edge cases, and potential issues",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -261,6 +307,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Add targeted feedback annotations",
     category: "design",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Annotate the current design document with targeted feedback on specific sections",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -275,6 +323,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Research a topic from the web",
     category: "knowledge",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Help me research topics relevant to this epic. What areas should we investigate?",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -287,6 +337,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Process and extract info from research sources",
     category: "knowledge",
     behavior: "chat",
+    assistantScopes: ["project"],
+    capability: "project-mutation",
     prompt: "Process the research sources for this epic and extract key insights",
     relevance: [{ view: "epic" }],
     requiresProject: true,
@@ -301,6 +353,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "Open the CodaScope guide",
     category: "help",
     behavior: "dispatch",
+    assistantScopes: ["workspace", "project"],
+    capability: "help",
     relevance: [{ view: "*" }],
   },
   {
@@ -310,6 +364,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "View what the assistant can do",
     category: "help",
     behavior: "dispatch",
+    assistantScopes: ["workspace", "project"],
+    capability: "help",
     relevance: [{ view: "*" }],
   },
   {
@@ -319,6 +375,8 @@ export const COMMANDS: SlashCommand[] = [
     description: "View keyboard shortcuts",
     category: "help",
     behavior: "dispatch",
+    assistantScopes: ["workspace", "project"],
+    capability: "help",
     relevance: [{ view: "*" }],
   },
 ];
@@ -357,6 +415,21 @@ function isRelevant(cmd: SlashCommand, ctx: CommandContext): boolean {
   });
 }
 
+export function canDispatchCommand(
+  command: SlashCommand,
+  context: CommandContext,
+): boolean {
+  if (!command.assistantScopes.includes(context.assistantScope)) return false;
+  if (context.assistantScope === "workspace"
+    && command.capability !== "help"
+    && command.capability !== "read-only-chat") {
+    return false;
+  }
+  if (command.requiresProject && !context.hasProject) return false;
+  if (command.requiresEpic && !context.isEpicView) return false;
+  return true;
+}
+
 /**
  * Simple fuzzy-ish match: check if all query chars appear in order within the target.
  */
@@ -388,19 +461,12 @@ export function getFilteredCommands(
     return fuzzyMatch(q, haystack);
   };
 
-  // Filter by context requirements
-  const meetsRequirements = (cmd: SlashCommand) => {
-    if (cmd.requiresProject && !ctx.hasProject) return false;
-    if (cmd.requiresEpic && !ctx.isEpicView) return false;
-    return true;
-  };
-
   const relevant: SlashCommand[] = [];
   const other: SlashCommand[] = [];
 
   for (const cmd of COMMANDS) {
     if (!matchesQuery(cmd)) continue;
-    if (!meetsRequirements(cmd)) continue;
+    if (!canDispatchCommand(cmd, ctx)) continue;
 
     if (isRelevant(cmd, ctx)) {
       relevant.push(cmd);

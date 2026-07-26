@@ -359,6 +359,17 @@ export function IconDelete({ size = 16, style, className }: IconProps) {
   );
 }
 
+/** Pencil — Edit / Rename */
+export function IconEdit({ size = 16, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M3 11.5V14h2.5L13 6.5 9.5 3 2 10.5z" />
+      <path d="M8.75 3.75l3.5 3.5" />
+      <path d="M2 14h12" />
+    </svg>
+  );
+}
+
 /** Counterclockwise arrow — Undo */
 export function IconUndo({ size = 16, style, className }: IconProps) {
   return (

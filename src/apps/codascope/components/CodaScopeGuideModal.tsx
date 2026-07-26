@@ -18,6 +18,8 @@ import {
   IconPlan,
   IconArrowRight,
 } from "./CodaScopeIcons";
+import { useAppSubRoute } from "../../../shell/useAppSubRoute";
+import { resolveAssistantScope } from "../assistantScope";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -192,7 +194,33 @@ function TabOverview() {
 
 // ── Tab Content: Chat Agent ─────────────────────────────────────────
 
-function TabChatAgent() {
+function TabChatAgent({ workspaceMode }: { workspaceMode: boolean }) {
+  if (workspaceMode) {
+    return (
+      <div className="codascope-guide-tab-content">
+        <div className="codascope-guide-intent-cards">
+          <IntentCard
+            icon={<IconSearch size={18} />}
+            title="Explore the Workspace"
+            description="Ask read-only questions across active project documentation"
+            example="Compare the architecture documented across my active projects"
+          />
+          <IntentCard
+            icon={<IconBook size={18} />}
+            title="Review Available Knowledge"
+            description="Summarize project, wiki, build-history, and code-map information"
+            example="Which projects have the most complete wiki coverage?"
+          />
+          <IntentCard
+            icon={<IconPlan size={18} />}
+            title="Workspace Safety"
+            description="Workspace chat cannot mutate notes, projects, sources, builds, epics, designs, or research"
+            slashCommands={["/help", "/commands", "/shortcuts"]}
+          />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="codascope-guide-tab-content">
       <div className="codascope-guide-intent-cards">
@@ -372,10 +400,10 @@ function TabEpics() {
 
 // ── Tab Content: Shortcuts & Tips ───────────────────────────────────
 
-function TabShortcuts() {
+function TabShortcuts({ workspaceMode }: { workspaceMode: boolean }) {
   return (
     <div className="codascope-guide-tab-content">
-      <section className="codascope-guide-section">
+      {!workspaceMode && <section className="codascope-guide-section">
         <h4>@ Mentions — Add Context</h4>
         <p className="codascope-guide-desc">
           Type <code>@</code> in the chat input to reference context from your project.
@@ -387,7 +415,7 @@ function TabShortcuts() {
           <div className="codascope-guide-shortcut"><kbd>@code/</kbd><span>Reference a code repository</span></div>
           <div className="codascope-guide-shortcut"><kbd>@def</kbd><span>Reference the epic definition</span></div>
         </div>
-      </section>
+      </section>}
 
       <section className="codascope-guide-section">
         <h4>Keyboard Shortcuts</h4>
@@ -395,7 +423,7 @@ function TabShortcuts() {
           <div className="codascope-guide-shortcut"><kbd>Enter</kbd><span>Send message</span></div>
           <div className="codascope-guide-shortcut"><kbd>Shift + Enter</kbd><span>New line</span></div>
           <div className="codascope-guide-shortcut"><kbd>Escape</kbd><span>Clear attachments / close picker</span></div>
-          <div className="codascope-guide-shortcut"><kbd>↑ ↓</kbd><span>Navigate @ picker or / palette</span></div>
+          <div className="codascope-guide-shortcut"><kbd>↑ ↓</kbd><span>{workspaceMode ? "Navigate the / palette" : "Navigate @ picker or / palette"}</span></div>
         </div>
       </section>
 
@@ -406,9 +434,9 @@ function TabShortcuts() {
           Filter by typing after the slash. Use arrow keys to navigate and Enter to select.
         </p>
         <div className="codascope-guide-shortcuts">
-          <div className="codascope-guide-shortcut"><kbd>/build wiki</kbd><span>Generate full wiki</span></div>
-          <div className="codascope-guide-shortcut"><kbd>/explore</kbd><span>Explore codebase</span></div>
-          <div className="codascope-guide-shortcut"><kbd>/goto ...</kbd><span>Navigate to a view</span></div>
+          {!workspaceMode && <div className="codascope-guide-shortcut"><kbd>/build wiki</kbd><span>Generate full wiki</span></div>}
+          {!workspaceMode && <div className="codascope-guide-shortcut"><kbd>/explore</kbd><span>Explore codebase</span></div>}
+          {!workspaceMode && <div className="codascope-guide-shortcut"><kbd>/goto ...</kbd><span>Navigate to a view</span></div>}
           <div className="codascope-guide-shortcut"><kbd>/help</kbd><span>Open this guide</span></div>
         </div>
       </section>
@@ -436,6 +464,8 @@ function TabShortcuts() {
 // ── Main Component ──────────────────────────────────────────────────
 
 export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }: CodaScopeGuideModalProps) {
+  const { segments } = useAppSubRoute("codascope");
+  const workspaceMode = resolveAssistantScope(segments).kind === "workspace";
   const [activeTab, setActiveTab] = useState<GuideTab>(initialTab);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -558,10 +588,10 @@ export function CodaScopeGuideModal({ isOpen, onClose, initialTab = "overview" }
   const renderTab = () => {
     switch (activeTab) {
       case "overview": return <TabOverview />;
-      case "chat-agent": return <TabChatAgent />;
+      case "chat-agent": return <TabChatAgent workspaceMode={workspaceMode} />;
       case "projects": return <TabProjects />;
       case "epics": return <TabEpics />;
-      case "shortcuts": return <TabShortcuts />;
+      case "shortcuts": return <TabShortcuts workspaceMode={workspaceMode} />;
     }
   };
 

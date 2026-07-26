@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeAssistantStreamResponse } from "./useAssistantStream";
+import {
+  cancelAssistantRun,
+  consumeAssistantStreamResponse,
+  createAssistantMessagePayload,
+  isAssistantRunCurrent,
+} from "./useAssistantStream";
 
 const encoder = new TextEncoder();
 
@@ -54,5 +59,101 @@ describe("consumeAssistantStreamResponse", () => {
       actions: [],
       conversationId: "conv-2",
     });
+  });
+});
+
+describe("assistant stream scoping", () => {
+  it("builds a workspace payload without a fake project or client grant", () => {
+    const payload = createAssistantMessagePayload(
+      { kind: "workspace" },
+      {
+        conversationId: "conv-1",
+        message: "Compare the projects",
+        modelId: "model",
+        context: {
+          assistantScope: { kind: "workspace" },
+          currentView: { view: "projects" },
+          explicitlyReferencedProjectIds: [],
+        },
+        attachments: [{ type: "image", path: "conv-1/images/image.png" }],
+        references: [{ category: "wiki", id: "topic", label: "Topic" }],
+        selectionContext: {
+          blockId: "block",
+          text: "selection",
+          startLine: 1,
+          endLine: 2,
+          docId: "doc",
+          epicId: "epic",
+        },
+      },
+    );
+
+    expect(payload).toMatchObject({
+      message: "Compare the projects",
+      modelId: "model",
+      attachments: [{ type: "image", path: "conv-1/images/image.png" }],
+    });
+    expect(payload).not.toHaveProperty("projectId");
+    expect(payload).not.toHaveProperty("workspaceReadGrant");
+    expect(payload).not.toHaveProperty("readGrant");
+    expect(payload).not.toHaveProperty("ownerId");
+    expect(payload).not.toHaveProperty("actorId");
+    expect(payload).not.toHaveProperty("references");
+    expect(payload).not.toHaveProperty("selectionContext");
+  });
+
+  it("preserves project-only references and selection context", () => {
+    const payload = createAssistantMessagePayload(
+      { kind: "project", projectId: "alpha" },
+      {
+        conversationId: "conv-1",
+        message: "Review",
+        modelId: "model",
+        references: [{ category: "wiki", id: "topic", label: "Topic" }],
+        selectionContext: {
+          blockId: "block",
+          text: "selection",
+          startLine: 1,
+          endLine: 2,
+          docId: "doc",
+          epicId: "epic",
+        },
+      },
+    );
+    expect(payload).toMatchObject({
+      references: [{ category: "wiki", id: "topic", label: "Topic" }],
+      selectionContext: { docId: "doc", epicId: "epic" },
+    });
+  });
+
+  it("cancels against the run's original scope endpoint", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const controller = new AbortController();
+    await cancelAssistantRun({ kind: "workspace" }, controller, fetchMock);
+    expect(controller.signal.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/codascope/workspace/assistant/cancel",
+      { method: "POST" },
+    );
+  });
+
+  it("rejects stale stream events after a scope transition", () => {
+    const workspaceRun = { id: 1, scopeKey: "workspace" };
+    expect(isAssistantRunCurrent(
+      workspaceRun,
+      workspaceRun,
+      "workspace",
+    )).toBe(true);
+    expect(isAssistantRunCurrent(
+      workspaceRun,
+      workspaceRun,
+      "project:alpha",
+    )).toBe(false);
+    expect(isAssistantRunCurrent(
+      workspaceRun,
+      { id: 2, scopeKey: "workspace" },
+      "workspace",
+    )).toBe(false);
   });
 });

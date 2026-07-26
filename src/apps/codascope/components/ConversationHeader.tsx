@@ -5,7 +5,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useRef, useState } from "react";
-import { IconChat } from "./CodaScopeIcons";
+import { IconChat, IconDelete, IconEdit } from "./CodaScopeIcons";
 import type { ConversationSummary } from "../codaScopeTypes";
 
 // Re-export for existing consumers
@@ -30,8 +30,10 @@ export function ConversationHeader({
   activeTitle,
   conversations,
   disabled,
-  onNewConversation: _onNewConversation,
+  onNewConversation,
   onSelectConversation,
+  onRenameConversation,
+  onDeleteConversation,
 }: {
   activeConversationId: string | undefined;
   activeTitle: string;
@@ -39,6 +41,8 @@ export function ConversationHeader({
   disabled: boolean;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
+  onRenameConversation: (id: string, title: string) => void;
+  onDeleteConversation: (id: string) => void;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -113,27 +117,74 @@ export function ConversationHeader({
             value={filter}
             autoFocus
           />
+          <button
+            className="codascope-conv-popover-new"
+            disabled={disabled}
+            onClick={() => {
+              setHistoryOpen(false);
+              onNewConversation();
+            }}
+            type="button"
+          >
+            + New conversation
+          </button>
           <div className="codascope-conv-list" role="listbox">
             {filteredConversations.length > 0 ? (
               filteredConversations.map((conv) => (
-                <button
+                <div
                   aria-selected={activeConversationId === conv.id}
-                  className={`codascope-conv-item ${activeConversationId === conv.id ? "codascope-conv-item--active" : ""}`}
-                  disabled={disabled}
+                  className={`codascope-conv-item-row ${activeConversationId === conv.id ? "codascope-conv-item-row-active" : ""}`}
                   key={conv.id}
-                  onClick={() => selectConversation(conv.id)}
                   role="option"
-                  type="button"
                 >
-                  <strong className="codascope-conv-item-title">{conv.title}</strong>
-                  {conv.summary && (
-                    <span className="codascope-conv-item-summary">{conv.summary}</span>
-                  )}
-                  <small className="codascope-conv-item-meta">
-                    {formatRelativeTime(conv.updatedAt)} · {conv.messageCount} message
-                    {conv.messageCount === 1 ? "" : "s"}
-                  </small>
-                </button>
+                  <button
+                    className="codascope-conv-item"
+                    disabled={disabled}
+                    onClick={() => selectConversation(conv.id)}
+                    type="button"
+                  >
+                    <strong className="codascope-conv-item-title">{conv.title}</strong>
+                    {conv.summary && (
+                      <span className="codascope-conv-item-summary">{conv.summary}</span>
+                    )}
+                    <small className="codascope-conv-item-meta">
+                      {formatRelativeTime(conv.updatedAt)} · {conv.messageCount} message
+                      {conv.messageCount === 1 ? "" : "s"}
+                    </small>
+                  </button>
+                  <div className="codascope-conv-item-actions">
+                    <button
+                      aria-label={`Rename ${conv.title}`}
+                      disabled={disabled}
+                      onClick={() => {
+                        const title = window.prompt(
+                          "Rename conversation",
+                          conv.title,
+                        )?.trim();
+                        if (title && title !== conv.title) {
+                          onRenameConversation(conv.id, title);
+                        }
+                      }}
+                      title="Rename conversation"
+                      type="button"
+                    >
+                      <IconEdit size={13} />
+                    </button>
+                    <button
+                      aria-label={`Delete ${conv.title}`}
+                      disabled={disabled}
+                      onClick={() => {
+                        if (window.confirm(`Delete "${conv.title}"?`)) {
+                          onDeleteConversation(conv.id);
+                        }
+                      }}
+                      title="Delete conversation"
+                      type="button"
+                    >
+                      <IconDelete size={13} />
+                    </button>
+                  </div>
+                </div>
               ))
             ) : (
               <p className="codascope-conv-empty">

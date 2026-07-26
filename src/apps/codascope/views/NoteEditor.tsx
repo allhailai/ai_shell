@@ -26,6 +26,12 @@ import { NoteExportDialog } from "../components/NoteExportDialog";
 import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
+import {
+  clearRootNoteContext,
+  createRootNoteContextOwner,
+  publishRootNoteContext,
+  updateRootNoteContext,
+} from "../assistantNoteContext";
 
 /* ── Visibility label helpers ────────────────────────────────────────── */
 
@@ -167,6 +173,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const hashRef = useRef(contentHash);
   const editorViewRef = useRef<EditorView | null>(null);
   const annotationFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const assistantContextOwnerRef = useRef(createRootNoteContextOwner());
 
   // Keep refs in sync
   useEffect(() => { contentRef.current = content; }, [content]);
@@ -191,6 +198,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   // ── Load note ──────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+    const assistantContextOwner = assistantContextOwnerRef.current;
+    clearRootNoteContext(assistantContextOwner);
     setLoading(true);
     setError(null);
     setLastEditor(null);
@@ -213,6 +222,18 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             setTags(fm.tags ?? []);
             setNoteId(fm.id ?? null);
             setNoteStatus(fm.status ?? undefined);
+            if (scope === "codascope" && typeof fm.id === "string") {
+              publishRootNoteContext(assistantContextOwner, {
+                stableId: fm.id,
+                scope: "codascope",
+                path: apiPath,
+                title: fm.title ?? "Untitled",
+                visibility,
+                ...(typeof data.contentHash === "string"
+                  ? { contentHash: data.contentHash }
+                  : {}),
+              });
+            }
           }
 
           // Last editor tracking
@@ -226,15 +247,29 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           }
         } else {
           setError("Note not found");
+          clearRootNoteContext(assistantContextOwner);
         }
       } catch {
-        if (!cancelled) setError("Failed to load note");
+        if (!cancelled) {
+          setError("Failed to load note");
+          clearRootNoteContext(assistantContextOwner);
+        }
       }
       if (!cancelled) setLoading(false);
     })();
 
-    return () => { cancelled = true; };
-  }, [apiBase, apiPath, queryString]);
+    return () => {
+      cancelled = true;
+      clearRootNoteContext(assistantContextOwner);
+    };
+  }, [apiBase, apiPath, queryString, scope, visibility]);
+
+  useEffect(() => {
+    updateRootNoteContext(assistantContextOwnerRef.current, {
+      title,
+      contentHash: contentHash ?? undefined,
+    });
+  }, [contentHash, title]);
 
   // ── Fetch annotations ─────────────────────────────────────────────
   const fetchAnnotations = useCallback(async () => {

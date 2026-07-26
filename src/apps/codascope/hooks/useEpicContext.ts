@@ -8,20 +8,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
 import { useCodaScopeStore } from "../useCodaScopeStore";
-import type { EpicDesign } from "../codaScopeTypes";
-import type { ConversationSummary } from "../components/ConversationHeader";
-
-/* ── Types ───────────────────────────────────────────────────────── */
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  status?: "complete" | "streaming" | "error";
-  createdAt?: string;
-  metadata?: Record<string, unknown>;
-  images?: Array<{ url: string; filename: string }>;
-}
+import type {
+  AssistantChatMessage,
+  ConversationSummary,
+  EpicDesign,
+} from "../codaScopeTypes";
+import { createAssistantEndpointAdapter } from "../assistantConversationApi";
 
 export interface EpicKnowledgeSummary {
   sourceCount: number;
@@ -52,7 +44,7 @@ export function useEpicContext(
   activeProjectId: string | null,
   setActiveConversationId: (id: string | null) => void,
   setActiveTitle: (title: string) => void,
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
+  setMessages: React.Dispatch<React.SetStateAction<AssistantChatMessage[]>>,
   loadConversationList: () => Promise<ConversationSummary[]>,
 ): UseEpicContextResult {
   const { segments } = useAppSubRoute("codascope");
@@ -170,12 +162,16 @@ export function useEpicContext(
           setActiveTitle(conv.title || `Epic: ${currentEpic.title}`);
           // Load messages from the epic conversation
           const msgs = (conv.messages ?? [])
-            .filter((m: ChatMessage) => m.role === "user" || m.role === "assistant")
-            .map((m: ChatMessage) => {
+            .filter((m: AssistantChatMessage) => m.role === "user" || m.role === "assistant")
+            .map((m: AssistantChatMessage) => {
               // Restore image URLs from metadata for conversation history
               const metaImages = m.metadata?.images as Array<{ path: string; filename: string }> | undefined;
+              const endpoints = createAssistantEndpointAdapter({
+                kind: "project",
+                projectId: activeProjectId,
+              });
               const images = metaImages?.map((img) => ({
-                url: `/api/codascope/projects/${activeProjectId}/conversations/${conv.id}/images/${img.filename}`,
+                url: endpoints.displayImage(conv.id, img.filename),
                 filename: img.filename,
               }));
               return {

@@ -43,6 +43,34 @@ export interface WikiTopic {
 
 // ── Chat / Conversations ────────────────────────────────────────────
 
+export type AssistantScope =
+  | { kind: "workspace" }
+  | { kind: "project"; projectId: string };
+
+export type AssistantScopeKind = AssistantScope["kind"];
+
+export interface WorkspaceCurrentNoteMetadata {
+  stableId: string;
+  scope: "codascope";
+  path: string;
+  title: string;
+  visibility: "private" | "shared";
+  contentHash?: string;
+}
+
+export interface WorkspaceCurrentView {
+  view: string;
+  identity?: string | null;
+  label?: string | null;
+}
+
+export interface WorkspaceMessageContext {
+  assistantScope: { kind: "workspace" };
+  currentNote?: WorkspaceCurrentNoteMetadata | null;
+  explicitlyReferencedProjectIds: string[];
+  currentView: WorkspaceCurrentView;
+}
+
 export interface MessageContext {
   view: string;
   topicId?: string | null;
@@ -71,8 +99,19 @@ export interface ConversationMessage {
   metadata?: Record<string, unknown>;
 }
 
+export interface AssistantChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  status?: MessageStatus;
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+  images?: Array<{ url: string; filename: string }>;
+}
+
 export interface Conversation {
   id: string;
+  scope?: { kind: "workspace" };
   /** Server-derived custody; clients must never supply or change it. */
   ownerId?: string;
   projectId?: string;

@@ -148,6 +148,24 @@
   color: var(--color-text-tertiary);
 }
 
+.codascope-conv-popover-new {
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.codascope-conv-popover-new:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
 .codascope-conv-list {
   flex: 1;
   overflow-y: auto;
@@ -167,10 +185,28 @@
 
 /* ── History Items ─────────────────────────────────────────────── */
 
+.codascope-conv-item-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.codascope-conv-item-row:hover {
+  background: var(--color-bg-hover);
+}
+
+.codascope-conv-item-row-active,
+.codascope-conv-item-row-active:hover {
+  background: var(--color-accent-muted);
+}
+
 .codascope-conv-item {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-1);
   width: 100%;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -183,7 +219,7 @@
 }
 
 .codascope-conv-item:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+  background: transparent;
 }
 
 .codascope-conv-item--active {
@@ -221,6 +257,37 @@
   color: var(--color-text-tertiary);
 }
 
+.codascope-conv-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.codascope-conv-item-row:hover .codascope-conv-item-actions,
+.codascope-conv-item-row:focus-within .codascope-conv-item-actions {
+  opacity: 1;
+}
+
+.codascope-conv-item-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.codascope-conv-item-actions button:hover:not(:disabled) {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
 .codascope-conv-empty {
   padding: var(--space-4) var(--space-3);
   font-size: var(--text-sm);
@@ -229,6 +296,30 @@
 }
 
 /* ── Context Badge ──────────────────────────────────────────────── */
+
+.codascope-assistant-scope {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+}
+
+.codascope-assistant-scope-icon {
+  display: flex;
+  color: var(--color-accent);
+}
+
+.codascope-assistant-scope-mode {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 
 .codascope-assistant-context {
   display: flex;
@@ -251,6 +342,32 @@
   color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.codascope-assistant-note-context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-tertiary);
+  font-size: var(--text-xs);
+}
+
+.codascope-assistant-note-context-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-assistant-note-context-visibility {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
 }
 
 /* ── Messages Area ──────────────────────────────────────────────── */
@@ -360,8 +477,8 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-full);
-  font-size: 14px;
   background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .codascope-assistant-msg-user .codascope-assistant-msg-avatar {

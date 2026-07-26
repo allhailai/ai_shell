@@ -17,21 +17,33 @@ import { MarkdownViewer } from "../../shared/markdown";
 import { assembleContext } from "./contextAssembler";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { ModelPicker, useModelPicker } from "./components/ModelPicker";
-import { IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend, IconWarning } from "./components/CodaScopeIcons";
+import { IconAgent, IconUser, IconChat, IconSearch, IconCopy, IconCheck, IconClose, IconCurate, IconMap, IconBook, IconShield, IconPlan, IconClipboard, IconSend, IconWarning } from "./components/CodaScopeIcons";
 import { ConversationHeader } from "./components/ConversationHeader";
-import { ActionCardList, type CodaScopeAction } from "./components/ActionCard";
+import { ActionCardList } from "./components/ActionCard";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
 import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
 import type { SlashCommand, CommandContext } from "./commandRegistry";
-import { getFilteredCommands } from "./commandRegistry";
+import { canDispatchCommand, getFilteredCommands } from "./commandRegistry";
 import { useCommandBus } from "../../shell/hooks";
 import { useAssistantStream } from "./hooks/useAssistantStream";
 import { openDeepRunModal } from "./views/ProjectDashboard";
 import { useConversationManager } from "./hooks/useConversationManager";
 import { useEpicContext } from "./hooks/useEpicContext";
-import type { EpicStatus } from "./codaScopeTypes";
+import type {
+  AssistantChatMessage,
+  CodaScopeAction,
+  EpicStatus,
+} from "./codaScopeTypes";
+import {
+  buildWorkspaceMessageContext,
+  canUseProjectMentions,
+  getAssistantScopeKey,
+  resolveAssistantScope,
+  rootNoteMatchesRoute,
+} from "./assistantScope";
+import { useRootNoteContext } from "./assistantNoteContext";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -67,28 +79,39 @@ function convertWikiLinks(text: string, projectId: string | null, epicId?: strin
   );
 }
 
-// ── Types ───────────────────────────────────────────────────────────
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  status?: "complete" | "streaming" | "error";
-  createdAt?: string;
-  metadata?: Record<string, unknown>;
-  /** Image attachment URLs (for display in the chat bubble) */
-  images?: Array<{ url: string; filename: string }>;
-}
-
 // ── Component ───────────────────────────────────────────────────────
 
 export function CodaScopeAssistant() {
   const { segments, getParam, setParam, navigate } = useAppSubRoute("codascope");
-  const { activeProjectId, projects, wikiTopics, epics } = useCodaScopeStore();
+  const { projects, wikiTopics, epics } = useCodaScopeStore();
+  const assistantScope = useMemo(
+    () => resolveAssistantScope(segments),
+    [segments[0], segments[1]],
+  );
+  const scopeKey = getAssistantScopeKey(assistantScope);
+  const projectId = assistantScope.kind === "project"
+    ? assistantScope.projectId
+    : null;
+  const publishedRootNote = useRootNoteContext();
+  const currentRootNote = rootNoteMatchesRoute(publishedRootNote, segments)
+    ? publishedRootNote
+    : null;
+
+  const {
+    streaming,
+    streamingContent,
+    streamMessage,
+    cancelStream,
+    detachActiveRun,
+  } = useAssistantStream(assistantScope);
 
   // Extracted hooks
-  const convManager = useConversationManager(activeProjectId);
+  const convManager = useConversationManager(
+    assistantScope,
+    detachActiveRun,
+  );
   const {
+    api: conversationApi,
     conversations,
     activeConversationId,
     setActiveConversationId,
@@ -98,11 +121,13 @@ export function CodaScopeAssistant() {
     setMessages,
     loadConversationList,
     createNewConversation,
+    updateConversation,
+    deleteConversation,
     switchConversation,
   } = convManager;
 
   const epicCtx = useEpicContext(
-    activeProjectId,
+    projectId,
     setActiveConversationId,
     setActiveTitle,
     setMessages,
@@ -112,19 +137,20 @@ export function CodaScopeAssistant() {
 
   // Input state
   const [input, setInput] = useState("");
-
-  // Streaming via extracted hook
-  const { streaming, streamingContent, streamMessage, cancelStream } = useAssistantStream(setActiveConversationId);
+  const inputScopeKeyRef = useRef(scopeKey);
 
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const attachmentsScopeKeyRef = useRef(scopeKey);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // @-mention picker state
   const [atPickerOpen, setAtPickerOpen] = useState(false);
+  const atPickerScopeKeyRef = useRef(scopeKey);
 
   // Slash command palette state
   const [slashPaletteOpen, setSlashPaletteOpen] = useState(false);
+  const slashPaletteScopeKeyRef = useRef(scopeKey);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashToast, setSlashToast] = useState<string | null>(null);
   const slashToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,9 +162,30 @@ export function CodaScopeAssistant() {
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoSendRef = useRef(false); // Prevents double auto-send
+  const currentScopeKeyRef = useRef(scopeKey);
+  currentScopeKeyRef.current = scopeKey;
+  const visibleInput = inputScopeKeyRef.current === scopeKey ? input : "";
+  const visibleAttachments = attachmentsScopeKeyRef.current === scopeKey
+    ? attachments
+    : [];
+  const visibleAtPickerOpen = atPickerScopeKeyRef.current === scopeKey
+    && atPickerOpen;
+  const visibleSlashPaletteOpen =
+    slashPaletteScopeKeyRef.current === scopeKey && slashPaletteOpen;
 
   // Get the current project name for context
-  const projectName = projects.find((p) => p.id === activeProjectId)?.name ?? "Unknown";
+  const projectName = projects.find((p) => p.id === projectId)?.name ?? "Unknown";
+
+  useEffect(() => {
+    inputScopeKeyRef.current = scopeKey;
+    attachmentsScopeKeyRef.current = scopeKey;
+    atPickerScopeKeyRef.current = scopeKey;
+    slashPaletteScopeKeyRef.current = scopeKey;
+    setInput("");
+    setAttachments([]);
+    setAtPickerOpen(false);
+    setSlashPaletteOpen(false);
+  }, [scopeKey]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -149,7 +196,9 @@ export function CodaScopeAssistant() {
 
   // Build context from current view
   const getContext = useCallback(() => {
-    if (!activeProjectId) return undefined;
+    if (assistantScope.kind === "workspace") {
+      return buildWorkspaceMessageContext(segments, currentRootNote);
+    }
     // Resolve the topic title from the store for enriched context
     const topicId = segments[2] === "wiki" ? (segments[3] ?? null) : null;
     const topicTitle = topicId
@@ -159,14 +208,19 @@ export function CodaScopeAssistant() {
     const epicId = segments[2] === "epic" ? (segments[3] ?? null) : null;
     const activeEpic = epicId ? epics.find((e) => e.id === epicId) : null;
     const epicTitle = activeEpic?.title ?? null;
-    const ctx = assembleContext(segments, projectName, activeProjectId, { topicTitle, epicId, epicTitle, epicTab: segments[2] === "epic" ? (segments[4] ?? "define") : null });
+    const ctx = assembleContext(segments, projectName, assistantScope.projectId, { topicTitle, epicId, epicTitle, epicTab: segments[2] === "epic" ? (segments[4] ?? "define") : null });
     if (!ctx) return undefined;
     return ctx;
-  }, [segments, projectName, activeProjectId, wikiTopics, epics]);
+  }, [assistantScope, currentRootNote, segments, projectName, wikiTopics, epics]);
 
   // Get context badge label
   const contextBadge = (() => {
-    const ctx = activeProjectId ? assembleContext(segments, projectName, activeProjectId) : null;
+    if (assistantScope.kind === "workspace") return "Workspace";
+    const ctx = assembleContext(
+      segments,
+      projectName,
+      assistantScope.projectId,
+    );
     if (!ctx) return null;
     switch (ctx.view) {
       case "wiki": {
@@ -195,37 +249,30 @@ export function CodaScopeAssistant() {
   // `promptText` overrides the input field when provided (e.g. prompt chips).
 
   const dispatchMessage = useCallback(async (promptText?: string) => {
-    const text = promptText ?? input.trim();
-    if (!text || streaming || !selectedModelId || !activeProjectId) return;
+    const text = promptText ?? visibleInput.trim();
+    if (!text || streaming || !selectedModelId) return;
 
     // If no active conversation, create one first
     let convId = activeConversationId;
     if (!convId) {
-      try {
-        const res = await fetch(`/api/codascope/projects/${activeProjectId}/conversations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ modelId: selectedModelId }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          convId = data.conversation.id;
-          setActiveConversationId(convId!);
-          setActiveTitle(data.conversation.title);
-        }
-      } catch {
-        return;
-      }
+      const conversation = await createNewConversation({
+        streaming: false,
+        selectedModelId,
+      });
+      convId = conversation?.id ?? null;
     }
 
     if (!convId) return;
 
     // Build image URLs from attachments for display in the chat bubble
-    const currentAttachments = promptText ? [] : [...attachments];
+    const currentAttachments = promptText ? [] : [...visibleAttachments];
     const imageUrls = currentAttachments
       .filter((a) => a.type === "image" && a.metadata?.path)
       .map((a) => ({
-        url: `/api/codascope/projects/${activeProjectId}/conversations/${convId}/images/${(a.metadata?.path as string).split("/").pop()}`,
+        url: conversationApi.endpoints.displayImage(
+          convId,
+          (a.metadata?.path as string).split("/").pop() ?? "",
+        ),
         filename: a.label,
       }));
     // Also capture blob previews for immediate display (before server URL is available)
@@ -236,7 +283,7 @@ export function CodaScopeAssistant() {
         filename: a.label,
       }));
 
-    const userMsg: ChatMessage = {
+    const userMsg: AssistantChatMessage = {
       id: `user-${Date.now()}`,
       role: "user",
       content: text,
@@ -255,7 +302,8 @@ export function CodaScopeAssistant() {
 
     // Build references payload from @-mention chips
     const referenceAttachments = currentAttachments
-      .filter((a) => a.type === "reference")
+      .filter((a) =>
+        assistantScope.kind === "project" && a.type === "reference")
       .map((a) => ({
         category: a.metadata?.category as string,
         id: a.metadata?.itemId as string,
@@ -263,7 +311,9 @@ export function CodaScopeAssistant() {
       }));
 
     // Build selection context from selection chips (Phase 3)
-    const selectionChip = currentAttachments.find((a) => a.type === "selection");
+    const selectionChip = assistantScope.kind === "project"
+      ? currentAttachments.find((a) => a.type === "selection")
+      : undefined;
     const selectionContext = selectionChip
       ? {
           blockId: selectionChip.metadata?.blockId as string,
@@ -277,7 +327,6 @@ export function CodaScopeAssistant() {
 
     const isFirstMessage = messages.length === 0;
     const result = await streamMessage({
-      projectId: activeProjectId,
       conversationId: convId,
       message: text,
       modelId: selectedModelId,
@@ -287,6 +336,10 @@ export function CodaScopeAssistant() {
       selectionContext,
     });
 
+    if (result.discarded) return;
+    if (result.conversationId) {
+      setActiveConversationId(result.conversationId);
+    }
     if (result.assistantMessage) {
       setMessages((prev) => [...prev, result.assistantMessage!]);
     }
@@ -298,7 +351,7 @@ export function CodaScopeAssistant() {
 
     // Refresh conversation list to get updated titles/summaries
     await loadConversationList();
-  }, [input, streaming, selectedModelId, activeProjectId, activeConversationId, attachments, getContext, messages.length, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages]);
+  }, [visibleInput, streaming, selectedModelId, activeConversationId, visibleAttachments, getContext, messages.length, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages, assistantScope.kind, conversationApi.endpoints, createNewConversation]);
 
   // Wrapper for send button (uses input field text)
   const sendMessage = useCallback(() => {
@@ -335,7 +388,8 @@ export function CodaScopeAssistant() {
   // ── Image upload handler ─────────────────────────────────────────
 
   const handleImageFile = useCallback(async (file: File) => {
-    if (!activeProjectId || !activeConversationId) return;
+    if (!activeConversationId) return;
+    const uploadScopeKey = scopeKey;
 
     // Create a local preview URL
     const previewUrl = URL.createObjectURL(file);
@@ -357,12 +411,15 @@ export function CodaScopeAssistant() {
     try {
       const formData = new FormData();
       formData.append("image", file);
-      const res = await fetch(
-        `/api/codascope/projects/${activeProjectId}/conversations/${activeConversationId}/images`,
-        { method: "POST", body: formData },
+      const data = await conversationApi.uploadImage(
+        activeConversationId,
+        formData,
       );
-      if (res.ok) {
-        const data = await res.json();
+      if (currentScopeKeyRef.current !== uploadScopeKey) {
+        URL.revokeObjectURL(previewUrl);
+        return;
+      }
+      if (data) {
         // Update chip with server path
         setAttachments((prev) =>
           prev.map((a) =>
@@ -376,9 +433,11 @@ export function CodaScopeAssistant() {
         setAttachments((prev) => prev.filter((a) => a.id !== tempId));
       }
     } catch {
-      setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      if (currentScopeKeyRef.current === uploadScopeKey) {
+        setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      }
     }
-  }, [activeProjectId, activeConversationId]);
+  }, [activeConversationId, conversationApi, scopeKey]);
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -391,8 +450,11 @@ export function CodaScopeAssistant() {
   // ── @-mention picker handlers ────────────────────────────────────
 
   const handleAtTrigger = useCallback((_position: { top: number; left: number }) => {
-    setAtPickerOpen(true);
-  }, []);
+    if (canUseProjectMentions(assistantScope)) {
+      atPickerScopeKeyRef.current = scopeKey;
+      setAtPickerOpen(true);
+    }
+  }, [assistantScope, scopeKey]);
 
   const handleAtMentionSelect = useCallback((item: AtMentionItem) => {
     // Insert @category/id text into the input
@@ -439,25 +501,34 @@ export function CodaScopeAssistant() {
   }, []);
 
   const slashCommandContext: CommandContext = useMemo(() => {
-    const currentView = segments[2] ?? "dashboard";
+    const currentView = assistantScope.kind === "project"
+      ? (segments[2] ?? "dashboard")
+      : (segments[0] ?? "projects");
     return {
+      assistantScope: assistantScope.kind,
       currentView,
-      hasProject: !!activeProjectId,
+      hasProject: assistantScope.kind === "project",
       isEpicView: currentView === "epic" || segments[2] === "epic",
       epicId: segments[2] === "epic" ? (segments[3] ?? null) : null,
       hasWiki: wikiTopics.length > 0,
       hasCodeMap: true, // TODO: track from store if needed
     };
-  }, [segments, activeProjectId, wikiTopics]);
+  }, [assistantScope, segments, wikiTopics]);
 
   const handleSlashTrigger = useCallback((_position: { top: number; left: number }) => {
+    slashPaletteScopeKeyRef.current = scopeKey;
     setSlashPaletteOpen(true);
     setSlashActiveIndex(0);
-  }, []);
+  }, [scopeKey]);
 
   const handleSlashSelect = useCallback(async (cmd: SlashCommand) => {
     setSlashPaletteOpen(false);
     setInput("");
+
+    if (!canDispatchCommand(cmd, slashCommandContext)) {
+      showSlashToast("That command is not available in workspace scope.");
+      return;
+    }
 
     if (cmd.behavior === "chat" && cmd.prompt) {
       // Inject prompt into input — user reviews and sends
@@ -469,33 +540,33 @@ export function CodaScopeAssistant() {
     switch (cmd.id) {
       // ── Navigation commands ──
       case "goto-dashboard":
-        navigate(`project/${activeProjectId}/dashboard`);
+        navigate(`project/${projectId}/dashboard`);
         showSlashToast("Navigating to Dashboard…");
         break;
       case "goto-wiki":
-        navigate(`project/${activeProjectId}/wiki`);
+        navigate(`project/${projectId}/wiki`);
         showSlashToast("Navigating to Wiki…");
         break;
 
       case "goto-skills":
-        navigate(`project/${activeProjectId}/skills`);
+        navigate(`project/${projectId}/skills`);
         showSlashToast("Navigating to Skills…");
         break;
       case "goto-epics":
-        navigate(`project/${activeProjectId}/epics`);
+        navigate(`project/${projectId}/epics`);
         showSlashToast("Navigating to Epics…");
         break;
       case "goto-settings":
-        navigate(`project/${activeProjectId}/settings`);
+        navigate(`project/${projectId}/settings`);
         showSlashToast("Navigating to Settings…");
         break;
 
       // ── Build commands ──
       case "build-wiki":
-        if (activeProjectId && selectedModelId) {
+        if (projectId && selectedModelId) {
           showSlashToast("Building wiki…");
           try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+            await fetch(`/api/codascope/projects/${projectId}/runs`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "do_build_full_wiki", modelId: selectedModelId }),
@@ -504,10 +575,10 @@ export function CodaScopeAssistant() {
         }
         break;
       case "build-wiki-page":
-        if (activeProjectId && selectedModelId) {
+        if (projectId && selectedModelId) {
           showSlashToast("Building wiki page…");
           try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+            await fetch(`/api/codascope/projects/${projectId}/runs`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "do_build_wiki_page", modelId: selectedModelId }),
@@ -516,10 +587,10 @@ export function CodaScopeAssistant() {
         }
         break;
       case "build-code-map":
-        if (activeProjectId && selectedModelId) {
+        if (projectId && selectedModelId) {
           showSlashToast("Exploring codebase…");
           try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+            await fetch(`/api/codascope/projects/${projectId}/runs`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "do_explore", modelId: selectedModelId }),
@@ -530,10 +601,10 @@ export function CodaScopeAssistant() {
 
       // ── Analyze commands ──
       case "explore":
-        if (activeProjectId && selectedModelId) {
+        if (projectId && selectedModelId) {
           showSlashToast("Exploring codebase…");
           try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+            await fetch(`/api/codascope/projects/${projectId}/runs`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "do_explore", modelId: selectedModelId }),
@@ -542,10 +613,10 @@ export function CodaScopeAssistant() {
         }
         break;
       case "scan-delta":
-        if (activeProjectId && selectedModelId) {
+        if (projectId && selectedModelId) {
           showSlashToast("Scanning for changes…");
           try {
-            await fetch(`/api/codascope/projects/${activeProjectId}/runs`, {
+            await fetch(`/api/codascope/projects/${projectId}/runs`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ command: "do_delta_scan", modelId: selectedModelId }),
@@ -556,17 +627,17 @@ export function CodaScopeAssistant() {
 
       // ── Epic commands ──
       case "epic-create":
-        if (activeProjectId) {
+        if (projectId) {
           showSlashToast("Creating new epic…");
           try {
-            const res = await fetch(`/api/codascope/projects/${activeProjectId}/epics`, {
+            const res = await fetch(`/api/codascope/projects/${projectId}/epics`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ title: "New Epic" }),
             });
             if (res.ok) {
               const data = await res.json();
-              navigate(`project/${activeProjectId}/epic/${data.epic.id}/define?new=1`);
+              navigate(`project/${projectId}/epic/${data.epic.id}/define?new=1`);
             }
           } catch { /* error handled by server */ }
         }
@@ -585,7 +656,7 @@ export function CodaScopeAssistant() {
 
       // ── Deep Run ──
       case "deep-run":
-        navigate(`project/${activeProjectId}/dashboard`);
+        navigate(`project/${projectId}/dashboard`);
         // Small delay to ensure dashboard mounts before opening modal
         setTimeout(() => openDeepRunModal(), 100);
         showSlashToast("Opening Deep Run…");
@@ -594,7 +665,7 @@ export function CodaScopeAssistant() {
       default:
         break;
     }
-  }, [activeProjectId, selectedModelId, navigate, showSlashToast]);
+  }, [projectId, selectedModelId, navigate, showSlashToast, slashCommandContext, commandBus]);
 
   const handleSlashClose = useCallback(() => {
     setSlashPaletteOpen(false);
@@ -605,10 +676,10 @@ export function CodaScopeAssistant() {
   // Keyboard capture for slash palette navigation
   const handleSlashKeyCapture = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
-      if (!slashPaletteOpen) return false;
+      if (!visibleSlashPaletteOpen) return false;
 
       const totalItems = getVisibleCommandCount(
-        input.startsWith("/") ? input.slice(1) : "",
+        visibleInput.startsWith("/") ? visibleInput.slice(1) : "",
         slashCommandContext,
       );
 
@@ -625,7 +696,9 @@ export function CodaScopeAssistant() {
       if (e.key === "Enter") {
         e.preventDefault();
         // Find the selected item from the filtered list at the active index
-        const q = input.startsWith("/") ? input.slice(1) : "";
+        const q = visibleInput.startsWith("/")
+          ? visibleInput.slice(1)
+          : "";
         const { relevant, other } = getFilteredCommands(q, slashCommandContext);
         const allItems = [...relevant, ...other];
         const selected = allItems[slashActiveIndex];
@@ -641,22 +714,22 @@ export function CodaScopeAssistant() {
       }
       return false;
     },
-    [slashPaletteOpen, input, slashCommandContext, slashActiveIndex, handleSlashSelect, handleSlashClose],
+    [visibleSlashPaletteOpen, visibleInput, slashCommandContext, slashActiveIndex, handleSlashSelect, handleSlashClose],
   );
 
   // Close palette if input becomes empty (user deleted `/`)
   useEffect(() => {
-    if (slashPaletteOpen && !input.startsWith("/")) {
+    if (visibleSlashPaletteOpen && !visibleInput.startsWith("/")) {
       setSlashPaletteOpen(false);
     }
-  }, [input, slashPaletteOpen]);
+  }, [visibleInput, visibleSlashPaletteOpen]);
 
   // Reset active index when query changes
   useEffect(() => {
-    if (slashPaletteOpen) {
+    if (visibleSlashPaletteOpen) {
       setSlashActiveIndex(0);
     }
-  }, [input, slashPaletteOpen]);
+  }, [visibleInput, visibleSlashPaletteOpen]);
 
   // ── First-visit auto-pop guide modal ─────────────────────────────
 
@@ -682,6 +755,7 @@ export function CodaScopeAssistant() {
       docId: string;
       epicId: string;
     }) => {
+      if (assistantScope.kind !== "project") return;
       // Create a selection attachment chip
       const chipId = `sel-${Date.now()}`;
       const preview = payload.text.length > 100
@@ -707,7 +781,7 @@ export function CodaScopeAssistant() {
       ]);
     }) as (payload: unknown) => void);
     return unsub;
-  }, [commandBus]);
+  }, [assistantScope.kind, commandBus]);
 
   // ── Directive generate → prefill and auto-send ─────────────────────
 
@@ -716,17 +790,18 @@ export function CodaScopeAssistant() {
     const unsub = commandBus.on("codascope:assistant-prefill", ((payload: {
       prompt: string;
     }) => {
-      if (payload.prompt) {
+      if (assistantScope.kind === "project" && payload.prompt) {
         handleSendPrompt(payload.prompt);
       }
     }) as (payload: unknown) => void);
     return unsub;
-  }, [commandBus, handleSendPrompt]);
+  }, [assistantScope.kind, commandBus, handleSendPrompt]);
 
   // ── Design doc action tag handlers ────────────────────────────────
 
   // After SSE completes, check for design doc actions in the final message
   useEffect(() => {
+    if (assistantScope.kind !== "project") return;
     if (streaming || messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role !== "assistant" || !lastMsg.metadata?.actions) return;
@@ -748,19 +823,17 @@ export function CodaScopeAssistant() {
         });
       } else if (action.type === "artifact_built" && action.attributes?.epicId && action.attributes?.artifactId) {
         // Auto-navigate to the artifact preview view
-        if (activeProjectId) {
-          navigate(`project/${activeProjectId}/epic/${action.attributes.epicId}/design/artifact:${action.attributes.artifactId}`);
+        if (projectId) {
+          navigate(`project/${projectId}/epic/${action.attributes.epicId}/design/artifact:${action.attributes.artifactId}`);
         }
       }
     }
-  }, [messages, streaming, commandBus, navigate, activeProjectId]);
+  }, [assistantScope.kind, messages, streaming, commandBus, navigate, projectId]);
 
 
   const stopStreaming = useCallback(async () => {
-    if (activeProjectId) {
-      await cancelStream(activeProjectId);
-    }
-  }, [activeProjectId, cancelStream]);
+    await cancelStream();
+  }, [cancelStream]);
 
   // ── Copy message to clipboard ──────────────────────────────────────
 
@@ -807,16 +880,18 @@ export function CodaScopeAssistant() {
     void switchConversation(convId, streaming);
   }, [switchConversation, streaming]);
 
-  // ── Render ────────────────────────────────────────────────────────
+  const handleRenameConversation = useCallback((
+    conversationId: string,
+    title: string,
+  ) => {
+    void updateConversation(conversationId, { title });
+  }, [updateConversation]);
 
-  if (!activeProjectId) {
-    return (
-      <div className="codascope-assistant-empty">
-        <div className="codascope-assistant-empty-icon">🤖</div>
-        <p>Select a project to use the assistant.</p>
-      </div>
-    );
-  }
+  const handleDeleteConversation = useCallback((conversationId: string) => {
+    void deleteConversation(conversationId);
+  }, [deleteConversation]);
+
+  // ── Render ────────────────────────────────────────────────────────
 
   return (
     <div className="codascope-assistant">
@@ -828,13 +903,36 @@ export function CodaScopeAssistant() {
         disabled={streaming}
         onNewConversation={handleNewConversation}
         onSelectConversation={handleSwitchConversation}
+        onRenameConversation={handleRenameConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
+
+      {assistantScope.kind === "workspace" && (
+        <div className="codascope-assistant-scope">
+          <span className="codascope-assistant-scope-icon">
+            <IconChat size={14} />
+          </span>
+          <strong>Workspace Assistant</strong>
+          <span className="codascope-assistant-scope-mode">Read only</span>
+        </div>
+      )}
 
       {/* Context Badge */}
       {contextBadge && (
         <div className="codascope-assistant-context">
           <span className="codascope-assistant-context-badge">{contextBadge}</span>
           <span className="codascope-assistant-context-label">Context</span>
+        </div>
+      )}
+
+      {assistantScope.kind === "workspace" && currentRootNote && (
+        <div className="codascope-assistant-note-context">
+          <span className="codascope-assistant-note-context-title">
+            {currentRootNote.title}
+          </span>
+          <span className="codascope-assistant-note-context-visibility">
+            {currentRootNote.visibility === "private" ? "Private" : "Shared"}
+          </span>
         </div>
       )}
 
@@ -853,12 +951,37 @@ export function CodaScopeAssistant() {
         {messages.length === 0 && !streaming && (
           <div className="codascope-assistant-welcome">
             <div className="codascope-assistant-welcome-icon"><IconSearch size={24} /></div>
-            <h3>CodaScope Assistant</h3>
+            <h3>
+              {assistantScope.kind === "workspace"
+                ? "Workspace Assistant"
+                : "CodaScope Assistant"}
+            </h3>
             <p>
-              I help you understand, document, and analyze your codebase.
+              {assistantScope.kind === "workspace"
+                ? "Ask read-only questions across your active CodaScope projects."
+                : "I help you understand, document, and analyze your codebase."}
             </p>
             <div className="codascope-assistant-welcome-cards">
-              {wikiTopics.length === 0 ? (
+              {assistantScope.kind === "workspace" ? (
+                <>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Summarize the active projects in this workspace and their documentation coverage")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconBook size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Workspace Overview</span>
+                  </button>
+                  <button
+                    className="codascope-assistant-welcome-card"
+                    onClick={() => handleSendPrompt("Compare the architecture documentation available across my active projects")}
+                    type="button"
+                  >
+                    <span className="codascope-assistant-welcome-card-icon"><IconSearch size={18} /></span>
+                    <span className="codascope-assistant-welcome-card-label">Compare Documentation</span>
+                  </button>
+                </>
+              ) : wikiTopics.length === 0 ? (
                 /* New project — no wiki yet */
                 <>
                   <button
@@ -909,13 +1032,19 @@ export function CodaScopeAssistant() {
               )}
             </div>
             <div className="codascope-assistant-welcome-hint">
-              Type <code>/</code> for commands &nbsp;·&nbsp; <code>@</code> to add context &nbsp;·&nbsp; <code>?</code> for the full guide
+              {assistantScope.kind === "workspace" ? (
+                <>Type <code>/</code> for workspace-safe help &nbsp;·&nbsp; <code>?</code> for the full guide</>
+              ) : (
+                <>Type <code>/</code> for commands &nbsp;·&nbsp; <code>@</code> to add context &nbsp;·&nbsp; <code>?</code> for the full guide</>
+              )}
             </div>
           </div>
         )}
 
         {messages.map((msg) => {
-          const actions = (msg.metadata?.actions ?? []) as CodaScopeAction[];
+          const actions = assistantScope.kind === "project"
+            ? (msg.metadata?.actions ?? []) as CodaScopeAction[]
+            : [];
           // Always strip action tags from assistant messages — even if metadata.actions
           // is empty (e.g. older messages or unrecognized action types)
           const displayContent = msg.role === "assistant"
@@ -928,7 +1057,9 @@ export function CodaScopeAssistant() {
                 className={`codascope-assistant-msg codascope-assistant-msg-${msg.role}${msg.status === "error" ? " codascope-assistant-msg-error" : ""}`}
               >
                 <div className="codascope-assistant-msg-avatar">
-                  {msg.role === "user" ? "👤" : "🤖"}
+                  {msg.role === "user"
+                    ? <IconUser size={15} />
+                    : <IconAgent size={15} />}
                 </div>
                 <div className="codascope-assistant-msg-content">
                   {msg.role === "assistant" ? (
@@ -938,7 +1069,7 @@ export function CodaScopeAssistant() {
                           <IconWarning size={12} /> Incomplete response
                         </div>
                       )}
-                      <MarkdownViewer content={convertWikiLinks(displayContent, activeProjectId, currentEpicId)} />
+                      <MarkdownViewer content={convertWikiLinks(displayContent, projectId, currentEpicId)} />
                     </>
                   ) : (
                     <>
@@ -979,10 +1110,12 @@ export function CodaScopeAssistant() {
         {/* Streaming message */}
         {streaming && (
           <div className="codascope-assistant-msg codascope-assistant-msg-assistant">
-            <div className="codascope-assistant-msg-avatar">🤖</div>
+            <div className="codascope-assistant-msg-avatar">
+              <IconAgent size={15} />
+            </div>
             <div className="codascope-assistant-msg-content">
               {streamingContent ? (
-                <MarkdownViewer content={convertWikiLinks(stripActionTagsClient(streamingContent), activeProjectId, currentEpicId)} />
+                <MarkdownViewer content={convertWikiLinks(stripActionTagsClient(streamingContent), projectId, currentEpicId)} />
               ) : (
                 <div className="codascope-assistant-thinking">
                   <span />
@@ -1008,10 +1141,12 @@ export function CodaScopeAssistant() {
       )}
 
       {/* Prompt Chips */}
-      <PromptChips
-        onSend={handleSendPrompt}
-        context={promptChipContext}
-      />
+      {assistantScope.kind === "project" && (
+        <PromptChips
+          onSend={handleSendPrompt}
+          context={promptChipContext}
+        />
+      )}
 
       {/* Input Area */}
       <div className="codascope-assistant-input-area">
@@ -1055,18 +1190,18 @@ export function CodaScopeAssistant() {
           </div>
         </div>
         <div className="codascope-assistant-input-row">
-          {atPickerOpen && activeProjectId && (
+          {visibleAtPickerOpen && projectId && (
             <AtMentionPicker
-              projectId={activeProjectId}
+              projectId={projectId}
               epicId={currentEpicId}
               onSelect={handleAtMentionSelect}
               onClose={handleAtPickerClose}
             />
           )}
-          {slashPaletteOpen && (
+          {visibleSlashPaletteOpen && (
             <SlashCommandPalette
-              isOpen={slashPaletteOpen}
-              query={input.startsWith("/") ? input.slice(1) : ""}
+              isOpen={visibleSlashPaletteOpen}
+              query={visibleInput.startsWith("/") ? visibleInput.slice(1) : ""}
               context={slashCommandContext}
               onSelect={handleSlashSelect}
               onClose={handleSlashClose}
@@ -1075,7 +1210,7 @@ export function CodaScopeAssistant() {
             />
           )}
           <RichChatInput
-            value={input}
+            value={visibleInput}
             onChange={setInput}
             onSend={sendMessage}
             onAtTrigger={handleAtTrigger}
@@ -1083,17 +1218,19 @@ export function CodaScopeAssistant() {
             onKeyDownCapture={handleSlashKeyCapture}
             onImagePaste={handleImageFile}
             onImageDrop={handleImageFile}
-            attachments={attachments}
+            attachments={visibleAttachments}
             onRemoveAttachment={handleRemoveAttachment}
             onClearAttachments={handleClearAttachments}
-            placeholder="Message the agent... (@ to add context, / for commands)"
+            placeholder={assistantScope.kind === "workspace"
+              ? "Message the Workspace Assistant... (/ for help)"
+              : "Message the agent... (@ to add context, / for commands)"}
             disabled={streaming || !selectedModelId}
-            sendDisabled={!input.trim() || streaming || !selectedModelId}
+            sendDisabled={!visibleInput.trim() || streaming || !selectedModelId}
           />
           <button
             className="codascope-assistant-send-btn"
             onClick={sendMessage}
-            disabled={!input.trim() || streaming || !selectedModelId}
+            disabled={!visibleInput.trim() || streaming || !selectedModelId}
             type="button"
             title="Send message"
           >

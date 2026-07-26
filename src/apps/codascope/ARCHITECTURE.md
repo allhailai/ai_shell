@@ -529,6 +529,32 @@ The authenticated route family is:
 | `GET` | `/api/codascope/workspace/conversations/:convId/images/:filename` | Read an owned conversation image |
 | `POST` | `/api/codascope/workspace/assistant/cancel` | Cancel only this actor's workspace run |
 
+The frontend uses the same explicit assistant-scope union as this server
+boundary: `{ kind: "workspace" }` or `{ kind: "project", projectId }`.
+`assistantScope.ts` derives it only from the current CodaScope route. Every
+`/codascope/project/:id/...` route is project scope; all other CodaScope routes
+are workspace scope. Neither `activeProjectId`, a conversation ID, nor a
+sentinel project can select or change assistant scope. Stable state keys are
+`workspace` and `project:<id>`.
+
+`assistantConversationApi.ts` is the single URL and response-normalization
+boundary for list/create/read/update/delete, message streaming, upload/display
+images, and cancellation. Project URLs retain their historical
+`/api/codascope/projects/:id/...` shapes, while workspace URLs use the route
+family above. Conversation and stream layers do not branch on endpoint paths
+themselves. A scope transition synchronously hides the prior scope's
+conversation list, selected conversation, title, messages, and attachments;
+detaches and cancels an active run through that run's original adapter; and
+uses scope epochs to discard stale list, read, stream, and terminal results.
+
+The `conv` URL parameter is accepted only when its ID appears in the current
+scope's freshly loaded list. Invalid and cross-scope values are removed.
+Project restoration remains compatible with
+`codascope:lastConv:<projectId>`, while workspace restoration uses
+`codascope:lastConv:workspace`; otherwise the most recently updated
+conversation in the current scope is selected. Conversation IDs never imply a
+scope.
+
 Workspace message context is bounded and strictly validated. The server writes
 the workspace assistant scope; the client may supply only a current-view
 identity, active explicit project references, and CodaScope-level current-note
@@ -536,6 +562,25 @@ metadata (stable ID, relative path, title, private/shared visibility, and an
 optional hash). Note bodies are not read or persisted by this plane. Raw read
 grants, project scope, actor IDs, owner IDs, and model-authored authorization
 inputs are rejected.
+
+For a root `/codascope/notes/...` editor, `assistantNoteContext.ts` publishes
+only the loaded note's stable ID, `codascope` scope, relative path, title,
+private/shared visibility, and optional content hash. Each editor instance has
+an ownership token, so cleanup from an older route or editor cannot erase a
+newer publication. Load failure, route change, and unmount clear the owning
+publication; title and hash changes update it. The assistant snapshots the
+latest matching route metadata per message. Note bodies are never published,
+copied into assistant state, or sent to the workspace conversation plane.
+
+Workspace UI capability metadata is fail-closed. Only commands explicitly
+declared for workspace and categorized as help or read-only chat helpers are
+shown or dispatched. Project navigation, build/deep-run, epic/design/research,
+source, and other mutation commands are hidden and rejected again at dispatch.
+The project `@` picker is not rendered in workspace scope and its trigger is a
+no-op. Workspace welcome prompts and placeholders omit project-mutation and
+mention affordances, and project-only response actions are discarded. Image
+attachments remain supported. This phase adds no workspace note, project,
+source, build, epic, design, research, or repository mutation capability.
 
 Before every run, `CodaScopeWorkspaceIntentService` re-reads active projects,
 epics, designs, curated pages, and ready research sources and deterministically
