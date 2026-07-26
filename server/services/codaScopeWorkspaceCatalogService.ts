@@ -15,6 +15,7 @@ import {
   type ActiveProjectRecord,
 } from "./codaScopeActiveEntityResolver.js";
 import { CodaScopePathValidationError, assertSafePathSegment } from "./codaScopePathSafety.js";
+import { CodaScopePersistenceCorruptError } from "./codaScopePersistence.js";
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import {
@@ -35,6 +36,18 @@ export interface WorkspaceProjectOverview {
   lastBuildAttemptAt: string | null;
   lastBuildAttemptStatus: "building" | "complete" | "error" | null;
   lastBuildError: string | null;
+}
+
+export interface WorkspaceProjectReferenceSummary {
+  projectId: string;
+  name: string;
+  description: string;
+}
+
+export interface WorkspaceProjectReferenceCatalog {
+  projects: WorkspaceProjectReferenceSummary[];
+  limit: number;
+  truncated: boolean;
 }
 
 export interface WorkspaceStatus {
@@ -156,6 +169,10 @@ export const WORKSPACE_BUILD_HISTORY_DEFAULT_LIMIT = 20;
 export const WORKSPACE_BUILD_HISTORY_MAX_LIMIT = 100;
 export const WORKSPACE_CODE_MAP_DEFAULT_MAX_CHARS = 20_000;
 export const WORKSPACE_CODE_MAP_MAX_CHARS = 50_000;
+export const WORKSPACE_PROJECT_REFERENCE_LIMIT = 100;
+export const WORKSPACE_PROJECT_REFERENCE_ID_MAX_CHARS = 255;
+export const WORKSPACE_PROJECT_REFERENCE_NAME_MAX_CHARS = 300;
+export const WORKSPACE_PROJECT_REFERENCE_DESCRIPTION_MAX_CHARS = 1_000;
 
 interface InternalWikiTopic {
   topicId: string;
@@ -192,6 +209,38 @@ export class CodaScopeWorkspaceCatalogService {
       projectsBuilding: projects.filter((project) => project.currentBuildStatus === "building").length,
       lastWikiBuildAt: latestOf(projects.map((project) => project.lastWikiBuildAt)),
       lastDeepRunAt: latestOf(projects.map((project) => project.lastDeepRunAt)),
+    };
+  }
+
+  /**
+   * Return the narrow, active-authoritative catalog used only by the workspace
+   * project-reference picker. Repository identity and filesystem data never
+   * cross this boundary.
+   */
+  async listActiveProjectReferences(): Promise<WorkspaceProjectReferenceCatalog> {
+    const initial = await this.activeResolver.listActiveProjects();
+    const active: WorkspaceProjectReferenceSummary[] = [];
+    for (const candidate of initial) {
+      // Re-resolve every candidate so an archive that races the initial scan
+      // cannot remain selectable.
+      const project = await this.activeResolver.resolveActiveProject(candidate.projectId);
+      if (!project) continue;
+      this.assertValidProjectReference(project);
+      const sensitivePaths = this.sensitivePaths(project);
+      active.push({
+        projectId: project.projectId,
+        name: scrubNativeLocations(project.name, sensitivePaths),
+        description: scrubNativeLocations(project.description, sensitivePaths),
+      });
+    }
+    active.sort((a, b) => (
+      a.name.localeCompare(b.name)
+      || a.projectId.localeCompare(b.projectId)
+    ));
+    return {
+      projects: active.slice(0, WORKSPACE_PROJECT_REFERENCE_LIMIT),
+      limit: WORKSPACE_PROJECT_REFERENCE_LIMIT,
+      truncated: active.length > WORKSPACE_PROJECT_REFERENCE_LIMIT,
     };
   }
 
@@ -534,6 +583,21 @@ export class CodaScopeWorkspaceCatalogService {
 
   private publicProjectName(project: ActiveProjectRecord): string {
     return scrubNativeLocations(project.name, this.sensitivePaths(project));
+  }
+
+  private assertValidProjectReference(project: ActiveProjectRecord): void {
+    const invalid = project.projectId.length > WORKSPACE_PROJECT_REFERENCE_ID_MAX_CHARS
+      || !project.name.trim()
+      || project.name.length > WORKSPACE_PROJECT_REFERENCE_NAME_MAX_CHARS
+      || project.description.length > WORKSPACE_PROJECT_REFERENCE_DESCRIPTION_MAX_CHARS
+      || /[\u0000-\u001f\u007f]/.test(project.name)
+      || /[\u0000-\u001f\u007f]/.test(project.description);
+    if (invalid) {
+      throw new CodaScopePersistenceCorruptError({
+        storage: "project_catalog",
+        projectId: project.projectId,
+      });
+    }
   }
 }
 

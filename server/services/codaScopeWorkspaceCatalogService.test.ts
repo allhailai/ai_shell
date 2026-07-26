@@ -15,6 +15,7 @@ import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import {
   CodaScopeWorkspaceCatalogService,
+  WORKSPACE_PROJECT_REFERENCE_LIMIT,
   WORKSPACE_PROJECT_FILTER_MAX,
   WORKSPACE_SEARCH_MAX_LIMIT,
   WORKSPACE_SNIPPET_MAX_CHARS,
@@ -156,6 +157,144 @@ describe("CodaScopeWorkspaceCatalogService project overviews", () => {
 
     await expect(fixture.catalog.getProjectOverview("project"))
       .rejects.toMatchObject({ code: "persistence_corrupt", status: 500 });
+  });
+});
+
+describe("CodaScopeWorkspaceCatalogService project reference catalog", () => {
+  it("returns only active bounded display fields in deterministic order", async () => {
+    const fixture = makeCatalog();
+    const repositoryLocation = path.join(
+      fixture.root,
+      "native",
+      "repository-secret",
+    );
+    writeProject(fixture.root, "zeta", {
+      id: "project-zeta",
+      name: "Zeta",
+      description: `Uses ${repositoryLocation}`,
+      repositories: [{
+        id: "secret-repository-id",
+        name: "Secret Repository",
+        path: repositoryLocation,
+      }],
+    });
+    writeProject(fixture.root, "alpha", {
+      id: "project-alpha",
+      name: "Alpha",
+      description: "First active project",
+      repositories: [],
+    });
+    writeProject(fixture.root, "archived", {
+      id: "project-archived",
+      name: "Archived",
+      description: "Must not be selectable",
+      repositories: [],
+      archived: true,
+    });
+
+    const result = await fixture.catalog.listActiveProjectReferences();
+
+    expect(result).toEqual({
+      projects: [
+        {
+          projectId: "project-alpha",
+          name: "Alpha",
+          description: "First active project",
+        },
+        {
+          projectId: "project-zeta",
+          name: "Zeta",
+          description: "Uses [redacted location]",
+        },
+      ],
+      limit: WORKSPACE_PROJECT_REFERENCE_LIMIT,
+      truncated: false,
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("project-archived");
+    expect(serialized).not.toContain(repositoryLocation);
+    expect(serialized).not.toContain("Secret Repository");
+    expect(Object.keys(result.projects[0])).toEqual([
+      "projectId",
+      "name",
+      "description",
+    ]);
+  });
+
+  it("fails closed for duplicate, malformed, and oversized project records", async () => {
+    const duplicate = makeCatalog();
+    writeProject(duplicate.root, "one", {
+      id: "ambiguous",
+      name: "One",
+      description: "",
+      repositories: [],
+    });
+    writeProject(duplicate.root, "two", {
+      id: "ambiguous",
+      name: "Two",
+      description: "",
+      repositories: [],
+    });
+    await expect(duplicate.catalog.listActiveProjectReferences())
+      .rejects.toMatchObject({ code: "persistence_corrupt" });
+
+    const malformed = makeCatalog();
+    const malformedDir = path.join(malformed.root, "malformed");
+    mkdirSync(malformedDir, { recursive: true });
+    writeFileSync(path.join(malformedDir, "project.json"), "{bad json", "utf-8");
+    await expect(malformed.catalog.listActiveProjectReferences())
+      .rejects.toMatchObject({ code: "persistence_corrupt" });
+
+    const oversized = makeCatalog();
+    writeProject(oversized.root, "oversized", {
+      id: "oversized",
+      name: "x".repeat(301),
+      description: "",
+      repositories: [],
+    });
+    await expect(oversized.catalog.listActiveProjectReferences())
+      .rejects.toMatchObject({ code: "persistence_corrupt" });
+  });
+
+  it("applies an explicit deterministic truncation contract", async () => {
+    const projects = Array.from(
+      { length: WORKSPACE_PROJECT_REFERENCE_LIMIT + 2 },
+      (_, index) => ({
+        projectId: `project-${String(index).padStart(3, "0")}`,
+        name: `Project ${String(
+          WORKSPACE_PROJECT_REFERENCE_LIMIT + 2 - index,
+        ).padStart(3, "0")}`,
+        description: "",
+        repositories: [],
+        createdAt: CREATED_AT,
+        updatedAt: CREATED_AT,
+        projectDir: `/tmp/project-${index}`,
+      }),
+    );
+    const resolver = {
+      getRoot: () => "/tmp/catalog-root",
+      listActiveProjects: vi.fn(async () => projects),
+      resolveActiveProject: vi.fn(async (projectId: string) => (
+        projects.find((project) => project.projectId === projectId) ?? null
+      )),
+    } as unknown as CodaScopeActiveEntityResolver;
+    const catalog = new CodaScopeWorkspaceCatalogService(
+      resolver,
+      {} as CodaScopeWikiService,
+      {} as CodaScopeWikiStateService,
+      {} as CodaScopeBuildStateService,
+      {} as CodaScopeCodeMapService,
+    );
+
+    const result = await catalog.listActiveProjectReferences();
+
+    expect(result.projects).toHaveLength(WORKSPACE_PROJECT_REFERENCE_LIMIT);
+    expect(result.truncated).toBe(true);
+    expect(result.limit).toBe(WORKSPACE_PROJECT_REFERENCE_LIMIT);
+    expect(result.projects).toEqual([...result.projects].sort((a, b) => (
+      a.name.localeCompare(b.name)
+      || a.projectId.localeCompare(b.projectId)
+    )));
   });
 });
 

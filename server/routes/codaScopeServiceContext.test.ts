@@ -136,6 +136,8 @@ describe("CodaScope root-bound service lifecycle", () => {
     await servicesA.wikiSvc.updateTopicContent(projectA.id, "root-a", "# Root A\n\nOld root only.");
     expect((await servicesA.workspaceCatalogSvc.listActiveProjects()).map((project) => project.projectId))
       .toEqual([projectA.id]);
+    expect((await servicesA.workspaceCatalogSvc.listActiveProjectReferences())
+      .projects.map((project) => project.projectId)).toEqual([projectA.id]);
 
     const servicesB = await changeProjectsRoot(secrets.service, rootB, httpError, "/opt/aishell-install");
     expect(close).toHaveBeenCalledOnce();
@@ -186,6 +188,8 @@ describe("CodaScope root-bound service lifecycle", () => {
     await servicesB.wikiSvc.updateTopicContent(projectB.id, "root-b", "# Root B Only");
     expect((await servicesB.workspaceCatalogSvc.listActiveProjects()).map((project) => project.projectId))
       .toEqual([projectB.id]);
+    expect((await servicesB.workspaceCatalogSvc.listActiveProjectReferences())
+      .projects.map((project) => project.projectId)).toEqual([projectB.id]);
     const rootBTools = (servicesB.agentSvc as any).getToolsForPurpose({
       scope: { kind: "project", projectId: projectB.id },
       purpose: "assistant",
@@ -201,6 +205,8 @@ describe("CodaScope root-bound service lifecycle", () => {
     expect(servicesC.workspaceConversationSvc)
       .not.toBe(servicesB.workspaceConversationSvc);
     expect(await servicesC.workspaceCatalogSvc.listActiveProjects()).toEqual([]);
+    expect(await servicesC.workspaceCatalogSvc.listActiveProjectReferences())
+      .toMatchObject({ projects: [], truncated: false });
     expect(vi.getTimerCount()).toBe(1);
   });
 

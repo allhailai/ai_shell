@@ -27,6 +27,17 @@ const MESSAGE_MAX = 200_000;
 export function registerWorkspaceChatRoutes(ctx: CodaScopeRouteContext): void {
   const { app, ensureServices, httpError, param, principal, upload, wrap } = ctx;
 
+  app.get("/api/codascope/workspace/projects", wrap(async (req, res) => {
+    // The catalog is workspace-global but remains authenticated.
+    principal(req);
+    const { workspaceCatalogSvc } = await ensureServices();
+    const catalog = await workspaceCatalogSvc.listActiveProjectReferences();
+    res.json({
+      scope: { kind: "workspace" },
+      ...catalog,
+    });
+  }));
+
   app.get("/api/codascope/workspace/conversations", wrap(async (req, res) => {
     const { workspaceConversationSvc } = await ensureServices();
     const conversations = await workspaceConversationSvc.listConversations(

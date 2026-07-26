@@ -198,6 +198,17 @@ export function useConversationManager(
     }
   }, [api, applyConversation, scopeKey]);
 
+  // Register the mount guard before the scope-loading effect. React Strict
+  // Mode replays effect setup/cleanup in declaration order; keeping this
+  // lifecycle effect first restores the guard before the replayed load begins.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      scopeVersionRef.current += 1;
+    };
+  }, []);
+
   useEffect(() => {
     const requestVersion = ++scopeVersionRef.current;
     const requestScopeKey = scopeKey;
@@ -275,14 +286,6 @@ export function useConversationManager(
     state.activeConversationId,
     state.scopeKey,
   ]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      scopeVersionRef.current += 1;
-    };
-  }, []);
 
   const setActiveConversationId = useCallback((id: string | null) => {
     setState((current) => current.scopeKey === scopeKey

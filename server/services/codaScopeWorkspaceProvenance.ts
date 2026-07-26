@@ -4,8 +4,11 @@
    replaced before every agent send.
    ──────────────────────────────────────────────────────────────────── */
 
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
+
 const MAX_RETRIEVED_SOURCES = 50;
 const MAX_SOURCE_TEXT = 500;
+const MAX_SOURCE_ID = 255;
 
 export type WorkspaceRetrievedSourceReference =
   | {
@@ -95,9 +98,9 @@ function validateReference(value: unknown): WorkspaceRetrievedSourceReference {
     return normalizeReference({
       kind: "project_wiki",
       retrieval: value.retrieval,
-      projectId: boundedString(value.projectId),
+      projectId: boundedIdentifier(value.projectId),
       projectName: boundedString(value.projectName),
-      topicId: boundedString(value.topicId),
+      topicId: boundedIdentifier(value.topicId),
       topicTitle: boundedString(value.topicTitle),
       topicUpdatedAt: timestamp(value.topicUpdatedAt),
       lastWikiBuildAt: nullableTimestamp(value.lastWikiBuildAt),
@@ -119,9 +122,9 @@ function validateReference(value: unknown): WorkspaceRetrievedSourceReference {
     return normalizeReference({
       kind: "code_map",
       retrieval: "direct",
-      projectId: boundedString(value.projectId),
+      projectId: boundedIdentifier(value.projectId),
       projectName: boundedString(value.projectName),
-      codeMapId: boundedString(value.codeMapId),
+      codeMapId: boundedIdentifier(value.codeMapId),
       generatedAt: nullableTimestamp(value.generatedAt),
       lastWikiBuildAt: nullableTimestamp(value.lastWikiBuildAt),
     });
@@ -176,10 +179,22 @@ function clip(value: string): string {
 }
 
 function boundedString(value: unknown): string {
-  if (typeof value !== "string" || !value || value.length > MAX_SOURCE_TEXT) {
+  if (typeof value !== "string"
+    || !value
+    || value.length > MAX_SOURCE_TEXT
+    || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new Error("Invalid workspace source text");
   }
   return value;
+}
+
+function boundedIdentifier(value: unknown): string {
+  const identifier = boundedString(value);
+  if (identifier.length > MAX_SOURCE_ID) {
+    throw new Error("Invalid workspace source identifier");
+  }
+  assertSafePathSegment(identifier, "workspace source identifier");
+  return identifier;
 }
 
 function timestamp(value: unknown): string {

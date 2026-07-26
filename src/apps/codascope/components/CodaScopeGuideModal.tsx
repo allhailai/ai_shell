@@ -14,7 +14,7 @@ import {
   IconCodeMap,
   IconBook,
   IconMap,
-
+  IconFolder,
   IconPlan,
   IconArrowRight,
 } from "./CodaScopeIcons";
@@ -30,6 +30,14 @@ interface CodaScopeGuideModalProps {
 }
 
 type GuideTab = "overview" | "chat-agent" | "projects" | "epics" | "shortcuts";
+
+export const WORKSPACE_ASSISTANT_GUIDE_COPY = {
+  explore: "Ask read-only questions across active project documentation",
+  references:
+    "Type @ to select up to 25 active projects and narrow project discovery",
+  safety:
+    "Project knowledge stays read-only; CodaScope Notes change only after an explicit directive",
+} as const;
 
 const TABS: { id: GuideTab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -202,8 +210,14 @@ function TabChatAgent({ workspaceMode }: { workspaceMode: boolean }) {
           <IntentCard
             icon={<IconSearch size={18} />}
             title="Explore the Workspace"
-            description="Ask read-only questions across active project documentation"
+            description={WORKSPACE_ASSISTANT_GUIDE_COPY.explore}
             example="Compare the architecture documented across my active projects"
+          />
+          <IntentCard
+            icon={<IconFolder size={18} />}
+            title="Reference Active Projects"
+            description={WORKSPACE_ASSISTANT_GUIDE_COPY.references}
+            example="Type @, choose projects, then ask a focused comparison question"
           />
           <IntentCard
             icon={<IconBook size={18} />}
@@ -214,7 +228,7 @@ function TabChatAgent({ workspaceMode }: { workspaceMode: boolean }) {
           <IntentCard
             icon={<IconPlan size={18} />}
             title="Workspace Safety"
-            description="Project knowledge stays read-only; CodaScope Notes change only after an explicit directive"
+            description={WORKSPACE_ASSISTANT_GUIDE_COPY.safety}
             slashCommands={["/help", "/commands", "/shortcuts"]}
           />
         </div>
@@ -403,6 +417,20 @@ function TabEpics() {
 function TabShortcuts({ workspaceMode }: { workspaceMode: boolean }) {
   return (
     <div className="codascope-guide-tab-content">
+      {workspaceMode && <section className="codascope-guide-section">
+        <h4>@ References — Active Projects</h4>
+        <p className="codascope-guide-desc">
+          Type <code>@</code> in the chat input to select active projects.
+          References narrow read-only project discovery and do not authorize
+          source access or project changes.
+        </p>
+        <div className="codascope-guide-shortcuts">
+          <div className="codascope-guide-shortcut">
+            <kbd>@project/name</kbd>
+            <span>Reference an active project</span>
+          </div>
+        </div>
+      </section>}
       {!workspaceMode && <section className="codascope-guide-section">
         <h4>@ Mentions — Add Context</h4>
         <p className="codascope-guide-desc">
@@ -423,7 +451,7 @@ function TabShortcuts({ workspaceMode }: { workspaceMode: boolean }) {
           <div className="codascope-guide-shortcut"><kbd>Enter</kbd><span>Send message</span></div>
           <div className="codascope-guide-shortcut"><kbd>Shift + Enter</kbd><span>New line</span></div>
           <div className="codascope-guide-shortcut"><kbd>Escape</kbd><span>Clear attachments / close picker</span></div>
-          <div className="codascope-guide-shortcut"><kbd>↑ ↓</kbd><span>{workspaceMode ? "Navigate the / palette" : "Navigate @ picker or / palette"}</span></div>
+          <div className="codascope-guide-shortcut"><kbd>↑ ↓</kbd><span>Navigate @ picker or / palette</span></div>
         </div>
       </section>
 

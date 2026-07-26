@@ -24,6 +24,13 @@ import { WorkspaceActionCardList } from "./components/WorkspaceActionCardList";
 import { PromptChips, type PromptChipContext } from "./components/PromptChips";
 import { RichChatInput, type ChatAttachment } from "../../shared/rich-chat-input/RichChatInput";
 import { AtMentionPicker, type AtMentionItem } from "./components/AtMentionPicker";
+import {
+  appendWorkspaceProjectReference,
+  removeWorkspaceProjectReference,
+  WorkspaceProjectReferencePicker,
+  WORKSPACE_PROJECT_REFERENCE_MAX,
+} from "./components/WorkspaceProjectReferencePicker";
+import { WorkspaceSourceReferences } from "./components/WorkspaceSourceReferences";
 import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
 import type { SlashCommand, CommandContext } from "./commandRegistry";
 import { canDispatchCommand, getFilteredCommands } from "./commandRegistry";
@@ -51,6 +58,7 @@ import {
   navigateSingleLiveCreatedNote,
   selectSingleCreatedNoteStableId,
 } from "./workspaceCreatedNote";
+import type { WorkspaceProjectReference } from "./workspaceProjectCatalogApi";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -149,6 +157,10 @@ export function CodaScopeAssistant() {
   // Attachment state for RichChatInput
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const attachmentsScopeKeyRef = useRef(scopeKey);
+  const [workspaceProjectReferences, setWorkspaceProjectReferences] = useState<
+    WorkspaceProjectReference[]
+  >([]);
+  const workspaceReferencesScopeKeyRef = useRef(scopeKey);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   // @-mention picker state
@@ -177,9 +189,28 @@ export function CodaScopeAssistant() {
   const claimedNavigationTurnsRef = useRef(new Set<number>());
   const workspaceNoteApi = useMemo(() => createWorkspaceNoteApi(), []);
   const visibleInput = inputScopeKeyRef.current === scopeKey ? input : "";
-  const visibleAttachments = attachmentsScopeKeyRef.current === scopeKey
+  const visibleBaseAttachments = attachmentsScopeKeyRef.current === scopeKey
     ? attachments
     : [];
+  const visibleWorkspaceProjectReferences =
+    workspaceReferencesScopeKeyRef.current === scopeKey
+      && assistantScope.kind === "workspace"
+      ? workspaceProjectReferences
+      : [];
+  const workspaceProjectReferenceChips = visibleWorkspaceProjectReferences.map(
+    (project): ChatAttachment => ({
+      id: `workspace-project-${project.projectId}`,
+      type: "reference",
+      label: project.name,
+      metadata: {
+        category: "workspace-project",
+        projectId: project.projectId,
+      },
+    }),
+  );
+  const visibleAttachments = assistantScope.kind === "workspace"
+    ? [...visibleBaseAttachments, ...workspaceProjectReferenceChips]
+    : visibleBaseAttachments;
   const visibleAtPickerOpen = atPickerScopeKeyRef.current === scopeKey
     && atPickerOpen;
   const visibleSlashPaletteOpen =
@@ -191,10 +222,12 @@ export function CodaScopeAssistant() {
   useEffect(() => {
     inputScopeKeyRef.current = scopeKey;
     attachmentsScopeKeyRef.current = scopeKey;
+    workspaceReferencesScopeKeyRef.current = scopeKey;
     atPickerScopeKeyRef.current = scopeKey;
     slashPaletteScopeKeyRef.current = scopeKey;
     setInput("");
     setAttachments([]);
+    setWorkspaceProjectReferences([]);
     setAtPickerOpen(false);
     setSlashPaletteOpen(false);
   }, [scopeKey]);
@@ -207,9 +240,15 @@ export function CodaScopeAssistant() {
   }, [messages.length, streamingContent]);
 
   // Build context from current view
-  const getContext = useCallback(() => {
+  const getContext = useCallback((
+    explicitlyReferencedProjectIds: readonly string[] = [],
+  ) => {
     if (assistantScope.kind === "workspace") {
-      return buildWorkspaceMessageContext(segments, currentRootNote);
+      return buildWorkspaceMessageContext(
+        segments,
+        currentRootNote,
+        explicitlyReferencedProjectIds,
+      );
     }
     // Resolve the topic title from the store for enriched context
     const topicId = segments[2] === "wiki" ? (segments[3] ?? null) : null;
@@ -279,6 +318,9 @@ export function CodaScopeAssistant() {
 
     // Build image URLs from attachments for display in the chat bubble
     const currentAttachments = promptText ? [] : [...visibleAttachments];
+    const currentWorkspaceProjectReferences = promptText
+      ? []
+      : [...visibleWorkspaceProjectReferences];
     const imageUrls = currentAttachments
       .filter((a) => a.type === "image" && a.metadata?.path)
       .map((a) => ({
@@ -307,6 +349,7 @@ export function CodaScopeAssistant() {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setAttachments([]);
+    setWorkspaceProjectReferences([]);
 
     // Build attachments payload
     const imageAttachments = currentAttachments
@@ -346,7 +389,9 @@ export function CodaScopeAssistant() {
       conversationId: convId,
       message: text,
       modelId: selectedModelId,
-      context: getContext() as Record<string, unknown> | undefined,
+      context: getContext(
+        currentWorkspaceProjectReferences.map((project) => project.projectId),
+      ) as Record<string, unknown> | undefined,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       references: referenceAttachments.length > 0 ? referenceAttachments : undefined,
       selectionContext,
@@ -394,7 +439,7 @@ export function CodaScopeAssistant() {
 
     // Refresh conversation list to get updated titles/summaries
     await loadConversationList();
-  }, [visibleInput, streaming, selectedModelId, activeConversationId, visibleAttachments, getContext, messages, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages, assistantScope.kind, conversationApi.endpoints, createNewConversation, navigate, scopeKey, workspaceNoteApi]);
+  }, [visibleInput, streaming, selectedModelId, activeConversationId, visibleAttachments, visibleWorkspaceProjectReferences, getContext, messages, loadConversationList, streamMessage, setActiveConversationId, setActiveTitle, setMessages, assistantScope.kind, conversationApi.endpoints, createNewConversation, navigate, scopeKey, workspaceNoteApi]);
 
   // Wrapper for send button (uses input field text)
   const sendMessage = useCallback(() => {
@@ -484,16 +529,28 @@ export function CodaScopeAssistant() {
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
+    if (id.startsWith("workspace-project-")) {
+      setWorkspaceProjectReferences((prev) => {
+        const project = prev.find(
+          (candidate) => `workspace-project-${candidate.projectId}` === id,
+        );
+        return project
+          ? removeWorkspaceProjectReference(prev, project.projectId)
+          : prev;
+      });
+    }
   }, []);
 
   const handleClearAttachments = useCallback(() => {
     setAttachments([]);
+    setWorkspaceProjectReferences([]);
   }, []);
 
   // ── @-mention picker handlers ────────────────────────────────────
 
   const handleAtTrigger = useCallback((_position: { top: number; left: number }) => {
-    if (canUseProjectMentions(assistantScope)) {
+    if (assistantScope.kind === "workspace"
+      || canUseProjectMentions(assistantScope)) {
       atPickerScopeKeyRef.current = scopeKey;
       setAtPickerOpen(true);
     }
@@ -530,6 +587,28 @@ export function CodaScopeAssistant() {
 
     setAtPickerOpen(false);
   }, []);
+
+  const handleWorkspaceProjectSelect = useCallback((
+    project: WorkspaceProjectReference,
+  ) => {
+    if (visibleWorkspaceProjectReferences.some(
+      (candidate) => candidate.projectId === project.projectId,
+    ) || visibleWorkspaceProjectReferences.length
+      >= WORKSPACE_PROJECT_REFERENCE_MAX) {
+      return;
+    }
+    workspaceReferencesScopeKeyRef.current = scopeKey;
+    setWorkspaceProjectReferences((current) => (
+      appendWorkspaceProjectReference(current, project)
+    ));
+    setInput((current) => {
+      const referenceText = `@project/${project.name}`;
+      return current.endsWith("@")
+        ? `${current.slice(0, -1)}${referenceText} `
+        : `${current}${referenceText} `;
+    });
+    setAtPickerOpen(false);
+  }, [scopeKey, visibleWorkspaceProjectReferences]);
 
   const handleAtPickerClose = useCallback(() => {
     setAtPickerOpen(false);
@@ -1003,7 +1082,7 @@ export function CodaScopeAssistant() {
             </h3>
             <p>
               {assistantScope.kind === "workspace"
-                ? "Project knowledge stays read-only. CodaScope Notes can change only when you explicitly ask."
+                ? "Reference active projects for focused read-only knowledge. CodaScope Notes can change only when you explicitly ask."
                 : "I help you understand, document, and analyze your codebase."}
             </p>
             <div className="codascope-assistant-welcome-cards">
@@ -1078,7 +1157,7 @@ export function CodaScopeAssistant() {
             </div>
             <div className="codascope-assistant-welcome-hint">
               {assistantScope.kind === "workspace" ? (
-                <>Type <code>/</code> for workspace-safe help &nbsp;·&nbsp; <code>?</code> for the full guide</>
+                <>Type <code>@</code> to reference active projects &nbsp;·&nbsp; <code>/</code> for workspace-safe help &nbsp;·&nbsp; <code>?</code> for the full guide</>
               ) : (
                 <>Type <code>/</code> for commands &nbsp;·&nbsp; <code>@</code> to add context &nbsp;·&nbsp; <code>?</code> for the full guide</>
               )}
@@ -1145,6 +1224,10 @@ export function CodaScopeAssistant() {
                   </button>
                 </div>
               </div>
+              <WorkspaceSourceReferences
+                scope={assistantScope}
+                message={msg}
+              />
               {actions.length > 0 && (
                 assistantScope.kind === "project"
                   ? <ActionCardList actions={actions as CodaScopeAction[]} />
@@ -1237,13 +1320,24 @@ export function CodaScopeAssistant() {
           </div>
         </div>
         <div className="codascope-assistant-input-row">
-          {visibleAtPickerOpen && projectId && (
-            <AtMentionPicker
-              projectId={projectId}
-              epicId={currentEpicId}
-              onSelect={handleAtMentionSelect}
-              onClose={handleAtPickerClose}
-            />
+          {visibleAtPickerOpen && (
+            assistantScope.kind === "workspace" ? (
+              <WorkspaceProjectReferencePicker
+                scopeKey={scopeKey}
+                selectedProjectIds={visibleWorkspaceProjectReferences.map(
+                  (project) => project.projectId,
+                )}
+                onSelect={handleWorkspaceProjectSelect}
+                onClose={handleAtPickerClose}
+              />
+            ) : projectId ? (
+              <AtMentionPicker
+                projectId={projectId}
+                epicId={currentEpicId}
+                onSelect={handleAtMentionSelect}
+                onClose={handleAtPickerClose}
+              />
+            ) : null
           )}
           {visibleSlashPaletteOpen && (
             <SlashCommandPalette
@@ -1269,7 +1363,7 @@ export function CodaScopeAssistant() {
             onRemoveAttachment={handleRemoveAttachment}
             onClearAttachments={handleClearAttachments}
             placeholder={assistantScope.kind === "workspace"
-              ? "Message the Workspace Assistant... (/ for help)"
+              ? "Message the Workspace Assistant... (@ active projects, / help)"
               : "Message the agent... (@ to add context, / for commands)"}
             disabled={streaming || !selectedModelId}
             sendDisabled={!visibleInput.trim() || streaming || !selectedModelId}

@@ -130,6 +130,9 @@ export interface AssistantChatMessage {
   content: string;
   status?: MessageStatus;
   createdAt?: string;
+  context?: MessageContext | WorkspaceMessageContext | null;
+  /** True only when restored from a strictly validated server record. */
+  authoritativePersisted?: boolean;
   metadata?: Record<string, unknown>;
   images?: Array<{ url: string; filename: string }>;
 }

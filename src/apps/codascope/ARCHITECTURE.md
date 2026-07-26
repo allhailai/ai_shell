@@ -39,6 +39,7 @@ src/apps/codascope/
 ├── useCodaScopeStore.ts        # Zustand store — projects, topics, agent state (95 lines)
 ├── contextAssembler.ts         # Builds lightweight context for the assistant (124 lines)
 ├── codaScopeSseClient.ts       # Shared SSE streaming utilities (173 lines)
+├── workspaceProjectCatalogApi.ts # Strict active-project picker adapter
 ├── commandRegistry.ts          # Slash command palette registry (413 lines)
 ├── CodaScopeContent.tsx        # Root content router (view switching) (208 lines)
 ├── CodaScopeNav.tsx            # Left nav — project picker + view navigation (185 lines)
@@ -48,6 +49,8 @@ src/apps/codascope/
 │   ├── ActionCard.tsx          # Pending-action and completed-operation cards (552 lines)
 │   ├── AnnotationThread.tsx    # Threaded annotation comments on design docs (212 lines)
 │   ├── AtMentionPicker.tsx     # @-mention autocomplete for chat input (393 lines)
+│   ├── WorkspaceProjectReferencePicker.tsx # Workspace-only active-project picker
+│   ├── WorkspaceSourceReferences.tsx # Persisted retrieval provenance/freshness
 │   ├── BlockedDownloadItem.tsx # Blocked download resolution UI (199 lines)
 │   ├── CodaScopeGuideModal.tsx # Tabbed help/guide modal (624 lines)
 │   ├── CodaScopeRepoRemapModal.tsx # Repository path remapping modal (210 lines)
@@ -519,6 +522,7 @@ The authenticated route family is:
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| `GET` | `/api/codascope/workspace/projects` | List the bounded active-project reference catalog |
 | `GET` | `/api/codascope/workspace/conversations` | List the actor's workspace conversations |
 | `POST` | `/api/codascope/workspace/conversations` | Create a workspace conversation |
 | `GET` | `/api/codascope/workspace/conversations/:convId` | Read an owned workspace conversation |
@@ -568,6 +572,38 @@ optional hash). Note bodies are not read or persisted by this plane. Raw read
 grants, project scope, actor IDs, owner IDs, and model-authored authorization
 inputs are rejected.
 
+The workspace reference catalog is a dedicated read-only boundary backed by
+the root-bound `CodaScopeActiveEntityResolver`, not the generic project
+management list. It strictly validates the complete authoritative catalog,
+re-resolves every candidate as active, rejects duplicate/corrupt identities,
+sorts by public name and ID, and returns at most 100 records with an explicit
+limit/truncation contract. Each record contains only project ID, scrubbed
+public name, and scrubbed optional description. Repository IDs, names, paths,
+native locations, archived projects, and archive-inclusion switches are not
+part of the endpoint. The frontend adapter rejects the entire envelope for a
+wrong scope, duplicate ID, malformed or oversized value, unexpected field, or
+authority-bearing repository/path data.
+
+Workspace project references live in a separate searchable picker rather than
+weakening the project `AtMentionPicker`. Typing `@` in workspace scope opens
+only the active-project catalog; wiki, source, code, epic, design, definition,
+and note categories are never offered there. Keyboard Escape/arrows/Enter,
+focus, empty/loading/error/retry states, a 25-project cap, duplicate
+suppression, removable chips, and request/scope epochs are enforced in the
+workspace picker. Scope transitions clear the picker, catalog response,
+visible reference text, and chips. Project scope retains its historical
+picker and project-style reference payload unchanged.
+
+For a workspace send,
+`explicitlyReferencedProjectIds` is derived only from the current validated
+workspace chips, deduplicated and sorted, while project-style `references`
+and selection payloads remain absent. Removing a chip therefore removes its
+authority from the next message even if visible prose remains. The route
+revalidates every ID as active before persisting the user message, and the
+intent service revalidates again immediately before execution. References
+narrow project discovery only; deeper epic, design, knowledge, research, and
+note reads still require exact current-turn intent grants.
+
 For a root `/codascope/notes/...` editor, `assistantNoteContext.ts` publishes
 only the loaded note's stable ID, `codascope` scope, relative path, title,
 private/shared visibility, and optional content hash. Each editor instance has
@@ -581,11 +617,13 @@ Workspace UI capability metadata is fail-closed. Only commands explicitly
 declared for workspace and categorized as help or read-only chat helpers are
 shown or dispatched. Project navigation, build/deep-run, epic/design/research,
 source, and other mutation commands are hidden and rejected again at dispatch.
-The project `@` picker is not rendered in workspace scope and its trigger is a
-no-op. Workspace welcome prompts and placeholders omit project-mutation and
-mention affordances, and project-only response actions are discarded. Image
-attachments remain supported. Workspace capability copy distinguishes
-read-only project/workspace knowledge from the narrow CodaScope Notes mutation
+The category-rich project `@` picker is not rendered in workspace scope; the
+separate active-project reference picker is the only workspace `@` surface.
+Workspace welcome prompts, placeholders, and guide copy advertise these
+read-only project references without implying source access or project write
+authority, and project-only response actions are discarded. Image attachments
+remain supported. Workspace capability copy distinguishes read-only
+project/workspace knowledge from the narrow CodaScope Notes mutation
 capability, which still requires an explicit user directive. Project, source,
 build, epic, design, research, and repository mutations remain unavailable in
 workspace scope.
@@ -603,7 +641,7 @@ negation forms are evaluated around capability, project, and epic references;
 negated or contradictory signals never widen a grant, while an independently
 affirmed narrower resource can still be isolated.
 
-Phase 5 adds a second one-turn grant dedicated to CodaScope notes. It is
+A second one-turn grant is dedicated to CodaScope notes. It is
 derived from the authenticated current message plus validated metadata-only
 current-note context, distinguishes create, content edit, display-title
 change, visibility change, archive, and authorized read, and binds
@@ -696,6 +734,25 @@ Repository identities, paths, source filenames, and native locations are
 never recorded. The holder is drained on success and cleared on cancellation,
 error, agent replacement, and root cutover.
 
+`assistantConversationApi.ts` strictly restores those persisted references
+only after the complete workspace conversation record validates. Duplicate
+source identities, unknown fields, unsafe IDs, oversized labels, or malformed
+timestamps reject the authoritative record; valid sources are sorted by their
+canonical identity. `WorkspaceSourceReferences` renders only complete
+authoritative persisted workspace assistant messages. It never parses
+assistant prose or terminal text and never appears for user/project messages,
+unverified local finalization errors, or source-free records. Wiki rows show
+project/topic identity, topic update time, and the last successful wiki build
+when present; code-map rows show project/map identity, generation time when
+present, and the last successful wiki build when present. The display is
+bounded to 12 visible rows with an overflow count and semantic `<time>`
+elements. Open-source actions encode validated route segments individually:
+wiki topics use the canonical project wiki route and code maps use the existing
+project dashboard, which is the safest supported view exposing their status.
+Following either route intentionally changes the right-panel assistant to
+project scope, where existing `conv` scope rejection prevents workspace
+conversation reuse.
+
 Successful workspace note tools also collect typed server-confirmed mutation
 records outside model text. Receipt capacity is reserved before mutation, so a
 successful authoritative create/readback always emits exactly one
@@ -718,13 +775,16 @@ resolution repeat conversation ownership checks and cannot cross into project
 image routes.
 
 Workspace conversation, image, intent, catalog, resolver, workspace-note, and
-agent state are all members of the root-bound service graph. Root replacement first cancels
-workspace runs and closes pooled agents, then disposes the old conversation
-run state; the replacement graph constructs fresh services bound only to the
-new root. `_workspace` is outside every project directory and is therefore
-excluded from the allowlisted portable project export/import format.
+agent state are all members of the root-bound service graph. Root replacement
+first cancels workspace runs and closes pooled agents, then disposes the old
+conversation run state; the replacement graph constructs fresh services bound
+only to the new root. Picker requests resolve through that current graph and
+the client discards stale scope/request responses. `_workspace` is outside
+every project directory and is therefore excluded from the allowlisted
+portable project export/import format.
 
-The Phase 6 backend surface is path-free at request time and actor-custodied:
+The workspace note-card backend surface is path-free at request time and
+actor-custodied:
 `GET /api/codascope/workspace/notes/:stableId`,
 `PATCH /api/codascope/workspace/notes/:stableId/title`, and
 `PATCH /api/codascope/workspace/notes/:stableId/visibility`. The authenticated
@@ -732,8 +792,9 @@ principal is the actor; request bodies cannot select scope, project, epic,
 path, owner, or actor. Unknown, archived, corrupt, duplicated, and
 private-other-actor identities share sanitized absence behavior. Mutations
 require `expectedHash`, return the canonical current DTO, and use the same
-workspace note service as assistant tools. No React consumer may derive paths
-or bypass this boundary.
+workspace note service as assistant tools. React consumers resolve stable IDs
+only through these routes and never derive native paths or bypass this
+boundary.
 
 `workspaceNoteApi.ts` is the frontend boundary for these routes. It validates
 the exact fixed-scope DTO and requested stable identity on every successful
@@ -741,7 +802,7 @@ response, treats sanitized `404` absence separately, parses only the canonical
 hash-bearing `409`, and converts all other or malformed responses to path-free
 user-facing failures.
 
-Phase 6 validates workspace mutation actions at both transport and persistence
+Workspace mutation actions are validated at both transport and persistence
 boundaries with `workspaceMutationActionValidation.ts`, but terminal actions
 are provisional only. Model-authored XML cannot enter either path, and no
 terminal-only action is published as a live action or used for navigation.

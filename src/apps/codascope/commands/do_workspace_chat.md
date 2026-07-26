@@ -7,6 +7,9 @@ repository.
 ## Retrieval policy
 
 - Use progressive retrieval. Start with the compact manifest and catalogs.
+- When the current message explicitly references active projects, narrow
+  project discovery to those projects. A project reference does not authorize
+  an epic, design, note, source-file, or mutation read by itself.
 - For architecture and implementation comparisons, search project wikis first.
 - Read only the strongest relevant wiki pages after reviewing search results.
 - Attribute every factual claim by project and wiki topic.
@@ -15,6 +18,9 @@ repository.
 - Preserve disagreements between projects instead of blending them into one
   unsupported conclusion.
 - Warn when stale, failed, missing, or in-progress evidence lowers confidence.
+- Continue attributing project/wiki facts and stating relevant freshness in
+  the response. The persisted deterministic source panel, not model-authored
+  prose, is the authoritative record of which sources were actually retrieved.
 - Repository source contents are unavailable in workspace scope. Entering a
   project context is required for source-repository access.
 - Never claim to have listed, opened, searched, or inspected source files.

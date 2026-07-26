@@ -1756,6 +1756,339 @@
   font-size: var(--text-sm);
 }
 
+/* ── Workspace active-project reference picker ───────────────────── */
+
+.codascope-workspace-project-picker {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  width: min(320px, 100%);
+  max-height: 380px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  animation: codascope-at-mention-fadein 0.12s ease-out;
+}
+
+.codascope-workspace-project-picker-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-workspace-project-picker-header-icon,
+.codascope-workspace-project-picker-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-accent-text);
+}
+
+.codascope-workspace-project-picker-header-label {
+  flex: 1;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.codascope-workspace-project-picker-count {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-project-picker-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-tertiary);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-workspace-project-picker-search-input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  outline: none;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.codascope-workspace-project-picker-search-input:focus {
+  border-color: var(--color-accent);
+}
+
+.codascope-workspace-project-picker-search-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.codascope-workspace-project-picker-limit,
+.codascope-workspace-project-picker-truncated {
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-secondary);
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-project-picker-limit {
+  color: var(--color-warning);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-workspace-project-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+
+.codascope-workspace-project-picker-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.codascope-workspace-project-picker-item:hover,
+.codascope-workspace-project-picker-item-focused {
+  background: var(--color-bg-hover);
+}
+
+.codascope-workspace-project-picker-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.codascope-workspace-project-picker-item-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-secondary);
+}
+
+.codascope-workspace-project-picker-item-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.codascope-workspace-project-picker-item-name {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-workspace-project-picker-item-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.codascope-workspace-project-picker-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 88px;
+  padding: var(--space-4) var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.codascope-workspace-project-picker-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-project-picker-retry:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ── Persisted workspace retrieval sources ───────────────────────── */
+
+.codascope-workspace-sources {
+  margin: 0 var(--space-3) var(--space-3) 38px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.codascope-workspace-sources-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-workspace-sources-title {
+  flex: 1;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.codascope-workspace-sources-count {
+  min-width: 20px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.codascope-workspace-sources-list {
+  display: flex;
+  max-height: 420px;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.codascope-workspace-source {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.codascope-workspace-source:last-child {
+  border-bottom: none;
+}
+
+.codascope-workspace-source-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--color-accent-text);
+}
+
+.codascope-workspace-source-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.codascope-workspace-source-kind {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+}
+
+.codascope-workspace-source-project,
+.codascope-workspace-source-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codascope-workspace-source-project {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.codascope-workspace-source-label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-source-freshness {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-source-freshness > span,
+.codascope-workspace-source-freshness > time {
+  flex-shrink: 0;
+}
+
+.codascope-workspace-source-open {
+  display: inline-flex;
+  grid-column: 2;
+  align-items: center;
+  justify-self: start;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.codascope-workspace-source-open:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.codascope-workspace-sources-overflow {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border-primary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
 /* ── Slash Command Palette ───────────────────────────────────────────
    Floating palette anchored above the chat input.
    Positioned like AtMentionPicker (absolute within .codascope-assistant-input-row).

@@ -193,6 +193,8 @@ export function restoreAssistantMessages(
         content: message.content,
         status: message.status ?? "complete",
         createdAt: message.createdAt,
+        context: message.context,
+        authoritativePersisted: true,
         metadata: message.metadata,
         ...(images.length > 0 ? { images } : {}),
       };
@@ -588,14 +590,15 @@ function normalizeWorkspaceRetrievedSources(
   for (const candidate of value) {
     const source = normalizeWorkspaceRetrievedSource(candidate);
     if (!source) return null;
-    const identity = source.kind === "project_wiki"
-      ? `${source.kind}\0${source.retrieval}\0${source.projectId}\0${source.topicId}`
-      : `${source.kind}\0${source.retrieval}\0${source.projectId}\0${source.codeMapId}`;
+    const identity = workspaceRetrievedSourceIdentity(source);
     if (identities.has(identity)) return null;
     identities.add(identity);
     sources.push(source);
   }
-  return sources;
+  return sources.sort((a, b) => (
+    workspaceRetrievedSourceIdentity(a)
+      .localeCompare(workspaceRetrievedSourceIdentity(b))
+  ));
 }
 
 function normalizeWorkspaceRetrievedSource(
@@ -614,10 +617,10 @@ function normalizeWorkspaceRetrievedSource(
       "lastWikiBuildAt",
     ])
       || (value.retrieval !== "direct" && value.retrieval !== "search")
-      || !isNonEmptyString(value.projectId)
-      || !isNonEmptyString(value.projectName)
-      || !isNonEmptyString(value.topicId)
-      || !isNonEmptyString(value.topicTitle)
+      || !isCanonicalAssistantRecordId(value.projectId)
+      || !isBoundedNonEmptyString(value.projectName, 500)
+      || !isCanonicalAssistantRecordId(value.topicId)
+      || !isBoundedNonEmptyString(value.topicTitle, 500)
       || !isTimestamp(value.topicUpdatedAt)
       || !(value.lastWikiBuildAt === null
         || isTimestamp(value.lastWikiBuildAt))) {
@@ -645,9 +648,9 @@ function normalizeWorkspaceRetrievedSource(
       "lastWikiBuildAt",
     ])
       || value.retrieval !== "direct"
-      || !isNonEmptyString(value.projectId)
-      || !isNonEmptyString(value.projectName)
-      || !isNonEmptyString(value.codeMapId)
+      || !isCanonicalAssistantRecordId(value.projectId)
+      || !isBoundedNonEmptyString(value.projectName, 500)
+      || !isCanonicalAssistantRecordId(value.codeMapId)
       || !(value.generatedAt === null || isTimestamp(value.generatedAt))
       || !(value.lastWikiBuildAt === null
         || isTimestamp(value.lastWikiBuildAt))) {
@@ -664,6 +667,14 @@ function normalizeWorkspaceRetrievedSource(
     };
   }
   return null;
+}
+
+function workspaceRetrievedSourceIdentity(
+  source: WorkspaceRetrievedSourceReference,
+): string {
+  return source.kind === "project_wiki"
+    ? `${source.kind}\0${source.retrieval}\0${source.projectId}\0${source.topicId}`
+    : `${source.kind}\0${source.retrieval}\0${source.projectId}\0${source.codeMapId}`;
 }
 
 function matchesExactScope(
@@ -697,6 +708,13 @@ function isNullableNonEmptyString(
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isBoundedNonEmptyString(
+  value: unknown,
+  maxLength: number,
+): value is string {
+  return isNonEmptyString(value) && value.length <= maxLength;
 }
 
 function hasOwn(value: Record<string, unknown>, key: string): boolean {

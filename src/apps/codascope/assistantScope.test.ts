@@ -4,6 +4,7 @@ import {
   canUseProjectMentions,
   getAssistantRestorationKey,
   getAssistantScopeKey,
+  normalizeWorkspaceProjectReferenceIds,
   resolveAssistantScope,
   rootNoteMatchesRoute,
 } from "./assistantScope";
@@ -132,7 +133,26 @@ describe("workspace message context", () => {
     });
   });
 
-  it("suppresses project mentions in workspace scope", () => {
+  it("derives exact deterministic project IDs while preserving note metadata", () => {
+    const context = buildWorkspaceMessageContext(
+      ["notes", "private", "planning", "roadmap"],
+      note,
+      ["zeta", "alpha", "zeta"],
+    );
+    expect(context.explicitlyReferencedProjectIds).toEqual(["alpha", "zeta"]);
+    expect(context.currentNote).toEqual(note);
+    expect(JSON.stringify(context)).not.toContain("body");
+  });
+
+  it("rejects invalid or excessive workspace project IDs", () => {
+    expect(() => normalizeWorkspaceProjectReferenceIds(["../alpha"]))
+      .toThrow("Invalid workspace project reference");
+    expect(() => normalizeWorkspaceProjectReferenceIds(
+      Array.from({ length: 26 }, (_, index) => `project-${index}`),
+    )).toThrow("at most 25");
+  });
+
+  it("keeps the category-rich project mention picker project-only", () => {
     expect(canUseProjectMentions({ kind: "workspace" })).toBe(false);
     expect(canUseProjectMentions({
       kind: "project",

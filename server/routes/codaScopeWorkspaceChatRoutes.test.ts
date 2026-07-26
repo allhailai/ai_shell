@@ -283,6 +283,45 @@ beforeEach(() => {
 });
 
 describe("workspace chat routes", () => {
+  it("serves the authenticated narrow active-project reference catalog", async () => {
+    const principal = vi.fn(() => ({ username: "alice", isAdmin: false }));
+    const listActiveProjectReferences = vi.fn(async () => ({
+      projects: [{
+        projectId: "alpha",
+        name: "Alpha",
+        description: "Active project",
+      }],
+      limit: 100,
+      truncated: false,
+    }));
+    const routes = registeredRoutes({
+      principal,
+      services: {
+        workspaceCatalogSvc: { listActiveProjectReferences },
+      },
+    });
+    const res = response();
+
+    await route(
+      routes,
+      "get",
+      "/api/codascope/workspace/projects",
+    )({} as any, res as any, vi.fn());
+
+    expect(principal).toHaveBeenCalledOnce();
+    expect(listActiveProjectReferences).toHaveBeenCalledOnce();
+    expect(res.json).toHaveBeenCalledWith({
+      scope: { kind: "workspace" },
+      projects: [{
+        projectId: "alpha",
+        name: "Alpha",
+        description: "Active project",
+      }],
+      limit: 100,
+      truncated: false,
+    });
+  });
+
   it("derives the actor for workspace CRUD and retains explicit scope responses", async () => {
     const listConversations = vi.fn(async () => []);
     const createConversation = vi.fn(async (actorId: string) => ({
@@ -394,6 +433,34 @@ describe("workspace chat routes", () => {
       code: "invalid_input",
     });
     expect(appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects a project archived after selection before durable execution", async () => {
+    const state = statefulConversationService();
+    const resolveActiveProject = vi.fn(async () => null);
+    const resolveTurn = vi.fn();
+    const routes = registeredRoutes({
+      services: streamingServices(state.service, {
+        activeEntityResolver: { resolveActiveProject },
+        workspaceIntentSvc: { resolveTurn },
+      }),
+    });
+    const next = vi.fn();
+
+    route(routes, "post", messagePath)(
+      messageRequest as any,
+      response() as any,
+      next,
+    );
+
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+    expect(next.mock.calls[0][0]).toMatchObject({
+      status: 400,
+      code: "invalid_input",
+    });
+    expect(resolveActiveProject).toHaveBeenCalledWith("alpha");
+    expect(resolveTurn).not.toHaveBeenCalled();
+    expect(state.service.appendMessage).not.toHaveBeenCalled();
   });
 
   it("persists one stable completion with provenance before exactly one done terminal", async () => {

@@ -127,14 +127,17 @@ describe("CodaScopeAssistant scope rendering", () => {
     const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
     expect(html).toContain("Workspace Assistant");
     expect(html).toContain("Notes by directive");
-    expect(html).toContain("Project knowledge stays read-only");
+    expect(html).toContain("Reference active projects");
+    expect(html).toContain("focused read-only knowledge");
     expect(html).toContain("only when you explicitly ask");
     expect(html).toContain("Roadmap");
     expect(html).toContain("Private");
     expect(html).toContain("Workspace Overview");
     expect(html).toContain("Message the Workspace Assistant...");
+    expect(html).toContain("@ active projects");
     expect(html).not.toContain("Select a project");
-    expect(html).not.toContain("@ to add context");
+    expect(html).not.toContain("Wiki Pages");
+    expect(html).not.toContain("Code Files");
   });
 
   it("renders a persisted created-note card on reload without automatic navigation", () => {
@@ -164,6 +167,44 @@ describe("CodaScopeAssistant scope rendering", () => {
     expect(html).toContain("CodaScope Notes");
     expect(html).toContain("Loading current note details");
     expect(routeState.navigate).not.toHaveBeenCalled();
+  });
+
+  it("renders persisted workspace provenance but not local unverified sources", () => {
+    conversationState.messages = [{
+      id: "assistant-server-id",
+      role: "assistant",
+      content: "Architecture answer.",
+      status: "complete",
+      authoritativePersisted: true,
+      context: {
+        assistantScope: { kind: "workspace" },
+        explicitlyReferencedProjectIds: ["alpha"],
+        currentView: { view: "projects" },
+        retrievedSources: [{
+          kind: "project_wiki",
+          retrieval: "search",
+          projectId: "alpha",
+          projectName: "Alpha",
+          topicId: "architecture",
+          topicTitle: "Architecture",
+          topicUpdatedAt: "2026-07-20T00:00:00.000Z",
+          lastWikiBuildAt: "2026-07-21T00:00:00.000Z",
+        }],
+      },
+      metadata: {},
+    }];
+
+    const persistedHtml = renderToStaticMarkup(createElement(CodaScopeAssistant));
+    expect(persistedHtml).toContain("Retrieved sources");
+    expect(persistedHtml).toContain("Project wiki");
+    expect(persistedHtml).toContain("Architecture");
+
+    conversationState.messages = [{
+      ...conversationState.messages[0],
+      authoritativePersisted: false,
+    }];
+    const localHtml = renderToStaticMarkup(createElement(CodaScopeAssistant));
+    expect(localHtml).not.toContain("Retrieved sources");
   });
 
   it("keeps project assistant rendering available on project routes", () => {

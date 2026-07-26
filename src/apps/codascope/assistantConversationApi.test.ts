@@ -433,6 +433,146 @@ describe("assistant conversation API boundary", () => {
     await expect(api.readConversation("conv-1")).resolves.toBeNull();
   });
 
+  it("restores strictly validated persisted workspace provenance authoritatively", async () => {
+    const sources = [
+      {
+        kind: "project_wiki",
+        retrieval: "search",
+        projectId: "zeta",
+        projectName: "Zeta",
+        topicId: "runtime",
+        topicTitle: "Runtime",
+        topicUpdatedAt: "2026-07-20T00:00:00.000Z",
+        lastWikiBuildAt: null,
+      },
+      {
+        kind: "code_map",
+        retrieval: "direct",
+        projectId: "alpha",
+        projectName: "Alpha",
+        codeMapId: "services",
+        generatedAt: "2026-07-19T00:00:00.000Z",
+        lastWikiBuildAt: "2026-07-21T00:00:00.000Z",
+      },
+    ];
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            role: "assistant",
+            context: {
+              assistantScope: workspaceScope,
+              explicitlyReferencedProjectIds: [],
+              currentView: { view: "projects" },
+              retrievedSources: sources,
+            },
+          })],
+        }),
+      })),
+    );
+
+    const conversation = await api.readConversation("conv-1");
+    expect(conversation).not.toBeNull();
+    const restored = restoreAssistantMessages(
+      conversation!,
+      api.endpoints,
+    );
+    expect(restored).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        authoritativePersisted: true,
+        context: expect.objectContaining({
+          retrievedSources: [
+            expect.objectContaining({
+              kind: "code_map",
+              projectId: "alpha",
+            }),
+            expect.objectContaining({
+              kind: "project_wiki",
+              projectId: "zeta",
+            }),
+          ],
+        }),
+      }),
+    ]);
+  });
+
+  it.each([
+    ["duplicate sources", [
+      {
+        kind: "project_wiki",
+        retrieval: "direct",
+        projectId: "alpha",
+        projectName: "Alpha",
+        topicId: "architecture",
+        topicTitle: "Architecture",
+        topicUpdatedAt: createdAt,
+        lastWikiBuildAt: null,
+      },
+      {
+        kind: "project_wiki",
+        retrieval: "direct",
+        projectId: "alpha",
+        projectName: "Alpha",
+        topicId: "architecture",
+        topicTitle: "Duplicate",
+        topicUpdatedAt: createdAt,
+        lastWikiBuildAt: null,
+      },
+    ]],
+    ["extra authority field", [{
+      kind: "code_map",
+      retrieval: "direct",
+      projectId: "alpha",
+      projectName: "Alpha",
+      codeMapId: "services",
+      generatedAt: null,
+      lastWikiBuildAt: null,
+      repositoryPath: "/private/repository",
+    }]],
+    ["invalid route identity", [{
+      kind: "project_wiki",
+      retrieval: "direct",
+      projectId: "alpha",
+      projectName: "Alpha",
+      topicId: "../private",
+      topicTitle: "Private",
+      topicUpdatedAt: createdAt,
+      lastWikiBuildAt: null,
+    }]],
+    ["oversized display value", [{
+      kind: "code_map",
+      retrieval: "direct",
+      projectId: "alpha",
+      projectName: "x".repeat(501),
+      codeMapId: "services",
+      generatedAt: null,
+      lastWikiBuildAt: null,
+    }]],
+  ])("rejects an entire authoritative record with %s", async (
+    _label,
+    retrievedSources,
+  ) => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            role: "assistant",
+            context: {
+              assistantScope: workspaceScope,
+              explicitlyReferencedProjectIds: [],
+              currentView: { view: "projects" },
+              retrievedSources,
+            },
+          })],
+        }),
+      })),
+    );
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+  });
+
   it("strictly retains canonical workspace note actions", async () => {
     const action = {
       type: "note_created",
