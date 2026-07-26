@@ -17,6 +17,9 @@ import { CodaScopeBuildStateService } from "../services/codaScopeBuildStateServi
 import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js";
 import { CodaScopeActiveEntityResolver } from "../services/codaScopeActiveEntityResolver.js";
 import { CodaScopeWorkspaceCatalogService } from "../services/codaScopeWorkspaceCatalogService.js";
+import { CodaScopeWorkspaceConversationService } from "../services/codaScopeWorkspaceConversationService.js";
+import { CodaScopeWorkspaceImageService } from "../services/codaScopeWorkspaceImageService.js";
+import { CodaScopeWorkspaceIntentService } from "../services/codaScopeWorkspaceIntentService.js";
 
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
 import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
@@ -87,6 +90,9 @@ export interface CodaScopeServices {
   codeMapSvc: CodaScopeCodeMapService;
   activeEntityResolver: CodaScopeActiveEntityResolver;
   workspaceCatalogSvc: CodaScopeWorkspaceCatalogService;
+  workspaceConversationSvc: CodaScopeWorkspaceConversationService;
+  workspaceImageSvc: CodaScopeWorkspaceImageService;
+  workspaceIntentSvc: CodaScopeWorkspaceIntentService;
 
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
@@ -369,6 +375,19 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     buildSvc,
     codeMapSvc,
   );
+  const workspaceConversationSvc = new CodaScopeWorkspaceConversationService(
+    root,
+    codaScopePersistence,
+  );
+  const workspaceImageSvc = new CodaScopeWorkspaceImageService(
+    workspaceConversationSvc,
+  );
+  const workspaceIntentSvc = new CodaScopeWorkspaceIntentService(
+    activeEntityResolver,
+    epicSvc,
+    designDocSvc,
+    epicKnowledgeSvc,
+  );
   // Construct the one timer-owning service last so an earlier constructor
   // failure cannot strand an untracked cleanup interval.
   const agentSvc = new CodaScopeAgentService(secretService, root, {
@@ -392,6 +411,9 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
       codeMapSvc,
       activeEntityResolver,
       workspaceCatalogSvc,
+      workspaceConversationSvc,
+      workspaceImageSvc,
+      workspaceIntentSvc,
       wikiStateSvc,
       epicSvc,
       epicBundleSvc: new CodaScopeEpicBundleService(projectSvc),
@@ -427,6 +449,7 @@ async function disposeServiceGraph(graph: CodaScopeServiceGraph): Promise<void> 
   graph.services.buildSvc.dispose();
   graph.services.noteExportSvc.dispose();
   await graph.services.agentSvc.shutdown();
+  graph.services.workspaceConversationSvc.dispose();
 }
 
 function withLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {

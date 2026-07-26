@@ -79,6 +79,11 @@ describe("CodaScope root-bound service lifecycle", () => {
 
     const servicesA = await context.ensureServices();
     expect((servicesA.chatSvc as any).persistence).toBe(codaScopePersistence);
+    expect((servicesA.workspaceConversationSvc as any).persistence)
+      .toBe(codaScopePersistence);
+    const workspaceConversationA =
+      await servicesA.workspaceConversationSvc.createConversation("alice");
+    expect(servicesA.workspaceConversationSvc.getRoot()).toBe(rootA);
     const close = vi.fn();
     const closeWorkspace = vi.fn();
     const cancel = vi.fn(async () => undefined);
@@ -135,10 +140,21 @@ describe("CodaScope root-bound service lifecycle", () => {
     expect(waitWorkspace).toHaveBeenCalledOnce();
     expect(controller.signal.aborted).toBe(true);
     expect(workspaceController.signal.aborted).toBe(true);
+    await expect(servicesA.workspaceConversationSvc.listConversations("alice"))
+      .rejects.toThrow("disposed");
     expect((servicesA.agentSvc as any).cleanupTimer).toBeNull();
     expect((servicesA.buildSvc as any).cancelledKeys.has("project")).toBe(true);
     expect(servicesB.activeEntityResolver).not.toBe(servicesA.activeEntityResolver);
     expect(servicesB.workspaceCatalogSvc).not.toBe(servicesA.workspaceCatalogSvc);
+    expect(servicesB.workspaceConversationSvc)
+      .not.toBe(servicesA.workspaceConversationSvc);
+    expect(servicesB.workspaceImageSvc).not.toBe(servicesA.workspaceImageSvc);
+    expect(servicesB.workspaceIntentSvc).not.toBe(servicesA.workspaceIntentSvc);
+    expect(servicesB.workspaceConversationSvc.getRoot()).toBe(rootB);
+    expect(await servicesB.workspaceConversationSvc.readConversation(
+      "alice",
+      workspaceConversationA.id,
+    )).toBeNull();
     expect((servicesB.agentSvc as any).workspaceTools).toMatchObject({
       activeResolver: servicesB.activeEntityResolver,
       catalog: servicesB.workspaceCatalogSvc,
@@ -165,6 +181,9 @@ describe("CodaScope root-bound service lifecycle", () => {
     const servicesC = await changeProjectsRoot(secrets.service, rootC, httpError, "/opt/aishell-install");
     expect((servicesB.agentSvc as any).cleanupTimer).toBeNull();
     expect(servicesC.projectSvc.getRoot()).toBe(rootC);
+    expect(servicesC.workspaceConversationSvc.getRoot()).toBe(rootC);
+    expect(servicesC.workspaceConversationSvc)
+      .not.toBe(servicesB.workspaceConversationSvc);
     expect(await servicesC.workspaceCatalogSvc.listActiveProjects()).toEqual([]);
     expect(vi.getTimerCount()).toBe(1);
   });

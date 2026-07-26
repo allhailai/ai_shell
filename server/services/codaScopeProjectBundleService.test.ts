@@ -38,6 +38,16 @@ afterEach(() => {
 describe("CodaScope portable project bundles", () => {
   it("exports only shared allowlisted artifacts with sanitized metadata and repository paths", async () => {
     const fixture = await createCustodyFixture();
+    writeText(
+      path.join(
+        fixture.projectSvc.getRoot(),
+        "_workspace",
+        "conversations",
+        "actor-hash",
+        "conversation.json",
+      ),
+      "workspace conversation data must not enter a project bundle",
+    );
     const bundleSvc = new CodaScopeProjectBundleService(fixture.projectSvc);
     const bundle = await bundleSvc.createExport(fixture.project.id);
     expect(bundle).not.toBeNull();
@@ -60,6 +70,7 @@ describe("CodaScope portable project bundles", () => {
     expect(names.every((name) => !name.includes("_user-prefs"))).toBe(true);
     expect(names.every((name) => !name.includes("_exports"))).toBe(true);
     expect(names.every((name) => !name.includes("build-logs"))).toBe(true);
+    expect(names.every((name) => !name.includes("_workspace"))).toBe(true);
     expect(names.every((name) => !name.includes("alice") && !name.includes("bob"))).toBe(true);
     expect(names).not.toContain("project/secrets.json");
 

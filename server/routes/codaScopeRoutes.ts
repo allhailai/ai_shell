@@ -14,6 +14,7 @@ import { registerCoreRoutes } from "./codaScopeCoreRoutes.js";
 import { registerWikiRoutes } from "./codaScopeWikiRoutes.js";
 import { registerBuildRoutes } from "./codaScopeBuildRoutes.js";
 import { registerChatRoutes } from "./codaScopeChatRoutes.js";
+import { registerWorkspaceChatRoutes } from "./codaScopeWorkspaceChatRoutes.js";
 import { registerEpicRoutes } from "./codaScopeEpicRoutes.js";
 import { registerAnnotationRoutes } from "./codaScopeAnnotationRoutes.js";
 import { registerKnowledgeRoutes } from "./codaScopeKnowledgeRoutes.js";
@@ -29,6 +30,7 @@ export function registerCodaScopeRoutes(app: Express, deps: CodaScopeRoutesDeps)
   registerWikiRoutes(ctx);
   registerBuildRoutes(ctx);
   registerChatRoutes(ctx);
+  registerWorkspaceChatRoutes(ctx);
   registerEpicRoutes(ctx);
   registerAnnotationRoutes(ctx);
   registerKnowledgeRoutes(ctx);

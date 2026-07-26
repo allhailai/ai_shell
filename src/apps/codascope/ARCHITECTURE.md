@@ -485,6 +485,92 @@ response once.
 | `GET` | `/api/codascope/projects/:id/conversations/legacy` | Admin-only list of ownerless legacy conversations |
 | `PATCH` | `/api/codascope/projects/:id/conversations/:convId/owner` | Admin-only legacy assignment (`targetUsername`) |
 
+### Workspace Assistant Conversation Plane
+
+The workspace assistant uses a separate version-1 conversation format with the
+explicit scope `{ "kind": "workspace" }`; it never overloads `projectId` and
+never resolves records through project conversation routes. Each authenticated
+principal owns a private store below:
+
+```
+<projectsRoot>/_workspace/conversations/<sha256(actorId)>/
+├── conversations.json
+├── <conversation-id>.json
+└── <conversation-id>/images/*
+```
+
+The hash is only a path key. The full authenticated owner ID remains in the
+strict authoritative index and conversation record. Index/record scope,
+owner, ID, file, and message-count agreement is required; malformed files,
+orphan records without an index, duplicate identities, and missing indexed
+records fail as persistence corruption. Owner or scope mismatch is treated as
+generic absence before the selected record is opened. Workspace mutations use
+an actor-keyed process-local queue, so the index and record cannot lose updates
+while unrelated actors continue independently. Record replacement precedes
+index publication with bounded rollback if the index write fails.
+
+The authenticated route family is:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/codascope/workspace/conversations` | List the actor's workspace conversations |
+| `POST` | `/api/codascope/workspace/conversations` | Create a workspace conversation |
+| `GET` | `/api/codascope/workspace/conversations/:convId` | Read an owned workspace conversation |
+| `PATCH` | `/api/codascope/workspace/conversations/:convId` | Update owned title/summary metadata |
+| `DELETE` | `/api/codascope/workspace/conversations/:convId` | Delete an owned conversation and its images |
+| `POST` | `/api/codascope/workspace/conversations/:convId/messages` | Persist and stream a workspace turn |
+| `POST` | `/api/codascope/workspace/conversations/:convId/images` | Upload an owned conversation image |
+| `GET` | `/api/codascope/workspace/conversations/:convId/images/:filename` | Read an owned conversation image |
+| `POST` | `/api/codascope/workspace/assistant/cancel` | Cancel only this actor's workspace run |
+
+Workspace message context is bounded and strictly validated. The server writes
+the workspace assistant scope; the client may supply only a current-view
+identity, active explicit project references, and CodaScope-level current-note
+metadata (stable ID, relative path, title, private/shared visibility, and an
+optional hash). Note bodies are not read or persisted by this plane. Raw read
+grants, project scope, actor IDs, owner IDs, and model-authored authorization
+inputs are rejected.
+
+Before every run, `CodaScopeWorkspaceIntentService` re-reads active projects,
+epics, designs, curated pages, and ready research sources and deterministically
+derives the immutable one-turn grant. Planning/roadmap and explicit epic
+requests receive only the required metadata/definition/scope capabilities.
+Design, curated-knowledge, and research capabilities require corresponding
+explicit intent and contain exact server-derived resource IDs. Missing,
+ambiguous, inactive, or concurrently archived references fail closed. Generic
+architecture or implementation comparisons remain wiki-first and receive no
+epic grant merely because project names appear.
+
+The message endpoint persists the user message, then exactly one stable
+assistant `streaming` placeholder before starting the agent. Concurrent sends
+to the same actor/conversation are rejected. Success persists completed text
+and retrieved provenance before `done`; failure rewrites the same assistant ID
+to `error` before `error`; cancellation rewrites it before `cancelled`. The
+route owns exactly one terminal and never converts failure, cancellation, or
+premature transport loss into success. Workspace failures are path-free and do
+not expose SDK or persistence locations.
+
+Successful direct wiki and code-map reads are collected outside model inputs
+in a fresh per-run provenance holder. Persisted references contain only
+project ID/public name, wiki topic ID/title/update timestamp or code-map ID,
+the applicable generated/build timestamp, and direct-versus-search identity.
+Repository identities, paths, source filenames, and native locations are
+never recorded. The holder is drained on success and cleared on cancellation,
+error, agent replacement, and root cutover.
+
+Workspace images reuse the project-chat MIME allowlist, 5 MB service limit,
+safe generated filenames, and single-segment path validation, but they live
+only below the actor's workspace conversation. Upload, serving, and attachment
+resolution repeat conversation ownership checks and cannot cross into project
+image routes.
+
+Workspace conversation, image, intent, catalog, resolver, and agent state are
+all members of the root-bound service graph. Root replacement first cancels
+workspace runs and closes pooled agents, then disposes the old conversation
+run state; the replacement graph constructs fresh services bound only to the
+new root. `_workspace` is outside every project directory and is therefore
+excluded from the allowlisted portable project export/import format.
+
 ---
 
 ## Level 5 — Agent Intelligence
@@ -1006,6 +1092,10 @@ The storage tree is broader than the portable-project boundary. In particular,
 `conversations/`, `build-logs/`, `_notes/private/`, `_notes/_user-prefs/`, and
 root `_exports/` remain local/actor-custodied and are never included by
 ordinary project export.
+
+The root-level `_workspace/conversations/` tree is an additional
+actor-custodied store. It is not a project child and is never an ordinary
+project bundle candidate.
 
 ---
 

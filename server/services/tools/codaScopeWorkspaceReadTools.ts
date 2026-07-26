@@ -20,6 +20,7 @@ import {
   type WorkspaceEpicReadCapability,
   type WorkspaceTurnReadGrantHolder,
 } from "../codaScopeWorkspaceReadGrant.js";
+import type { WorkspaceProvenanceCollectorHolder } from "../codaScopeWorkspaceProvenance.js";
 
 const WORKSPACE_CATALOG_MAX_ITEMS = 50;
 const WORKSPACE_PROJECT_CATALOG_MAX_ITEMS = 100;
@@ -36,6 +37,7 @@ type ToolArgs = Record<string, unknown>;
 export function buildWorkspaceReadTools(
   services: WorkspaceToolServices,
   grantHolder: WorkspaceTurnReadGrantHolder,
+  provenanceHolder?: WorkspaceProvenanceCollectorHolder,
 ): Record<string, SDKCustomTool> {
   const {
     activeResolver,
@@ -162,11 +164,25 @@ export function buildWorkspaceReadTools(
           WORKSPACE_DEEP_MAX_CHARS,
         ),
       }, ["projectId", "topicId"]),
-      execute: async (args) => automatic(() => catalog.readProjectWikiTopic(
-        requiredString(args, "projectId"),
-        requiredString(args, "topicId"),
-        optionalInteger(args, "maxChars", WORKSPACE_TOPIC_DEFAULT_MAX_CHARS),
-      )),
+      execute: async (args) => controlledRead(async () => {
+        const result = await catalog.readProjectWikiTopic(
+          requiredString(args, "projectId"),
+          requiredString(args, "topicId"),
+          optionalInteger(args, "maxChars", WORKSPACE_TOPIC_DEFAULT_MAX_CHARS),
+        );
+        const overview = await catalog.getProjectOverview(result.projectId);
+        provenanceHolder?.collect({
+          kind: "project_wiki",
+          retrieval: "direct",
+          projectId: result.projectId,
+          projectName: result.projectName,
+          topicId: result.topicId,
+          topicTitle: result.topicTitle,
+          topicUpdatedAt: result.topicUpdatedAt,
+          lastWikiBuildAt: overview.lastWikiBuildAt,
+        });
+        return JSON.stringify(result);
+      }),
     },
 
     search_project_wiki: {
@@ -178,18 +194,33 @@ export function buildWorkspaceReadTools(
         limit: integerProperty("Maximum results", 1, 30),
         perProjectCandidates: integerProperty("Maximum candidates", 1, 5),
       }, ["projectId", "query"]),
-      execute: async (args) => automatic(() => catalog.searchProjectWiki(
-        requiredString(args, "projectId"),
-        requiredString(args, "query"),
-        {
-          limit: optionalInteger(args, "limit", WORKSPACE_SEARCH_DEFAULT_LIMIT),
-          perProjectCandidates: optionalInteger(
-            args,
-            "perProjectCandidates",
-            WORKSPACE_SEARCH_DEFAULT_PER_PROJECT,
-          ),
-        },
-      )),
+      execute: async (args) => controlledRead(async () => {
+        const result = await catalog.searchProjectWiki(
+          requiredString(args, "projectId"),
+          requiredString(args, "query"),
+          {
+            limit: optionalInteger(args, "limit", WORKSPACE_SEARCH_DEFAULT_LIMIT),
+            perProjectCandidates: optionalInteger(
+              args,
+              "perProjectCandidates",
+              WORKSPACE_SEARCH_DEFAULT_PER_PROJECT,
+            ),
+          },
+        );
+        for (const source of result.results) {
+          provenanceHolder?.collect({
+            kind: "project_wiki",
+            retrieval: "search",
+            projectId: source.projectId,
+            projectName: source.projectName,
+            topicId: source.topicId,
+            topicTitle: source.topicTitle,
+            topicUpdatedAt: source.topicUpdatedAt,
+            lastWikiBuildAt: source.lastWikiBuildAt,
+          });
+        }
+        return JSON.stringify(result);
+      }),
     },
 
     search_project_wikis: {
@@ -210,20 +241,35 @@ export function buildWorkspaceReadTools(
           5,
         ),
       }, ["query"]),
-      execute: async (args) => automatic(() => catalog.searchWorkspaceWikis(
-        requiredString(args, "query"),
-        {
-          ...(args.projectIds === undefined
-            ? {}
-            : { projectIds: requiredStringArray(args, "projectIds") }),
-          limit: optionalInteger(args, "limit", WORKSPACE_SEARCH_DEFAULT_LIMIT),
-          perProjectCandidates: optionalInteger(
-            args,
-            "perProjectCandidates",
-            WORKSPACE_SEARCH_DEFAULT_PER_PROJECT,
-          ),
-        },
-      )),
+      execute: async (args) => controlledRead(async () => {
+        const result = await catalog.searchWorkspaceWikis(
+          requiredString(args, "query"),
+          {
+            ...(args.projectIds === undefined
+              ? {}
+              : { projectIds: requiredStringArray(args, "projectIds") }),
+            limit: optionalInteger(args, "limit", WORKSPACE_SEARCH_DEFAULT_LIMIT),
+            perProjectCandidates: optionalInteger(
+              args,
+              "perProjectCandidates",
+              WORKSPACE_SEARCH_DEFAULT_PER_PROJECT,
+            ),
+          },
+        );
+        for (const source of result.results) {
+          provenanceHolder?.collect({
+            kind: "project_wiki",
+            retrieval: "search",
+            projectId: source.projectId,
+            projectName: source.projectName,
+            topicId: source.topicId,
+            topicTitle: source.topicTitle,
+            topicUpdatedAt: source.topicUpdatedAt,
+            lastWikiBuildAt: source.lastWikiBuildAt,
+          });
+        }
+        return JSON.stringify(result);
+      }),
     },
 
     get_project_build_history: {
@@ -268,15 +314,28 @@ export function buildWorkspaceReadTools(
           WORKSPACE_DEEP_MAX_CHARS,
         ),
       }, ["projectId", "codeMapId"]),
-      execute: async (args) => automatic(() => catalog.readProjectCodeMap(
-        requiredString(args, "projectId"),
-        requiredString(args, "codeMapId"),
-        optionalInteger(
-          args,
-          "maxChars",
-          WORKSPACE_CODE_MAP_DEFAULT_MAX_CHARS,
-        ),
-      )),
+      execute: async (args) => controlledRead(async () => {
+        const result = await catalog.readProjectCodeMap(
+          requiredString(args, "projectId"),
+          requiredString(args, "codeMapId"),
+          optionalInteger(
+            args,
+            "maxChars",
+            WORKSPACE_CODE_MAP_DEFAULT_MAX_CHARS,
+          ),
+        );
+        const overview = await catalog.getProjectOverview(result.projectId);
+        provenanceHolder?.collect({
+          kind: "code_map",
+          retrieval: "direct",
+          projectId: result.projectId,
+          projectName: result.projectName,
+          codeMapId: result.codeMapId,
+          generatedAt: result.generatedAt,
+          lastWikiBuildAt: overview.lastWikiBuildAt,
+        });
+        return JSON.stringify(result);
+      }),
     },
 
     list_active_epics: {

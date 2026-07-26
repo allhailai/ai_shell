@@ -43,6 +43,11 @@ import {
   getWorkspaceTools,
   type WorkspaceToolServices,
 } from "./codaScopeWorkspaceToolDefinitions.js";
+import {
+  WorkspaceProvenanceCollector,
+  WorkspaceProvenanceCollectorHolder,
+  type WorkspaceRetrievedSourceReference,
+} from "./codaScopeWorkspaceProvenance.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -55,7 +60,10 @@ interface AgentSendCommonOptions {
   context?: string;
   images?: Array<{ data: string; mimeType: string }>;
   onMessage: (msg: SDKMessage) => void;
-  onDone: (result: RunResult) => void;
+  onDone: (
+    result: RunResult,
+    workspaceRetrievedSources?: WorkspaceRetrievedSourceReference[],
+  ) => void;
   onError: (err: Error) => void;
 }
 
@@ -98,6 +106,7 @@ interface PoolEntry {
   busy: boolean;
   collectorHolder: ToolResultCollectorHolder;
   workspaceGrantHolder?: WorkspaceTurnReadGrantHolder;
+  workspaceProvenanceHolder?: WorkspaceProvenanceCollectorHolder;
 }
 
 export interface AgentLocalWorkspace {
@@ -336,6 +345,7 @@ export class CodaScopeAgentService {
       purpose: AgentPurpose;
       collectorHolder: ToolResultCollectorHolder;
       workspaceGrantHolder?: WorkspaceTurnReadGrantHolder;
+      workspaceProvenanceHolder?: WorkspaceProvenanceCollectorHolder;
       actorId?: string;
     },
   ): Record<string, SDKCustomTool> {
@@ -344,6 +354,7 @@ export class CodaScopeAgentService {
       purpose,
       collectorHolder,
       workspaceGrantHolder,
+      workspaceProvenanceHolder,
       actorId,
     } = options;
     assertAgentPurposeScope(scope, purpose);
@@ -351,7 +362,11 @@ export class CodaScopeAgentService {
       if (!this.workspaceTools || !workspaceGrantHolder) {
         throw new Error("CodaScope workspace tool dependencies are unavailable.");
       }
-      return getWorkspaceTools(this.workspaceTools, workspaceGrantHolder);
+      return getWorkspaceTools(
+        this.workspaceTools,
+        workspaceGrantHolder,
+        workspaceProvenanceHolder,
+      );
     }
     return getToolsForPurpose(
       scope.projectId,
@@ -403,6 +418,9 @@ export class CodaScopeAgentService {
     const workspaceGrantHolder = scope.kind === "workspace"
       ? new WorkspaceTurnReadGrantHolder()
       : undefined;
+    const workspaceProvenanceHolder = scope.kind === "workspace"
+      ? new WorkspaceProvenanceCollectorHolder()
+      : undefined;
 
     let projectName: string | null = null;
     let projectDir: string | null = null;
@@ -430,6 +448,7 @@ export class CodaScopeAgentService {
       purpose,
       collectorHolder,
       workspaceGrantHolder,
+      workspaceProvenanceHolder,
       actorId,
     });
     const agentName = getAgentName({ scope, purpose, projectName });
@@ -467,6 +486,7 @@ export class CodaScopeAgentService {
       busy: false,
       collectorHolder,
       workspaceGrantHolder,
+      workspaceProvenanceHolder,
     });
 
     return agent;
@@ -574,6 +594,7 @@ export class CodaScopeAgentService {
     // The pool entry's collectorHolder is a stable reference captured by tool closures;
     // swapping .current redirects all tool result collection to this run's collector.
     const runCollector = new ToolResultCollector();
+    const workspaceProvenanceCollector = new WorkspaceProvenanceCollector();
     let activeEntry: PoolEntry | undefined;
     let startedRun: Run | undefined;
 
@@ -591,6 +612,10 @@ export class CodaScopeAgentService {
         activeEntry.busy = true;
         activeEntry.collectorHolder.current = runCollector;
         activeEntry.workspaceGrantHolder?.replace(workspaceReadGrant);
+        if (activeEntry.workspaceProvenanceHolder) {
+          activeEntry.workspaceProvenanceHolder.current =
+            workspaceProvenanceCollector;
+        }
       }
 
       // Build the full message with optional context
@@ -674,6 +699,10 @@ export class CodaScopeAgentService {
             activeEntry.busy = true;
             activeEntry.collectorHolder.current = runCollector;
             activeEntry.workspaceGrantHolder?.replace(workspaceReadGrant);
+            if (activeEntry.workspaceProvenanceHolder) {
+              activeEntry.workspaceProvenanceHolder.current =
+                workspaceProvenanceCollector;
+            }
           }
           return fallbackAgent;
         },
@@ -710,6 +739,7 @@ export class CodaScopeAgentService {
 
       if (abortController.signal.aborted) {
         runCollector.drain(); // discard collected results on cancel
+        workspaceProvenanceCollector.clear();
         onError(new Error("Agent cancelled by user."));
       } else {
         // Forward any tool results collected during execution
@@ -720,7 +750,7 @@ export class CodaScopeAgentService {
             text,
           } as unknown as SDKMessage);
         }
-        onDone(result);
+        onDone(result, workspaceProvenanceCollector.drain());
       }
     } catch (err) {
       if (activeEntry) {
@@ -740,12 +770,15 @@ export class CodaScopeAgentService {
       if (startedRun) this.removeActiveRun(chatKey, startedRun);
 
       if (abortController.signal.aborted) {
+        workspaceProvenanceCollector.clear();
         onError(new Error("Agent cancelled by user."));
       } else if (scope.kind === "workspace") {
+        workspaceProvenanceCollector.clear();
         // SDK/native errors may contain machine-local details. Workspace
         // callers receive a stable path-free failure instead.
         onError(new Error("Workspace assistant run failed."));
       } else {
+        workspaceProvenanceCollector.clear();
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     }

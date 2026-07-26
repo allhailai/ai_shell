@@ -4,6 +4,7 @@ import {
   WorkspaceTurnReadGrantHolder,
   type WorkspaceTurnReadGrant,
 } from "./codaScopeWorkspaceReadGrant.js";
+import { WorkspaceProvenanceCollectorHolder } from "./codaScopeWorkspaceProvenance.js";
 
 const EXPECTED_WORKSPACE_TOOLS = [
   "get_workspace_status",
@@ -71,14 +72,30 @@ function services() {
         lastDeepRunAt: null,
       })),
       listActiveProjects: vi.fn(async () => []),
-      getProjectOverview: vi.fn(async (projectId: string) => ({ projectId })),
+      getProjectOverview: vi.fn(async (projectId: string) => ({
+        projectId,
+        lastWikiBuildAt: "2026-01-02T00:00:00.000Z",
+      })),
       listProjectWikiTopics: vi.fn(async () => []),
-      readProjectWikiTopic: vi.fn(async () => ({ content: "wiki" })),
+      readProjectWikiTopic: vi.fn(async () => ({
+        projectId: "project",
+        projectName: "Project",
+        topicId: "topic",
+        topicTitle: "Topic",
+        topicUpdatedAt: "2026-01-01T00:00:00.000Z",
+        content: "wiki",
+      })),
       searchProjectWiki: vi.fn(async () => ({ results: [] })),
       searchWorkspaceWikis: vi.fn(async () => ({ results: [] })),
       getRelevantBuildHistory: vi.fn(async () => ({ attempts: [] })),
       listProjectCodeMaps: vi.fn(async () => []),
-      readProjectCodeMap: vi.fn(async () => ({ content: "map" })),
+      readProjectCodeMap: vi.fn(async () => ({
+        projectId: "project",
+        projectName: "Project",
+        codeMapId: "code-map",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        content: "map",
+      })),
       sanitizeProjectText: vi.fn(async (
         _projectId: string,
         content: string,
@@ -204,6 +221,51 @@ describe("workspace tool allowlist", () => {
     expect(fixture.catalog.getRelevantBuildHistory).toHaveBeenCalled();
     expect(fixture.catalog.listProjectCodeMaps).toHaveBeenCalled();
     expect(fixture.catalog.readProjectCodeMap).toHaveBeenCalled();
+  });
+
+  it("collects bounded direct retrieval provenance outside model-controlled inputs", async () => {
+    const fixture = services();
+    const provenance = new WorkspaceProvenanceCollectorHolder();
+    const tools = getWorkspaceTools(
+      fixture as any,
+      grantHolder(),
+      provenance,
+    );
+    await tools.read_project_wiki_topic.execute({
+      projectId: "project",
+      topicId: "topic",
+    }, {} as any);
+    await tools.read_project_code_map.execute({
+      projectId: "project",
+      codeMapId: "code-map",
+    }, {} as any);
+
+    expect(provenance.current.drain()).toEqual([
+      {
+        kind: "code_map",
+        retrieval: "direct",
+        projectId: "project",
+        projectName: "Project",
+        codeMapId: "code-map",
+        generatedAt: "2026-01-01T00:00:00.000Z",
+        lastWikiBuildAt: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        kind: "project_wiki",
+        retrieval: "direct",
+        projectId: "project",
+        projectName: "Project",
+        topicId: "topic",
+        topicTitle: "Topic",
+        topicUpdatedAt: "2026-01-01T00:00:00.000Z",
+        lastWikiBuildAt: "2026-01-02T00:00:00.000Z",
+      },
+    ]);
+    for (const tool of Object.values(tools)) {
+      expect((tool.inputSchema as any).properties).not.toHaveProperty(
+        "retrievedSources",
+      );
+    }
   });
 });
 

@@ -10,6 +10,7 @@ import type { CodaScopeEpicKnowledgeService } from "./codaScopeEpicKnowledgeServ
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import type { CodaScopeWorkspaceCatalogService } from "./codaScopeWorkspaceCatalogService.js";
 import type { WorkspaceTurnReadGrantHolder } from "./codaScopeWorkspaceReadGrant.js";
+import type { WorkspaceProvenanceCollectorHolder } from "./codaScopeWorkspaceProvenance.js";
 import { buildWorkspaceReadTools } from "./tools/codaScopeWorkspaceReadTools.js";
 
 export interface WorkspaceToolServices {
@@ -23,8 +24,9 @@ export interface WorkspaceToolServices {
 export function getWorkspaceTools(
   services: WorkspaceToolServices,
   grantHolder: WorkspaceTurnReadGrantHolder,
+  provenanceHolder?: WorkspaceProvenanceCollectorHolder,
 ): Record<string, SDKCustomTool> {
-  return buildWorkspaceReadTools(services, grantHolder);
+  return buildWorkspaceReadTools(services, grantHolder, provenanceHolder);
 }
 
 export { buildWorkspaceReadTools } from "./tools/codaScopeWorkspaceReadTools.js";

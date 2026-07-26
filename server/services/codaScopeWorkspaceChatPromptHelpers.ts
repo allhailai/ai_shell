@@ -12,10 +12,16 @@ import {
   loadCommandTemplate,
   substituteVars,
 } from "./codaScopeCommandLoader.js";
+import type {
+  WorkspaceConversationMessage,
+  WorkspaceMessageContext,
+} from "./codaScopeWorkspaceConversationService.js";
 
 export const WORKSPACE_MANIFEST_MAX_PROJECTS = 12;
 export const WORKSPACE_MANIFEST_MAX_CHARS = 6_000;
 const WORKSPACE_DESCRIPTION_MAX_CHARS = 160;
+const WORKSPACE_HISTORY_MAX_MESSAGES = 20;
+const WORKSPACE_HISTORY_MESSAGE_MAX_CHARS = 2_000;
 
 export interface WorkspaceManifestInput {
   status: WorkspaceStatus;
@@ -84,7 +90,8 @@ export function buildWorkspaceManifest(input: WorkspaceManifestInput): string {
 
 export function buildWorkspaceAssistantPrompt(
   manifest: string,
-  userMessage: string,
+  history: string,
+  currentContext = "",
 ): string {
   const template = loadCommandTemplate("do_workspace_chat");
   if (!template) {
@@ -92,13 +99,60 @@ export function buildWorkspaceAssistantPrompt(
       "You are the CodaScope Workspace Assistant.",
       "Use progressive, wiki-first retrieval and never claim source-file access.",
       manifest,
-      `User: ${userMessage}`,
+      history,
+      currentContext,
+      "The current user request is supplied once as the agent user payload.",
     ].join("\n\n");
   }
   return substituteVars(template, {
     WORKSPACE_MANIFEST: manifest,
-    USER_MESSAGE: userMessage,
+    WORKSPACE_CONVERSATION_HISTORY: history,
+    WORKSPACE_CURRENT_CONTEXT: currentContext,
   });
+}
+
+export function formatWorkspaceConversationHistory(
+  messages: readonly WorkspaceConversationMessage[],
+): string {
+  const selected = messages
+    .filter((message) => (
+      message.role === "user"
+      || message.role === "assistant"
+      || message.role === "system"
+    ))
+    .slice(-WORKSPACE_HISTORY_MAX_MESSAGES);
+  if (selected.length === 0) return "No prior conversation messages.";
+  return selected.map((message) => {
+    const content = singleLine(message.content)
+      .slice(0, WORKSPACE_HISTORY_MESSAGE_MAX_CHARS);
+    return `${message.role.toUpperCase()}: ${content}`;
+  }).join("\n");
+}
+
+export function formatWorkspaceCurrentContext(
+  context: WorkspaceMessageContext,
+): string {
+  const lines = [
+    `Current view: ${singleLine(context.currentView.view)}`,
+    `Navigation identity: ${singleLine(context.currentView.identity ?? "none")}`,
+    `View label: ${singleLine(context.currentView.label ?? "none")}`,
+    `Explicit active project references: ${
+      context.explicitlyReferencedProjectIds.join(", ") || "none"
+    }`,
+  ];
+  if (context.currentNote) {
+    lines.push(
+      `Current CodaScope note: ${singleLine(context.currentNote.title)} `
+        + `[${context.currentNote.stableId}]`,
+      `Note scope/visibility: codascope/${context.currentNote.visibility}`,
+      `Note path: ${singleLine(context.currentNote.path)}`,
+      `Note content hash: ${context.currentNote.contentHash ?? "not supplied"}`,
+      "The note body is not available in this phase.",
+    );
+  } else {
+    lines.push("Current CodaScope note: none");
+  }
+  return lines.join("\n");
 }
 
 function projectSummary(project: WorkspaceProjectOverview): string {
