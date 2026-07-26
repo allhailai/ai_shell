@@ -16,11 +16,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { assertSafePathSegment } from "./codaScopePathSafety.js";
+import {
+  CodaScopePathValidationError,
+  assertSafePathSegment,
+} from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistenceCorruptError,
+  CodaScopePersistenceError,
+  isPersistenceDomainError,
+} from "./codaScopePersistence.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
 export type BuildStatus = "idle" | "building" | "complete" | "error";
+export type BuildRunKind = "analyze" | "deep-run";
 
 export interface TokenUsageRecord {
   inputTokens: number;
@@ -55,7 +64,7 @@ export interface BuildState {
   outputLength: number;  // bytes of output written so far
   pipelineSteps: PipelineStepRecord[];
   scope?: string;  // Optional scope key (e.g. "epic-deepen::epicId", "research::epicId")
-  buildType?: "analyze" | "deep-run";
+  buildType?: BuildRunKind;
 }
 
 export interface BuildLogEntry {
@@ -80,7 +89,40 @@ export interface BuildLogEntry {
   syncGitHeads?: Record<string, string>;
   topicsBuilt?: number;
   topicsSkipped?: number;
+  /** New generic `/runs` records opt out of legacy command-based workspace classification. */
+  workspaceExcluded?: true;
 }
+
+export interface WorkspaceBuildAttempt {
+  runId: string;
+  buildType: BuildRunKind;
+  status: Exclude<BuildStatus, "idle">;
+  startedAt: string;
+  completedAt: string | null;
+  error: string | null;
+  publishedWiki: boolean;
+}
+
+export interface WorkspaceBuildHistory {
+  attempts: WorkspaceBuildAttempt[];
+  truncated: boolean;
+  latestAttempt: WorkspaceBuildAttempt | null;
+  lastSuccessfulWikiBuildAt: string | null;
+  lastSuccessfulDeepRunAt: string | null;
+}
+
+const MAX_WORKSPACE_BUILD_LOG_FILES = 5_000;
+const MAX_WORKSPACE_BUILD_LOG_BYTES = 1024 * 1024;
+const MAX_WORKSPACE_BUILD_HISTORY_LIMIT = 100;
+const LEGACY_WIKI_COMMANDS = new Set([
+  "do_explore",
+  "do_build_full_wiki",
+  "do_build_wiki_page",
+  "do_build_wiki_delta",
+  "do_deep_wiki_page",
+  "do_wiki_cross_reference",
+]);
+const WIKI_BUILD_MODES = new Set(["outline", "delta", "full"]);
 
 /* ── Service ────────────────────────────────────────────────────────── */
 
@@ -235,6 +277,9 @@ export class CodaScopeBuildStateService {
           outputLength: 0,
           pipelineSteps: data.pipelineSteps ?? [],
           scope: logScope,
+          ...(data.buildType === "analyze" || data.buildType === "deep-run"
+            ? { buildType: data.buildType }
+            : {}),
         };
 
         this.recoverInterruptedBuild(state, data, file.path);
@@ -286,7 +331,17 @@ export class CodaScopeBuildStateService {
    * @param scope — Optional scope key for per-epic builds (e.g. "research::epicId").
    *   Scoped builds are independent of each other and of unscoped project builds.
    */
-  startBuild(projectId: string, command: string, modelId: string, scope?: string): string | null {
+  startBuild(
+    projectId: string,
+    command: string,
+    modelId: string,
+    scope?: string,
+    buildType?: BuildRunKind,
+    excludeFromWorkspaceHistory = false,
+  ): string | null {
+    if (scope && buildType) {
+      throw new CodaScopePathValidationError("scoped project build classification");
+    }
     const key = this.buildKey(projectId, scope);
 
     // Hydrate from disk first to detect stale builds
@@ -315,13 +370,17 @@ export class CodaScopeBuildStateService {
       outputLength: 0,
       pipelineSteps: [],
       scope,
+      buildType,
     };
 
     this.activeBuilds.set(key, state);
 
     // Write initial metadata (include scope for disk hydration)
     const metaPath = this.runMetadataPath(projectId, runId);
-    writeFileSync(metaPath, JSON.stringify(state, null, 2), "utf-8");
+    writeFileSync(metaPath, JSON.stringify({
+      ...state,
+      ...(excludeFromWorkspaceHistory ? { workspaceExcluded: true } : {}),
+    }, null, 2), "utf-8");
 
     // Create empty log file
     const logPath = this.runLogPath(projectId, runId);
@@ -460,6 +519,7 @@ export class CodaScopeBuildStateService {
     const now = new Date();
     state.status = "complete";
     state.completedAt = now.toISOString();
+    if (buildInfo?.buildType) state.buildType = buildInfo.buildType;
 
     // Auto-generate summary based on what actually happened
     const startTime = new Date(state.startedAt).getTime();
@@ -525,10 +585,11 @@ export class CodaScopeBuildStateService {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let buildMode: string | undefined;
-    let buildType: string | undefined;
+    let buildType: string | undefined = state.buildType;
     let syncGitHeads: Record<string, string> | undefined;
     let topicsBuilt: number | undefined;
     let topicsSkipped: number | undefined;
+    let workspaceExcluded: true | undefined;
 
     for (const step of state.pipelineSteps) {
       if (step.tokenUsage) {
@@ -547,6 +608,7 @@ export class CodaScopeBuildStateService {
         if (existing.syncGitHeads) syncGitHeads = existing.syncGitHeads;
         if (existing.topicsBuilt != null) topicsBuilt = existing.topicsBuilt;
         if (existing.topicsSkipped != null) topicsSkipped = existing.topicsSkipped;
+        if (existing.workspaceExcluded === true) workspaceExcluded = true;
       }
     } catch { /* skip */ }
 
@@ -578,6 +640,7 @@ export class CodaScopeBuildStateService {
       syncGitHeads,
       topicsBuilt,
       topicsSkipped,
+      workspaceExcluded,
     };
 
     writeFileSync(metaPath, JSON.stringify(entry, null, 2), "utf-8");
@@ -645,6 +708,130 @@ export class CodaScopeBuildStateService {
     return this.runLogPath(projectId, runId);
   }
 
+  /**
+   * Strict, bounded workspace history read. It classifies only unscoped
+   * Analyze/Deep Run records (plus exact known wiki commands for publication
+   * freshness), retains start-time classification through interruption
+   * recovery, and fails closed when relevant metadata is malformed.
+   */
+  readWorkspaceBuildHistory(projectId: string, limit = 20): WorkspaceBuildHistory {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_WORKSPACE_BUILD_HISTORY_LIMIT) {
+      throw new CodaScopePathValidationError("workspace build history limit");
+    }
+
+    const directory = this.buildLogsDir(projectId);
+    if (!existsSync(directory)) return emptyWorkspaceBuildHistory();
+
+    let files: string[];
+    try {
+      files = readdirSync(directory).filter((file) => file.endsWith(".json"));
+    } catch {
+      throw new CodaScopePersistenceError({ storage: "build_history", projectId });
+    }
+    if (files.length > MAX_WORKSPACE_BUILD_LOG_FILES) {
+      throw new CodaScopePersistenceCorruptError({ storage: "build_history", projectId });
+    }
+
+    const relevant: WorkspaceBuildAttempt[] = [];
+    const seenRunIds = new Set<string>();
+    let lastSuccessfulWikiBuildAt: string | null = null;
+    let lastSuccessfulDeepRunAt: string | null = null;
+
+    for (const file of files) {
+      const filePath = path.join(directory, file);
+      let raw: unknown;
+      try {
+        const stats = statSync(filePath);
+        if (!stats.isFile() || stats.size > MAX_WORKSPACE_BUILD_LOG_BYTES) {
+          throw new Error("invalid build metadata file");
+        }
+        raw = JSON.parse(readFileSync(filePath, "utf-8"));
+      } catch (error) {
+        if (isPersistenceDomainError(error)) throw error;
+        throw new CodaScopePersistenceCorruptError({ storage: "build_history", projectId });
+      }
+
+      try {
+        const record = classifyWorkspaceLog(raw);
+        if (!record) continue;
+        const validated = validateWorkspaceBuildLog(
+          raw,
+          file.slice(0, -".json".length),
+          record.buildType,
+        );
+        if (seenRunIds.has(validated.runId)) {
+          throw new Error("duplicate build run ID");
+        }
+        seenRunIds.add(validated.runId);
+
+        let status = validated.status;
+        let completedAt = validated.completedAt;
+        let error = validated.error;
+        if (record.buildType && status === "building") {
+          const live = this.activeBuilds.get(projectId);
+          if (!live || live.runId !== validated.runId || live.status !== "building") {
+            const recovered = this.recoverInterruptedBuild({
+              runId: validated.runId,
+              status,
+              command: validated.command,
+              modelId: validated.modelId,
+              startedAt: validated.startedAt,
+              completedAt,
+              summary: validated.summary,
+              error,
+              outputLength: 0,
+              pipelineSteps: validated.pipelineSteps,
+              buildType: record.buildType,
+            }, validated, filePath);
+            status = recovered.status as Exclude<BuildStatus, "idle">;
+            completedAt = recovered.completedAt;
+            error = recovered.error;
+          }
+        }
+
+        const publishedWiki = status === "complete"
+          && (
+            record.buildType === "deep-run"
+            || LEGACY_WIKI_COMMANDS.has(validated.command)
+            || WIKI_BUILD_MODES.has(validated.buildMode ?? "")
+          );
+        if (publishedWiki && completedAt) {
+          lastSuccessfulWikiBuildAt = latestTimestamp(lastSuccessfulWikiBuildAt, completedAt);
+        }
+        if (record.buildType === "deep-run" && status === "complete" && completedAt) {
+          lastSuccessfulDeepRunAt = latestTimestamp(lastSuccessfulDeepRunAt, completedAt);
+        }
+
+        if (record.buildType) {
+          relevant.push({
+            runId: validated.runId,
+            buildType: record.buildType,
+            status,
+            startedAt: validated.startedAt,
+            completedAt,
+            error,
+            publishedWiki,
+          });
+        }
+      } catch (error) {
+        if (isPersistenceDomainError(error)) throw error;
+        throw new CodaScopePersistenceCorruptError({ storage: "build_history", projectId });
+      }
+    }
+
+    relevant.sort((a, b) => (
+      Date.parse(b.startedAt) - Date.parse(a.startedAt)
+      || b.runId.localeCompare(a.runId)
+    ));
+    return {
+      attempts: relevant.slice(0, limit),
+      truncated: relevant.length > limit,
+      latestAttempt: relevant[0] ?? null,
+      lastSuccessfulWikiBuildAt,
+      lastSuccessfulDeepRunAt,
+    };
+  }
+
   /** List recent build logs (most recent first). */
   listBuildLogs(projectId: string, limit = 20): BuildLogEntry[] {
     const dir = this.buildLogsDir(projectId);
@@ -683,4 +870,141 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainSec = seconds % 60;
   return remainSec > 0 ? `${minutes}m ${remainSec}s` : `${minutes}m`;
+}
+
+interface StrictWorkspaceBuildLog extends BuildLogEntry {
+  status: Exclude<BuildStatus, "idle">;
+  pipelineSteps: PipelineStepRecord[];
+}
+
+function emptyWorkspaceBuildHistory(): WorkspaceBuildHistory {
+  return {
+    attempts: [],
+    truncated: false,
+    latestAttempt: null,
+    lastSuccessfulWikiBuildAt: null,
+    lastSuccessfulDeepRunAt: null,
+  };
+}
+
+function classifyWorkspaceLog(
+  value: unknown,
+): { buildType: BuildRunKind | null } | null {
+  if (!isRecord(value)) throw new Error("invalid build metadata");
+
+  if (value.workspaceExcluded !== undefined) {
+    if (value.workspaceExcluded !== true) throw new Error("invalid workspace exclusion marker");
+    return LEGACY_WIKI_COMMANDS.has(String(value.command))
+      ? { buildType: null }
+      : null;
+  }
+
+  if (value.scope !== undefined) {
+    if (typeof value.scope !== "string" || value.scope.length === 0) {
+      throw new Error("invalid build scope");
+    }
+    return null;
+  }
+
+  const signals: BuildRunKind[] = [];
+  if (value.buildType === "analyze" || value.buildType === "deep-run") {
+    signals.push(value.buildType);
+  }
+  if (value.command === "analyze") signals.push("analyze");
+  if (value.command === "deep-run") signals.push("deep-run");
+  if (typeof value.buildMode === "string" && WIKI_BUILD_MODES.has(value.buildMode)) {
+    signals.push("analyze");
+  }
+
+  const distinct = [...new Set(signals)];
+  if (distinct.length > 1) throw new Error("conflicting build classification");
+  const buildType = distinct[0] ?? null;
+  if (buildType || LEGACY_WIKI_COMMANDS.has(String(value.command))) {
+    return { buildType };
+  }
+  return null;
+}
+
+function validateWorkspaceBuildLog(
+  value: unknown,
+  filenameRunId: string,
+  expectedBuildType: BuildRunKind | null,
+): StrictWorkspaceBuildLog {
+  if (!isRecord(value)
+    || typeof value.runId !== "string"
+    || value.runId !== filenameRunId
+    || typeof value.command !== "string"
+    || typeof value.modelId !== "string"
+    || !new Set(["building", "complete", "error"]).has(String(value.status))
+    || !isTimestamp(value.startedAt)
+    || (value.completedAt !== null && !isTimestamp(value.completedAt))
+    || (value.summary !== null && typeof value.summary !== "string")
+    || (value.error !== null && typeof value.error !== "string")
+    || (value.pageCount !== undefined && value.pageCount !== null && !isNonNegativeNumber(value.pageCount))
+    || (value.durationMs !== undefined && value.durationMs !== null && !isNonNegativeNumber(value.durationMs))
+    || (value.pipelineSteps !== undefined && !Array.isArray(value.pipelineSteps))
+    || (value.buildMode !== undefined && typeof value.buildMode !== "string")
+    || (value.buildType !== undefined
+      && value.buildType !== "analyze"
+      && value.buildType !== "deep-run")
+    || (value.workspaceExcluded !== undefined && value.workspaceExcluded !== true)
+    || (value.syncGitHeads !== undefined && !isStringRecord(value.syncGitHeads))) {
+    throw new Error("invalid build metadata");
+  }
+  assertSafePathSegment(value.runId, "run ID");
+
+  if (expectedBuildType && value.buildType !== undefined && value.buildType !== expectedBuildType) {
+    throw new Error("conflicting build classification");
+  }
+  if (value.status === "building" && value.completedAt !== null) {
+    throw new Error("building run has a completion timestamp");
+  }
+  if (value.status !== "building" && value.completedAt === null) {
+    throw new Error("terminal run has no completion timestamp");
+  }
+  if (value.status === "error" && typeof value.error !== "string") {
+    throw new Error("failed run has no error");
+  }
+
+  return {
+    runId: value.runId,
+    command: value.command,
+    modelId: value.modelId,
+    status: value.status as Exclude<BuildStatus, "idle">,
+    startedAt: value.startedAt,
+    completedAt: value.completedAt,
+    summary: value.summary,
+    error: value.error,
+    pageCount: typeof value.pageCount === "number" ? value.pageCount : null,
+    durationMs: typeof value.durationMs === "number" ? value.durationMs : null,
+    pipelineSteps: Array.isArray(value.pipelineSteps)
+      ? value.pipelineSteps as PipelineStepRecord[]
+      : [],
+    ...(typeof value.buildMode === "string" ? { buildMode: value.buildMode } : {}),
+    ...(typeof value.buildType === "string" ? { buildType: value.buildType } : {}),
+    ...(value.workspaceExcluded === true ? { workspaceExcluded: true } : {}),
+    ...(isStringRecord(value.syncGitHeads) ? { syncGitHeads: value.syncGitHeads } : {}),
+  };
+}
+
+function latestTimestamp(current: string | null, candidate: string): string {
+  return !current || Date.parse(candidate) > Date.parse(current) ? candidate : current;
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && Number.isFinite(Date.parse(value));
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

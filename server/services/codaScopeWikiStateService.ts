@@ -12,6 +12,11 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
+import {
+  CodaScopePersistence,
+  codaScopePersistence,
+} from "./codaScopePersistence.js";
+import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -57,7 +62,10 @@ export interface WikiState {
 export class CodaScopeWikiStateService {
   private root: string;
 
-  constructor(root: string) {
+  constructor(
+    root: string,
+    private readonly persistence: CodaScopePersistence = codaScopePersistence,
+  ) {
     this.root = root;
   }
 
@@ -82,6 +90,18 @@ export class CodaScopeWikiStateService {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Strict workspace-facing state read. Unlike the legacy project-facing
+   * reader, malformed authoritative state is never interpreted as absence.
+   */
+  getWorkspaceWikiState(projectDir: string): Promise<WikiState | null> {
+    return this.persistence.readJson(this.stateFilePath(projectDir), {
+      context: { storage: "wiki_state" },
+      missing: () => null,
+      validate: validateWikiState,
+    });
   }
 
   /** Save wiki-state.json for a project. Creates the file if needed. */
@@ -363,4 +383,75 @@ export class CodaScopeWikiStateService {
     const depth = this.classifyDepth(metrics);
     return { depth, metrics };
   }
+}
+
+function validateWikiState(value: unknown): WikiState {
+  if (!isRecord(value)
+    || value.version !== 1
+    || (value.lastBuildAt !== null && !isTimestamp(value.lastBuildAt))
+    || (value.lastBuildMode !== null && typeof value.lastBuildMode !== "string")
+    || !isStringRecord(value.gitHeads)
+    || !isRecord(value.topics)
+    || (value.lastSyncAt !== undefined && !isTimestamp(value.lastSyncAt))
+    || (value.lastSyncGitHeads !== undefined && !isStringRecord(value.lastSyncGitHeads))
+    || (value.lastSyncRunId !== undefined && typeof value.lastSyncRunId !== "string")) {
+    throw new Error("invalid wiki state");
+  }
+
+  if (typeof value.lastSyncRunId === "string") {
+    assertSafePathSegment(value.lastSyncRunId, "wiki sync run ID");
+  }
+
+  for (const [topicId, rawTopic] of Object.entries(value.topics)) {
+    assertSafePathSegment(topicId, "wiki topic ID");
+    if (!isRecord(rawTopic)
+      || !new Set(["outline", "developed", "deep"]).has(String(rawTopic.depth))
+      || !isTimestamp(rawTopic.builtAt)
+      || (rawTopic.lastDeepenedAt !== undefined && !isTimestamp(rawTopic.lastDeepenedAt))
+      || !Array.isArray(rawTopic.deps)
+      || !rawTopic.deps.every((dependency) => typeof dependency === "string")
+      || !isTopicMetrics(rawTopic.metrics)) {
+      throw new Error("invalid wiki topic state");
+    }
+  }
+
+  return value as unknown as WikiState;
+}
+
+function isTopicMetrics(value: unknown): value is TopicDepthMetrics {
+  if (!isRecord(value)) return false;
+  const numericFields = [
+    "wordCount",
+    "codeExampleCount",
+    "fileRefCount",
+    "fileRefsWithLineNumbers",
+    "diagramCount",
+    "crossRefCount",
+  ];
+  const booleanFields = [
+    "hasEdgeCases",
+    "hasPerformanceNotes",
+    "hasTestingStrategy",
+    "hasHistoricalContext",
+  ];
+  return numericFields.every((field) => (
+    typeof value[field] === "number"
+    && Number.isFinite(value[field])
+    && value[field] >= 0
+  )) && booleanFields.every((field) => typeof value[field] === "boolean");
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value)
+    && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isTimestamp(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && Number.isFinite(Date.parse(value));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

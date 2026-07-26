@@ -150,7 +150,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       if (projectDir) buildSvc.registerProjectDir(id, projectDir);
 
       // Reject duplicate builds
-      const runId = buildSvc.startBuild(id, command, modelId);
+      const runId = buildSvc.startBuild(id, command, modelId, undefined, undefined, true);
       if (!runId) {
         res.status(409).json({ error: "A build is already running for this project.", code: "build_in_progress" });
         return;
@@ -466,7 +466,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       buildSvc.registerProjectDir(id, projectDir);
 
       // Reject duplicate builds
-      const runId = buildSvc.startBuild(id, "analyze", modelId);
+      const runId = buildSvc.startBuild(id, "analyze", modelId, undefined, "analyze");
       if (!runId) {
         res.status(409).json({ error: "An analysis is already running for this project.", code: "build_in_progress" });
         return;
@@ -561,15 +561,11 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
       buildSvc.registerProjectDir(id, projectDir);
 
       // Reject duplicate builds (deep-run uses the main project scope)
-      const runId = buildSvc.startBuild(id, "deep-run", modelId);
+      const runId = buildSvc.startBuild(id, "deep-run", modelId, undefined, "deep-run");
       if (!runId) {
         res.status(409).json({ error: "A build is already running for this project.", code: "build_in_progress" });
         return;
       }
-
-      // Mark the build as a deep-run
-      const buildState = buildSvc.getBuildState(id);
-      if (buildState) buildState.buildType = "deep-run";
 
       // SSE headers
       res.writeHead(200, {

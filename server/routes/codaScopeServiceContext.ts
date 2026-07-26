@@ -15,6 +15,8 @@ import { CodaScopeSkillService } from "../services/codaScopeSkillService.js";
 import { CodaScopeAgentService } from "../services/codaScopeAgentService.js";
 import { CodaScopeBuildStateService } from "../services/codaScopeBuildStateService.js";
 import { CodaScopeCodeMapService } from "../services/codaScopeCodeMapService.js";
+import { CodaScopeActiveEntityResolver } from "../services/codaScopeActiveEntityResolver.js";
+import { CodaScopeWorkspaceCatalogService } from "../services/codaScopeWorkspaceCatalogService.js";
 
 import { CodaScopeWikiStateService } from "../services/codaScopeWikiStateService.js";
 import { CodaScopeEpicService } from "../services/codaScopeEpicService.js";
@@ -83,6 +85,8 @@ export interface CodaScopeServices {
   agentSvc: CodaScopeAgentService;
   buildSvc: CodaScopeBuildStateService;
   codeMapSvc: CodaScopeCodeMapService;
+  activeEntityResolver: CodaScopeActiveEntityResolver;
+  workspaceCatalogSvc: CodaScopeWorkspaceCatalogService;
 
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
@@ -353,6 +357,18 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     noteLinkIndexSvc,
     noteAuditSvc,
   );
+  const activeEntityResolver = new CodaScopeActiveEntityResolver(
+    root,
+    designDocSvc,
+    codaScopePersistence,
+  );
+  const workspaceCatalogSvc = new CodaScopeWorkspaceCatalogService(
+    activeEntityResolver,
+    wikiSvc,
+    wikiStateSvc,
+    buildSvc,
+    codeMapSvc,
+  );
   // Construct the one timer-owning service last so an earlier constructor
   // failure cannot strand an untracked cleanup interval.
   const agentSvc = new CodaScopeAgentService(secretService, root);
@@ -368,6 +384,8 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
       agentSvc,
       buildSvc,
       codeMapSvc,
+      activeEntityResolver,
+      workspaceCatalogSvc,
       wikiStateSvc,
       epicSvc,
       epicBundleSvc: new CodaScopeEpicBundleService(projectSvc),

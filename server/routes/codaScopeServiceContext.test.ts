@@ -99,6 +99,10 @@ describe("CodaScope root-bound service lifecycle", () => {
     (servicesA.agentSvc as any).activeChatControllers.set("project::alice", controller);
     (servicesA.buildSvc as any).activeBuilds.set("project", { status: "building" });
     expect(vi.getTimerCount()).toBe(1);
+    const projectA = await servicesA.projectSvc.createProject("Root A Project", "old graph");
+    await servicesA.wikiSvc.updateTopicContent(projectA.id, "root-a", "# Root A\n\nOld root only.");
+    expect((await servicesA.workspaceCatalogSvc.listActiveProjects()).map((project) => project.projectId))
+      .toEqual([projectA.id]);
 
     const servicesB = await changeProjectsRoot(secrets.service, rootB, httpError, "/opt/aishell-install");
     expect(close).toHaveBeenCalledOnce();
@@ -107,18 +111,23 @@ describe("CodaScope root-bound service lifecycle", () => {
     expect(controller.signal.aborted).toBe(true);
     expect((servicesA.agentSvc as any).cleanupTimer).toBeNull();
     expect((servicesA.buildSvc as any).cancelledKeys.has("project")).toBe(true);
+    expect(servicesB.activeEntityResolver).not.toBe(servicesA.activeEntityResolver);
+    expect(servicesB.workspaceCatalogSvc).not.toBe(servicesA.workspaceCatalogSvc);
     expect(servicesB.projectSvc.getRoot()).toBe(rootB);
     expect((servicesB.agentSvc as any).projectsRoot).toBe(rootB);
     expect(await context.ensureServices()).toBe(servicesB);
     expect(vi.getTimerCount()).toBe(1);
     const projectB = await servicesB.projectSvc.createProject("Root B Project", "fresh graph");
     await servicesB.wikiSvc.updateTopicContent(projectB.id, "root-b", "# Root B Only");
+    expect((await servicesB.workspaceCatalogSvc.listActiveProjects()).map((project) => project.projectId))
+      .toEqual([projectB.id]);
     const rootBTools = (servicesB.agentSvc as any).getToolsForPurpose(projectB.id, "assistant", undefined, "alice");
     await expect(rootBTools.list_wiki_topics.execute({}, {})).resolves.toContain("Root B Only");
 
     const servicesC = await changeProjectsRoot(secrets.service, rootC, httpError, "/opt/aishell-install");
     expect((servicesB.agentSvc as any).cleanupTimer).toBeNull();
     expect(servicesC.projectSvc.getRoot()).toBe(rootC);
+    expect(await servicesC.workspaceCatalogSvc.listActiveProjects()).toEqual([]);
     expect(vi.getTimerCount()).toBe(1);
   });
 
