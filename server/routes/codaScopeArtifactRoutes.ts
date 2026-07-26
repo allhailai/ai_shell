@@ -169,7 +169,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
     const agentCallback = async (spec: ArtifactSpec): Promise<string> => {
       return new Promise<string>((resolve, reject) => {
         agentSvc.send({
-          projectId: id,
+          scope: { kind: "project", projectId: id },
           message: assembledPrompt,
           modelId: modelId ?? "default",
           purpose: "artifact-build",
@@ -475,7 +475,7 @@ export function registerArtifactRoutes(ctx: CodaScopeRouteContext): void {
 
       // Fire and forget — the SSE status endpoint will track progress
       agentSvc.send({
-        projectId: id,
+        scope: { kind: "project", projectId: id },
         message: regenPrompt,
         modelId: "default",
         purpose: "artifact-section-regen",

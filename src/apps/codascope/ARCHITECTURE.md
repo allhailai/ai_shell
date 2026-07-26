@@ -520,6 +520,17 @@ receiving the assistant's full tool set. User-facing agent pools and note-tool
 closures are also actor-scoped so a private note or document path cannot cross
 users through an agent reuse.
 
+The first-class workspace assistant is a separate read-only boundary. Backend
+runs use an explicit `workspace` or `project:<id>` assistant scope; workspace
+is never represented by a sentinel project ID. `workspace-assistant` receives
+only the dedicated active-workspace tool builder: compact project/catalog,
+wiki, build-history, and path-scrubbed code-map reads are automatic, while
+epic/design/knowledge/research reads require a server-validated grant replaced
+and cleared for each run. Workspace pools and cancellation are keyed by scope,
+purpose, and authenticated actor. Workspace agents receive no repository
+lookup, repository cwd, project skills, notes, web search, source-file tools,
+mutation tools, or native filesystem workspace.
+
 Wiki-builds have a stronger storage boundary: their Cursor SDK workspace is the
 CodaScope project directory and the SDK filesystem sandbox is enabled when the
 host supports it. If the SDK explicitly reports that sandboxing is unsupported,
@@ -590,6 +601,13 @@ by a write tool; it is never deferred to a confirmation card.
 - `formatViewContext()` — human-readable description of user's current view
 
 The system prompt template (`do_chat.md`) uses `{{VARIABLE}}` placeholders: `{{PROJECT_MANIFEST}}`, `{{CONVERSATION_HISTORY}}`, `{{VIEW_CONTEXT}}`, `{{USER_MESSAGE}}`.
+
+Workspace prompt support is separate and does not change project chat.
+`codaScopeWorkspaceChatPromptHelpers.ts` builds a bounded, path-free active
+workspace manifest with deterministic one-line project summaries and an
+explicit truncation signal. `do_workspace_chat.md` requires progressive
+wiki-first retrieval, project/topic provenance, freshness warnings,
+disagreement preservation, and refusal to claim repository source access.
 
 ### Stale Data Awareness
 

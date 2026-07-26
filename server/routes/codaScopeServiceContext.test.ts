@@ -80,23 +80,45 @@ describe("CodaScope root-bound service lifecycle", () => {
     const servicesA = await context.ensureServices();
     expect((servicesA.chatSvc as any).persistence).toBe(codaScopePersistence);
     const close = vi.fn();
+    const closeWorkspace = vi.fn();
     const cancel = vi.fn(async () => undefined);
+    const cancelWorkspace = vi.fn(async () => undefined);
     const wait = vi.fn(async () => undefined);
+    const waitWorkspace = vi.fn(async () => undefined);
     const fakeAgent = { close };
+    const fakeWorkspaceAgent = { close: closeWorkspace };
     const fakeRun = { cancel, wait };
+    const fakeWorkspaceRun = {
+      cancel: cancelWorkspace,
+      wait: waitWorkspace,
+    };
     const controller = new AbortController();
-    (servicesA.agentSvc as any).pool.set("project::assistant::alice", {
+    const workspaceController = new AbortController();
+    (servicesA.agentSvc as any).pool.set("project:project::assistant::alice", {
       agent: fakeAgent,
-      projectId: "project",
+      scope: { kind: "project", projectId: "project" },
       purpose: "assistant",
       actorId: "alice",
       lastUsed: Date.now(),
       busy: true,
       collectorHolder: {},
     });
+    (servicesA.agentSvc as any).pool.set("workspace::workspace-assistant::alice", {
+      agent: fakeWorkspaceAgent,
+      scope: { kind: "workspace" },
+      purpose: "workspace-assistant",
+      actorId: "alice",
+      lastUsed: Date.now(),
+      busy: true,
+      collectorHolder: {},
+      workspaceGrantHolder: {},
+    });
     (servicesA.agentSvc as any).allAgents.add(fakeAgent);
-    (servicesA.agentSvc as any).activeRuns.set("project::alice", new Set([fakeRun]));
-    (servicesA.agentSvc as any).activeChatControllers.set("project::alice", controller);
+    (servicesA.agentSvc as any).allAgents.add(fakeWorkspaceAgent);
+    (servicesA.agentSvc as any).activeRuns.set("project:project::alice", new Set([fakeRun]));
+    (servicesA.agentSvc as any).activeRuns.set("workspace::alice", new Set([fakeWorkspaceRun]));
+    (servicesA.agentSvc as any).activeChatControllers.set("project:project::alice", controller);
+    (servicesA.agentSvc as any).activeChatControllers.set("workspace::alice", workspaceController);
     (servicesA.buildSvc as any).activeBuilds.set("project", { status: "building" });
     expect(vi.getTimerCount()).toBe(1);
     const projectA = await servicesA.projectSvc.createProject("Root A Project", "old graph");
@@ -106,13 +128,24 @@ describe("CodaScope root-bound service lifecycle", () => {
 
     const servicesB = await changeProjectsRoot(secrets.service, rootB, httpError, "/opt/aishell-install");
     expect(close).toHaveBeenCalledOnce();
+    expect(closeWorkspace).toHaveBeenCalledOnce();
     expect(cancel).toHaveBeenCalledOnce();
+    expect(cancelWorkspace).toHaveBeenCalledOnce();
     expect(wait).toHaveBeenCalledOnce();
+    expect(waitWorkspace).toHaveBeenCalledOnce();
     expect(controller.signal.aborted).toBe(true);
+    expect(workspaceController.signal.aborted).toBe(true);
     expect((servicesA.agentSvc as any).cleanupTimer).toBeNull();
     expect((servicesA.buildSvc as any).cancelledKeys.has("project")).toBe(true);
     expect(servicesB.activeEntityResolver).not.toBe(servicesA.activeEntityResolver);
     expect(servicesB.workspaceCatalogSvc).not.toBe(servicesA.workspaceCatalogSvc);
+    expect((servicesB.agentSvc as any).workspaceTools).toMatchObject({
+      activeResolver: servicesB.activeEntityResolver,
+      catalog: servicesB.workspaceCatalogSvc,
+      epic: servicesB.epicSvc,
+      designDoc: servicesB.designDocSvc,
+      epicKnowledge: servicesB.epicKnowledgeSvc,
+    });
     expect(servicesB.projectSvc.getRoot()).toBe(rootB);
     expect((servicesB.agentSvc as any).projectsRoot).toBe(rootB);
     expect(await context.ensureServices()).toBe(servicesB);
@@ -121,7 +154,12 @@ describe("CodaScope root-bound service lifecycle", () => {
     await servicesB.wikiSvc.updateTopicContent(projectB.id, "root-b", "# Root B Only");
     expect((await servicesB.workspaceCatalogSvc.listActiveProjects()).map((project) => project.projectId))
       .toEqual([projectB.id]);
-    const rootBTools = (servicesB.agentSvc as any).getToolsForPurpose(projectB.id, "assistant", undefined, "alice");
+    const rootBTools = (servicesB.agentSvc as any).getToolsForPurpose({
+      scope: { kind: "project", projectId: projectB.id },
+      purpose: "assistant",
+      collectorHolder: {},
+      actorId: "alice",
+    });
     await expect(rootBTools.list_wiki_topics.execute({}, {})).resolves.toContain("Root B Only");
 
     const servicesC = await changeProjectsRoot(secrets.service, rootC, httpError, "/opt/aishell-install");

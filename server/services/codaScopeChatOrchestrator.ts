@@ -140,7 +140,7 @@ export async function streamAssistantResponse(options: {
 
   return new Promise<StreamResult>((resolve, reject) => {
     agentSvc.send({
-      projectId,
+      scope: { kind: "project", projectId },
       actorId,
       message,
       modelId,

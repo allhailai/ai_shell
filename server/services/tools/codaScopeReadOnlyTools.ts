@@ -315,7 +315,11 @@ export function buildReadOnlyTools(
           const commands: string[] = [];
           if (existsSync(commandsDir)) {
             for (const f of readdirSync(commandsDir)) {
-              if (f.endsWith(".md")) commands.push(f.replace(/\.md$/, ""));
+              // The workspace system prompt is framework-owned but is not a
+              // runnable/discoverable project skill.
+              if (f.endsWith(".md") && f !== "do_workspace_chat.md") {
+                commands.push(f.replace(/\.md$/, ""));
+              }
             }
           }
           return JSON.stringify({ frameworkCommands: commands }, null, 2);

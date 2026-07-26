@@ -371,7 +371,13 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
   );
   // Construct the one timer-owning service last so an earlier constructor
   // failure cannot strand an untracked cleanup interval.
-  const agentSvc = new CodaScopeAgentService(secretService, root);
+  const agentSvc = new CodaScopeAgentService(secretService, root, {
+    activeResolver: activeEntityResolver,
+    catalog: workspaceCatalogSvc,
+    epic: epicSvc,
+    designDoc: designDocSvc,
+    epicKnowledge: epicKnowledgeSvc,
+  });
 
   return {
     root,

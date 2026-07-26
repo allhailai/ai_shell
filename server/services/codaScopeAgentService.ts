@@ -2,7 +2,7 @@
    Manages Cursor SDK agent lifecycle for CodaScope.
 
    Key features:
-   - Agent pool: one agent per (projectId, purpose, authenticated actor) with idle cleanup
+   - Agent pool: one agent per (assistant scope, purpose, authenticated actor)
    - Custom tools: purpose-based filtering (read-only vs read+write)
    - Streaming: emits SDKMessage objects via callback for SSE
    - Model listing: cached Cursor.models.list() results
@@ -22,12 +22,31 @@ import type {
 } from "@cursor/sdk";
 import type { SecretService } from "./secretService.js";
 import { CodaScopeProjectService } from "./codaScopeProjectService.js";
-import { getToolsForPurpose, ToolResultCollector, ToolResultCollectorHolder } from "./codaScopeToolDefinitions.js";
+import {
+  getToolsForPurpose,
+  ToolResultCollector,
+  ToolResultCollectorHolder,
+  type AgentPurpose,
+  type ProjectAgentPurpose,
+} from "./codaScopeToolDefinitions.js";
+import {
+  assistantScopeKey,
+  type AssistantScope,
+} from "./codaScopeAssistantScope.js";
+import {
+  EMPTY_WORKSPACE_TURN_READ_GRANT,
+  WorkspaceTurnReadGrantHolder,
+  validateWorkspaceTurnReadGrant,
+  type WorkspaceTurnReadGrant,
+} from "./codaScopeWorkspaceReadGrant.js";
+import {
+  getWorkspaceTools,
+  type WorkspaceToolServices,
+} from "./codaScopeWorkspaceToolDefinitions.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
-export interface AgentSendOptions {
-  projectId: string;
+interface AgentSendCommonOptions {
   /** Authenticated actor for user-facing runs. Never taken from a tool arg. */
   actorId?: string;
   message: string;
@@ -35,13 +54,35 @@ export interface AgentSendOptions {
   systemPrompt?: string;
   context?: string;
   images?: Array<{ data: string; mimeType: string }>;
-  purpose: "chat" | "assistant" | "wiki-build" | "curation" | "research" | "artifact-build" | "artifact-section-regen";
   onMessage: (msg: SDKMessage) => void;
   onDone: (result: RunResult) => void;
   onError: (err: Error) => void;
 }
 
-const EPIC_MUTATION_PURPOSES = new Set<AgentSendOptions["purpose"]>([
+export type AgentSendOptions =
+  | (AgentSendCommonOptions & {
+      scope: Extract<AssistantScope, { kind: "project" }>;
+      purpose: ProjectAgentPurpose;
+      workspaceReadGrant?: never;
+    })
+  | (AgentSendCommonOptions & {
+      scope: Extract<AssistantScope, { kind: "workspace" }>;
+      purpose: "workspace-assistant";
+      actorId: string;
+      workspaceReadGrant?: WorkspaceTurnReadGrant;
+    });
+
+const PROJECT_PURPOSES = new Set<ProjectAgentPurpose>([
+  "chat",
+  "assistant",
+  "wiki-build",
+  "curation",
+  "research",
+  "artifact-build",
+  "artifact-section-regen",
+]);
+
+const EPIC_MUTATION_PURPOSES = new Set<ProjectAgentPurpose>([
   "assistant",
   "chat",
   "curation",
@@ -50,17 +91,26 @@ const EPIC_MUTATION_PURPOSES = new Set<AgentSendOptions["purpose"]>([
 
 interface PoolEntry {
   agent: SDKAgent;
-  projectId: string;
-  purpose: string;
+  scope: AssistantScope;
+  purpose: AgentPurpose;
   actorId?: string;
   lastUsed: number;
   busy: boolean;
   collectorHolder: ToolResultCollectorHolder;
+  workspaceGrantHolder?: WorkspaceTurnReadGrantHolder;
 }
 
 export interface AgentLocalWorkspace {
   cwd?: string | string[];
   sandboxOptions?: { enabled: boolean };
+}
+
+export interface AgentLocalWorkspaceOptions {
+  scope: AssistantScope;
+  purpose: AgentPurpose | string;
+  projectDir?: string | null;
+  repoPaths?: string[];
+  sandboxEnabled?: boolean;
 }
 
 /**
@@ -70,11 +120,17 @@ export interface AgentLocalWorkspace {
  * access is tool-mediated and the SDK sandbox is limited to CodaScope data.
  */
 export function getAgentLocalWorkspace(
-  purpose: string,
-  projectDir: string | null,
-  repoPaths: string[],
-  sandboxEnabled = true,
+  options: AgentLocalWorkspaceOptions,
 ): AgentLocalWorkspace {
+  const {
+    scope,
+    purpose,
+    projectDir = null,
+    repoPaths = [],
+    sandboxEnabled = true,
+  } = options;
+  if (scope.kind === "workspace") return {};
+
   if (purpose === "wiki-build") {
     if (!projectDir) throw new Error("CodaScope project directory not found for wiki build.");
     return {
@@ -84,6 +140,34 @@ export function getAgentLocalWorkspace(
   }
 
   return { cwd: repoPaths.length > 0 ? repoPaths : undefined };
+}
+
+export function assertAgentPurposeScope(
+  scope: AssistantScope,
+  purpose: string,
+): asserts purpose is AgentPurpose {
+  if (scope.kind === "workspace") {
+    if (purpose !== "workspace-assistant") {
+      throw new Error(`Invalid CodaScope purpose/scope combination: ${purpose} on workspace`);
+    }
+    return;
+  }
+  if (!PROJECT_PURPOSES.has(purpose as ProjectAgentPurpose)) {
+    throw new Error(`Invalid CodaScope purpose/scope combination: ${purpose} on project`);
+  }
+}
+
+export function getAgentName(options: {
+  scope: AssistantScope;
+  purpose: AgentPurpose;
+  projectName?: string | null;
+}): string {
+  if (options.scope.kind === "workspace") {
+    return "CodaScope Workspace Assistant";
+  }
+  return `CodaScope ${options.purpose} — ${
+    options.projectName ?? options.scope.projectId
+  }`;
 }
 
 /** The SDK emits this stable error when the host cannot provide its sandbox. */
@@ -145,6 +229,7 @@ const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 export class CodaScopeAgentService {
   private secretService: SecretService;
   private projectsRoot: string;
+  private workspaceTools?: WorkspaceToolServices;
   private pool = new Map<string, PoolEntry>();
   private modelCache: ModelCache | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -152,16 +237,21 @@ export class CodaScopeAgentService {
   private wikiBuildSandboxUnsupported = false;
   private disposed = false;
 
-  /** Active chat AbortControllers keyed by project and authenticated actor. */
+  /** Active chat AbortControllers keyed by assistant scope and actor. */
   private activeChatControllers = new Map<string, AbortController>();
   /** Every SDK run, including non-chat builds, must be cancellable on cutover. */
   private activeRuns = new Map<string, Set<Run>>();
   /** Busy agents can temporarily fall outside the one-entry-per-pool-key map. */
   private allAgents = new Set<SDKAgent>();
 
-  constructor(secretService: SecretService, projectsRoot: string) {
+  constructor(
+    secretService: SecretService,
+    projectsRoot: string,
+    workspaceTools?: WorkspaceToolServices,
+  ) {
     this.secretService = secretService;
     this.projectsRoot = projectsRoot;
+    this.workspaceTools = workspaceTools;
 
     // Clean up idle agents every 2 minutes
     this.cleanupTimer = setInterval(() => this.cleanIdleAgents(), 2 * 60 * 1000);
@@ -240,40 +330,65 @@ export class CodaScopeAgentService {
 
   /* ── Tool Assembly by Purpose ─────────────────────────────────────── */
 
-  /**
-   * Get the appropriate tools for a given agent purpose.
-   * Delegates to codaScopeToolDefinitions.ts for the actual tool objects.
-   */
   private getToolsForPurpose(
-    projectId: string,
-    purpose: string,
-    collectorHolder?: ToolResultCollectorHolder,
-    actorId?: string,
+    options: {
+      scope: AssistantScope;
+      purpose: AgentPurpose;
+      collectorHolder: ToolResultCollectorHolder;
+      workspaceGrantHolder?: WorkspaceTurnReadGrantHolder;
+      actorId?: string;
+    },
   ): Record<string, SDKCustomTool> {
-    return getToolsForPurpose(projectId, this.projectsRoot, purpose, collectorHolder, actorId);
+    const {
+      scope,
+      purpose,
+      collectorHolder,
+      workspaceGrantHolder,
+      actorId,
+    } = options;
+    assertAgentPurposeScope(scope, purpose);
+    if (scope.kind === "workspace") {
+      if (!this.workspaceTools || !workspaceGrantHolder) {
+        throw new Error("CodaScope workspace tool dependencies are unavailable.");
+      }
+      return getWorkspaceTools(this.workspaceTools, workspaceGrantHolder);
+    }
+    return getToolsForPurpose(
+      scope.projectId,
+      this.projectsRoot,
+      purpose,
+      collectorHolder,
+      actorId,
+    );
   }
 
   /* ── Agent Pool ───────────────────────────────────────────────────── */
 
-  private poolKey(projectId: string, purpose: string, actorId?: string): string {
-    // Tool closures carry the actor into note/document authorization. Do not
-    // reuse one actor's closures for another actor, even when project/purpose
-    // match. A system run is a distinct boundary as well.
-    return `${projectId}::${purpose}::${actorId ?? "system"}`;
-  }
-
-  private activeChatKey(projectId: string, actorId?: string): string {
-    return `${projectId}::${actorId ?? "system"}`;
-  }
-
-  private async getOrCreateAgent(
-    projectId: string,
+  private poolKey(
+    scope: AssistantScope,
     purpose: string,
-    modelId: string,
     actorId?: string,
-  ): Promise<SDKAgent> {
+  ): string {
+    // Tool closures carry the actor into note/document authorization. Do not
+    // reuse one actor's closures for another actor, even when scope/purpose
+    // match. A system run is a distinct boundary as well.
+    return `${assistantScopeKey(scope)}::${purpose}::${actorId ?? "system"}`;
+  }
+
+  private activeChatKey(scope: AssistantScope, actorId?: string): string {
+    return `${assistantScopeKey(scope)}::${actorId ?? "system"}`;
+  }
+
+  private async getOrCreateAgent(options: {
+    scope: AssistantScope;
+    purpose: AgentPurpose;
+    modelId: string;
+    actorId?: string;
+  }): Promise<SDKAgent> {
     if (this.disposed) throw new Error("CodaScope agent service has been disposed.");
-    const key = this.poolKey(projectId, purpose, actorId);
+    const { scope, purpose, modelId, actorId } = options;
+    assertAgentPurposeScope(scope, purpose);
+    const key = this.poolKey(scope, purpose, actorId);
     const existing = this.pool.get(key);
 
     if (existing && !existing.busy) {
@@ -281,32 +396,47 @@ export class CodaScopeAgentService {
       return existing.agent;
     }
 
-    // Create new agent
+    // Create a stable collector holder for this pool entry. Tool closures
+    // capture holders whose current run state is replaced before every send.
     const apiKey = await this.getApiKey();
-    const projectService = new CodaScopeProjectService(this.projectsRoot);
-    const project = await projectService.getProject(projectId);
-
-    const repoPaths = project?.repositories?.map(
-      (r: { path: string }) => r.path,
-    ) ?? [];
-    const projectDir = projectService.getProjectDir(projectId);
-
-    // Create a stable collector holder for this pool entry.
-    // Tool closures capture the holder; before each run we swap
-    // holder.current to a fresh ToolResultCollector.
     const collectorHolder = new ToolResultCollectorHolder();
+    const workspaceGrantHolder = scope.kind === "workspace"
+      ? new WorkspaceTurnReadGrantHolder()
+      : undefined;
 
-    const localWorkspace = getAgentLocalWorkspace(
+    let projectName: string | null = null;
+    let projectDir: string | null = null;
+    let repoPaths: string[] = [];
+    if (scope.kind === "project") {
+      const projectService = new CodaScopeProjectService(this.projectsRoot);
+      const project = await projectService.getProject(scope.projectId);
+      projectName = project?.name ?? scope.projectId;
+      repoPaths = project?.repositories?.map(
+        (repository: { path: string }) => repository.path,
+      ) ?? [];
+      projectDir = projectService.getProjectDir(scope.projectId);
+    }
+
+    const localWorkspace = getAgentLocalWorkspace({
+      scope,
       purpose,
       projectDir,
       repoPaths,
-      purpose !== "wiki-build" || !this.wikiBuildSandboxUnsupported,
-    );
-    const customTools = this.getToolsForPurpose(projectId, purpose, collectorHolder, actorId);
+      sandboxEnabled: purpose !== "wiki-build"
+        || !this.wikiBuildSandboxUnsupported,
+    });
+    const customTools = this.getToolsForPurpose({
+      scope,
+      purpose,
+      collectorHolder,
+      workspaceGrantHolder,
+      actorId,
+    });
+    const agentName = getAgentName({ scope, purpose, projectName });
     const createAgent = (workspace: typeof localWorkspace) => Agent.create({
       model: { id: modelId },
       apiKey,
-      name: `CodaScope ${purpose} — ${project?.name ?? projectId}`,
+      name: agentName,
       local: {
         // Source repositories remain outside the wiki-build native
         // filesystem boundary. Custom tools run in the host service and
@@ -330,12 +460,13 @@ export class CodaScopeAgentService {
 
     this.pool.set(key, {
       agent,
-      projectId,
+      scope,
       purpose,
       actorId,
       lastUsed: Date.now(),
       busy: false,
       collectorHolder,
+      workspaceGrantHolder,
     });
 
     return agent;
@@ -360,12 +491,10 @@ export class CodaScopeAgentService {
 
   /* ── Cancel Support ──────────────────────────────────────────────── */
 
-  /**
-   * Cancel an active agent chat for a project.
-   * Returns true if a controller was found and aborted.
-   */
-  cancelAgent(projectId: string, actorId?: string): boolean {
-    const key = this.activeChatKey(projectId, actorId);
+  /** Cancel an active assistant run without crossing scope or actor custody. */
+  cancelAgent(options: { scope: AssistantScope; actorId?: string }): boolean {
+    const { scope, actorId } = options;
+    const key = this.activeChatKey(scope, actorId);
     const controller = this.activeChatControllers.get(key);
     const runs = this.activeRuns.get(key);
     for (const run of runs ?? []) void run.cancel().catch(() => undefined);
@@ -380,24 +509,63 @@ export class CodaScopeAgentService {
   /* ── Send Message ─────────────────────────────────────────────────── */
 
   async send(options: AgentSendOptions): Promise<void> {
-    const { projectId, actorId, message, modelId, systemPrompt, context, images, purpose, onMessage, onDone, onError } = options;
+    const {
+      scope,
+      actorId,
+      message,
+      modelId,
+      systemPrompt,
+      context,
+      images,
+      purpose,
+      onMessage,
+      onDone,
+      onError,
+    } = options;
 
     if (this.disposed) {
       onError(new Error("CodaScope agent service has been disposed."));
       return;
     }
-    if (EPIC_MUTATION_PURPOSES.has(purpose) && !actorId?.trim()) {
+    try {
+      assertAgentPurposeScope(scope, purpose);
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    if ((purpose === "workspace-assistant"
+      || EPIC_MUTATION_PURPOSES.has(purpose as ProjectAgentPurpose))
+      && !actorId?.trim()) {
       onError(new Error(`An authenticated initiating actor is required for ${purpose} agent tools.`));
       return;
     }
 
-    const key = this.poolKey(projectId, purpose, actorId);
-    const chatKey = this.activeChatKey(projectId, actorId);
+    let workspaceReadGrant = EMPTY_WORKSPACE_TURN_READ_GRANT;
+    if (scope.kind === "workspace") {
+      if (!this.workspaceTools) {
+        onError(new Error("CodaScope workspace tool dependencies are unavailable."));
+        return;
+      }
+      try {
+        workspaceReadGrant = await validateWorkspaceTurnReadGrant(
+          options.workspaceReadGrant ?? EMPTY_WORKSPACE_TURN_READ_GRANT,
+          this.workspaceTools.activeResolver,
+        );
+      } catch {
+        onError(new Error("Workspace turn read grant is invalid or inactive."));
+        return;
+      }
+    }
+
+    const key = this.poolKey(scope, purpose, actorId);
+    const chatKey = this.activeChatKey(scope, actorId);
 
     // Set up AbortController for cancel support (assistant/chat only)
     const abortController = new AbortController();
-    if (purpose === "assistant" || purpose === "chat") {
-      // Cancel any existing controller for this project
+    if (purpose === "assistant"
+      || purpose === "chat"
+      || purpose === "workspace-assistant") {
+      // Cancel any existing controller for this scope and actor.
       this.activeChatControllers.get(chatKey)?.abort();
       this.activeChatControllers.set(chatKey, abortController);
     }
@@ -406,15 +574,23 @@ export class CodaScopeAgentService {
     // The pool entry's collectorHolder is a stable reference captured by tool closures;
     // swapping .current redirects all tool result collection to this run's collector.
     const runCollector = new ToolResultCollector();
+    let activeEntry: PoolEntry | undefined;
+    let startedRun: Run | undefined;
 
     try {
-      const agent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
+      const agent = await this.getOrCreateAgent({
+        scope,
+        purpose,
+        modelId,
+        actorId,
+      });
       if (this.disposed) throw new Error("CodaScope agent service has been disposed.");
 
-      let activeEntry = this.pool.get(key);
+      activeEntry = this.pool.get(key);
       if (activeEntry) {
         activeEntry.busy = true;
         activeEntry.collectorHolder.current = runCollector;
+        activeEntry.workspaceGrantHolder?.replace(workspaceReadGrant);
       }
 
       // Build the full message with optional context
@@ -487,15 +663,22 @@ export class CodaScopeAgentService {
             this.pool.delete(key);
           }
 
-          const fallbackAgent = await this.getOrCreateAgent(projectId, purpose, modelId, actorId);
+          const fallbackAgent = await this.getOrCreateAgent({
+            scope,
+            purpose,
+            modelId,
+            actorId,
+          });
           activeEntry = this.pool.get(key);
           if (activeEntry) {
             activeEntry.busy = true;
             activeEntry.collectorHolder.current = runCollector;
+            activeEntry.workspaceGrantHolder?.replace(workspaceReadGrant);
           }
           return fallbackAgent;
         },
       );
+      startedRun = run;
 
       // shutdown() can race an SDK send() that has not returned a Run yet.
       // Do not let that late Run escape the old service graph after a root
@@ -506,22 +689,24 @@ export class CodaScopeAgentService {
         throw new Error("CodaScope agent service has been shut down.");
       }
 
-      const activeRuns = this.activeRuns.get(chatKey) ?? new Set<Run>();
-      activeRuns.add(run);
-      this.activeRuns.set(chatKey, activeRuns);
+      const scopedRuns = this.activeRuns.get(chatKey) ?? new Set<Run>();
+      scopedRuns.add(run);
+      this.activeRuns.set(chatKey, scopedRuns);
 
       // Wait for completion
       const result = await run.wait();
-      activeRuns.delete(run);
-      if (activeRuns.size === 0) this.activeRuns.delete(chatKey);
+      this.removeActiveRun(chatKey, run);
 
       if (activeEntry) {
         activeEntry.busy = false;
         activeEntry.lastUsed = Date.now();
+        activeEntry.workspaceGrantHolder?.clear();
       }
 
       // Clean up controller
-      this.activeChatControllers.delete(chatKey);
+      if (this.activeChatControllers.get(chatKey) === abortController) {
+        this.activeChatControllers.delete(chatKey);
+      }
 
       if (abortController.signal.aborted) {
         runCollector.drain(); // discard collected results on cancel
@@ -538,24 +723,39 @@ export class CodaScopeAgentService {
         onDone(result);
       }
     } catch (err) {
-      const entry = this.pool.get(key);
-      if (entry) entry.busy = false;
+      if (activeEntry) {
+        activeEntry.busy = false;
+        activeEntry.workspaceGrantHolder?.clear();
+      }
 
-      // If agent creation failed, remove from pool
-      this.pool.delete(key);
+      // Never let an older failed run delete a newer busy entry that reused
+      // the same scope/purpose/actor key.
+      if (activeEntry && this.pool.get(key) === activeEntry) {
+        this.pool.delete(key);
+      }
 
-      // Clean up controller
-      this.activeChatControllers.delete(chatKey);
-      // A failed/cancelled run is removed by identity when possible; clearing
-      // this actor key is safe because user-facing sends replace each other.
-      this.activeRuns.delete(chatKey);
+      if (this.activeChatControllers.get(chatKey) === abortController) {
+        this.activeChatControllers.delete(chatKey);
+      }
+      if (startedRun) this.removeActiveRun(chatKey, startedRun);
 
       if (abortController.signal.aborted) {
         onError(new Error("Agent cancelled by user."));
+      } else if (scope.kind === "workspace") {
+        // SDK/native errors may contain machine-local details. Workspace
+        // callers receive a stable path-free failure instead.
+        onError(new Error("Workspace assistant run failed."));
       } else {
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     }
+  }
+
+  private removeActiveRun(key: string, run: Run): void {
+    const runs = this.activeRuns.get(key);
+    if (!runs) return;
+    runs.delete(run);
+    if (runs.size === 0) this.activeRuns.delete(key);
   }
 
   /* ── Cleanup ──────────────────────────────────────────────────────── */

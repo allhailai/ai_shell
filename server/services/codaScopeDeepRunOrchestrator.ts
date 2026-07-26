@@ -147,7 +147,7 @@ export async function runDeepRunPipeline(
     sendEvent("pipeline-step", { step: "deep-code-map", status: "building", repo: repo.name });
 
     await agentSvc.send({
-      projectId,
+      scope: { kind: "project", projectId },
       message: prompt,
       modelId,
       systemPrompt:
@@ -197,7 +197,7 @@ export async function runDeepRunPipeline(
       let outlineError: string | null = null;
       if (prompt) {
         await agentSvc.send({
-          projectId,
+          scope: { kind: "project", projectId },
           message: prompt,
           modelId,
           systemPrompt:
@@ -275,7 +275,7 @@ export async function runDeepRunPipeline(
       }
 
       await agentSvc.send({
-        projectId,
+        scope: { kind: "project", projectId },
         message: prompt,
         modelId,
         systemPrompt:
@@ -360,7 +360,7 @@ export async function runDeepRunPipeline(
       const prompt = loadCommandOrSkill("do_wiki_cross_reference", projectDir, vars);
       if (prompt) {
         await agentSvc.send({
-          projectId,
+          scope: { kind: "project", projectId },
           message: prompt,
           modelId,
           systemPrompt:
@@ -405,7 +405,7 @@ export async function runDeepRunPipeline(
     if (prompt) {
       // Use a focused system prompt that only regenerates the index
       await agentSvc.send({
-        projectId,
+        scope: { kind: "project", projectId },
         message:
           "Regenerate ONLY the index and _index wiki topics. All topic pages have already been written at deep depth. " +
           "Read the existing topic pages to build an accurate, rich index page. " +

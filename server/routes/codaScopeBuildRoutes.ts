@@ -94,7 +94,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await agentSvc.send({
-        projectId: id,
+        scope: { kind: "project", projectId: id },
         message: "Execute the following skill:\n\n" + prompt,
         modelId,
         systemPrompt:
@@ -204,7 +204,7 @@ export function registerBuildRoutes(ctx: CodaScopeRouteContext): void {
 
       try {
         await agentSvc.send({
-        projectId: id,
+        scope: { kind: "project", projectId: id },
         message: prompt,
         modelId,
         systemPrompt:

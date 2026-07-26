@@ -98,7 +98,7 @@ export async function runAnalyzePipeline(
       sendEvent("pipeline-step", { step: "code-map", status: "building", repo: repo.name });
 
       await agentSvc.send({
-        projectId,
+        scope: { kind: "project", projectId },
         message: prompt,
         modelId,
         systemPrompt:
@@ -150,7 +150,7 @@ export async function runAnalyzePipeline(
       let outlineError: string | null = null;
       if (prompt) {
         await agentSvc.send({
-          projectId,
+          scope: { kind: "project", projectId },
           message: prompt,
           modelId,
           systemPrompt:
@@ -241,7 +241,7 @@ export async function runAnalyzePipeline(
           const prompt = loadCommandOrSkill("do_build_wiki_delta", projectDir, vars);
           if (prompt) {
             await agentSvc.send({
-              projectId,
+              scope: { kind: "project", projectId },
               message: prompt,
               modelId,
               systemPrompt:
@@ -461,7 +461,7 @@ export async function runEpicDeepenPipeline(
 
     try {
       await agentSvc.send({
-        projectId,
+        scope: { kind: "project", projectId },
         message: prompt,
         modelId,
         systemPrompt:

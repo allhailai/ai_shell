@@ -69,6 +69,13 @@ describe("tool tier builders", () => {
     expect(keys).toContain("read_annotation_thread");
   });
 
+  it("keeps the workspace system prompt out of project skill discovery", async () => {
+    const tools = buildReadOnlyTools(PROJECT_ID, services);
+    const listed = String(await tools.list_project_skills.execute({}, {} as any));
+    expect(listed).not.toContain("do_workspace_chat");
+    expect(listed).toContain("do_chat");
+  });
+
   it("buildEpicTools returns non-empty tool set", () => {
     const tools = buildEpicTools(PROJECT_ID, services);
     const keys = Object.keys(tools);
@@ -861,6 +868,11 @@ describe("getToolsForPurpose", () => {
   it("rejects an unknown purpose instead of granting the full tool set", () => {
     expect(() => getToolsForPurpose(PROJECT_ID, PROJECTS_ROOT, "unknown-purpose"))
       .toThrow("Unknown CodaScope agent purpose");
+    expect(() => getToolsForPurpose(
+      PROJECT_ID,
+      PROJECTS_ROOT,
+      "workspace-assistant",
+    )).toThrow("Unknown CodaScope agent purpose");
   });
 
   it("tool count sanity check — each tier is meaningful", () => {

@@ -22,7 +22,8 @@ import { buildNoteReadTools, buildNoteWriteTools } from "./tools/codaScopeNoteTo
 
 // ── Types ───────────────────────────────────────────────────────────
 
-export type AgentPurpose = "chat" | "assistant" | "wiki-build" | "curation" | "research" | "artifact-build" | "artifact-section-regen";
+export type ProjectAgentPurpose = "chat" | "assistant" | "wiki-build" | "curation" | "research" | "artifact-build" | "artifact-section-regen";
+export type AgentPurpose = ProjectAgentPurpose | "workspace-assistant";
 
 // ── Tool Result Collector ───────────────────────────────────────────
 // Per-run collector for tool return values that contain action tags.
@@ -89,7 +90,7 @@ export { buildNoteReadTools, buildNoteWriteTools } from "./tools/codaScopeNoteTo
 export function getToolsForPurpose(
   projectId: string,
   projectsRoot: string,
-  purpose: AgentPurpose | string,
+  purpose: ProjectAgentPurpose | string,
   collectorHolder?: ToolResultCollectorHolder,
   actorId?: string,
 ): Record<string, SDKCustomTool> {

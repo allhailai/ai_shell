@@ -595,7 +595,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   app.post("/api/codascope/projects/:id/assistant/cancel", wrap(async (req, res) => {
     const { agentSvc } = await ensureServices();
     const id = param(req, "id");
-    const cancelled = agentSvc.cancelAgent(id, principal(req).username);
+    const cancelled = agentSvc.cancelAgent({
+      scope: { kind: "project", projectId: id },
+      actorId: principal(req).username,
+    });
     res.json({ cancelled });
   }));
 

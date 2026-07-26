@@ -119,6 +119,12 @@ export interface WorkspaceCodeMapRead extends WorkspaceCodeMapSummary {
   truncated: boolean;
 }
 
+export interface WorkspaceSanitizedText {
+  content: string;
+  charCount: number;
+  truncated: boolean;
+}
+
 export interface WorkspaceWikiSearchOptions {
   projectIds?: string[];
   limit?: number;
@@ -369,6 +375,26 @@ export class CodaScopeWorkspaceCatalogService {
       projectName: this.publicProjectName(project),
       codeMapId,
       generatedAt: summary?.generatedAt ?? null,
+      content: content.slice(0, maxChars),
+      charCount: content.length,
+      truncated: content.length > maxChars,
+    };
+  }
+
+  /**
+   * Scrub and bound project-derived text for other root-graph workspace
+   * readers. Re-resolving the active project here also closes an archive race
+   * after the underlying domain service completed its read.
+   */
+  async sanitizeProjectText(
+    projectId: string,
+    rawContent: string,
+    maxChars: number,
+  ): Promise<WorkspaceSanitizedText> {
+    assertBoundedInteger(maxChars, 1, WORKSPACE_TOPIC_MAX_CHARS, "workspace content character limit");
+    const project = await this.requireActiveProject(projectId);
+    const content = scrubNativeLocations(rawContent, this.sensitivePaths(project));
+    return {
       content: content.slice(0, maxChars),
       charCount: content.length,
       truncated: content.length > maxChars,

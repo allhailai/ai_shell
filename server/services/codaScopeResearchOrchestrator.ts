@@ -298,7 +298,7 @@ async function generateResearchPlan(
 
   await new Promise<void>((resolve, reject) => {
     agentSvc.send({
-      projectId,
+      scope: { kind: "project", projectId },
       actorId,
       message: prompt,
       modelId,
