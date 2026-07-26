@@ -69,7 +69,29 @@ export interface WorkspaceMessageContext {
   currentNote?: WorkspaceCurrentNoteMetadata | null;
   explicitlyReferencedProjectIds: string[];
   currentView: WorkspaceCurrentView;
+  retrievedSources?: WorkspaceRetrievedSourceReference[];
 }
+
+export type WorkspaceRetrievedSourceReference =
+  | {
+      kind: "project_wiki";
+      retrieval: "direct" | "search";
+      projectId: string;
+      projectName: string;
+      topicId: string;
+      topicTitle: string;
+      topicUpdatedAt: string;
+      lastWikiBuildAt: string | null;
+    }
+  | {
+      kind: "code_map";
+      retrieval: "direct";
+      projectId: string;
+      projectName: string;
+      codeMapId: string;
+      generatedAt: string | null;
+      lastWikiBuildAt: string | null;
+    };
 
 export interface MessageContext {
   view: string;
@@ -79,10 +101,13 @@ export interface MessageContext {
   projectName?: string;
   projectId?: string;
   recentViews?: Array<{ view: string; label: string }>;
+  epicId?: string | null;
+  epicTitle?: string | null;
+  epicTab?: string | null;
   /** Note context (when viewing a note) */
-  noteScope?: NoteScope;
-  noteVisibility?: NoteVisibility;
-  notePath?: string;
+  noteScope?: NoteScope | null;
+  noteVisibility?: NoteVisibility | null;
+  notePath?: string | null;
 }
 
 export type MessageStatus = "complete" | "streaming" | "error";
@@ -91,12 +116,12 @@ export interface ConversationMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  createdAt?: string;
-  updatedAt?: string | null;
-  modelId?: string | null;
-  status?: MessageStatus;
-  context?: MessageContext | null;
-  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string | null;
+  modelId: string | null;
+  status: MessageStatus;
+  context: MessageContext | WorkspaceMessageContext | null;
+  metadata: Record<string, unknown>;
 }
 
 export interface AssistantChatMessage {
@@ -111,21 +136,22 @@ export interface AssistantChatMessage {
 
 export interface Conversation {
   id: string;
-  scope?: { kind: "workspace" };
+  scope: AssistantScope;
   /** Server-derived custody; clients must never supply or change it. */
   ownerId?: string;
   projectId?: string;
   title: string;
   messages: ConversationMessage[];
-  summary?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  defaultModelId?: string | null;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+  defaultModelId: string | null;
   epicId?: string;
 }
 
 export interface ConversationSummary {
   id: string;
+  scope: AssistantScope;
   title: string;
   summary: string;
   modelId: string | null;

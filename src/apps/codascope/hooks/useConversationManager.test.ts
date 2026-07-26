@@ -11,6 +11,7 @@ function summary(
 ): ConversationSummary {
   return {
     id,
+    scope: { kind: "project", projectId: "alpha" },
     title: id,
     summary: "",
     modelId: null,

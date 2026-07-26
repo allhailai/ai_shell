@@ -541,7 +541,12 @@ sentinel project can select or change assistant scope. Stable state keys are
 boundary for list/create/read/update/delete, message streaming, upload/display
 images, and cancellation. Project URLs retain their historical
 `/api/codascope/projects/:id/...` shapes, while workspace URLs use the route
-family above. Conversation and stream layers do not branch on endpoint paths
+family above. The boundary validates complete response DTOs before exposing
+them: workspace scope is retained explicitly, legacy project responses are
+normalized to the adapter's exact project scope, and malformed entries,
+duplicate identities, wrong scopes, conflicting project identities, or
+read/update ID mismatches reject the complete response rather than yielding
+partial state. Conversation and stream layers do not branch on endpoint paths
 themselves. A scope transition synchronously hides the prior scope's
 conversation list, selected conversation, title, messages, and attachments;
 detaches and cancels an active run through that run's original adapter; and

@@ -3,7 +3,11 @@ import {
   createAssistantConversationApi,
   restoreAssistantMessages,
 } from "./assistantConversationApi";
-import type { Conversation } from "./codaScopeTypes";
+import type {
+  AssistantScope,
+  Conversation,
+  ConversationMessage,
+} from "./codaScopeTypes";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -12,43 +16,255 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-const conversation = {
-  id: "conv-1",
-  scope: { kind: "workspace" as const },
-  title: "Workspace chat",
-  summary: "Summary",
-  createdAt: "2026-07-26T10:00:00.000Z",
-  updatedAt: "2026-07-26T11:00:00.000Z",
-  defaultModelId: "model",
-  messages: [],
-};
+const workspaceScope = { kind: "workspace" } as const;
+const projectScope = { kind: "project", projectId: "alpha" } as const;
+const createdAt = "2026-07-26T10:00:00.000Z";
+const updatedAt = "2026-07-26T11:00:00.000Z";
+
+function summary(
+  id: string,
+  scope?: AssistantScope,
+): Record<string, unknown> {
+  return {
+    id,
+    ...(scope ? { scope } : {}),
+    title: id,
+    summary: "",
+    modelId: null,
+    createdAt,
+    updatedAt,
+    messageCount: 0,
+  };
+}
+
+function workspaceMessage(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "message-1",
+    role: "user",
+    content: "Hello",
+    createdAt,
+    updatedAt: null,
+    modelId: null,
+    status: "complete",
+    context: {
+      assistantScope: workspaceScope,
+      explicitlyReferencedProjectIds: [],
+      currentView: { view: "projects" },
+    },
+    metadata: {},
+    ...overrides,
+  };
+}
+
+function projectMessage(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "message-1",
+    role: "user",
+    content: "Hello",
+    createdAt,
+    updatedAt: null,
+    modelId: null,
+    status: "complete",
+    context: {
+      view: "dashboard",
+      projectName: "Alpha",
+      projectId: "alpha",
+      noteScope: null,
+      noteVisibility: null,
+      notePath: null,
+    },
+    metadata: {},
+    ...overrides,
+  };
+}
+
+function workspaceConversation(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    version: 1,
+    id: "conv-1",
+    scope: workspaceScope,
+    ownerId: "alan",
+    title: "Workspace chat",
+    summary: "Summary",
+    createdAt,
+    updatedAt,
+    defaultModelId: "model",
+    messages: [],
+    ...overrides,
+  };
+}
+
+function projectConversation(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    version: 2,
+    id: "conv-1",
+    projectId: "alpha",
+    ownerId: "alan",
+    title: "Project chat",
+    summary: "Summary",
+    createdAt,
+    updatedAt,
+    defaultModelId: "model",
+    messages: [],
+    ...overrides,
+  };
+}
 
 describe("assistant conversation API boundary", () => {
-  it("runs workspace create, read/select, update, delete, and image upload through workspace URLs", async () => {
+  it("retains valid workspace list scope and sorts by updatedAt", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      scope: workspaceScope,
+      conversations: [
+        {
+          ...summary("older", workspaceScope),
+          updatedAt: "2026-07-25T11:00:00.000Z",
+        },
+        summary("newer", workspaceScope),
+      ],
+    }));
+
+    const summaries = await createAssistantConversationApi(
+      workspaceScope,
+      fetchMock,
+    ).listConversations();
+
+    expect(summaries.map(({ id, scope }) => ({ id, scope }))).toEqual([
+      { id: "newer", scope: workspaceScope },
+      { id: "older", scope: workspaceScope },
+    ]);
+  });
+
+  it.each([
+    {
+      name: "missing",
+      payload: { conversations: [summary("conv-1", workspaceScope)] },
+    },
+    {
+      name: "project",
+      payload: {
+        scope: projectScope,
+        conversations: [summary("conv-1", workspaceScope)],
+      },
+    },
+    {
+      name: "malformed",
+      payload: {
+        scope: { kind: "workspace", projectId: "alpha" },
+        conversations: [summary("conv-1", workspaceScope)],
+      },
+    },
+  ])("rejects a $name workspace list envelope scope", async ({ payload }) => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(payload)),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("rejects a wrong-scope workspace summary", async () => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        scope: workspaceScope,
+        conversations: [summary("conv-1", projectScope)],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("rejects a complete workspace list when one summary is malformed", async () => {
+    const malformed = summary("malformed", workspaceScope);
+    delete malformed.summary;
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        scope: workspaceScope,
+        conversations: [
+          summary("valid", workspaceScope),
+          malformed,
+        ],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("rejects duplicate workspace summary IDs", async () => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        scope: workspaceScope,
+        conversations: [
+          summary("duplicate", workspaceScope),
+          summary("duplicate", workspaceScope),
+        ],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("normalizes legacy project summaries to the adapter's exact scope", async () => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversations: [summary("conv-1")],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([
+      expect.objectContaining({
+        id: "conv-1",
+        scope: projectScope,
+      }),
+    ]);
+  });
+
+  it.each([
+    { scope: { kind: "workspace" } },
+    { scope: { kind: "project", projectId: "beta" } },
+    { projectId: "beta" },
+  ])("rejects conflicting project summary identity %#", async (conflict) => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversations: [{ ...summary("conv-1"), ...conflict }],
+      })),
+    );
+    await expect(api.listConversations()).resolves.toEqual([]);
+  });
+
+  it("validates workspace create, read, and update records and uses workspace URLs", async () => {
     const fetchMock = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ conversation }, 201))
-      .mockResolvedValueOnce(jsonResponse({ conversation }))
       .mockResolvedValueOnce(jsonResponse({
-        conversation: { ...conversation, title: "Renamed" },
+        conversation: workspaceConversation(),
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        conversation: workspaceConversation(),
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        conversation: workspaceConversation({ title: "Renamed" }),
       }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse({
         path: "conv-1/images/image.png",
         filename: "image.png",
       }, 201));
-    const api = createAssistantConversationApi(
-      { kind: "workspace" },
-      fetchMock,
-    );
+    const api = createAssistantConversationApi(workspaceScope, fetchMock);
 
-    expect(await api.createConversation({ modelId: "model" }))
-      .toMatchObject({ id: "conv-1", title: "Workspace chat" });
-    expect(await api.readConversation("conv-1"))
-      .toMatchObject({ id: "conv-1" });
-    expect(await api.updateConversation("conv-1", { title: "Renamed" }))
-      .toMatchObject({ title: "Renamed" });
-    expect(await api.deleteConversation("conv-1")).toBe(true);
-    expect(await api.uploadImage("conv-1", new FormData())).toEqual({
+    await expect(api.createConversation({ modelId: "model" })).resolves
+      .toMatchObject({ id: "conv-1", scope: workspaceScope });
+    await expect(api.readConversation("conv-1")).resolves
+      .toMatchObject({ id: "conv-1", scope: workspaceScope });
+    await expect(api.updateConversation("conv-1", { title: "Renamed" }))
+      .resolves.toMatchObject({ title: "Renamed", scope: workspaceScope });
+    await expect(api.deleteConversation("conv-1")).resolves.toBe(true);
+    await expect(api.uploadImage("conv-1", new FormData())).resolves.toEqual({
       path: "conv-1/images/image.png",
       filename: "image.png",
     });
@@ -60,75 +276,187 @@ describe("assistant conversation API boundary", () => {
       "/api/codascope/workspace/conversations/conv-1",
       "/api/codascope/workspace/conversations/conv-1/images",
     ]);
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: "PATCH" });
-    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ method: "DELETE" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      modelId: "model",
+    });
   });
 
-  it("normalizes and sorts workspace and legacy project list responses at the API boundary", async () => {
-    const payload = {
-      conversations: [
-        {
-          id: "older",
-          title: "Older",
-          createdAt: "2026-07-25T10:00:00.000Z",
-          updatedAt: "2026-07-25T11:00:00.000Z",
-        },
-        {
-          id: "newer",
-          title: "Newer",
-          summary: "Latest",
-          modelId: "model",
-          messageCount: 2,
-          createdAt: "2026-07-26T10:00:00.000Z",
-          updatedAt: "2026-07-26T11:00:00.000Z",
-        },
-      ],
-    };
-    for (const scope of [
-      { kind: "workspace" } as const,
-      { kind: "project", projectId: "alpha" } as const,
-    ]) {
-      const fetchMock = vi.fn<typeof fetch>()
-        .mockResolvedValue(jsonResponse(payload));
-      const summaries = await createAssistantConversationApi(
-        scope,
-        fetchMock,
-      ).listConversations();
-      expect(summaries.map((summary) => summary.id))
-        .toEqual(["newer", "older"]);
-      expect(summaries[1]).toMatchObject({
-        summary: "",
-        modelId: null,
-        messageCount: 0,
-      });
-    }
+  it.each([
+    { name: "missing scope", conversation: (() => {
+      const { scope: _scope, ...record } = workspaceConversation();
+      return record;
+    })() },
+    {
+      name: "project scope",
+      conversation: workspaceConversation({ scope: projectScope }),
+    },
+    {
+      name: "project identity",
+      conversation: workspaceConversation({ projectId: "alpha" }),
+    },
+  ])("rejects a workspace record with $name", async ({ conversation }) => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ conversation })),
+    );
+    await expect(api.createConversation({})).resolves.toBeNull();
+  });
+
+  it("accepts a project record with the adapter project ID and normalizes its scope", async () => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation(),
+      })),
+    );
+    await expect(api.createConversation({})).resolves.toMatchObject({
+      id: "conv-1",
+      projectId: "alpha",
+      scope: projectScope,
+    });
   });
 
   it.each([
     {
-      scope: { kind: "workspace" } as const,
+      name: "different projectId",
+      conversation: projectConversation({ projectId: "beta" }),
+    },
+    {
+      name: "conflicting explicit scope",
+      conversation: projectConversation({ scope: workspaceScope }),
+    },
+  ])("rejects a project record with $name", async ({ conversation }) => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ conversation })),
+    );
+    await expect(api.createConversation({})).resolves.toBeNull();
+  });
+
+  it("rejects read and update response ID mismatches", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        conversation: workspaceConversation({ id: "other" }),
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        conversation: workspaceConversation({ id: "other" }),
+      }));
+    const api = createAssistantConversationApi(workspaceScope, fetchMock);
+
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+    await expect(api.updateConversation("conv-1", { title: "Renamed" }))
+      .resolves.toBeNull();
+  });
+
+  it("rejects a complete record when one message is malformed", async () => {
+    const malformed = workspaceMessage({ id: "malformed" });
+    delete malformed.createdAt;
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [
+            workspaceMessage({ id: "valid" }),
+            malformed,
+          ],
+        }),
+      })),
+    );
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+  });
+
+  it("rejects duplicate message IDs", async () => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation({
+          messages: [
+            projectMessage({ id: "duplicate" }),
+            projectMessage({ id: "duplicate", role: "assistant" }),
+          ],
+        }),
+      })),
+    );
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+  });
+
+  it("preserves valid system messages in the persisted DTO", async () => {
+    const api = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            id: "system-1",
+            role: "system",
+            content: "Internal context",
+          })],
+        }),
+      })),
+    );
+    const conversation = await api.readConversation("conv-1");
+
+    expect(conversation?.messages).toEqual([
+      expect.objectContaining({
+        id: "system-1",
+        role: "system",
+        content: "Internal context",
+      }),
+    ]);
+    expect(conversation
+      ? restoreAssistantMessages(conversation, api.endpoints)
+      : null).toEqual([]);
+  });
+
+  it.each([
+    {
+      scope: workspaceScope,
       expected:
         "/api/codascope/workspace/conversations/conv-1/images/image.png",
     },
     {
-      scope: { kind: "project", projectId: "alpha" } as const,
+      scope: projectScope,
       expected:
         "/api/codascope/projects/alpha/conversations/conv-1/images/image.png",
     },
   ])("restores $scope.kind image display URLs", ({ scope, expected }) => {
     const api = createAssistantConversationApi(scope, vi.fn());
-    const withImage: Conversation = {
-      ...conversation,
-      messages: [{
-        id: "message-1",
-        role: "user",
-        content: "See image",
-        metadata: {
-          images: [{ path: "ignored/server/path", filename: "image.png" }],
-        },
-      }],
+    const message: ConversationMessage = {
+      id: "message-1",
+      role: "user",
+      content: "See image",
+      createdAt,
+      updatedAt: null,
+      modelId: null,
+      status: "complete",
+      context: null,
+      metadata: {
+        images: [{ path: "ignored/server/path", filename: "image.png" }],
+      },
     };
+    const withImage: Conversation = scope.kind === "workspace"
+      ? {
+          id: "conv-1",
+          scope,
+          ownerId: "alan",
+          title: "Workspace chat",
+          summary: "Summary",
+          createdAt,
+          updatedAt,
+          defaultModelId: "model",
+          messages: [message],
+        }
+      : {
+          id: "conv-1",
+          scope,
+          ownerId: "alan",
+          projectId: scope.projectId,
+          title: "Project chat",
+          summary: "Summary",
+          createdAt,
+          updatedAt,
+          defaultModelId: "model",
+          messages: [message],
+        };
     expect(restoreAssistantMessages(withImage, api.endpoints)[0]?.images)
       .toEqual([{ url: expected, filename: "image.png" }]);
   });
