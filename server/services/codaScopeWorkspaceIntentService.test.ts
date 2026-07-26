@@ -268,4 +268,82 @@ describe("CodaScopeWorkspaceIntentService", () => {
       researchSourceIds: ["ready-source"],
     })]);
   });
+
+  it("does not authorize a negated roadmap mention", async () => {
+    const { service, epicService } = fixture();
+    const result = await service.resolveTurn(
+      "Do not inspect Alpha's roadmap; compare architecture from the wikis.",
+      ["alpha"],
+    );
+
+    expect(result.intent).toBe("wiki_first");
+    expect(result.grant).toMatchObject({
+      epicDiscoveryProjectIds: [],
+      epicResources: [],
+    });
+    expect(epicService.listEpics).not.toHaveBeenCalled();
+  });
+
+  it("does not grant a negated design or epic reference", async () => {
+    const { service, designDocService } = fixture();
+    const result = await service.resolveTurn(
+      "Don't read payments designs; use wiki evidence.",
+      [],
+    );
+
+    expect(result.grant.epicResources).toEqual([]);
+    expect(designDocService.listDesignDocs).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Without research or curated knowledge, summarize the payments epic definition.",
+    "Research isn't needed; summarize the payments epic definition.",
+  ])("keeps an affirmative epic base grant while denying optional reads: %s", async (message) => {
+    const { service, epicKnowledgeService } = fixture();
+    const result = await service.resolveTurn(message, []);
+
+    expect(result.intent).toBe("epic");
+    expect(result.grant.epicResources).toEqual([expect.objectContaining({
+      projectId: "alpha",
+      epicId: "payments",
+      capabilities: ["metadata", "definition", "scope"],
+    })]);
+    expect(epicKnowledgeService.listEpicWikiPages).not.toHaveBeenCalled();
+    expect(epicKnowledgeService.listSources).not.toHaveBeenCalled();
+  });
+
+  it("isolates an affirmed project from a negated project reference", async () => {
+    const { service } = fixture();
+    const result = await service.resolveTurn(
+      "Ignore Alpha; compare Beta's roadmap.",
+      ["alpha", "beta"],
+    );
+
+    expect(result.resolvedProjectIds).toEqual(["beta"]);
+    expect(result.grant.epicDiscoveryProjectIds).toEqual(["beta"]);
+    expect(result.grant.epicResources.every(
+      (resource) => resource.projectId === "beta",
+    )).toBe(true);
+  });
+
+  it.each([
+    [
+      "Read the payments epic designs, but do not read designs.",
+      "designs",
+    ],
+    [
+      "Use payments epic research, but without research summarize the definition.",
+      "research",
+    ],
+  ])("denies contradictory capability language: %s", async (message, capability) => {
+    const { service } = fixture();
+    const result = await service.resolveTurn(message, []);
+
+    expect(result.grant.epicResources).toEqual([expect.objectContaining({
+      projectId: "alpha",
+      epicId: "payments",
+      capabilities: ["metadata", "definition", "scope"],
+    })]);
+    expect(result.grant.epicResources[0]?.capabilities).not.toContain(capability);
+  });
 });

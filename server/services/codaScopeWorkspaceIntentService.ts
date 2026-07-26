@@ -41,7 +41,8 @@ export class CodaScopeWorkspaceIntentService {
     message: string,
     explicitlyReferencedProjectIds: readonly string[],
   ): Promise<WorkspaceIntentResolution> {
-    const normalizedMessage = normalize(message);
+    const language = analyzeMessage(message);
+    const normalizedMessage = language.all;
     if (!normalizedMessage) return emptyResolution();
 
     const activeProjects = await this.activeResolver.listActiveProjects();
@@ -49,10 +50,11 @@ export class CodaScopeWorkspaceIntentService {
     for (const projectId of [...new Set(explicitlyReferencedProjectIds)].sort()) {
       const active = await this.activeResolver.resolveActiveProject(projectId);
       if (!active) return emptyResolution();
+      if (projectMentionPolarity(language, active).negative) continue;
       explicitProjects.push(active);
     }
 
-    const mentioned = resolveMentionedProjects(normalizedMessage, activeProjects);
+    const mentioned = resolveMentionedProjects(language, activeProjects);
     if (mentioned.ambiguous) return emptyResolution();
     const selectedProjects = deduplicateProjects([
       ...explicitProjects,
@@ -60,17 +62,27 @@ export class CodaScopeWorkspaceIntentService {
     ]);
     const resolvedProjectIds = selectedProjects.map((project) => project.projectId);
 
-    const designIntent = /\bdesign(?:s| docs?| documents?)?\b/.test(normalizedMessage);
-    const knowledgeIntent = /\b(?:curated )?knowledge(?: pages?)?\b/.test(normalizedMessage);
-    const researchIntent = /\b(?:research|research sources?|sources? from research)\b/.test(
-      normalizedMessage,
+    const designIntent = affirmedSignal(
+      language,
+      /\bdesign(?:s| docs?| documents?)?\b/,
     );
-    const planningIntent = /\b(?:active )?roadmaps?\b/.test(normalizedMessage)
-      || /\bcurrently planning\b/.test(normalizedMessage)
-      || /\bproject planning\b/.test(normalizedMessage);
-    const epicIntent = /\bepics?\b/.test(normalizedMessage);
-    const genericImplementation = /\b(?:architecture|architectural|implement|implementation|code)\b/
-      .test(normalizedMessage);
+    const knowledgeIntent = affirmedSignal(
+      language,
+      /\b(?:curated )?knowledge(?: pages?)?\b/,
+    );
+    const researchIntent = affirmedSignal(
+      language,
+      /\b(?:research|research sources?|sources? from research)\b/,
+    );
+    const planningIntent = affirmedSignal(
+      language,
+      /\b(?:(?:active )?roadmaps?|currently planning|project planning)\b/,
+    );
+    const epicIntent = affirmedSignal(language, /\bepics?\b/);
+    const genericImplementation = affirmedSignal(
+      language,
+      /\b(?:architecture|architectural|implement|implementation|code)\b/,
+    );
 
     if (
       genericImplementation
@@ -127,7 +139,7 @@ export class CodaScopeWorkspaceIntentService {
           listed.id,
         );
         if (!active) continue;
-        if (mentionsEpic(normalizedMessage, active.epic.title, active.epic.id)) {
+        if (affirmativelyMentionsEpic(language, active.epic.title, active.epic.id)) {
           matchingEpics.push(active);
         }
       }
@@ -266,8 +278,95 @@ function phraseMentioned(message: string, phrase: string): boolean {
   return ` ${message} `.includes(` ${phrase} `);
 }
 
+interface MessagePolarity {
+  all: string;
+  positive: string[];
+  negative: string[];
+}
+
+function analyzeMessage(value: string): MessagePolarity {
+  const expanded = value.toLocaleLowerCase()
+    .replace(/\b(?:don[’']?t|dont)\b/g, "do not")
+    .replace(/\b(?:doesn[’']?t|doesnt)\b/g, "does not")
+    .replace(/\b(?:didn[’']?t|didnt)\b/g, "did not")
+    .replace(/\b(?:can[’']?t|cant|cannot)\b/g, "can not")
+    .replace(/\b(?:won[’']?t|wont)\b/g, "will not")
+    .replace(/\b(?:shouldn[’']?t|shouldnt)\b/g, "should not")
+    .replace(/\b(?:isn[’']?t|isnt)\b/g, "is not")
+    .replace(/\b(?:aren[’']?t|arent)\b/g, "are not")
+    .replace(/\b(?:wasn[’']?t|wasnt)\b/g, "was not")
+    .replace(/\b(?:weren[’']?t|werent)\b/g, "were not")
+    .replace(/\b(?:mustn[’']?t|mustnt)\b/g, "must not")
+    .replace(/\b(?:needn[’']?t|neednt)\b/g, "need not");
+  const positive: string[] = [];
+  const negative: string[] = [];
+  const clauses = expanded.split(
+    /[;,.!?]+|\b(?:but|instead|however)\b/,
+  );
+  const denial = /\b(?:do not|does not|did not|can not|will not|should not|is not|are not|was not|were not|must not|need not|not|never|without|ignore|ignoring|ignored|skip|skipping|avoid|avoiding|exclude|excluding|except|rather than|no)\b/;
+
+  for (const clause of clauses) {
+    const normalizedClause = normalize(clause);
+    if (!normalizedClause) continue;
+    if (!denial.test(normalizedClause)) {
+      positive.push(normalizedClause);
+      continue;
+    }
+    // A denial makes the whole bounded clause non-authorizing. This also
+    // catches postfix forms such as "research is not needed" without trying
+    // to recover a broader positive interpretation from the same clause.
+    negative.push(normalizedClause);
+  }
+
+  return {
+    all: normalize(expanded),
+    positive,
+    negative,
+  };
+}
+
+function affirmedSignal(
+  language: MessagePolarity,
+  pattern: RegExp,
+): boolean {
+  const positive = language.positive.some((text) => pattern.test(text));
+  const negative = language.negative.some((text) => pattern.test(text));
+  return positive && !negative;
+}
+
+function phrasePolarity(
+  language: MessagePolarity,
+  phrases: readonly string[],
+): { positive: boolean; negative: boolean } {
+  const mentioned = (text: string) => phrases.some(
+    (phrase) => phraseMentioned(text, phrase),
+  );
+  return {
+    positive: language.positive.some(mentioned),
+    negative: language.negative.some(mentioned),
+  };
+}
+
+function projectMentionPolarity(
+  language: MessagePolarity,
+  project: { projectId: string; name: string },
+): { idPositive: boolean; namePositive: boolean; negative: boolean } {
+  const id = normalize(project.projectId);
+  const name = normalize(project.name);
+  const idPolarity = phrasePolarity(language, [id]);
+  const namePolarity = phrasePolarity(language, [
+    name,
+    normalize(`project ${project.name}`),
+  ]);
+  return {
+    idPositive: idPolarity.positive,
+    namePositive: namePolarity.positive,
+    negative: idPolarity.negative || namePolarity.negative,
+  };
+}
+
 function resolveMentionedProjects(
-  message: string,
+  language: MessagePolarity,
   projects: Awaited<ReturnType<CodaScopeActiveEntityResolver["listActiveProjects"]>>,
 ): {
   projects: typeof projects;
@@ -281,10 +380,11 @@ function resolveMentionedProjects(
 
   const result = [];
   for (const project of projects) {
-    const idMentioned = phraseMentioned(message, normalize(project.projectId));
+    const polarity = projectMentionPolarity(language, project);
+    if (polarity.negative) continue;
+    const idMentioned = polarity.idPositive;
     const name = normalize(project.name);
-    const nameMentioned = phraseMentioned(message, name)
-      || phraseMentioned(message, normalize(`project ${project.name}`));
+    const nameMentioned = polarity.namePositive;
     if (!idMentioned && !nameMentioned) continue;
     if (nameMentioned && (byName.get(name)?.length ?? 0) > 1 && !idMentioned) {
       return { projects: [], ambiguous: true };
@@ -302,16 +402,23 @@ function deduplicateProjects<T extends { projectId: string }>(
   ).values()].sort((a, b) => a.projectId.localeCompare(b.projectId));
 }
 
-function mentionsEpic(message: string, title: string, epicId: string): boolean {
+function affirmativelyMentionsEpic(
+  language: MessagePolarity,
+  title: string,
+  epicId: string,
+): boolean {
   const normalizedId = normalize(epicId);
   const normalizedTitle = normalize(title);
   const withoutEpic = normalizedTitle
     .replace(/^epic /, "")
     .replace(/ epic$/, "")
     .trim();
-  return phraseMentioned(message, normalizedId)
-    || phraseMentioned(message, normalizedTitle)
-    || phraseMentioned(message, withoutEpic)
-    || phraseMentioned(message, `${withoutEpic} epic`)
-    || phraseMentioned(message, `${withoutEpic} epics`);
+  const polarity = phrasePolarity(language, [
+    normalizedId,
+    normalizedTitle,
+    withoutEpic,
+    `${withoutEpic} epic`,
+    `${withoutEpic} epics`,
+  ]);
+  return polarity.positive && !polarity.negative;
 }

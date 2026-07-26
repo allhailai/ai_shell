@@ -948,6 +948,9 @@ describe("CodaScopeChatService", () => {
   // ── Index Management ──────────────────────────────────────────
 
   describe("index management", () => {
+    // This is an intentional filesystem durability stress test. It completes
+    // in about three seconds alone but can exceed the global timeout under
+    // full-suite parallel I/O load.
     it("caps index at 100 conversations", async () => {
       scaffoldProject(root, "proj-cap");
 
@@ -958,7 +961,7 @@ describe("CodaScopeChatService", () => {
 
       const list = await svc.listConversations("proj-cap", "alice");
       expect(list.length).toBeLessThanOrEqual(100);
-    });
+    }, 15_000);
 
     it("fails closed on a syntax-corrupt authoritative index without publishing, then recovers its queue after repair", async () => {
       const projectId = "proj-corrupt";

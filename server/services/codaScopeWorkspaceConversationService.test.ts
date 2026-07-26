@@ -33,6 +33,20 @@ function actorFiles(
     .sort();
 }
 
+function actorIndex(
+  service: CodaScopeWorkspaceConversationService,
+  actorId: string,
+): { path: string; value: any } {
+  const indexPath = path.join(
+    service.getActorStorageDirectory(actorId),
+    "conversations.json",
+  );
+  return {
+    path: indexPath,
+    value: JSON.parse(readFileSync(indexPath, "utf-8")),
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -202,6 +216,112 @@ describe("CodaScopeWorkspaceConversationService", () => {
     });
   });
 
+  it("fails list, read, and mutation paths when a valid index has an unindexed record", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const created = await service.createConversation("alice");
+    const actorDir = service.getActorStorageDirectory("alice");
+    writeFileSync(
+      path.join(actorDir, "conv_unindexed.json"),
+      JSON.stringify({ id: "conv_unindexed" }),
+      "utf-8",
+    );
+
+    await expect(service.listConversations("alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+    });
+    await expect(service.readConversation("alice", created.id)).rejects.toMatchObject({
+      code: "persistence_corrupt",
+    });
+    await expect(service.updateConversation("alice", created.id, {
+      title: "Must not publish",
+    })).rejects.toMatchObject({ code: "persistence_corrupt" });
+  });
+
+  it("rejects an index that references a missing conversation record", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const created = await service.createConversation("alice");
+    rmSync(path.join(
+      service.getActorStorageDirectory("alice"),
+      `${created.id}.json`,
+    ));
+
+    await expect(service.listConversations("alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+    });
+  });
+
+  it.each([
+    ["title", "Different title"],
+    ["summary", "Different summary"],
+    ["modelId", "different-model"],
+    ["createdAt", "2025-01-01T00:00:00.000Z"],
+    ["updatedAt", "2025-01-02T00:00:00.000Z"],
+    ["messageCount", 1],
+  ])("rejects index/record %s disagreement", async (field, value) => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    await service.createConversation("alice", {
+      title: "Canonical title",
+      modelId: "canonical-model",
+    });
+    const index = actorIndex(service, "alice");
+    index.value.conversations[0][field] = value;
+    writeFileSync(index.path, JSON.stringify(index.value), "utf-8");
+
+    await expect(service.listConversations("alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+    });
+  });
+
+  it.each([
+    "bad%2Frecord.json",
+    ".json",
+    "unexpected-storage-entry.txt",
+  ])("rejects malformed or unsafe storage filename %s", async (filename) => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    await service.createConversation("alice");
+    writeFileSync(
+      path.join(service.getActorStorageDirectory("alice"), filename),
+      "{}",
+      "utf-8",
+    );
+
+    await expect(service.listConversations("alice")).rejects.toMatchObject({
+      code: "persistence_corrupt",
+    });
+  });
+
+  it("ignores valid conversation asset directories and atomic-write artifacts", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const created = await service.createConversation("alice");
+    const actorDir = service.getActorStorageDirectory("alice");
+    const imagesDir = path.join(actorDir, created.id, "images");
+    mkdirSync(imagesDir, { recursive: true });
+    writeFileSync(path.join(imagesDir, "image.png"), "image", "utf-8");
+    writeFileSync(
+      path.join(
+        actorDir,
+        ".conversations.json.tmp.123.00000000-0000-4000-8000-000000000000",
+      ),
+      "{}",
+      "utf-8",
+    );
+    writeFileSync(
+      path.join(
+        actorDir,
+        `.${created.id}.json.bak.123.00000000-0000-4000-8000-000000000000`,
+      ),
+      "{}",
+      "utf-8",
+    );
+
+    expect(await service.listConversations("alice")).toEqual([
+      expect.objectContaining({ id: created.id }),
+    ]);
+    expect(await service.readConversation("alice", created.id)).toMatchObject({
+      id: created.id,
+    });
+  });
+
   it("returns generic absence for index owner or scope mismatch before record validation", async () => {
     const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
     const actorDir = service.getActorStorageDirectory("alice");
@@ -212,6 +332,7 @@ describe("CodaScopeWorkspaceConversationService", () => {
       ownerId: "mallory",
       conversations: [{ malformed: true }],
     }), "utf-8");
+    writeFileSync(path.join(actorDir, "bad%2Frecord.json"), "{broken", "utf-8");
 
     expect(await service.readConversation("alice", "conv_missing")).toBeNull();
     expect(await service.listConversations("alice")).toEqual([]);

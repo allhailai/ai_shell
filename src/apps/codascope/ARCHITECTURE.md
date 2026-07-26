@@ -500,14 +500,20 @@ principal owns a private store below:
 ```
 
 The hash is only a path key. The full authenticated owner ID remains in the
-strict authoritative index and conversation record. Index/record scope,
-owner, ID, file, and message-count agreement is required; malformed files,
-orphan records without an index, duplicate identities, and missing indexed
-records fail as persistence corruption. Owner or scope mismatch is treated as
-generic absence before the selected record is opened. Workspace mutations use
-an actor-keyed process-local queue, so the index and record cannot lose updates
-while unrelated actors continue independently. Record replacement precedes
-index publication with bounded rollback if the index write fails.
+strict authoritative index and conversation record. The actor directory must
+contain exactly the canonical conversation JSON files referenced by the index;
+only the index itself, safe conversation asset directories, and valid atomic
+write artifacts are non-record entries. Every record is read before an index
+can be listed or used, and its scope, owner, ID, file, title, summary, effective
+model, created/updated timestamps, and message count must match the one
+canonical derived index summary. Malformed or unexpected files, orphan
+records, duplicate identities, missing indexed records, and summary
+disagreement fail as persistence corruption. Owner or scope mismatch is
+treated as generic absence before directory or record validation. Workspace
+mutations use an actor-keyed process-local queue, so the index and record
+cannot lose updates while unrelated actors continue independently. Record
+replacement precedes index publication with bounded rollback if the index
+write fails.
 
 The authenticated route family is:
 
@@ -539,16 +545,22 @@ Design, curated-knowledge, and research capabilities require corresponding
 explicit intent and contain exact server-derived resource IDs. Missing,
 ambiguous, inactive, or concurrently archived references fail closed. Generic
 architecture or implementation comparisons remain wiki-first and receive no
-epic grant merely because project names appear.
+epic grant merely because project names appear. Common current-turn denial and
+negation forms are evaluated around capability, project, and epic references;
+negated or contradictory signals never widen a grant, while an independently
+affirmed narrower resource can still be isolated.
 
 The message endpoint persists the user message, then exactly one stable
 assistant `streaming` placeholder before starting the agent. Concurrent sends
 to the same actor/conversation are rejected. Success persists completed text
 and retrieved provenance before `done`; failure rewrites the same assistant ID
 to `error` before `error`; cancellation rewrites it before `cancelled`. The
-route owns exactly one terminal and never converts failure, cancellation, or
-premature transport loss into success. Workspace failures are path-free and do
-not expose SDK or persistence locations.
+normal terminal is emitted only after that transition returns a persisted
+conversation. A rejected or null stable-state transition emits one sanitized
+emergency `error`, never `done` or `cancelled`, and records a fixed path-free
+server diagnostic. The route owns exactly one terminal and never converts
+failure, cancellation, or premature transport loss into success. Workspace
+failures are path-free and do not expose SDK or persistence locations.
 
 Successful direct wiki and code-map reads are collected outside model inputs
 in a fresh per-run provenance holder. Persisted references contain only

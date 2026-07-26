@@ -10,6 +10,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   CodaScopePersistence,
   CodaScopePersistenceCorruptError,
@@ -531,17 +532,14 @@ export class CodaScopeWorkspaceConversationService {
           storage: "workspace_conversation_index",
         });
       }
-      if (await this.hasOrphanRecords(actorDir)) {
-        throw new CodaScopePersistenceCorruptError({
-          storage: "workspace_conversation_index",
-        });
-      }
-      return {
+      const emptyIndex: WorkspaceConversationIndex = {
         version: WORKSPACE_CONVERSATION_VERSION,
         scope: { kind: "workspace" },
         ownerId,
         conversations: [],
       };
+      await this.validateStoreIntegrity(actorDir, emptyIndex, true);
+      return emptyIndex;
     }
 
     let parsed: unknown;
@@ -564,31 +562,82 @@ export class CodaScopeWorkspaceConversationService {
     ) {
       return null;
     }
+    let index: WorkspaceConversationIndex;
     try {
-      return validateIndex(parsed);
+      index = validateIndex(parsed);
     } catch {
       throw new CodaScopePersistenceCorruptError({
         storage: "workspace_conversation_index",
       });
     }
+    await this.validateStoreIntegrity(actorDir, index);
+    return index;
   }
 
-  private async hasOrphanRecords(actorDir: string): Promise<boolean> {
+  private async validateStoreIntegrity(
+    actorDir: string,
+    index: WorkspaceConversationIndex,
+    allowMissingDirectory = false,
+  ): Promise<void> {
     let entries;
     try {
       entries = await fs.readdir(actorDir, { withFileTypes: true });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if (
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+        && allowMissingDirectory
+      ) return;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "workspace_conversation_index",
+        });
+      }
       throw new CodaScopePersistenceError({
         storage: "workspace_conversation_index",
       });
     }
-    return entries.some(
-      (entry) =>
-        entry.isFile()
-        && entry.name !== "conversations.json"
-        && entry.name.endsWith(".json"),
-    );
+
+    const referencedFiles = new Set(index.conversations.map((record) => record.file));
+    const presentRecordFiles = new Set<string>();
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name === "conversations.json") continue;
+      if (entry.isFile() && isValidAtomicArtifact(entry.name)) continue;
+      if (entry.isDirectory() && isValidConversationAssetsDirectory(entry.name)) {
+        continue;
+      }
+      if (!entry.isFile()) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "workspace_conversation_index",
+        });
+      }
+      const candidate = canonicalConversationRecordFilename(entry.name);
+      if (!candidate) {
+        throw new CodaScopePersistenceCorruptError({
+          storage: "workspace_conversation_index",
+        });
+      }
+      presentRecordFiles.add(candidate);
+    }
+
+    if (
+      presentRecordFiles.size !== referencedFiles.size
+      || [...presentRecordFiles].some((file) => !referencedFiles.has(file))
+      || [...referencedFiles].some((file) => !presentRecordFiles.has(file))
+    ) {
+      throw new CodaScopePersistenceCorruptError({
+        storage: "workspace_conversation_index",
+      });
+    }
+
+    await Promise.all(index.conversations.map(async (record) => {
+      await this.persistence.readJson(
+        this.recordPath(actorDir, record.file),
+        {
+          context: { storage: "workspace_conversation" },
+          validate: (value) => validateConversation(value, record),
+        },
+      );
+    }));
   }
 
   private async persistState(
@@ -768,11 +817,6 @@ function validateConversation(
   const id = safeId(source.id, "conversation ID");
   const scope = validateWorkspaceScope(source.scope);
   const ownerId = validateOwner(source.ownerId);
-  if (
-    id !== record.id
-    || scope.kind !== record.scope.kind
-    || ownerId !== record.ownerId
-  ) throw new Error("Workspace conversation identity disagreement");
   if (!Array.isArray(source.messages) || source.messages.length > MAX_MESSAGES) {
     throw new Error("Invalid workspace conversation messages");
   }
@@ -782,10 +826,7 @@ function validateConversation(
     if (ids.has(message.id)) throw new Error("Duplicate workspace message ID");
     ids.add(message.id);
   }
-  if (messages.length !== record.messageCount) {
-    throw new Error("Workspace conversation message-count disagreement");
-  }
-  return {
+  const conversation: WorkspaceConversation = {
     version: WORKSPACE_CONVERSATION_VERSION,
     id,
     scope,
@@ -797,6 +838,36 @@ function validateConversation(
     defaultModelId: nullableModel(source.defaultModelId),
     messages,
   };
+  if (!isDeepStrictEqual(record, indexRecord(conversation))) {
+    throw new Error("Workspace conversation index disagreement");
+  }
+  return conversation;
+}
+
+function canonicalConversationRecordFilename(filename: string): string | null {
+  if (!filename.endsWith(".json") || filename === "conversations.json") return null;
+  const id = filename.slice(0, -".json".length);
+  try {
+    return safeId(id, "conversation ID") === id ? filename : null;
+  } catch {
+    return null;
+  }
+}
+
+function isValidConversationAssetsDirectory(directory: string): boolean {
+  try {
+    return safeId(directory, "conversation ID") === directory;
+  } catch {
+    return false;
+  }
+}
+
+function isValidAtomicArtifact(filename: string): boolean {
+  const match = /^\.(.+\.json)\.(?:tmp|bak)\.(\d+)\.([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+    .exec(filename);
+  if (!match || !Number.isSafeInteger(Number(match[2]))) return false;
+  return match[1] === "conversations.json"
+    || canonicalConversationRecordFilename(match[1]) !== null;
 }
 
 function validatePersistedMessage(value: unknown): WorkspaceConversationMessage {

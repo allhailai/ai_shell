@@ -369,23 +369,22 @@ async function handleWorkspaceMessage(
       terminal.done(donePayload);
     } catch (error) {
       const partial = partialResponse(error) || generatedResponse;
+      const failurePersisted = await persistWorkspaceFailure(
+        workspaceConversationSvc,
+        actorId,
+        conversationId,
+        assistantMessageId,
+        error instanceof WorkspaceAssistantCancelledError
+          ? partial || "[Workspace assistant response cancelled.]"
+          : partial || "Workspace assistant run failed.",
+      );
+      if (!failurePersisted) {
+        terminal.error("Workspace assistant run could not be finalized.");
+        return;
+      }
       if (error instanceof WorkspaceAssistantCancelledError) {
-        await persistWorkspaceFailure(
-          workspaceConversationSvc,
-          actorId,
-          conversationId,
-          assistantMessageId,
-          partial || "[Workspace assistant response cancelled.]",
-        );
         terminal.cancelled({ conversationId, assistantMessageId });
       } else {
-        await persistWorkspaceFailure(
-          workspaceConversationSvc,
-          actorId,
-          conversationId,
-          assistantMessageId,
-          partial || "Workspace assistant run failed.",
-        );
         terminal.error("Workspace assistant run failed.");
       }
     }
@@ -407,19 +406,30 @@ async function persistWorkspaceFailure(
   conversationId: string,
   messageId: string,
   content: string,
-): Promise<void> {
-  if (!messageId) return;
+): Promise<boolean> {
+  if (!messageId) {
+    logWorkspaceFailurePersistenceDiagnostic();
+    return false;
+  }
   try {
-    await service.recordAssistantMessageError(
+    const persisted = await service.recordAssistantMessageError(
       actorId,
       conversationId,
       messageId,
       content,
     );
+    if (persisted) return true;
   } catch {
-    // Terminal ownership remains with this route. The stable failure is best
-    // effort only when the persistence boundary itself is unavailable.
+    // The diagnostic below is deliberately fixed and path-free.
   }
+  logWorkspaceFailurePersistenceDiagnostic();
+  return false;
+}
+
+function logWorkspaceFailurePersistenceDiagnostic(): void {
+  console.error(
+    "[CodaScope] workspace assistant failure state could not be persisted.",
+  );
 }
 
 function validateAttachments(

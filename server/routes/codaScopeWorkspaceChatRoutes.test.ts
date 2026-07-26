@@ -494,6 +494,92 @@ describe("workspace chat routes", () => {
     expect(res.frames.join("")).not.toContain("event: done");
   });
 
+  it("emits one sanitized error when completion persistence fails but error persistence succeeds", async () => {
+    const timeline: string[] = [];
+    const state = statefulConversationService(timeline);
+    state.service.completeAssistantMessage.mockRejectedValueOnce(
+      new Error("/private/storage/completion-write-failed"),
+    );
+    orchestrator.stream.mockResolvedValueOnce({
+      fullResponse: "Generated answer",
+      agentResult: {},
+      retrievedSources: [],
+    });
+    const routes = registeredRoutes({
+      services: streamingServices(state.service),
+    });
+    const res = response();
+
+    route(routes, "post", messagePath)(
+      messageRequest as any,
+      res as any,
+      vi.fn(),
+    );
+    await waitForEnd(res);
+
+    expect(terminals(res)).toEqual([
+      'event: error\ndata: {"error":"Workspace assistant run failed."}\n\n',
+    ]);
+    expect(res.frames.join("")).not.toContain("/private/storage");
+    expect(state.service.completeAssistantMessage).toHaveBeenCalledTimes(1);
+    expect(state.service.recordAssistantMessageError).toHaveBeenCalledTimes(1);
+    expect(state.get().messages.find((message: any) => message.role === "assistant"))
+      .toMatchObject({ status: "error", content: "Generated answer" });
+    expect(state.service.endConversationRun).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["error-state rejection", false, "rejects"],
+    ["error-state null transition", false, "returns-null"],
+    ["cancellation rejection", true, "rejects"],
+    ["cancellation null transition", true, "returns-null"],
+  ])(
+    "emits one emergency error when %s",
+    async (_label, cancelled, persistenceOutcome) => {
+      const state = statefulConversationService();
+      const diagnostic = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      if (persistenceOutcome === "rejects") {
+        state.service.recordAssistantMessageError.mockRejectedValueOnce(
+          new Error("/private/storage/error-state-write-failed"),
+        );
+      } else {
+        state.service.recordAssistantMessageError.mockResolvedValueOnce(null as any);
+      }
+      orchestrator.stream.mockRejectedValueOnce(
+        cancelled
+          ? new WorkspaceAssistantCancelledError("Partial")
+          : Object.assign(
+              new Error("/private/sdk/native-failure"),
+              { fullResponse: "Partial" },
+            ),
+      );
+      const routes = registeredRoutes({
+        services: streamingServices(state.service),
+      });
+      const res = response();
+
+      route(routes, "post", messagePath)(
+        messageRequest as any,
+        res as any,
+        vi.fn(),
+      );
+      await waitForEnd(res);
+
+      expect(terminals(res)).toEqual([
+        "event: error\ndata: {\"error\":\"Workspace assistant run could not be finalized.\"}\n\n",
+      ]);
+      expect(res.frames.join("")).not.toContain("/private/");
+      expect(res.frames.join("")).not.toContain("event: done");
+      expect(res.frames.join("")).not.toContain("event: cancelled");
+      expect(res.end).toHaveBeenCalledTimes(1);
+      expect(state.service.recordAssistantMessageError).toHaveBeenCalledTimes(1);
+      expect(state.service.endConversationRun).toHaveBeenCalledTimes(1);
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant failure state could not be persisted.",
+      );
+    },
+  );
+
   it("rejects overlapping same-conversation sends before appending", async () => {
     const state = statefulConversationService();
     state.service.tryBeginConversationRun.mockReturnValue(false);
