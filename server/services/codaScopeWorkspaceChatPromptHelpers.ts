@@ -16,6 +16,10 @@ import type {
   WorkspaceConversationMessage,
   WorkspaceMessageContext,
 } from "./codaScopeWorkspaceConversationService.js";
+import {
+  normalizeCanonicalWorkspaceNoteRangeTarget,
+  type CanonicalWorkspaceNoteRangeTarget,
+} from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 
 export const WORKSPACE_MANIFEST_MAX_PROJECTS = 12;
 export const WORKSPACE_MANIFEST_MAX_CHARS = 6_000;
@@ -125,12 +129,23 @@ export function formatWorkspaceConversationHistory(
   return selected.map((message) => {
     const content = singleLine(message.content)
       .slice(0, WORKSPACE_HISTORY_MESSAGE_MAX_CHARS);
-    return `${message.role.toUpperCase()}: ${content}`;
+    const target = message.role === "user"
+      ? normalizeCanonicalWorkspaceNoteRangeTarget(
+          message.metadata.noteRangeTarget,
+        )
+      : null;
+    const provenance = target
+      ? ` [historical exact note-range target: "${singleLine(target.title)}" `
+        + `(${singleLine(target.path)}), lines ${target.startLine}-${target.endLine}, `
+        + `selected "${singleLine(target.selectedText).slice(0, 500)}"]`
+      : "";
+    return `${message.role.toUpperCase()}${provenance}: ${content}`;
   }).join("\n");
 }
 
 export function formatWorkspaceCurrentContext(
   context: WorkspaceMessageContext,
+  noteRangeTarget?: CanonicalWorkspaceNoteRangeTarget | null,
 ): string {
   const lines = [
     `Current view: ${singleLine(context.currentView.view)}`,
@@ -147,12 +162,51 @@ export function formatWorkspaceCurrentContext(
       `Note scope/visibility: codascope/${context.currentNote.visibility}`,
       `Note path: ${singleLine(context.currentNote.path)}`,
       `Note content hash: ${context.currentNote.contentHash ?? "not supplied"}`,
-      "The note body is not available in this phase.",
+      noteRangeTarget
+        ? "The full note body is not supplied; the exact selected text is attached below."
+        : "The note body is not available in this phase.",
     );
   } else {
     lines.push("Current CodaScope note: none");
   }
+  if (noteRangeTarget) {
+    lines.push(
+      "",
+      "### Exact current-turn CodaScope note edit target",
+      "The user attached an exact edit target in the current note.",
+      `Canonical note: ${singleLine(noteRangeTarget.title)} (${singleLine(noteRangeTarget.path)})`,
+      `Display line range: ${noteRangeTarget.startLine}-${noteRangeTarget.endLine}`,
+      "Exact selected text:",
+      fencedSelection(noteRangeTarget.selectedText),
+      "Operate only on this supplied target through replace_codascope_note_range.",
+      "Line numbers are descriptive; the server-held exact target is authoritative.",
+      "Do not rewrite the full note through this capability.",
+      "If the requested replacement is ambiguous, ask one concise question.",
+    );
+  }
   return lines.join("\n");
+}
+
+function fencedSelection(value: string): string {
+  const backticks = longestRun(value, "`");
+  const tildes = longestRun(value, "~");
+  const marker = backticks <= tildes ? "`" : "~";
+  const fence = marker.repeat(Math.max(3, Math.min(backticks, tildes) + 1));
+  return `${fence}markdown\n${value}\n${fence}`;
+}
+
+function longestRun(value: string, marker: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const character of value) {
+    if (character === marker) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
 }
 
 function projectSummary(project: WorkspaceProjectOverview): string {

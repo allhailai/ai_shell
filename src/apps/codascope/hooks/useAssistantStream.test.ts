@@ -182,6 +182,77 @@ describe("consumeAssistantStreamResponse", () => {
       workspaceTerminalIdentityValid: false,
     });
   });
+
+  it.each([
+    ["error", { error: "Generation failed." }],
+    ["cancelled", {}],
+  ])("retains a canonical project range receipt from an %s terminal", async (
+    terminal,
+    terminalFields,
+  ) => {
+    const action = {
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_note_range",
+        stableId: "note-1",
+        scope: "project",
+        visibility: "shared",
+        projectId: "alpha",
+        path: "notes/one.md",
+        title: "One",
+        contentHash: "b".repeat(64),
+        startLine: "1",
+        endLine: "1",
+      },
+      description: "Replaced selected text.",
+    };
+    const outcome = await consumeAssistantStreamResponse(
+      responseFrom([
+        `event: ${terminal}\ndata: ${JSON.stringify({
+          ...terminalFields,
+          actions: [action, { type: "navigate" }],
+        })}\n\n`,
+      ]),
+      undefined,
+      () => undefined,
+      { kind: "project", projectId: "alpha" },
+    );
+    expect(outcome).toMatchObject({
+      status: terminal,
+      actions: [action],
+    });
+  });
+
+  it("rejects a malformed or wrong-project range receipt", async () => {
+    const action = {
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_note_range",
+        stableId: "note-1",
+        scope: "project",
+        visibility: "shared",
+        projectId: "beta",
+        path: "notes/one.md",
+        title: "One",
+        contentHash: "b".repeat(64),
+        startLine: "1",
+        endLine: "1",
+      },
+      description: "Replaced selected text.",
+    };
+    const outcome = await consumeAssistantStreamResponse(
+      responseFrom([
+        `event: error\ndata: ${JSON.stringify({
+          error: "Generation failed.",
+          actions: [action],
+        })}\n\n`,
+      ]),
+      undefined,
+      () => undefined,
+      { kind: "project", projectId: "alpha" },
+    );
+    expect(outcome).toMatchObject({ status: "error", actions: [] });
+  });
 });
 
 describe("workspace persisted turn reconciliation", () => {
@@ -613,6 +684,83 @@ describe("assistant stream scoping", () => {
       references: [{ category: "wiki", id: "topic", label: "Topic" }],
       selectionContext: { docId: "doc", epicId: "epic" },
     });
+  });
+
+  it("attaches only a note range valid for the endpoint family", () => {
+    const workspaceTarget = {
+      kind: "note-range" as const,
+      stableId: "note-1",
+      scope: "codascope" as const,
+      visibility: "private" as const,
+      path: "notes/one.md",
+      title: "One",
+      selectionStart: 0,
+      selectionEnd: 5,
+      selectedText: "first",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "a".repeat(64),
+    };
+    const projectTarget = {
+      ...workspaceTarget,
+      stableId: "note-2",
+      scope: "project" as const,
+      visibility: "shared" as const,
+      projectId: "alpha",
+    };
+    const epicTarget = {
+      ...workspaceTarget,
+      stableId: "note-3",
+      scope: "epic" as const,
+      visibility: "shared" as const,
+      projectId: "alpha",
+      epicId: "epic-1",
+    };
+    expect(createAssistantMessagePayload(
+      { kind: "workspace" },
+      {
+        conversationId: "conv-1",
+        message: "Revise",
+        modelId: "model",
+        noteRangeTarget: workspaceTarget,
+      },
+    )).toHaveProperty("noteRangeTarget", workspaceTarget);
+    expect(createAssistantMessagePayload(
+      { kind: "project", projectId: "alpha" },
+      {
+        conversationId: "conv-1",
+        message: "Revise",
+        modelId: "model",
+        noteRangeTarget: projectTarget,
+      },
+    )).toHaveProperty("noteRangeTarget", projectTarget);
+    expect(createAssistantMessagePayload(
+      { kind: "project", projectId: "alpha" },
+      {
+        conversationId: "conv-1",
+        message: "Revise",
+        modelId: "model",
+        noteRangeTarget: epicTarget,
+      },
+    )).toHaveProperty("noteRangeTarget", epicTarget);
+    expect(() => createAssistantMessagePayload(
+      { kind: "workspace" },
+      {
+        conversationId: "conv-1",
+        message: "Revise",
+        modelId: "model",
+        noteRangeTarget: projectTarget,
+      },
+    )).toThrow("does not match this assistant");
+    expect(() => createAssistantMessagePayload(
+      { kind: "project", projectId: "beta" },
+      {
+        conversationId: "conv-1",
+        message: "Revise",
+        modelId: "model",
+        noteRangeTarget: projectTarget,
+      },
+    )).toThrow("does not match this assistant");
   });
 
   it("cancels against the run's original scope endpoint", async () => {

@@ -59,6 +59,13 @@ import {
   type WorkspaceRetrievedSourceReference,
 } from "./codaScopeWorkspaceProvenance.js";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { CanonicalProjectNoteRangeTarget } from "../../src/apps/codascope/projectNoteRangeTargetValidation.js";
+import type { CodaScopeProjectNoteRangeService } from "./codaScopeProjectNoteRangeService.js";
+import { ProjectNoteRangeGrantHolder } from "./codaScopeProjectNoteRangeGrant.js";
+import {
+  ProjectNoteRangeActionCollector,
+  ProjectNoteRangeActionCollectorHolder,
+} from "./codaScopeProjectNoteRangeMutationActions.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -74,9 +81,9 @@ interface AgentSendCommonOptions {
   onDone: (
     result: RunResult,
     workspaceRetrievedSources?: WorkspaceRetrievedSourceReference[],
-    workspaceMutationActions?: CodaScopeAction[],
+    trustedMutationActions?: CodaScopeAction[],
   ) => void;
-  onError: (err: Error, workspaceMutationActions?: CodaScopeAction[]) => void;
+  onError: (err: Error, trustedMutationActions?: CodaScopeAction[]) => void;
 }
 
 export type AgentSendOptions =
@@ -85,6 +92,7 @@ export type AgentSendOptions =
       purpose: ProjectAgentPurpose;
       workspaceReadGrant?: never;
       workspaceNoteGrant?: never;
+      projectNoteRangeTarget?: CanonicalProjectNoteRangeTarget;
     })
   | (AgentSendCommonOptions & {
       scope: Extract<AssistantScope, { kind: "workspace" }>;
@@ -123,6 +131,8 @@ interface PoolEntry {
   workspaceNoteGrantHolder?: WorkspaceTurnNoteGrantHolder;
   workspaceProvenanceHolder?: WorkspaceProvenanceCollectorHolder;
   workspaceMutationActionHolder?: WorkspaceMutationActionCollectorHolder;
+  projectNoteRangeGrantHolder?: ProjectNoteRangeGrantHolder;
+  projectNoteRangeActionHolder?: ProjectNoteRangeActionCollectorHolder;
 }
 
 export interface AgentLocalWorkspace {
@@ -255,6 +265,7 @@ export class CodaScopeAgentService {
   private secretService: SecretService;
   private projectsRoot: string;
   private workspaceTools?: WorkspaceToolServices;
+  private projectNoteRangeService?: CodaScopeProjectNoteRangeService;
   private pool = new Map<string, PoolEntry>();
   private modelCache: ModelCache | null = null;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -273,10 +284,12 @@ export class CodaScopeAgentService {
     secretService: SecretService,
     projectsRoot: string,
     workspaceTools?: WorkspaceToolServices,
+    projectNoteRangeService?: CodaScopeProjectNoteRangeService,
   ) {
     this.secretService = secretService;
     this.projectsRoot = projectsRoot;
     this.workspaceTools = workspaceTools;
+    this.projectNoteRangeService = projectNoteRangeService;
 
     // Clean up idle agents every 2 minutes
     this.cleanupTimer = setInterval(() => this.cleanIdleAgents(), 2 * 60 * 1000);
@@ -364,6 +377,8 @@ export class CodaScopeAgentService {
       workspaceNoteGrantHolder?: WorkspaceTurnNoteGrantHolder;
       workspaceProvenanceHolder?: WorkspaceProvenanceCollectorHolder;
       workspaceMutationActionHolder?: WorkspaceMutationActionCollectorHolder;
+      projectNoteRangeGrantHolder?: ProjectNoteRangeGrantHolder;
+      projectNoteRangeActionHolder?: ProjectNoteRangeActionCollectorHolder;
       actorId?: string;
     },
   ): Record<string, SDKCustomTool> {
@@ -375,6 +390,8 @@ export class CodaScopeAgentService {
       workspaceNoteGrantHolder,
       workspaceProvenanceHolder,
       workspaceMutationActionHolder,
+      projectNoteRangeGrantHolder,
+      projectNoteRangeActionHolder,
       actorId,
     } = options;
     assertAgentPurposeScope(scope, purpose);
@@ -401,6 +418,15 @@ export class CodaScopeAgentService {
       purpose,
       collectorHolder,
       actorId,
+      this.projectNoteRangeService
+        && projectNoteRangeGrantHolder
+        && projectNoteRangeActionHolder
+        ? {
+            service: this.projectNoteRangeService,
+            grantHolder: projectNoteRangeGrantHolder,
+            actionHolder: projectNoteRangeActionHolder,
+          }
+        : undefined,
     );
   }
 
@@ -454,6 +480,14 @@ export class CodaScopeAgentService {
     const workspaceMutationActionHolder = scope.kind === "workspace"
       ? new WorkspaceMutationActionCollectorHolder()
       : undefined;
+    const projectNoteRangeGrantHolder = scope.kind === "project"
+      && (purpose === "assistant" || purpose === "chat")
+      ? new ProjectNoteRangeGrantHolder()
+      : undefined;
+    const projectNoteRangeActionHolder = scope.kind === "project"
+      && (purpose === "assistant" || purpose === "chat")
+      ? new ProjectNoteRangeActionCollectorHolder()
+      : undefined;
 
     let projectName: string | null = null;
     let projectDir: string | null = null;
@@ -484,6 +518,8 @@ export class CodaScopeAgentService {
       workspaceNoteGrantHolder,
       workspaceProvenanceHolder,
       workspaceMutationActionHolder,
+      projectNoteRangeGrantHolder,
+      projectNoteRangeActionHolder,
       actorId,
     });
     const agentName = getAgentName({ scope, purpose, projectName });
@@ -524,6 +560,8 @@ export class CodaScopeAgentService {
       workspaceNoteGrantHolder,
       workspaceProvenanceHolder,
       workspaceMutationActionHolder,
+      projectNoteRangeGrantHolder,
+      projectNoteRangeActionHolder,
     });
 
     return agent;
@@ -600,6 +638,7 @@ export class CodaScopeAgentService {
 
     let workspaceReadGrant = EMPTY_WORKSPACE_TURN_READ_GRANT;
     let workspaceNoteGrant = EMPTY_WORKSPACE_TURN_NOTE_GRANT;
+    let projectNoteRangeTarget: CanonicalProjectNoteRangeTarget | null = null;
     if (scope.kind === "workspace") {
       if (!this.workspaceTools) {
         onError(new Error("CodaScope workspace tool dependencies are unavailable."));
@@ -624,6 +663,26 @@ export class CodaScopeAgentService {
         return;
       }
     }
+    if (scope.kind === "project"
+      && "projectNoteRangeTarget" in options
+      && options.projectNoteRangeTarget !== undefined) {
+      if ((purpose !== "assistant" && purpose !== "chat")
+        || !actorId
+        || !this.projectNoteRangeService) {
+        onError(new Error("Project note-range authority is unavailable."));
+        return;
+      }
+      try {
+        projectNoteRangeTarget =
+          await this.projectNoteRangeService.revalidateTarget(
+            actorId,
+            options.projectNoteRangeTarget,
+          );
+      } catch {
+        onError(new Error("Project note-range authority is invalid or stale."));
+        return;
+      }
+    }
 
     const key = this.poolKey(scope, purpose, actorId);
     const chatKey = this.activeChatKey(scope, actorId);
@@ -645,6 +704,8 @@ export class CodaScopeAgentService {
     const workspaceProvenanceCollector = new WorkspaceProvenanceCollector();
     const workspaceMutationActionCollector =
       new WorkspaceMutationActionCollector();
+    const projectNoteRangeActionCollector =
+      new ProjectNoteRangeActionCollector();
     let activeEntry: PoolEntry | undefined;
     let startedRun: Run | undefined;
 
@@ -670,6 +731,13 @@ export class CodaScopeAgentService {
         if (activeEntry.workspaceMutationActionHolder) {
           activeEntry.workspaceMutationActionHolder.current =
             workspaceMutationActionCollector;
+        }
+        activeEntry.projectNoteRangeGrantHolder?.replace(
+          projectNoteRangeTarget,
+        );
+        if (activeEntry.projectNoteRangeActionHolder) {
+          activeEntry.projectNoteRangeActionHolder.current =
+            projectNoteRangeActionCollector;
         }
       }
 
@@ -764,6 +832,13 @@ export class CodaScopeAgentService {
               activeEntry.workspaceMutationActionHolder.current =
                 workspaceMutationActionCollector;
             }
+            activeEntry.projectNoteRangeGrantHolder?.replace(
+              projectNoteRangeTarget,
+            );
+            if (activeEntry.projectNoteRangeActionHolder) {
+              activeEntry.projectNoteRangeActionHolder.current =
+                projectNoteRangeActionCollector;
+            }
           }
           return fallbackAgent;
         },
@@ -792,6 +867,7 @@ export class CodaScopeAgentService {
         activeEntry.lastUsed = Date.now();
         activeEntry.workspaceGrantHolder?.clear();
         activeEntry.workspaceNoteGrantHolder?.clear();
+        activeEntry.projectNoteRangeGrantHolder?.clear();
       }
 
       // Clean up controller
@@ -802,8 +878,11 @@ export class CodaScopeAgentService {
       if (abortController.signal.aborted) {
         runCollector.drain(); // discard collected results on cancel
         workspaceProvenanceCollector.clear();
-        const mutationActions = workspaceMutationActionCollector.drain();
+        const mutationActions = scope.kind === "workspace"
+          ? workspaceMutationActionCollector.drain()
+          : projectNoteRangeActionCollector.drain();
         activeEntry?.workspaceMutationActionHolder?.clear();
+        activeEntry?.projectNoteRangeActionHolder?.clear();
         onError(
           new Error("Agent cancelled by user."),
           mutationActions,
@@ -817,8 +896,11 @@ export class CodaScopeAgentService {
             text,
           } as unknown as SDKMessage);
         }
-        const mutationActions = workspaceMutationActionCollector.drain();
+        const mutationActions = scope.kind === "workspace"
+          ? workspaceMutationActionCollector.drain()
+          : projectNoteRangeActionCollector.drain();
         activeEntry?.workspaceMutationActionHolder?.clear();
+        activeEntry?.projectNoteRangeActionHolder?.clear();
         onDone(
           result,
           workspaceProvenanceCollector.drain(),
@@ -830,6 +912,7 @@ export class CodaScopeAgentService {
         activeEntry.busy = false;
         activeEntry.workspaceGrantHolder?.clear();
         activeEntry.workspaceNoteGrantHolder?.clear();
+        activeEntry.projectNoteRangeGrantHolder?.clear();
       }
 
       // Never let an older failed run delete a newer busy entry that reused
@@ -845,8 +928,11 @@ export class CodaScopeAgentService {
 
       if (abortController.signal.aborted) {
         workspaceProvenanceCollector.clear();
-        const mutationActions = workspaceMutationActionCollector.drain();
+        const mutationActions = scope.kind === "workspace"
+          ? workspaceMutationActionCollector.drain()
+          : projectNoteRangeActionCollector.drain();
         activeEntry?.workspaceMutationActionHolder?.clear();
+        activeEntry?.projectNoteRangeActionHolder?.clear();
         onError(
           new Error("Agent cancelled by user."),
           mutationActions,
@@ -863,7 +949,12 @@ export class CodaScopeAgentService {
         );
       } else {
         workspaceProvenanceCollector.clear();
-        onError(err instanceof Error ? err : new Error(String(err)));
+        const mutationActions = projectNoteRangeActionCollector.drain();
+        activeEntry?.projectNoteRangeActionHolder?.clear();
+        onError(
+          err instanceof Error ? err : new Error(String(err)),
+          mutationActions,
+        );
       }
     }
   }
@@ -880,6 +971,8 @@ export class CodaScopeAgentService {
     entry.workspaceNoteGrantHolder?.clear();
     entry.workspaceProvenanceHolder?.current.clear();
     entry.workspaceMutationActionHolder?.clear();
+    entry.projectNoteRangeGrantHolder?.clear();
+    entry.projectNoteRangeActionHolder?.clear();
   }
 
   /* ── Cleanup ──────────────────────────────────────────────────────── */

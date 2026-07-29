@@ -10,6 +10,7 @@ import {
   WORKSPACE_NOTE_MAX_ACTIONS,
 } from "../../src/apps/codascope/workspaceMutationActionValidation.js";
 import type { WorkspaceNoteMutationOperation } from "../../src/apps/codascope/workspaceMutationActionValidation.js";
+import type { CanonicalWorkspaceNoteRangeTarget } from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 import type { WorkspaceNoteDto } from "./codaScopeWorkspaceNoteService.js";
 
 export interface WorkspaceMutationActionReservation {
@@ -17,6 +18,11 @@ export interface WorkspaceMutationActionReservation {
   commitNoteMutation(
     operation: WorkspaceNoteMutationOperation,
     note: WorkspaceNoteDto,
+    description: string,
+  ): void;
+  commitNoteRangeMutation(
+    note: WorkspaceNoteDto,
+    target: CanonicalWorkspaceNoteRangeTarget,
     description: string,
   ): void;
   release(): void;
@@ -58,6 +64,13 @@ export class WorkspaceMutationActionCollector {
       )),
       commitNoteMutation: (operation, note, description) => commit(
         canonicalAction("operation_completed", note, description, { operation }),
+      ),
+      commitNoteRangeMutation: (note, target, description) => commit(
+        canonicalAction("operation_completed", note, description, {
+          operation: "replace_codascope_note_range",
+          startLine: String(target.startLine),
+          endLine: String(target.endLine),
+        }),
       ),
       release: () => {
         if (!pending) return;

@@ -7,7 +7,7 @@
    - @ detection for context injection (callback only)
    ──────────────────────────────────────────────────────────────────── */
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, type Ref } from "react";
 
 /* ── Types ───────────────────────────────────────────────────────── */
 
@@ -39,6 +39,8 @@ export interface RichChatInputProps {
   maxHeightPercent?: number; // default 40
   sendDisabled?: boolean;
   sendIcon?: React.ReactNode;
+  /** Direct composer ref for scoped focus management. */
+  inputRef?: Ref<HTMLTextAreaElement>;
 }
 
 /* ── Accepted image types ────────────────────────────────────────── */
@@ -75,11 +77,20 @@ export function RichChatInput({
   maxHeightPercent = 40,
   sendDisabled = false,
   sendIcon: _sendIcon,
+  inputRef,
 }: RichChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounter = useRef(0);
+  const assignTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    textareaRef.current = node;
+    if (typeof inputRef === "function") {
+      inputRef(node);
+    } else if (inputRef) {
+      inputRef.current = node;
+    }
+  }, [inputRef]);
 
   /* ── Auto-resize textarea ─────────────────────────────────────── */
 
@@ -292,7 +303,7 @@ export function RichChatInput({
 
       {/* Textarea */}
       <textarea
-        ref={textareaRef}
+        ref={assignTextareaRef}
         className="shared-rich-input-textarea"
         value={value}
         onChange={handleChange}

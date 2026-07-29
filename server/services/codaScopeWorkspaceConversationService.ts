@@ -30,6 +30,9 @@ import {
   validateWorkspaceMutationActions,
 } from "./codaScopeWorkspaceMutationActions.js";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  normalizeCanonicalWorkspaceNoteRangeTarget,
+} from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 
 const WORKSPACE_CONVERSATION_VERSION = 1;
 const MAX_CONVERSATIONS = 100;
@@ -918,7 +921,7 @@ function validatePersistedMessage(value: unknown): WorkspaceConversationMessage 
     status = "error";
     content = `${content.trim()}\n\n[Response was interrupted before completion.]`.trim();
   }
-  const metadata = validateWorkspaceMessageMetadata(source.metadata);
+  const metadata = validateWorkspaceMessageMetadata(source.metadata, source.role);
   return {
     id: safeId(source.id, "message ID"),
     role: source.role,
@@ -976,7 +979,7 @@ function normalizeNewMessage(
     context: createWorkspaceMessageContext(value.context),
     metadata: value.metadata === undefined
       ? {}
-      : validateWorkspaceMessageMetadata(value.metadata),
+      : validateWorkspaceMessageMetadata(value.metadata, role),
   };
 }
 
@@ -1158,10 +1161,21 @@ function requireRecord(value: unknown): Record<string, unknown> {
 
 function validateWorkspaceMessageMetadata(
   value: unknown,
+  role: WorkspaceConversationMessage["role"],
 ): Record<string, unknown> {
   const metadata = requireRecord(value);
+  const noteRangeTarget = metadata.noteRangeTarget === undefined
+    ? undefined
+    : normalizeCanonicalWorkspaceNoteRangeTarget(metadata.noteRangeTarget);
+  if (metadata.noteRangeTarget !== undefined
+    && (role !== "user" || noteRangeTarget === null)) {
+    throw new Error("Invalid workspace note range target metadata.");
+  }
   return {
     ...metadata,
+    ...(noteRangeTarget === undefined
+      ? {}
+      : { noteRangeTarget }),
     ...(metadata.actions === undefined
       ? {}
       : { actions: validateWorkspaceMutationActions(metadata.actions) }),

@@ -38,6 +38,23 @@ describe("workspace mutation action validation", () => {
         attributes: { operation },
       });
     }
+    expect(validateWorkspaceMutationAction({
+      ...canonicalCreated,
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_codascope_note_range",
+        ...canonicalCreated.attributes,
+        startLine: "2",
+        endLine: "3",
+      },
+    })).toMatchObject({
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_codascope_note_range",
+        startLine: "2",
+        endLine: "3",
+      },
+    });
   });
 
   it.each([
@@ -65,6 +82,24 @@ describe("workspace mutation action validation", () => {
     for (const attributes of [
       { operation: "delete_note", ...canonicalCreated.attributes },
       { ...canonicalCreated.attributes },
+    ]) {
+      expect(() => validateWorkspaceMutationAction({
+        ...canonicalCreated,
+        type: "operation_completed",
+        attributes,
+      })).toThrow("Invalid workspace mutation action");
+    }
+    for (const attributes of [
+      {
+        operation: "replace_codascope_note_range",
+        ...canonicalCreated.attributes,
+      },
+      {
+        operation: "replace_codascope_note_range",
+        ...canonicalCreated.attributes,
+        startLine: "4",
+        endLine: "3",
+      },
     ]) {
       expect(() => validateWorkspaceMutationAction({
         ...canonicalCreated,

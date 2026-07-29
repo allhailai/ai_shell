@@ -11,6 +11,7 @@ import type {
   CodaScopeWorkspaceNoteService,
   WorkspaceCurrentNoteIdentity,
 } from "./codaScopeWorkspaceNoteService.js";
+import type { CanonicalWorkspaceNoteRangeTarget } from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 import {
   deriveWorkspaceTurnNoteGrant,
   EMPTY_WORKSPACE_TURN_NOTE_GRANT,
@@ -42,6 +43,7 @@ export interface WorkspaceIntentResolution {
 export interface WorkspaceNoteIntentContext {
   actorId: string;
   currentNote?: WorkspaceCurrentNoteIdentity | null;
+  noteRangeTarget?: CanonicalWorkspaceNoteRangeTarget | null;
 }
 
 export class CodaScopeWorkspaceIntentService {
@@ -63,6 +65,7 @@ export class CodaScopeWorkspaceIntentService {
           actorId: noteContext?.actorId,
           message,
           currentNote: noteContext?.currentNote,
+          noteRangeTarget: noteContext?.noteRangeTarget,
           noteService: this.workspaceNoteService,
         })
       : EMPTY_WORKSPACE_TURN_NOTE_GRANT;

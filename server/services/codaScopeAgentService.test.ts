@@ -28,6 +28,8 @@ import { getWorkspaceTools } from "./codaScopeWorkspaceToolDefinitions.js";
 import { WorkspaceTurnNoteGrantHolder } from "./codaScopeWorkspaceNoteGrant.js";
 import { WorkspaceProvenanceCollectorHolder } from "./codaScopeWorkspaceProvenance.js";
 import { WorkspaceMutationActionCollectorHolder } from "./codaScopeWorkspaceMutationActions.js";
+import { ProjectNoteRangeGrantHolder } from "./codaScopeProjectNoteRangeGrant.js";
+import { ProjectNoteRangeActionCollectorHolder } from "./codaScopeProjectNoteRangeMutationActions.js";
 
 function tmpDir(): string {
   const root = path.join(os.tmpdir(), `agent-actor-${crypto.randomBytes(6).toString("hex")}`);
@@ -554,6 +556,7 @@ describe("CodaScopeAgentService actor isolation", () => {
         workspaceNoteGrant: {
           create: { maxSuccesses: 1, visibility: "private" },
           readStableIds: [],
+          editRangeTarget: null,
           editBodyStableIds: [],
           editTitleStableIds: [],
           visibilityChanges: [],
@@ -573,6 +576,121 @@ describe("CodaScopeAgentService actor isolation", () => {
           attributes: expect.objectContaining({ stableId: "note-1" }),
         })],
       );
+      await service.shutdown();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("revalidates, installs, returns, and clears a fresh project note-range grant per run", async () => {
+    const root = tmpDir();
+    try {
+      const target = {
+        kind: "note-range" as const,
+        stableId: "note_123",
+        scope: "project" as const,
+        visibility: "shared" as const,
+        projectId: "project",
+        path: "plan.md",
+        title: "Plan",
+        selectionStart: 0,
+        selectionEnd: 4,
+        selectedText: "plan",
+        startLine: 1,
+        endLine: 1,
+        expectedHash: "a".repeat(64),
+      };
+      const revalidateTarget = vi.fn(async () => target);
+      const grantHolder = new ProjectNoteRangeGrantHolder();
+      const actionHolder = new ProjectNoteRangeActionCollectorHolder();
+      const observedActive: boolean[] = [];
+      const fakeAgent = {
+        agentId: "project-agent",
+        close: vi.fn(),
+        send: vi.fn(async () => {
+          observedActive.push(grantHolder.hasActiveTarget());
+          if (grantHolder.hasActiveTarget()) {
+            const grant = grantHolder.reserve()!;
+            actionHolder.reserve()!.commit({
+              stableId: target.stableId,
+              scope: target.scope,
+              visibility: target.visibility,
+              projectId: target.projectId,
+              path: target.path,
+              title: target.title,
+              contentHash: "b".repeat(64),
+            }, target);
+            grant.commit();
+          }
+          return {
+            id: crypto.randomUUID(),
+            cancel: vi.fn(async () => undefined),
+            wait: vi.fn(async () => ({ status: "completed" })),
+          };
+        }),
+      };
+      const service = new CodaScopeAgentService(
+        {} as any,
+        root,
+        undefined,
+        { revalidateTarget } as any,
+      );
+      const key = (service as any).poolKey(
+        { kind: "project", projectId: "project" },
+        "assistant",
+        "alice",
+      );
+      (service as any).pool.set(key, {
+        agent: fakeAgent,
+        scope: { kind: "project", projectId: "project" },
+        purpose: "assistant",
+        actorId: "alice",
+        lastUsed: Date.now(),
+        busy: false,
+        collectorHolder: new ToolResultCollectorHolder(),
+        projectNoteRangeGrantHolder: grantHolder,
+        projectNoteRangeActionHolder: actionHolder,
+      });
+      (service as any).allAgents.add(fakeAgent);
+      const onDone = vi.fn();
+
+      await service.send({
+        scope: { kind: "project", projectId: "project" },
+        purpose: "assistant",
+        actorId: "alice",
+        projectNoteRangeTarget: target,
+        message: "Do that",
+        modelId: "model",
+        onMessage: vi.fn(),
+        onDone,
+        onError: (error) => { throw error; },
+      });
+      expect(revalidateTarget).toHaveBeenCalledWith("alice", target);
+      expect(onDone).toHaveBeenCalledWith(
+        expect.anything(),
+        [],
+        [expect.objectContaining({
+          type: "operation_completed",
+          attributes: expect.objectContaining({
+            operation: "replace_note_range",
+            stableId: target.stableId,
+          }),
+        })],
+      );
+      expect(grantHolder.hasActiveTarget()).toBe(false);
+
+      await service.send({
+        scope: { kind: "project", projectId: "project" },
+        purpose: "assistant",
+        actorId: "alice",
+        message: "No selection this turn",
+        modelId: "model",
+        onMessage: vi.fn(),
+        onDone: vi.fn(),
+        onError: (error) => { throw error; },
+      });
+      expect(observedActive).toEqual([true, false]);
+      expect(revalidateTarget).toHaveBeenCalledTimes(1);
       await service.shutdown();
     } finally {
       rmSync(root, { recursive: true, force: true });

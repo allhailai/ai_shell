@@ -877,6 +877,162 @@ describe("CodaScopeChatService", () => {
     });
   });
 
+  describe("project note-range metadata persistence", () => {
+    const target = {
+      kind: "note-range" as const,
+      stableId: "note_123",
+      scope: "project" as const,
+      visibility: "shared" as const,
+      projectId: "proj-range",
+      path: "plans/current.md",
+      title: "Current plan",
+      selectionStart: 4,
+      selectionEnd: 9,
+      selectedText: "alpha",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "a".repeat(64),
+    };
+    const context = {
+      view: "notes",
+      projectId: "proj-range",
+      epicId: null,
+      noteScope: "project",
+      noteVisibility: "shared",
+      notePath: "plans/current",
+    };
+
+    it("coexists with images, stays on the user message only, and survives terminal states", async () => {
+      scaffoldProject(root, "proj-range");
+      const conv = await svc.createConversation("proj-range", "alice");
+      await svc.appendMessage("proj-range", conv.id, "alice", {
+        id: "user_range",
+        role: "user",
+        content: "Do that",
+        status: "complete",
+        context,
+        metadata: {
+          images: [{ path: "image.png", filename: "image.png" }],
+          noteRangeTarget: target,
+        },
+      });
+      await svc.appendMessage("proj-range", conv.id, "alice", {
+        id: "assistant_range",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      });
+
+      await svc.recordAssistantMessageError(
+        "proj-range",
+        conv.id,
+        "alice",
+        {
+          id: "assistant_range",
+          content: "cancelled",
+          modelId: "model",
+        },
+      );
+      const reloaded = await svc.readConversation(
+        "proj-range",
+        conv.id,
+        "alice",
+      );
+      expect(reloaded!.messages[0].metadata).toEqual({
+        images: [{ path: "image.png", filename: "image.png" }],
+        noteRangeTarget: target,
+      });
+      expect(reloaded!.messages[1].metadata)
+        .not.toHaveProperty("noteRangeTarget");
+      expect(reloaded!.messages[1].status).toBe("error");
+    });
+
+    it("rejects targets on assistant messages before persistence", async () => {
+      scaffoldProject(root, "proj-range");
+      const conv = await svc.createConversation("proj-range", "alice");
+      await expect(svc.appendMessage("proj-range", conv.id, "alice", {
+        role: "assistant",
+        content: "forged",
+        context,
+        metadata: { noteRangeTarget: target },
+      })).rejects.toThrow("Invalid project note-range target metadata");
+      expect((await svc.readConversation(
+        "proj-range",
+        conv.id,
+        "alice",
+      ))!.messages).toEqual([]);
+    });
+
+    it("treats malformed persisted target metadata as corruption", async () => {
+      const projectDir = scaffoldProject(root, "proj-range");
+      const conv = await svc.createConversation("proj-range", "alice");
+      await svc.appendMessage("proj-range", conv.id, "alice", {
+        role: "user",
+        content: "Do that",
+        status: "complete",
+        context,
+        metadata: { noteRangeTarget: target },
+      });
+      const file = conversationDataFiles(projectDir)[0];
+      const filePath = path.join(conversationDirectory(projectDir), file);
+      const persisted = JSON.parse(readFileSync(filePath, "utf-8"));
+      persisted.messages[0].metadata.noteRangeTarget.selectedText = "forged";
+      writeFileSync(filePath, JSON.stringify(persisted), "utf-8");
+
+      await expectPersistenceCorrupt(
+        svc.readConversation("proj-range", conv.id, "alice"),
+        "conversation",
+        "proj-range",
+      );
+    });
+
+    it("retains only a strict server-owned range action on a later assistant error", async () => {
+      scaffoldProject(root, "proj-range");
+      const conv = await svc.createConversation("proj-range", "alice");
+      await svc.appendMessage("proj-range", conv.id, "alice", {
+        id: "assistant_range",
+        role: "assistant",
+        content: "",
+        status: "streaming",
+      });
+      const action = {
+        type: "operation_completed",
+        attributes: {
+          operation: "replace_note_range",
+          stableId: target.stableId,
+          scope: target.scope,
+          visibility: target.visibility,
+          projectId: target.projectId,
+          path: target.path,
+          title: target.title,
+          contentHash: "b".repeat(64),
+          startLine: "1",
+          endLine: "1",
+        },
+        description: "Server confirmed the replacement.",
+      };
+      await svc.recordAssistantMessageError(
+        "proj-range",
+        conv.id,
+        "alice",
+        {
+          id: "assistant_range",
+          content: "Generation failed after the edit.",
+          trustedMutationActions: [action],
+        },
+      );
+      const reloaded = await svc.readConversation(
+        "proj-range",
+        conv.id,
+        "alice",
+      );
+      expect(reloaded!.messages[0]).toMatchObject({
+        status: "error",
+        metadata: { actions: [action] },
+      });
+    });
+  });
+
   // ── Epic Conversations ────────────────────────────────────────
 
   describe("epic conversations", () => {

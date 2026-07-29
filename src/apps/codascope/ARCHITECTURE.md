@@ -488,6 +488,44 @@ response once.
 | `GET` | `/api/codascope/projects/:id/conversations/legacy` | Admin-only list of ownerless legacy conversations |
 | `PATCH` | `/api/codascope/projects/:id/conversations/:convId/owner` | Admin-only legacy assignment (`targetUsername`) |
 
+Project-assistant message requests may attach one `noteRangeTarget` only while
+the current route context identifies an open project or shared epic note. This
+is a separate authority boundary from the workspace/root-note range contract.
+Before the user message or assistant placeholder is persisted, the route binds
+the raw target to the authenticated conversation owner and authoritative route
+project, validates the current note context (including the epic identity when
+applicable), and resolves the exact note through the root-composed project
+note-range service. Route-style paths use one rule: a missing final `.md` is
+added once, while the persisted canonical target always includes `.md`.
+
+The canonical project variant contains the project ID; the epic variant also
+contains a shared-only epic ID. Both carry the stable note ID, canonical path
+and title, full-content hash, exact UTF-16 body offsets and selected text, and
+descriptive 1-based lines. Unknown fields, private epic notes, inaccessible
+private project notes, surrogate-splitting offsets, stale identity/hash/text,
+and mismatched context fail before conversation persistence. Only user-message
+metadata stores the canonical target, alongside images when present. Strict
+reload validation treats malformed targets as persistence corruption; legacy
+messages without the field remain valid.
+
+For the current run, `CodaScopeAgentService` installs a fresh actor/project/
+pool-entry-local one-use grant after revalidating the canonical target. The
+grant never derives from history and is cleared after success, error,
+cancellation, replacement, eviction, or root cutover. While it is active,
+`create_note` and whole-note `edit_note` fail closed. The model-controlled
+`replace_note_range` tool accepts only bounded `replacementMarkdown`; all note
+identity and range authority remains in the holder.
+
+The root-composed mutation service re-resolves project/epic custody and exact
+note identity, then rechecks title, path, hash, UTF-16 boundaries, selected
+substring, and lines. It reuses the Phase-1 exact-range transform, rejects
+annotation-marker crossings, never searches for moved text, and publishes only
+the transformed body through the ordinary optimistic note update path. This
+preserves frontmatter, snapshots, annotation reconciliation, backlinks,
+last-editor metadata, and audit behavior. A confirmed mutation produces one
+strict server-owned `operation_completed` action with operation
+`replace_note_range`; model-authored copies are discarded.
+
 ### Workspace Assistant Conversation Plane
 
 The workspace assistant uses a separate version-1 conversation format with the
@@ -568,9 +606,16 @@ Workspace message context is bounded and strictly validated. The server writes
 the workspace assistant scope; the client may supply only a current-view
 identity, active explicit project references, and CodaScope-level current-note
 metadata (stable ID, relative path, title, private/shared visibility, and an
-optional hash). Note bodies are not read or persisted by this plane. Raw read
-grants, project scope, actor IDs, owner IDs, and model-authored authorization
-inputs are rejected.
+optional hash). Full note bodies are not read or persisted by this plane. A
+message request may separately carry one bounded `note-range` target with exact
+offsets, selected text, display lines, and expected hash. That raw target is
+not authority: before the user message is durable, the server binds it to the
+authenticated actor's freshly resolved current root CodaScope note, verifies
+canonical identity/path/visibility/hash/text/lines, and persists only the
+canonical target on that user message. Unknown fields, multiple targets,
+stale/mismatched ranges, and inaccessible notes fail closed. Raw read grants,
+project scope, actor IDs, owner IDs, and model-authored authorization inputs
+are rejected.
 
 The workspace reference catalog is a dedicated read-only boundary backed by
 the root-bound `CodaScopeActiveEntityResolver`, not the generic project
@@ -704,11 +749,29 @@ project/epic scope, or an arbitrary filesystem path.
 
 The exact workspace note tool set is `read_codascope_note`,
 `create_codascope_note`, `edit_codascope_note`,
+`replace_codascope_note_range`,
 `set_codascope_note_title`, `set_codascope_note_visibility`, and
 `archive_codascope_note`. Their schemas and runtime validators reject unknown
 fields and never accept actor, owner, scope, project, epic, archive-inclusion,
 or permanent-delete authority. The broader project `create_note` and
 `edit_note` tiers are not registered in workspace scope.
+
+An attached canonical range replaces ordinary message-language note authority
+for that turn: even a nonempty deictic instruction such as `Do that` grants
+only repeatable read access to the same stable ID and one consumable exact-range
+replacement. It grants no whole-body edit, title, visibility, archive, create,
+different-range, or later-turn capability. The target is revalidated during
+intent resolution and again when the Agent run installs its grant; the
+Phase-1 exact-range mutation primitive performs the final hash/text/offset
+check atomically under the note mutation boundary. The range tool accepts only
+bounded `replacementMarkdown`, including the empty string. Historical target
+metadata is prompt provenance only and never enters later grant derivation.
+
+The current-turn prompt names the canonical note and display line range,
+includes the exact bounded selected text in a safe fenced block, and states
+that the server-held offsets/text/hash are authoritative. It forbids whole-note
+replacement through this capability and requests one concise clarification
+when the replacement instruction is ambiguous.
 
 The message endpoint persists the user message, then exactly one stable
 assistant `streaming` placeholder before starting the agent. Concurrent sends
@@ -764,8 +827,10 @@ accept `note_created`, so assistant prose cannot forge this completion.
 Server persistence/reload and frontend normalization share the canonical
 validator: safe bounded stable ID, fixed scope, visibility, contained
 non-system `.md` path, bounded newline/NUL-free title, hexadecimal content
-hash, bounded description, exact attributes, and one of the four supported
-non-create operation names. One malformed action rejects the complete
+hash, bounded description, exact attributes, and one of the existing note
+operations or the exact-range replacement operation. Exact-range
+completion adds the original validated display `startLine` and `endLine` while
+retaining the new content hash. One malformed action rejects the complete
 workspace record/action collection.
 
 Workspace images reuse the project-chat MIME allowlist, 5 MB service limit,

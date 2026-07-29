@@ -152,6 +152,55 @@ export function buildWorkspaceNoteTools(
       }),
     },
 
+    replace_codascope_note_range: {
+      description:
+        "Replace only the exact server-authorized selected range in the current CodaScope note. The server owns the note ID, offsets, selected text, and expected hash; supply only replacement Markdown. An empty replacement deletes the selection.",
+      inputSchema: objectSchema({
+        replacementMarkdown: {
+          type: "string",
+          description: "Markdown that replaces the exact authorized selection",
+          maxLength: MAX_BODY,
+        },
+      }, ["replacementMarkdown"]),
+      execute: async (rawArgs) => controlled(async () => {
+        const args = exactArgs(rawArgs, ["replacementMarkdown"]);
+        const replacementMarkdown = requiredString(
+          args,
+          "replacementMarkdown",
+          MAX_BODY,
+          true,
+        );
+        const grantReservation = grantHolder.reserveRangeMutation();
+        const target = grantReservation?.target;
+        const updated = await withMutationReservations(
+          grantReservation,
+          actionHolder,
+          () => {
+            if (!target) throw new WorkspaceNoteGrantRefusal();
+            return noteService.replaceExactRange(actorId, {
+              stableId: target.stableId,
+              selectionStart: target.selectionStart,
+              selectionEnd: target.selectionEnd,
+              selectedText: target.selectedText,
+              expectedHash: target.expectedHash,
+              replacementMarkdown,
+            });
+          },
+          (reservation, note) => {
+            if (!target) throw new WorkspaceNoteGrantRefusal();
+            reservation.commitNoteRangeMutation(
+              note,
+              target,
+              `Replaced selected lines ${target.startLine}-${target.endLine} `
+                + `in CodaScope note "${note.title}".`,
+            );
+          },
+        );
+        const { body: _body, ...note } = updated;
+        return JSON.stringify({ ok: true, note });
+      }),
+    },
+
     set_codascope_note_title: {
       description:
         "Change only the display title of one explicitly authorized active CodaScope note. The relative note path is preserved.",

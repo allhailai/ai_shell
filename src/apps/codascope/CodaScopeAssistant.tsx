@@ -31,6 +31,8 @@ import {
   WORKSPACE_PROJECT_REFERENCE_MAX,
 } from "./components/WorkspaceProjectReferencePicker";
 import { WorkspaceSourceReferences } from "./components/WorkspaceSourceReferences";
+import { NoteRangeMessageReference } from "./components/NoteRangeMessageReference";
+import { NoteRangeTargetCard } from "./components/NoteRangeTargetCard";
 import { SlashCommandPalette, getVisibleCommandCount } from "./components/SlashCommandPalette";
 import type { SlashCommand, CommandContext } from "./commandRegistry";
 import { canDispatchCommand, getFilteredCommands } from "./commandRegistry";
@@ -59,6 +61,14 @@ import {
   selectSingleCreatedNoteStableId,
 } from "./workspaceCreatedNote";
 import type { WorkspaceProjectReference } from "./workspaceProjectCatalogApi";
+import {
+  clearNoteRangeHandoff,
+  findStrictMatchingNoteRangeAction,
+  getNoteRangeHandoff,
+  markNoteRangeHandoffInFlight,
+  settleNoteRangeHandoff,
+  useNoteRangeHandoff,
+} from "./noteRangeHandoff";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -176,6 +186,12 @@ export function CodaScopeAssistant() {
 
   // Command bus for cross-component communication
   const commandBus = useCommandBus();
+  const noteRangeHandoff = useNoteRangeHandoff(scopeKey);
+  const liveNoteRangeHandoff = noteRangeHandoff
+    && (noteRangeHandoff.status === "staged"
+      || noteRangeHandoff.status === "in-flight")
+    ? noteRangeHandoff
+    : null;
 
   const { models, selectedModelId, selectModel, loading: modelsLoading } = useModelPicker();
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -188,6 +204,7 @@ export function CodaScopeAssistant() {
   const liveTurnIdRef = useRef(0);
   const claimedNavigationTurnsRef = useRef(new Set<number>());
   const workspaceNoteApi = useMemo(() => createWorkspaceNoteApi(), []);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const visibleInput = inputScopeKeyRef.current === scopeKey ? input : "";
   const visibleBaseAttachments = attachmentsScopeKeyRef.current === scopeKey
     ? attachments
@@ -231,6 +248,18 @@ export function CodaScopeAssistant() {
     setAtPickerOpen(false);
     setSlashPaletteOpen(false);
   }, [scopeKey]);
+
+  useEffect(() => {
+    if (!liveNoteRangeHandoff || liveNoteRangeHandoff.status !== "staged") {
+      return;
+    }
+    // A note selection and a design-document selection are mutually exclusive.
+    setAttachments((current) => current.filter(
+      (attachment) => attachment.type !== "selection",
+    ));
+    setSlashPaletteOpen(false);
+    queueMicrotask(() => composerRef.current?.focus());
+  }, [liveNoteRangeHandoff?.handoffId, liveNoteRangeHandoff?.status]);
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -302,6 +331,11 @@ export function CodaScopeAssistant() {
   const dispatchMessage = useCallback(async (promptText?: string) => {
     const text = promptText ?? visibleInput.trim();
     if (!text || streaming || !selectedModelId) return;
+    const stagedHandoff = getNoteRangeHandoff(scopeKey);
+    if (stagedHandoff?.status === "in-flight") return;
+    const targetHandoff = stagedHandoff?.status === "staged"
+      ? stagedHandoff
+      : null;
 
     // If no active conversation, create one first
     let convId = activeConversationId;
@@ -315,10 +349,16 @@ export function CodaScopeAssistant() {
 
     if (!convId) return;
     activeConversationIdRef.current = convId;
+    const inFlightHandoff = targetHandoff
+      ? markNoteRangeHandoffInFlight(scopeKey, targetHandoff.handoffId)
+      : null;
+    if (targetHandoff && !inFlightHandoff) return;
 
     // Build image URLs from attachments for display in the chat bubble
-    const currentAttachments = promptText ? [] : [...visibleAttachments];
-    const currentWorkspaceProjectReferences = promptText
+    const currentAttachments = promptText && !inFlightHandoff
+      ? []
+      : [...visibleAttachments];
+    const currentWorkspaceProjectReferences = promptText && !inFlightHandoff
       ? []
       : [...visibleWorkspaceProjectReferences];
     const imageUrls = currentAttachments
@@ -343,6 +383,9 @@ export function CodaScopeAssistant() {
       role: "user",
       content: text,
       status: "complete",
+      metadata: inFlightHandoff
+        ? { noteRangeTarget: inFlightHandoff.target }
+        : undefined,
       images: imageUrls.length > 0 ? imageUrls : imagePreviews.length > 0 ? imagePreviews : undefined,
     };
 
@@ -368,6 +411,7 @@ export function CodaScopeAssistant() {
 
     // Build selection context from selection chips (Phase 3)
     const selectionChip = assistantScope.kind === "project"
+      && !inFlightHandoff
       ? currentAttachments.find((a) => a.type === "selection")
       : undefined;
     const selectionContext = selectionChip
@@ -385,18 +429,61 @@ export function CodaScopeAssistant() {
     const liveTurnId = ++liveTurnIdRef.current;
     const turnScopeKey = scopeKey;
     const knownMessageIds = messages.map((message) => message.id);
+    const baseContext = getContext(
+      currentWorkspaceProjectReferences.map((project) => project.projectId),
+    ) as Record<string, unknown> | undefined;
+    const messageContext = inFlightHandoff
+      ? inFlightHandoff.target.scope === "codascope"
+        ? {
+            ...baseContext,
+            currentNote: {
+              stableId: inFlightHandoff.target.stableId,
+              scope: "codascope",
+              path: inFlightHandoff.target.path,
+              title: inFlightHandoff.target.title,
+              visibility: inFlightHandoff.target.visibility,
+              contentHash: inFlightHandoff.target.expectedHash,
+            },
+          }
+        : {
+            ...baseContext,
+            view: "notes",
+            projectId: inFlightHandoff.target.projectId,
+            epicId: inFlightHandoff.target.scope === "epic"
+              ? inFlightHandoff.target.epicId
+              : null,
+            noteScope: inFlightHandoff.target.scope,
+            noteVisibility: inFlightHandoff.target.visibility,
+            notePath: inFlightHandoff.target.path,
+          }
+      : baseContext;
     const result = await streamMessage({
       conversationId: convId,
       message: text,
       modelId: selectedModelId,
-      context: getContext(
-        currentWorkspaceProjectReferences.map((project) => project.projectId),
-      ) as Record<string, unknown> | undefined,
+      context: messageContext,
       attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       references: referenceAttachments.length > 0 ? referenceAttachments : undefined,
       selectionContext,
+      noteRangeTarget: inFlightHandoff?.target,
       knownMessageIds,
     });
+
+    if (inFlightHandoff) {
+      const terminalActions = assistantScope.kind === "workspace"
+        ? result.liveWorkspaceActions ?? result.terminalActions ?? []
+        : result.terminalActions ?? [];
+      const completionAction = findStrictMatchingNoteRangeAction(
+        inFlightHandoff.target,
+        terminalActions,
+      );
+      settleNoteRangeHandoff({
+        scope: scopeKey,
+        handoffId: inFlightHandoff.handoffId,
+        terminalStatus: result.terminalStatus ?? "error",
+        ...(completionAction ? { completionAction } : {}),
+      });
+    }
 
     if (result.discarded) return;
     if (result.conversationId) {
@@ -450,6 +537,18 @@ export function CodaScopeAssistant() {
   const handleSendPrompt = useCallback((prompt: string) => {
     setInput(prompt);
     queueMicrotask(() => void dispatchMessage(prompt));
+  }, [dispatchMessage]);
+
+  const handleRemoveNoteRangeTarget = useCallback(() => {
+    const current = getNoteRangeHandoff(scopeKey);
+    if (current?.status === "staged") {
+      clearNoteRangeHandoff(scopeKey, current.handoffId);
+      queueMicrotask(() => composerRef.current?.focus());
+    }
+  }, [scopeKey]);
+
+  const handleNoteRangeQuickAction = useCallback(() => {
+    void dispatchMessage("Do what the selected text asks.");
   }, [dispatchMessage]);
 
   // ── Auto-send interview for new epics (?new=1) ────────────────────
@@ -638,6 +737,10 @@ export function CodaScopeAssistant() {
   }, [assistantScope, segments, wikiTopics]);
 
   const handleSlashTrigger = useCallback((_position: { top: number; left: number }) => {
+    const current = getNoteRangeHandoff(scopeKey);
+    if (current?.status === "staged" || current?.status === "in-flight") {
+      return;
+    }
     slashPaletteScopeKeyRef.current = scopeKey;
     setSlashPaletteOpen(true);
     setSlashActiveIndex(0);
@@ -878,6 +981,11 @@ export function CodaScopeAssistant() {
       epicId: string;
     }) => {
       if (assistantScope.kind !== "project") return;
+      const currentNoteHandoff = getNoteRangeHandoff(scopeKey);
+      if (currentNoteHandoff?.status === "in-flight") return;
+      if (currentNoteHandoff?.status === "staged") {
+        clearNoteRangeHandoff(scopeKey, currentNoteHandoff.handoffId);
+      }
       // Create a selection attachment chip
       const chipId = `sel-${Date.now()}`;
       const preview = payload.text.length > 100
@@ -885,7 +993,7 @@ export function CodaScopeAssistant() {
         : payload.text;
 
       setAttachments((prev) => [
-        ...prev,
+        ...prev.filter((attachment) => attachment.type !== "selection"),
         {
           id: chipId,
           type: "selection" as const,
@@ -903,7 +1011,7 @@ export function CodaScopeAssistant() {
       ]);
     }) as (payload: unknown) => void);
     return unsub;
-  }, [assistantScope.kind, commandBus]);
+  }, [assistantScope.kind, commandBus, scopeKey]);
 
   // ── Directive generate → prefill and auto-send ─────────────────────
 
@@ -912,12 +1020,16 @@ export function CodaScopeAssistant() {
     const unsub = commandBus.on("codascope:assistant-prefill", ((payload: {
       prompt: string;
     }) => {
-      if (assistantScope.kind === "project" && payload.prompt) {
+      const current = getNoteRangeHandoff(scopeKey);
+      if (assistantScope.kind === "project"
+        && payload.prompt
+        && current?.status !== "staged"
+        && current?.status !== "in-flight") {
         handleSendPrompt(payload.prompt);
       }
     }) as (payload: unknown) => void);
     return unsub;
-  }, [assistantScope.kind, commandBus, handleSendPrompt]);
+  }, [assistantScope.kind, commandBus, handleSendPrompt, scopeKey]);
 
   // ── Design doc action tag handlers ────────────────────────────────
 
@@ -1085,6 +1197,7 @@ export function CodaScopeAssistant() {
                 ? "Reference active projects for focused read-only knowledge. CodaScope Notes can change only when you explicitly ask."
                 : "I help you understand, document, and analyze your codebase."}
             </p>
+            {!liveNoteRangeHandoff && (
             <div className="codascope-assistant-welcome-cards">
               {assistantScope.kind === "workspace" ? (
                 <>
@@ -1155,6 +1268,8 @@ export function CodaScopeAssistant() {
                 </>
               )}
             </div>
+            )}
+            {!liveNoteRangeHandoff && (
             <div className="codascope-assistant-welcome-hint">
               {assistantScope.kind === "workspace" ? (
                 <>Type <code>@</code> to reference active projects &nbsp;·&nbsp; <code>/</code> for workspace-safe help &nbsp;·&nbsp; <code>?</code> for the full guide</>
@@ -1162,6 +1277,7 @@ export function CodaScopeAssistant() {
                 <>Type <code>/</code> for commands &nbsp;·&nbsp; <code>@</code> to add context &nbsp;·&nbsp; <code>?</code> for the full guide</>
               )}
             </div>
+            )}
           </div>
         )}
 
@@ -1210,6 +1326,9 @@ export function CodaScopeAssistant() {
                           ))}
                         </div>
                       )}
+                      <NoteRangeMessageReference
+                        value={msg.metadata?.noteRangeTarget}
+                      />
                       <p>{msg.content}</p>
                     </>
                   )}
@@ -1271,7 +1390,7 @@ export function CodaScopeAssistant() {
       )}
 
       {/* Prompt Chips */}
-      {assistantScope.kind === "project" && (
+      {assistantScope.kind === "project" && !liveNoteRangeHandoff && (
         <PromptChips
           onSend={handleSendPrompt}
           context={promptChipContext}
@@ -1319,6 +1438,14 @@ export function CodaScopeAssistant() {
             </button>
           </div>
         </div>
+        {liveNoteRangeHandoff && (
+          <NoteRangeTargetCard
+            handoff={liveNoteRangeHandoff}
+            onRemove={handleRemoveNoteRangeTarget}
+            onQuickAction={handleNoteRangeQuickAction}
+            quickActionDisabled={!selectedModelId || streaming}
+          />
+        )}
         <div className="codascope-assistant-input-row">
           {visibleAtPickerOpen && (
             assistantScope.kind === "workspace" ? (
@@ -1351,6 +1478,7 @@ export function CodaScopeAssistant() {
             />
           )}
           <RichChatInput
+            inputRef={composerRef}
             value={visibleInput}
             onChange={setInput}
             onSend={sendMessage}
@@ -1362,9 +1490,11 @@ export function CodaScopeAssistant() {
             attachments={visibleAttachments}
             onRemoveAttachment={handleRemoveAttachment}
             onClearAttachments={handleClearAttachments}
-            placeholder={assistantScope.kind === "workspace"
-              ? "Message the Workspace Assistant... (@ active projects, / help)"
-              : "Message the agent... (@ to add context, / for commands)"}
+            placeholder={liveNoteRangeHandoff
+              ? "Describe the change to this selection…"
+              : assistantScope.kind === "workspace"
+                ? "Message the Workspace Assistant... (@ active projects, / help)"
+                : "Message the agent... (@ to add context, / for commands)"}
             disabled={streaming || !selectedModelId}
             sendDisabled={!visibleInput.trim() || streaming || !selectedModelId}
           />

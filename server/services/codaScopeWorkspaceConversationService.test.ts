@@ -17,6 +17,20 @@ import {
 } from "./codaScopeWorkspaceConversationService.js";
 
 const roots: string[] = [];
+const noteRangeTarget = {
+  kind: "note-range",
+  stableId: "note-1",
+  scope: "codascope",
+  visibility: "private",
+  path: "one.md",
+  title: "One",
+  selectionStart: 0,
+  selectionEnd: 4,
+  selectedText: "body",
+  startLine: 1,
+  endLine: 1,
+  expectedHash: "a".repeat(32),
+};
 
 function temporaryRoot(): string {
   const root = mkdtempSync(path.join(os.tmpdir(), "workspace-conversations-"));
@@ -467,6 +481,72 @@ describe("CodaScopeWorkspaceConversationService", () => {
         visibility: "shared",
       },
     })).toThrow();
+  });
+
+  it("persists and reloads one canonical user note-range target unchanged", async () => {
+    const root = temporaryRoot();
+    const service = new CodaScopeWorkspaceConversationService(root);
+    const conversation = await service.createConversation("alice");
+    await service.appendMessage("alice", conversation.id, {
+      id: "selection-user",
+      role: "user",
+      content: "Do that",
+      status: "complete",
+      metadata: { noteRangeTarget },
+    });
+
+    const reloaded = new CodaScopeWorkspaceConversationService(root);
+    expect((await reloaded.readConversation(
+      "alice",
+      conversation.id,
+    ))?.messages.at(-1)).toMatchObject({
+      role: "user",
+      metadata: { noteRangeTarget },
+    });
+  });
+
+  it("keeps legacy messages without targets compatible and rejects targets on non-user messages", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const conversation = await service.createConversation("alice");
+    await service.appendMessage("alice", conversation.id, {
+      id: "legacy-user",
+      role: "user",
+      content: "Legacy",
+      status: "complete",
+    });
+    expect((await service.readConversation(
+      "alice",
+      conversation.id,
+    ))?.messages.at(-1)?.metadata).toEqual({});
+    await expect(service.appendMessage("alice", conversation.id, {
+      id: "forged-assistant-target",
+      role: "assistant",
+      content: "No",
+      status: "complete",
+      metadata: { noteRangeTarget },
+    })).rejects.toThrow("Invalid workspace note range target metadata");
+  });
+
+  it("fails closed when persisted note-range target metadata is malformed", async () => {
+    const service = new CodaScopeWorkspaceConversationService(temporaryRoot());
+    const conversation = await service.createConversation("alice");
+    await service.appendMessage("alice", conversation.id, {
+      id: "selection-user",
+      role: "user",
+      content: "Do that",
+      status: "complete",
+      metadata: { noteRangeTarget },
+    });
+    const recordPath = path.join(
+      service.getActorStorageDirectory("alice"),
+      `${conversation.id}.json`,
+    );
+    const record = JSON.parse(readFileSync(recordPath, "utf-8"));
+    record.messages[0].metadata.noteRangeTarget.ownerId = "mallory";
+    writeFileSync(recordPath, JSON.stringify(record, null, 2));
+
+    await expect(service.readConversation("alice", conversation.id))
+      .rejects.toMatchObject({ code: "persistence_corrupt" });
   });
 
   it("keeps storage outside project directories", async () => {

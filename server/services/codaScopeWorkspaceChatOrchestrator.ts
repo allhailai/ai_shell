@@ -12,6 +12,7 @@ import type {
 import type { CodaScopeWorkspaceIntentService } from "./codaScopeWorkspaceIntentService.js";
 import type { WorkspaceRetrievedSourceReference } from "./codaScopeWorkspaceProvenance.js";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { CanonicalWorkspaceNoteRangeTarget } from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 import {
   buildWorkspaceAssistantPrompt,
   buildWorkspaceManifestFromCatalog,
@@ -44,6 +45,7 @@ export async function streamWorkspaceAssistantResponse(options: {
   message: string;
   modelId: string;
   context: WorkspaceMessageContext;
+  noteRangeTarget?: CanonicalWorkspaceNoteRangeTarget | null;
   history: readonly WorkspaceConversationMessage[];
   catalog: CodaScopeWorkspaceCatalogService;
   intentService: CodaScopeWorkspaceIntentService;
@@ -53,7 +55,10 @@ export async function streamWorkspaceAssistantResponse(options: {
 }): Promise<WorkspaceStreamResult> {
   const manifest = await buildWorkspaceManifestFromCatalog(options.catalog);
   const history = formatWorkspaceConversationHistory(options.history);
-  const currentContext = formatWorkspaceCurrentContext(options.context);
+  const currentContext = formatWorkspaceCurrentContext(
+    options.context,
+    options.noteRangeTarget,
+  );
   const prompt = buildWorkspaceAssistantPrompt(manifest, history, currentContext);
   const resolution = await options.intentService.resolveTurn(
     options.message,
@@ -61,6 +66,7 @@ export async function streamWorkspaceAssistantResponse(options: {
     {
       actorId: options.actorId,
       currentNote: options.context.currentNote,
+      noteRangeTarget: options.noteRangeTarget,
     },
   );
 

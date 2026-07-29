@@ -138,6 +138,30 @@ const archivedNoteAction = {
   description: 'Archived CodaScope note "One".',
 };
 
+const selectedNote = {
+  stableId: "note-1",
+  scope: "codascope" as const,
+  visibility: "private" as const,
+  path: "one.md",
+  title: "One",
+  contentHash: "a".repeat(32),
+};
+
+const noteRangeTarget = {
+  kind: "note-range" as const,
+  stableId: selectedNote.stableId,
+  scope: selectedNote.scope,
+  visibility: selectedNote.visibility,
+  path: selectedNote.path,
+  title: selectedNote.title,
+  selectionStart: 0,
+  selectionEnd: 4,
+  selectedText: "body",
+  startLine: 1,
+  endLine: 1,
+  expectedHash: selectedNote.contentHash,
+};
+
 function statefulConversationService(timeline: string[] = []) {
   let current = conversation();
   const readConversation = vi.fn(async (
@@ -462,6 +486,161 @@ describe("workspace chat routes", () => {
     expect(resolveTurn).not.toHaveBeenCalled();
     expect(state.service.appendMessage).not.toHaveBeenCalled();
   });
+
+  it("canonicalizes and persists a current target before streaming it to the orchestrator", async () => {
+    const state = statefulConversationService();
+    const resolveTurn = vi.fn(async () => ({
+      grant: { epicDiscoveryProjectIds: [], epicResources: [] },
+    }));
+    orchestrator.stream.mockResolvedValueOnce({
+      fullResponse: "Changed.",
+      agentResult: {},
+      retrievedSources: [],
+      actions: [],
+    });
+    const routes = registeredRoutes({
+      services: streamingServices(state.service, {
+        workspaceIntentSvc: { resolveTurn },
+        workspaceNoteSvc: {
+          resolveCurrentContext: vi.fn(async () => selectedNote),
+          readForEditing: vi.fn(async () => ({ ...selectedNote, body: "body" })),
+        },
+      }),
+    });
+    const request = {
+      params: { convId: "conv-workspace" },
+      body: {
+        message: "Do that",
+        modelId: "model",
+        context: {
+          currentNote: selectedNote,
+          currentView: { view: "notes", identity: "note-1" },
+        },
+        noteRangeTarget,
+      },
+    };
+    const res = response();
+
+    route(routes, "post", messagePath)(
+      request as any,
+      res as any,
+      vi.fn(),
+    );
+    await waitForEnd(res);
+
+    const user = state.get().messages.find((message: any) => message.role === "user");
+    const assistant = state.get().messages.find(
+      (message: any) => message.role === "assistant",
+    );
+    expect(user.metadata).toEqual({ noteRangeTarget });
+    expect(assistant.metadata).not.toHaveProperty("noteRangeTarget");
+    expect(resolveTurn).toHaveBeenCalledWith("Do that", [], {
+      actorId: "alice",
+      currentNote: expect.objectContaining({ stableId: "note-1" }),
+      noteRangeTarget,
+    });
+    expect(orchestrator.stream).toHaveBeenCalledWith(
+      expect.objectContaining({ noteRangeTarget }),
+    );
+  });
+
+  it("rejects a stale selected target before the first durable message", async () => {
+    const state = statefulConversationService();
+    const resolveTurn = vi.fn();
+    const routes = registeredRoutes({
+      services: streamingServices(state.service, {
+        workspaceIntentSvc: { resolveTurn },
+        workspaceNoteSvc: {
+          resolveCurrentContext: vi.fn(async () => null),
+          readForEditing: vi.fn(),
+        },
+      }),
+    });
+    const next = vi.fn();
+
+    route(routes, "post", messagePath)({
+      params: { convId: "conv-workspace" },
+      body: {
+        message: "Do that",
+        modelId: "model",
+        context: {
+          currentNote: selectedNote,
+          currentView: { view: "notes", identity: "note-1" },
+        },
+        noteRangeTarget,
+      },
+    } as any, response() as any, next);
+
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+    expect(next.mock.calls[0][0]).toMatchObject({
+      status: 400,
+      code: "invalid_input",
+    });
+    expect(resolveTurn).not.toHaveBeenCalled();
+    expect(state.service.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported multiple-target request shapes instead of dropping them", async () => {
+    const state = statefulConversationService();
+    const routes = registeredRoutes({
+      services: streamingServices(state.service),
+    });
+    const next = vi.fn();
+
+    route(routes, "post", messagePath)({
+      ...messageRequest,
+      body: {
+        ...messageRequest.body,
+        noteRangeTargets: [noteRangeTarget],
+      },
+    } as any, response() as any, next);
+
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+    expect(next.mock.calls[0][0]).toMatchObject({
+      status: 400,
+      code: "invalid_input",
+    });
+    expect(state.service.appendMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["error", "cancelled"] as const)(
+    "retains canonical user target metadata after assistant %s",
+    async (outcome) => {
+      const state = statefulConversationService();
+      orchestrator.stream.mockRejectedValueOnce(outcome === "cancelled"
+        ? new WorkspaceAssistantCancelledError("Partial")
+        : Object.assign(new Error("failed"), { fullResponse: "Partial" }));
+      const routes = registeredRoutes({
+        services: streamingServices(state.service, {
+          workspaceNoteSvc: {
+            resolveCurrentContext: vi.fn(async () => selectedNote),
+            readForEditing: vi.fn(async () => ({ ...selectedNote, body: "body" })),
+          },
+        }),
+      });
+      const res = response();
+
+      route(routes, "post", messagePath)({
+        params: { convId: "conv-workspace" },
+        body: {
+          message: "Do that",
+          modelId: "model",
+          context: {
+            currentNote: selectedNote,
+            currentView: { view: "notes", identity: "note-1" },
+          },
+          noteRangeTarget,
+        },
+      } as any, res as any, vi.fn());
+      await waitForEnd(res);
+
+      expect(state.get().messages.find(
+        (message: any) => message.role === "user",
+      )).toMatchObject({
+        metadata: { noteRangeTarget },
+      });
+    },
+  );
 
   it("persists one stable completion with provenance before exactly one done terminal", async () => {
     const timeline: string[] = [];

@@ -50,6 +50,7 @@ import { CodaScopeNoteTagSuggestionService } from "../services/codaScopeNoteTagS
 import { CodaScopeNoteTransferService } from "../services/codaScopeNoteTransferService.js";
 import { CodaScopeNoteDocumentService } from "../services/codaScopeNoteDocumentService.js";
 import { CodaScopeWorkspaceNoteService } from "../services/codaScopeWorkspaceNoteService.js";
+import { CodaScopeProjectNoteRangeService } from "../services/codaScopeProjectNoteRangeService.js";
 import {
   isPathValidationError,
   isSameOrDescendantPath,
@@ -95,6 +96,7 @@ export interface CodaScopeServices {
   workspaceImageSvc: CodaScopeWorkspaceImageService;
   workspaceIntentSvc: CodaScopeWorkspaceIntentService;
   workspaceNoteSvc: CodaScopeWorkspaceNoteService;
+  projectNoteRangeSvc: CodaScopeProjectNoteRangeService;
 
   wikiStateSvc: CodaScopeWikiStateService;
   epicSvc: CodaScopeEpicService;
@@ -374,6 +376,14 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     noteUserPrefsSvc,
     noteAuditSvc,
   );
+  const projectNoteRangeSvc = new CodaScopeProjectNoteRangeService(
+    projectSvc,
+    epicSvc,
+    noteSvc,
+    noteAnnotationSvc,
+    noteLinkIndexSvc,
+    noteAuditSvc,
+  );
   const activeEntityResolver = new CodaScopeActiveEntityResolver(
     root,
     designDocSvc,
@@ -409,7 +419,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
     designDoc: designDocSvc,
     epicKnowledge: epicKnowledgeSvc,
     workspaceNote: workspaceNoteSvc,
-  });
+  }, projectNoteRangeSvc);
 
   return {
     root,
@@ -428,6 +438,7 @@ function createServiceGraph(secretService: SecretService, root: string): CodaSco
       workspaceImageSvc,
       workspaceIntentSvc,
       workspaceNoteSvc,
+      projectNoteRangeSvc,
       wikiStateSvc,
       epicSvc,
       epicBundleSvc: new CodaScopeEpicBundleService(projectSvc),

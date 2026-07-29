@@ -4,6 +4,7 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import type { NoteVisibility } from "../../src/apps/codascope/codaScopeTypes.js";
+import type { CanonicalWorkspaceNoteRangeTarget } from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
 import type { WorkspaceNoteMutationOperation } from "../../src/apps/codascope/workspaceMutationActionValidation.js";
 import {
   WORKSPACE_NOTE_MAX_ACTIONS,
@@ -13,6 +14,9 @@ import type {
   CodaScopeWorkspaceNoteService,
   WorkspaceCurrentNoteIdentity,
 } from "./codaScopeWorkspaceNoteService.js";
+import {
+  revalidateWorkspaceNoteRangeTarget,
+} from "./codaScopeWorkspaceNoteRangeTarget.js";
 import { assertSafePathSegment } from "./codaScopePathSafety.js";
 
 export interface WorkspaceNoteCreateGrant {
@@ -32,6 +36,7 @@ export interface WorkspaceNoteVisibilityGrant {
 export interface WorkspaceTurnNoteGrant {
   create: WorkspaceNoteCreateGrant | null;
   readStableIds: readonly string[];
+  editRangeTarget: CanonicalWorkspaceNoteRangeTarget | null;
   editBodyStableIds: readonly string[];
   editTitleStableIds: readonly string[];
   visibilityChanges: readonly WorkspaceNoteVisibilityGrant[];
@@ -42,6 +47,7 @@ export const EMPTY_WORKSPACE_TURN_NOTE_GRANT: WorkspaceTurnNoteGrant =
   freezeGrant({
     create: null,
     readStableIds: [],
+    editRangeTarget: null,
     editBodyStableIds: [],
     editTitleStableIds: [],
     visibilityChanges: [],
@@ -51,6 +57,11 @@ export const EMPTY_WORKSPACE_TURN_NOTE_GRANT: WorkspaceTurnNoteGrant =
 export interface WorkspaceNoteGrantReservation {
   commit(): void;
   release(): void;
+}
+
+export interface WorkspaceNoteRangeGrantReservation
+  extends WorkspaceNoteGrantReservation {
+  target: CanonicalWorkspaceNoteRangeTarget;
 }
 
 export class WorkspaceTurnNoteGrantHolder {
@@ -75,6 +86,13 @@ export class WorkspaceTurnNoteGrantHolder {
     return this.session.reserve(`create:${visibility}`);
   }
 
+  reserveRangeMutation(): WorkspaceNoteRangeGrantReservation | null {
+    const target = this.current.editRangeTarget;
+    if (!target) return null;
+    const reservation = this.session.reserve(rangeMutationBudgetKey(target));
+    return reservation ? { ...reservation, target } : null;
+  }
+
   reserveMutation(
     operation: WorkspaceNoteMutationOperation,
     stableId: string,
@@ -93,6 +111,9 @@ class ConsumableGrantSession {
         `create:${grant.create.visibility}`,
         grant.create.maxSuccesses,
       );
+    }
+    if (grant.editRangeTarget) {
+      this.remaining.set(rangeMutationBudgetKey(grant.editRangeTarget), 1);
     }
     for (const stableId of grant.editBodyStableIds) {
       this.remaining.set(mutationBudgetKey("edit_codascope_note", stableId), 1);
@@ -144,9 +165,26 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
   actorId?: string;
   message: string;
   currentNote?: WorkspaceCurrentNoteIdentity | null;
+  noteRangeTarget?: CanonicalWorkspaceNoteRangeTarget | null;
   noteService: CodaScopeWorkspaceNoteService;
 }): Promise<WorkspaceTurnNoteGrant> {
   if (!options.actorId?.trim()) return EMPTY_WORKSPACE_TURN_NOTE_GRANT;
+  if (options.noteRangeTarget) {
+    const target = await revalidateWorkspaceNoteRangeTarget({
+      actorId: options.actorId,
+      target: options.noteRangeTarget,
+      noteService: options.noteService,
+    });
+    return freezeGrant({
+      create: null,
+      readStableIds: [target.stableId],
+      editRangeTarget: target,
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [],
+    });
+  }
   const clauses = authorizingClauses(options.message);
   if (clauses.length === 0) return EMPTY_WORKSPACE_TURN_NOTE_GRANT;
 
@@ -210,6 +248,7 @@ export async function deriveWorkspaceTurnNoteGrant(options: {
   return freezeGrant(capGrantToReceiptCapacity({
     create,
     readStableIds,
+    editRangeTarget: null,
     editBodyStableIds: targetStableId && bodyRequested ? [targetStableId] : [],
     editTitleStableIds: targetStableId && titleRequested ? [targetStableId] : [],
     visibilityChanges: targetStableId && visibility
@@ -231,6 +270,7 @@ export async function validateWorkspaceTurnNoteGrant(
   if (!isRecord(value) || hasUnknown(value, [
     "create",
     "readStableIds",
+    "editRangeTarget",
     "editBodyStableIds",
     "editTitleStableIds",
     "visibilityChanges",
@@ -255,6 +295,18 @@ export async function validateWorkspaceTurnNoteGrant(
     };
   }
   const readStableIds = validateIds(value.readStableIds);
+  let editRangeTarget: CanonicalWorkspaceNoteRangeTarget | null = null;
+  if (value.editRangeTarget !== null) {
+    try {
+      editRangeTarget = await revalidateWorkspaceNoteRangeTarget({
+        actorId,
+        target: value.editRangeTarget,
+        noteService,
+      });
+    } catch {
+      throw invalidGrant();
+    }
+  }
   const editBodyStableIds = validateIds(value.editBodyStableIds);
   const editTitleStableIds = validateIds(value.editTitleStableIds);
   const archiveStableIds = validateIds(value.archiveStableIds);
@@ -281,6 +333,7 @@ export async function validateWorkspaceTurnNoteGrant(
 
   const everyId = new Set([
     ...readStableIds,
+    ...(editRangeTarget ? [editRangeTarget.stableId] : []),
     ...editBodyStableIds,
     ...editTitleStableIds,
     ...archiveStableIds,
@@ -292,6 +345,7 @@ export async function validateWorkspaceTurnNoteGrant(
     }
   }
   for (const stableId of [
+    ...(editRangeTarget ? [editRangeTarget.stableId] : []),
     ...editBodyStableIds,
     ...editTitleStableIds,
     ...archiveStableIds,
@@ -299,7 +353,19 @@ export async function validateWorkspaceTurnNoteGrant(
   ]) {
     if (!readStableIds.includes(stableId)) throw invalidGrant();
   }
+  if (editRangeTarget && (
+    create !== null
+    || readStableIds.length !== 1
+    || readStableIds[0] !== editRangeTarget.stableId
+    || editBodyStableIds.length > 0
+    || editTitleStableIds.length > 0
+    || visibilityChanges.length > 0
+    || archiveStableIds.length > 0
+  )) {
+    throw invalidGrant();
+  }
   const totalMutationBudget = (create?.maxSuccesses ?? 0)
+    + (editRangeTarget ? 1 : 0)
     + editBodyStableIds.length
     + editTitleStableIds.length
     + visibilityChanges.length
@@ -309,6 +375,7 @@ export async function validateWorkspaceTurnNoteGrant(
   return freezeGrant({
     create,
     readStableIds,
+    editRangeTarget,
     editBodyStableIds,
     editTitleStableIds,
     visibilityChanges,
@@ -430,15 +497,29 @@ function mutationBudgetKey(
   return [operation, stableId, visibility ?? ""].join(":");
 }
 
+function rangeMutationBudgetKey(
+  target: CanonicalWorkspaceNoteRangeTarget,
+): string {
+  return [
+    "replace_codascope_note_range",
+    target.stableId,
+    target.selectionStart,
+    target.selectionEnd,
+    target.expectedHash,
+  ].join(":");
+}
+
 function capGrantToReceiptCapacity(grant: {
   create: WorkspaceNoteCreateGrant | null;
   readStableIds: string[];
+  editRangeTarget: CanonicalWorkspaceNoteRangeTarget | null;
   editBodyStableIds: string[];
   editTitleStableIds: string[];
   visibilityChanges: WorkspaceNoteVisibilityGrant[];
   archiveStableIds: string[];
 }): typeof grant {
-  const existingMutationBudget = grant.editBodyStableIds.length
+  const existingMutationBudget = (grant.editRangeTarget ? 1 : 0)
+    + grant.editBodyStableIds.length
     + grant.editTitleStableIds.length
     + grant.visibilityChanges.length
     + grant.archiveStableIds.length;
@@ -478,12 +559,14 @@ function safeId(value: string): string {
 function freezeGrant(grant: {
   create: WorkspaceNoteCreateGrant | null;
   readStableIds: string[];
+  editRangeTarget: CanonicalWorkspaceNoteRangeTarget | null;
   editBodyStableIds: string[];
   editTitleStableIds: string[];
   visibilityChanges: WorkspaceNoteVisibilityGrant[];
   archiveStableIds: string[];
 }): WorkspaceTurnNoteGrant {
   if (grant.create) Object.freeze(grant.create);
+  if (grant.editRangeTarget) Object.freeze(grant.editRangeTarget);
   for (const entry of grant.visibilityChanges) Object.freeze(entry);
   Object.freeze(grant.readStableIds);
   Object.freeze(grant.editBodyStableIds);

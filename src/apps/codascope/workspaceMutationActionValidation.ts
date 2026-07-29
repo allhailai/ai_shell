@@ -8,6 +8,7 @@ export const WORKSPACE_NOTE_MAX_ACTIONS = 25;
 export const WORKSPACE_NOTE_MAX_ACTION_DESCRIPTION = 500;
 
 export const WORKSPACE_NOTE_MUTATION_OPERATIONS = [
+  "replace_codascope_note_range",
   "edit_codascope_note",
   "set_codascope_note_title",
   "set_codascope_note_visibility",
@@ -100,9 +101,16 @@ export function normalizeCanonicalWorkspaceMutationAction(
     "title",
     "contentHash",
   ];
+  const operation = isRecord(value.attributes)
+    && typeof value.attributes.operation === "string"
+    ? value.attributes.operation
+    : null;
+  const rangeFields = operation === "replace_codascope_note_range"
+    ? ["startLine", "endLine"]
+    : [];
   const required = value.type === "note_created"
     ? identityFields
-    : ["operation", ...identityFields];
+    : ["operation", ...identityFields, ...rangeFields];
   const attributes = value.attributes;
   if (!hasExactKeys(attributes, required)
     || required.some((field) => typeof attributes[field] !== "string")
@@ -115,7 +123,11 @@ export function normalizeCanonicalWorkspaceMutationAction(
     || !isCanonicalContentHash(attributes.contentHash)
     || (value.type === "operation_completed"
       && (typeof attributes.operation !== "string"
-        || !OPERATION_SET.has(attributes.operation)))) {
+        || !OPERATION_SET.has(attributes.operation)))
+    || (operation === "replace_codascope_note_range"
+      && (!isCanonicalLineAttribute(attributes.startLine)
+        || !isCanonicalLineAttribute(attributes.endLine)
+        || Number(attributes.endLine) < Number(attributes.startLine)))) {
     return null;
   }
 
@@ -124,6 +136,12 @@ export function normalizeCanonicalWorkspaceMutationAction(
     attributes: { ...(attributes as Record<string, string>) },
     description: value.description,
   };
+}
+
+function isCanonicalLineAttribute(value: unknown): value is string {
+  return typeof value === "string"
+    && /^(?:[1-9]\d{0,6})$/.test(value)
+    && Number(value) <= WORKSPACE_NOTE_MAX_BODY + 1;
 }
 
 function canonicalDeliveryKey(action: CodaScopeAction): string {

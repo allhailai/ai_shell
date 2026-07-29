@@ -8,6 +8,7 @@
 
 import { markdown } from "@codemirror/lang-markdown";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import type { Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { useMemo, useRef, useEffect, useCallback } from "react";
@@ -83,7 +84,11 @@ interface MarkdownEditorProps {
   onEditorView?: (view: EditorView) => void;
   /** Called when the editor text selection changes — enables selection actions. */
   onSelectionChange?: (view: EditorView) => void;
+  /** Stable caller-owned extensions for feature-specific state/decorations. */
+  additionalExtensions?: Extension[];
 }
+
+const EMPTY_EXTENSIONS: Extension[] = [];
 
 const darkEditorTheme = EditorView.theme({
   "&": {
@@ -160,6 +165,7 @@ export function MarkdownEditor({
   onAnnotationClick,
   onEditorView,
   onSelectionChange,
+  additionalExtensions = EMPTY_EXTENSIONS,
 }: MarkdownEditorProps) {
   const keybindingProfile = useKeybindingProfile();
   // This extension is intentionally only installed on editable shared editors;
@@ -299,6 +305,7 @@ export function MarkdownEditor({
         exts.push(buildSlashCommandExtension());
       }
 
+      exts.push(...additionalExtensions);
       return exts;
     },
     [editable, darkTheme, getFiles, selectedPath, getOnOpenFile, resolvedKeymap,
@@ -306,7 +313,8 @@ export function MarkdownEditor({
      showInsertionHotzones, onInsertionRequest, stableOnInsertionRequest,
      showSlashCommands, showCallouts, showTagPills, autoContinueLists,
      showFootnotes,
-     inlineAnnotationAnchors, inlineAnnotationMarkerRanges, stableOnAnnotationClick, onSelectionChange, stableOnSelectionChange],
+     inlineAnnotationAnchors, inlineAnnotationMarkerRanges, stableOnAnnotationClick,
+     onSelectionChange, stableOnSelectionChange, additionalExtensions],
   );
 
   return (

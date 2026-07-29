@@ -17,6 +17,12 @@ export { buildInlineAnnotationExtension, type InlineAnnotationAnchorItem, type I
 export { buildHighlightExtension } from "./extensions/highlightExtension";
 export { buildFootnoteExtension } from "./extensions/footnoteExtension";
 export {
+  buildPinnedRangeExtension,
+  readPinnedEditorRanges,
+  setPinnedEditorRange,
+  type PinnedEditorRange,
+} from "./extensions/pinnedRangeExtension";
+export {
   toggleBold,
   toggleItalic,
   toggleStrikethrough,

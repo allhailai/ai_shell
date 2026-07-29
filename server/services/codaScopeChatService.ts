@@ -22,6 +22,14 @@ import {
   CodaScopePersistenceError,
   codaScopePersistence,
 } from "./codaScopePersistence.js";
+import {
+  normalizeCanonicalProjectNoteRangeTarget,
+} from "../../src/apps/codascope/projectNoteRangeTargetValidation.js";
+import {
+  isProjectNoteRangeActionCandidate,
+  normalizeCanonicalProjectNoteRangeAction,
+} from "../../src/apps/codascope/projectNoteRangeMutationActionValidation.js";
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -94,6 +102,7 @@ export interface MessageContext {
   topicId?: string | null;
   projectName?: string;
   projectId?: string;
+  epicId?: string | null;
   noteScope?: string | null;
   noteVisibility?: string | null;
   notePath?: string | null;
@@ -294,13 +303,7 @@ function validateMessage(value: unknown): ConversationMessage {
   ) {
     throw new Error("Invalid conversation message updatedAt");
   }
-  if (
-    Object.prototype.hasOwnProperty.call(value, "context")
-    && value.context !== null
-    && !isRecord(value.context)
-  ) {
-    throw new Error("Invalid conversation message context");
-  }
+  const context = normalizeMessageContext(value.context);
   if (
     Object.prototype.hasOwnProperty.call(value, "metadata")
     && !isRecord(value.metadata)
@@ -316,6 +319,7 @@ function validateMessage(value: unknown): ConversationMessage {
     content: requiredString(value, "content", { allowEmpty: true }),
     createdAt: requiredString(value, "createdAt"),
     modelId: nullableNonEmptyString(value, "modelId"),
+    context,
   });
 }
 
@@ -383,6 +387,8 @@ function normalizeMessage(value: unknown): ConversationMessage {
 
   const content = typeof source.content === "string" ? source.content : "";
   const updatedAt = typeof source.updatedAt === "string" ? source.updatedAt : null;
+  const context = normalizeMessageContext(source.context);
+  const metadata = normalizeMessageMetadata(role, context, source.metadata);
 
   // Stale streaming detection
   const ts = Date.parse((updatedAt ?? createdAt) as string);
@@ -400,13 +406,70 @@ function normalizeMessage(value: unknown): ConversationMessage {
     updatedAt,
     modelId: typeof source.modelId === "string" && source.modelId.trim() ? source.modelId.trim() : null,
     status,
-    context: source.context && typeof source.context === "object" && !Array.isArray(source.context)
-      ? source.context as MessageContext
-      : null,
-    metadata: source.metadata && typeof source.metadata === "object" && !Array.isArray(source.metadata)
-      ? source.metadata as Record<string, unknown>
-      : {},
+    context,
+    metadata,
   };
+}
+
+function normalizeMessageContext(value: unknown): MessageContext | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)
+    || typeof value.view !== "string"
+    || !value.view.trim()) {
+    throw new Error("Invalid conversation message context");
+  }
+  for (const key of ["topicId", "epicId", "noteScope", "noteVisibility", "notePath"]) {
+    if (Object.prototype.hasOwnProperty.call(value, key)
+      && value[key] !== null
+      && typeof value[key] !== "string") {
+      throw new Error(`Invalid conversation message context ${key}`);
+    }
+  }
+  for (const key of ["projectName", "projectId"]) {
+    if (Object.prototype.hasOwnProperty.call(value, key)
+      && typeof value[key] !== "string") {
+      throw new Error(`Invalid conversation message context ${key}`);
+    }
+  }
+  return { ...(value as unknown as MessageContext), view: value.view };
+}
+
+function normalizeMessageMetadata(
+  role: ConversationMessage["role"],
+  context: MessageContext | null,
+  value: unknown,
+): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (!isRecord(value)) throw new Error("Invalid conversation message metadata");
+  const metadata: Record<string, unknown> = { ...value };
+
+  if (Object.prototype.hasOwnProperty.call(metadata, "noteRangeTarget")) {
+    const target = normalizeCanonicalProjectNoteRangeTarget(
+      metadata.noteRangeTarget,
+    );
+    if (!target
+      || role !== "user"
+      || !context
+      || context.projectId !== target.projectId
+      || context.noteScope !== target.scope
+      || context.noteVisibility !== target.visibility
+      || (target.scope === "epic" && context.epicId !== target.epicId)) {
+      throw new Error("Invalid project note-range target metadata");
+    }
+    metadata.noteRangeTarget = target;
+  }
+
+  if (Array.isArray(metadata.actions)) {
+    metadata.actions = metadata.actions.map((action) => {
+      if (!isProjectNoteRangeActionCandidate(action)) return action;
+      const canonical = normalizeCanonicalProjectNoteRangeAction(action);
+      if (!canonical) {
+        throw new Error("Invalid project note-range completion action");
+      }
+      return canonical;
+    });
+  }
+  return metadata;
 }
 
 function normalizeConversation(projectId: string, value: unknown, fallback: Partial<Conversation> = {}): Conversation {
@@ -941,15 +1004,20 @@ export class CodaScopeChatService {
 
       const messages = [...state.conversation.messages];
       const placeholder = messages[messageIndex];
+      const metadata = normalizeMessageMetadata(
+        "assistant",
+        placeholder.context ?? null,
+        {
+          ...(placeholder.metadata ?? {}),
+          ...(completion.metadata ?? {}),
+        },
+      );
       messages[messageIndex] = {
         ...placeholder,
         content: completion.content,
         status: "complete",
         updatedAt: nowIso(),
-        metadata: {
-          ...(placeholder.metadata ?? {}),
-          ...(completion.metadata ?? {}),
-        },
+        metadata,
       };
       const next: Conversation = {
         ...state.conversation,
@@ -976,6 +1044,7 @@ export class CodaScopeChatService {
       id: string;
       content: string;
       modelId?: string | null;
+      trustedMutationActions?: CodaScopeAction[];
     },
     options: { appendIfMissing?: boolean } = {},
   ): Promise<Conversation | null> {
@@ -997,17 +1066,26 @@ export class CodaScopeChatService {
       let messages: ConversationMessage[];
       let summary = state.conversation.summary;
       let defaultModelId = state.conversation.defaultModelId;
+      const trustedMutationActions = normalizeTrustedProjectNoteRangeActions(
+        message.trustedMutationActions,
+      );
 
       if (existingIndex >= 0) {
         const existing = state.conversation.messages[existingIndex];
         if (existing.role !== "assistant") return null;
         messages = [...state.conversation.messages];
+        const retainedMetadata = metadataWithoutActions(existing.metadata);
         messages[existingIndex] = {
           ...existing,
           content: message.content,
           status: "error",
           updatedAt: nowIso(),
-          metadata: metadataWithoutActions(existing.metadata),
+          metadata: {
+            ...(retainedMetadata ?? {}),
+            ...(trustedMutationActions.length > 0
+              ? { actions: trustedMutationActions }
+              : {}),
+          },
         };
       } else {
         if (!options.appendIfMissing) return null;
@@ -1017,6 +1095,9 @@ export class CodaScopeChatService {
           content: message.content,
           modelId: message.modelId ?? null,
           status: "error",
+          ...(trustedMutationActions.length > 0
+            ? { metadata: { actions: trustedMutationActions } }
+            : {}),
         });
         const firstAssistantMessage = state.conversation.messages.find(
           (candidate) => candidate.role === "assistant",
@@ -1105,4 +1186,20 @@ export class CodaScopeChatService {
       return true;
     });
   }
+}
+
+function normalizeTrustedProjectNoteRangeActions(
+  value: CodaScopeAction[] | undefined,
+): CodaScopeAction[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 1) {
+    throw new Error("Invalid trusted project note-range actions");
+  }
+  return value.map((action) => {
+    const canonical = normalizeCanonicalProjectNoteRangeAction(action);
+    if (!canonical) {
+      throw new Error("Invalid trusted project note-range action");
+    }
+    return canonical;
+  });
 }

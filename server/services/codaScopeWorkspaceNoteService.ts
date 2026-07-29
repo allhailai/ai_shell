@@ -30,6 +30,7 @@ import type { CodaScopeNoteTransferService } from "./codaScopeNoteTransferServic
 import type { CodaScopeNoteLinkIndexService } from "./codaScopeNoteLinkIndexService.js";
 import type { CodaScopeNoteUserPrefsService } from "./codaScopeNoteUserPrefsService.js";
 import type { CodaScopeNoteAuditService } from "./codaScopeNoteAuditService.js";
+import { replaceExactNoteRange } from "./codaScopeNoteAnnotationAnchorService.js";
 import {
   assertSafePathSegment,
   resolveContainedRelativePath,
@@ -67,6 +68,18 @@ export interface WorkspaceNoteCreateInput {
   body: string;
   visibility?: NoteVisibility;
 }
+
+export interface WorkspaceNoteExactRangeReplacementInput {
+  stableId: string;
+  selectionStart: number;
+  selectionEnd: number;
+  selectedText: string;
+  expectedHash: string;
+  replacementMarkdown: string;
+}
+
+export type WorkspaceNoteExactRangeReplacementResult =
+  WorkspaceEditableNoteDto;
 
 export interface WorkspaceCurrentNoteIdentity {
   stableId: string;
@@ -326,38 +339,57 @@ export class CodaScopeWorkspaceNoteService {
       current,
     ) => {
       const nextBody = validateBody(body);
-      const stored = this.noteSvc.serializeFrontmatter(current.frontmatter)
-        + nextBody;
-      await this.writeExisting(
+      const saved = await this.commitBodyEdit(
         actor,
         current,
-        stored,
+        nextBody,
         expectedHash,
-        (saved) => saved.body === nextBody
-          && saved.dto.title === current.dto.title,
       );
-      try {
-        await this.annotationSvc.reconcileAfterNoteWrite(
-          "codascope",
-          current.dto.visibility,
-          { userId: actor },
-          current.dto.path,
-        );
-      } catch {
-        // The body write is already durable and confirmed. Annotation state is
-        // derived and will be reconciled on the next normal note read/save.
-      }
-      const saved = await this.requireResolved(actor, stableId);
-      this.linkIndexSvc.updateLinksForNote(
-        "codascope",
-        saved.dto.visibility,
-        { userId: actor },
-        saved.dto.stableId,
-        saved.body,
-      );
-      this.audit("note.updated", actor, saved.dto, { operation: "body_edit" });
       return saved.dto;
     });
+  }
+
+  /**
+   * Replace only the exact, current CodeMirror source range supplied by the
+   * caller. Stable-ID resolution, hash verification, selection verification,
+   * and publication all occur under the existing per-note mutation boundary.
+   */
+  async replaceExactRange(
+    actorId: string,
+    input: WorkspaceNoteExactRangeReplacementInput,
+  ): Promise<WorkspaceNoteExactRangeReplacementResult> {
+    this.assertActive();
+    const replacementMarkdown = validateReplacementMarkdown(
+      input.replacementMarkdown,
+    );
+    return this.mutateExisting(
+      actorId,
+      input.stableId,
+      input.expectedHash,
+      async (actor, current) => {
+        let nextBody: string;
+        try {
+          nextBody = replaceExactNoteRange(current.body, {
+            from: input.selectionStart,
+            to: input.selectionEnd,
+            selectedText: input.selectedText,
+            replacementMarkdown,
+          });
+        } catch (error) {
+          throw new WorkspaceNoteInvalidInputError(
+            error instanceof Error ? error.message : "Note selection is invalid.",
+          );
+        }
+        validateBody(nextBody);
+        const saved = await this.commitBodyEdit(
+          actor,
+          current,
+          nextBody,
+          input.expectedHash,
+        );
+        return { ...saved.dto, body: saved.body };
+      },
+    );
   }
 
   async setTitle(
@@ -577,6 +609,45 @@ export class CodaScopeWorkspaceNoteService {
     if (isConflict(result)) {
       throw new WorkspaceNoteConflictError(result.currentHash);
     }
+  }
+
+  private async commitBodyEdit(
+    actor: string,
+    current: ResolvedWorkspaceNote,
+    nextBody: string,
+    expectedHash: string,
+  ): Promise<ResolvedWorkspaceNote> {
+    const stored = this.noteSvc.serializeFrontmatter(current.frontmatter)
+      + nextBody;
+    await this.writeExisting(
+      actor,
+      current,
+      stored,
+      expectedHash,
+      (saved) => saved.body === nextBody
+        && saved.dto.title === current.dto.title,
+    );
+    try {
+      await this.annotationSvc.reconcileAfterNoteWrite(
+        "codascope",
+        current.dto.visibility,
+        { userId: actor },
+        current.dto.path,
+      );
+    } catch {
+      // The body write is already durable and confirmed. Annotation state is
+      // derived and will be reconciled on the next normal note read/save.
+    }
+    const saved = await this.requireResolved(actor, current.dto.stableId);
+    this.linkIndexSvc.updateLinksForNote(
+      "codascope",
+      saved.dto.visibility,
+      { userId: actor },
+      saved.dto.stableId,
+      saved.body,
+    );
+    this.audit("note.updated", actor, saved.dto, { operation: "body_edit" });
+    return saved;
   }
 
   private async requireResolved(
@@ -923,6 +994,15 @@ function validateTitle(value: string): string {
 function validateBody(value: string): string {
   if (typeof value !== "string" || value.length > MAX_NOTE_BODY) {
     throw new WorkspaceNoteInvalidInputError("body is invalid.");
+  }
+  return value;
+}
+
+function validateReplacementMarkdown(value: string): string {
+  if (typeof value !== "string" || value.length > MAX_NOTE_BODY) {
+    throw new WorkspaceNoteInvalidInputError(
+      "replacementMarkdown is invalid.",
+    );
   }
   return value;
 }

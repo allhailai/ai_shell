@@ -30,6 +30,11 @@ function setup() {
       visibility: input.visibility ?? "private",
     })),
     replaceBody: vi.fn(async () => baseNote),
+    replaceExactRange: vi.fn(async (_actor, input) => ({
+      ...baseNote,
+      body: input.replacementMarkdown,
+      contentHash: "b".repeat(32),
+    })),
     setTitle: vi.fn(async () => ({ ...baseNote, title: "Renamed" })),
     setVisibility: vi.fn(async () => ({ ...baseNote, visibility: "shared" })),
     archiveNote: vi.fn(async () => baseNote),
@@ -38,6 +43,7 @@ function setup() {
   grant.replace({
     create: { maxSuccesses: 1, visibility: "private" },
     readStableIds: ["note-1"],
+    editRangeTarget: null,
     editBodyStableIds: ["note-1"],
     editTitleStableIds: ["note-1"],
     visibilityChanges: [{ stableId: "note-1", visibility: "shared" }],
@@ -54,6 +60,23 @@ function setup() {
   return { service, grant, actions, tools };
 }
 
+function exactRangeTarget() {
+  return {
+    kind: "note-range" as const,
+    stableId: "note-1",
+    scope: "codascope" as const,
+    visibility: "private" as const,
+    path: "one.md",
+    title: "One",
+    selectionStart: 0,
+    selectionEnd: 4,
+    selectedText: "body",
+    startLine: 1,
+    endLine: 1,
+    expectedHash: "a".repeat(32),
+  };
+}
+
 describe("workspace CodaScope note tools", () => {
   it("exposes the exact dedicated allowlist with strict authority-free schemas", () => {
     const { tools } = setup();
@@ -61,6 +84,7 @@ describe("workspace CodaScope note tools", () => {
       "read_codascope_note",
       "create_codascope_note",
       "edit_codascope_note",
+      "replace_codascope_note_range",
       "set_codascope_note_title",
       "set_codascope_note_visibility",
       "archive_codascope_note",
@@ -85,6 +109,114 @@ describe("workspace CodaScope note tools", () => {
     expect(tools).not.toHaveProperty("edit_note");
     expect(tools).not.toHaveProperty("delete_note");
     expect(tools).not.toHaveProperty("restore_note");
+  });
+
+  it("exposes a replacement-only exact-range schema and rejects authority substitution", async () => {
+    const { tools, service, grant } = setup();
+    grant.replace({
+      ...grant.current,
+      editRangeTarget: exactRangeTarget(),
+      editBodyStableIds: [],
+    });
+    expect(tools.replace_codascope_note_range.inputSchema).toMatchObject({
+      additionalProperties: false,
+      required: ["replacementMarkdown"],
+      properties: {
+        replacementMarkdown: { type: "string" },
+      },
+    });
+    for (const forged of [
+      { stableId: "note-2" },
+      { selectionStart: 99 },
+      { selectionEnd: 100 },
+      { selectedText: "other" },
+      { expectedHash: "f".repeat(32) },
+    ]) {
+      expect(String(await tools.replace_codascope_note_range.execute({
+        replacementMarkdown: "next",
+        ...forged,
+      } as any, {} as any))).toBe(
+        "The CodaScope note operation input is invalid.",
+      );
+    }
+    expect(service.replaceExactRange).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["nonempty", "replacement"],
+    ["empty", ""],
+  ])("replaces the server-owned range with %s Markdown and emits a strict action", async (
+    _label,
+    replacementMarkdown,
+  ) => {
+    const { tools, service, grant, actions } = setup();
+    const target = exactRangeTarget();
+    grant.replace({
+      ...grant.current,
+      editRangeTarget: target,
+      editBodyStableIds: [],
+    });
+
+    expect(JSON.parse(String(
+      await tools.replace_codascope_note_range.execute({
+        replacementMarkdown,
+      } as any, {} as any),
+    ))).toMatchObject({
+      ok: true,
+      note: { stableId: "note-1", contentHash: "b".repeat(32) },
+    });
+    expect(service.replaceExactRange).toHaveBeenCalledWith("alice", {
+      stableId: target.stableId,
+      selectionStart: target.selectionStart,
+      selectionEnd: target.selectionEnd,
+      selectedText: target.selectedText,
+      expectedHash: target.expectedHash,
+      replacementMarkdown,
+    });
+    expect(actions.current.drain()).toEqual([{
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_codascope_note_range",
+        stableId: "note-1",
+        scope: "codascope",
+        visibility: "private",
+        path: "one.md",
+        title: "One",
+        contentHash: "b".repeat(32),
+        startLine: "1",
+        endLine: "1",
+      },
+      description: 'Replaced selected lines 1-1 in CodaScope note "One".',
+    }]);
+  });
+
+  it("releases exact-range grant/action reservations after a stale failure", async () => {
+    const { tools, service, grant, actions } = setup();
+    grant.replace({
+      ...grant.current,
+      editRangeTarget: exactRangeTarget(),
+      editBodyStableIds: [],
+    });
+    service.replaceExactRange
+      .mockRejectedValueOnce(new WorkspaceNoteConflictError("b".repeat(32)))
+      .mockResolvedValueOnce({
+        ...baseNote,
+        body: "retry",
+        contentHash: "c".repeat(32),
+      });
+
+    expect(JSON.parse(String(
+      await tools.replace_codascope_note_range.execute({
+        replacementMarkdown: "first",
+      } as any, {} as any),
+    ))).toMatchObject({ error: "conflict" });
+    expect(actions.current.drain()).toEqual([]);
+    expect(JSON.parse(String(
+      await tools.replace_codascope_note_range.execute({
+        replacementMarkdown: "retry",
+      } as any, {} as any),
+    ))).toMatchObject({ ok: true });
+    expect(service.replaceExactRange).toHaveBeenCalledTimes(2);
   });
 
   it("rejects runtime unknown fields even when schema validation is bypassed", async () => {
@@ -275,6 +407,7 @@ describe("workspace CodaScope note tools", () => {
     grant.replace({
       create: { maxSuccesses: 25, visibility: "private" },
       readStableIds: [],
+      editRangeTarget: null,
       editBodyStableIds: [],
       editTitleStableIds: [],
       visibilityChanges: [],

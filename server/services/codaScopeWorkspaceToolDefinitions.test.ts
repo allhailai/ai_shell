@@ -147,7 +147,7 @@ describe("workspace tool allowlist", () => {
     );
   });
 
-  it("adds only the six dedicated CodaScope-note tools when the root graph provides the note boundary", () => {
+  it("adds only the seven dedicated CodaScope-note tools when the root graph provides the note boundary", () => {
     const fixture = {
       ...services(),
       workspaceNote: {},
@@ -165,6 +165,7 @@ describe("workspace tool allowlist", () => {
       "read_codascope_note",
       "create_codascope_note",
       "edit_codascope_note",
+      "replace_codascope_note_range",
       "set_codascope_note_title",
       "set_codascope_note_visibility",
       "archive_codascope_note",

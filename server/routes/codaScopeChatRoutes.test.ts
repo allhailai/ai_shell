@@ -16,6 +16,7 @@ import {
   type CodaScopeRouteContext,
 } from "./codaScopeServiceContext.js";
 import { CodaScopePersistenceCorruptError } from "../services/codaScopePersistence.js";
+import { ProjectNoteRangeInvalidError } from "../services/codaScopeProjectNoteRangeService.js";
 
 type RouteRegistration = { method: string; path: string; handlers: Array<RequestHandler | undefined> };
 
@@ -182,7 +183,12 @@ function statefulChatService(initial = chatConversation()) {
     _projectId: string,
     _conversationId: string,
     _actorId: string,
-    message: { id: string; content: string; modelId?: string | null },
+    message: {
+      id: string;
+      content: string;
+      modelId?: string | null;
+      trustedMutationActions?: unknown[];
+    },
     options: { appendIfMissing?: boolean } = {},
   ) => {
     if (!conversation) return null;
@@ -197,7 +203,15 @@ function statefulChatService(initial = chatConversation()) {
         content: message.content,
         status: "error",
         updatedAt: "2026-07-23T00:00:03.000Z",
-        metadata: Object.keys(remainingMetadata).length > 0 ? remainingMetadata : undefined,
+        metadata: Object.keys(remainingMetadata).length > 0
+          || (message.trustedMutationActions?.length ?? 0) > 0
+          ? {
+              ...remainingMetadata,
+              ...(message.trustedMutationActions?.length
+                ? { actions: message.trustedMutationActions }
+                : {}),
+            }
+          : undefined,
       };
     } else {
       if (!options.appendIfMissing) return null;
@@ -209,6 +223,9 @@ function statefulChatService(initial = chatConversation()) {
         createdAt: "2026-07-23T00:00:03.000Z",
         updatedAt: "2026-07-23T00:00:03.000Z",
         modelId: message.modelId,
+        metadata: message.trustedMutationActions?.length
+          ? { actions: message.trustedMutationActions }
+          : undefined,
       });
     }
     conversation = {
@@ -252,6 +269,9 @@ function streamingServices(chatSvc: Record<string, unknown>) {
     buildSvc: { getBuildState: vi.fn(() => null) },
     wikiStateSvc: { getWikiState: vi.fn(() => null) },
     codeMapSvc: { getCodeMapMeta: vi.fn(() => null) },
+    projectNoteRangeSvc: {
+      canonicalizeTarget: vi.fn(async ({ target }: { target: unknown }) => target),
+    },
   };
 }
 
@@ -815,6 +835,169 @@ describe("CodaScope chat SSE completion persistence", () => {
     expect(chat.getConversation()?.messages.find((message) => message.role === "assistant"))
       .toMatchObject({ content: "Partial answer", status: "error" });
     expect(chat.writeConversation).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe("CodaScope project note-range route authority", () => {
+  const target = {
+    kind: "note-range" as const,
+    stableId: "note_123",
+    scope: "project" as const,
+    visibility: "shared" as const,
+    projectId: "proj",
+    path: "plan.md",
+    title: "Plan",
+    selectionStart: 0,
+    selectionEnd: 4,
+    selectedText: "plan",
+    startLine: 1,
+    endLine: 1,
+    expectedHash: "a".repeat(64),
+  };
+  const context = {
+    view: "notes",
+    projectId: "proj",
+    epicId: null,
+    noteScope: "project",
+    noteVisibility: "shared",
+    notePath: "plan",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("canonicalizes before persistence and stores the target on the user only", async () => {
+    const chat = statefulChatService();
+    const services = streamingServices(chat.service);
+    const canonicalizeTarget = vi.fn(async () => target);
+    services.projectNoteRangeSvc = { canonicalizeTarget };
+    orchestrator.streamAssistantResponse.mockResolvedValueOnce({
+      fullResponse: "Done",
+      actions: [],
+      agentResult: {},
+    });
+    const routes = registeredRoutes({ services });
+    const res = sseResponse();
+    const next = vi.fn();
+
+    route(routes, "post", messagesPath)({
+      params: { id: "proj", convId: "conv-1" },
+      body: {
+        message: "Do that",
+        modelId: "model",
+        context,
+        noteRangeTarget: { ...target, title: "Untrusted client title" },
+      },
+    } as never, res as never, next);
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
+
+    expect(canonicalizeTarget).toHaveBeenCalledWith({
+      actorId: "alice",
+      routeProjectId: "proj",
+      currentContext: expect.objectContaining(context),
+      target: { ...target, title: "Untrusted client title" },
+    });
+    expect(chat.appendMessage.mock.calls[0][3].metadata)
+      .toEqual({ noteRangeTarget: target });
+    expect(chat.appendMessage.mock.calls[1][3].metadata).toBeUndefined();
+    expect(orchestrator.streamAssistantResponse)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        projectId: "proj",
+        actorId: "alice",
+        noteRangeTarget: target,
+      }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid target before any user or placeholder write", async () => {
+    const chat = statefulChatService();
+    const services = streamingServices(chat.service);
+    services.projectNoteRangeSvc = {
+      canonicalizeTarget: vi.fn(async () => {
+        throw new ProjectNoteRangeInvalidError();
+      }),
+    };
+    const routes = registeredRoutes({ services });
+    const res = sseResponse();
+    const next = vi.fn();
+
+    route(routes, "post", messagesPath)({
+      params: { id: "proj", convId: "conv-1" },
+      body: {
+        message: "Do that",
+        modelId: "model",
+        context,
+        noteRangeTarget: target,
+      },
+    } as never, res as never, next);
+    await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(1));
+
+    expect(chat.appendMessage).not.toHaveBeenCalled();
+    expect(orchestrator.streamAssistantResponse).not.toHaveBeenCalled();
+    expect(res.writeHead).not.toHaveBeenCalled();
+    expect(next.mock.calls[0][0]).toMatchObject({
+      status: 400,
+      code: "invalid_input",
+    });
+  });
+
+  it("persists and emits a confirmed server action when generation later fails", async () => {
+    const chat = statefulChatService();
+    const services = streamingServices(chat.service);
+    services.projectNoteRangeSvc = {
+      canonicalizeTarget: vi.fn(async () => target),
+    };
+    const action = {
+      type: "operation_completed",
+      attributes: {
+        operation: "replace_note_range",
+        stableId: target.stableId,
+        scope: target.scope,
+        visibility: target.visibility,
+        projectId: target.projectId,
+        path: target.path,
+        title: target.title,
+        contentHash: "b".repeat(64),
+        startLine: "1",
+        endLine: "1",
+      },
+      description: "Server confirmed.",
+    };
+    orchestrator.streamAssistantResponse.mockRejectedValueOnce(Object.assign(
+      new Error("later failure"),
+      {
+        fullResponse: "Partial",
+        trustedMutationActions: [action],
+      },
+    ));
+    const routes = registeredRoutes({ services });
+    const res = sseResponse();
+    const next = vi.fn();
+
+    route(routes, "post", messagesPath)({
+      params: { id: "proj", convId: "conv-1" },
+      body: {
+        message: "Do that",
+        modelId: "model",
+        context,
+        noteRangeTarget: target,
+      },
+    } as never, res as never, next);
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalledTimes(1));
+
+    expect(terminalFrames(res)).toEqual([
+      `event: error\ndata: ${JSON.stringify({
+        error: "later failure",
+        actions: [action],
+      })}\n\n`,
+    ]);
+    expect(chat.getConversation()?.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      status: "error",
+      metadata: { actions: [action] },
+    });
     expect(next).not.toHaveBeenCalled();
   });
 });

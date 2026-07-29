@@ -19,6 +19,10 @@ import {
 } from "./utils/ssePipelineHelper.js";
 import { assertSafePathSegment } from "../services/codaScopePathSafety.js";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  canonicalizeWorkspaceNoteRangeTarget,
+  WorkspaceNoteRangeTargetInvalidError,
+} from "../services/codaScopeWorkspaceNoteRangeTarget.js";
 
 const MAX_ATTACHMENTS = 10;
 const MODEL_ID_MAX = 255;
@@ -204,11 +208,17 @@ async function handleWorkspaceMessage(
     workspaceConversationSvc,
     workspaceImageSvc,
     workspaceIntentSvc,
+    workspaceNoteSvc,
   } = services;
   const actorId = principal(req).username;
   const conversationId = param(req, "convId");
   const body = requestBody(req);
   rejectClientAuthorizationInputs(body, httpError);
+  rejectUnknownRequestFields(
+    body,
+    ["message", "modelId", "context", "attachments", "noteRangeTarget"],
+    httpError,
+  );
 
   const message = requiredBoundedString(
     body.message,
@@ -235,6 +245,27 @@ async function handleWorkspaceMessage(
   );
   if (!owned) throw httpError("Conversation not found.", 404, "not_found");
 
+  let noteRangeTarget;
+  if (body.noteRangeTarget !== undefined) {
+    try {
+      noteRangeTarget = await canonicalizeWorkspaceNoteRangeTarget({
+        actorId,
+        currentNote: context.currentNote,
+        target: body.noteRangeTarget,
+        noteService: workspaceNoteSvc,
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceNoteRangeTargetInvalidError) {
+        throw httpError(
+          "The selected CodaScope note range is invalid or stale.",
+          400,
+          "invalid_input",
+        );
+      }
+      throw error;
+    }
+  }
+
   for (const projectId of context.explicitlyReferencedProjectIds) {
     if (!await activeEntityResolver.resolveActiveProject(projectId)) {
       throw httpError(
@@ -249,7 +280,11 @@ async function handleWorkspaceMessage(
   await workspaceIntentSvc.resolveTurn(
     message,
     context.explicitlyReferencedProjectIds,
-    { actorId, currentNote: context.currentNote },
+    {
+      actorId,
+      currentNote: context.currentNote,
+      noteRangeTarget,
+    },
   );
 
   const attachments = validateAttachments(
@@ -303,7 +338,10 @@ async function handleWorkspaceMessage(
         modelId: null,
         status: "complete",
         context,
-        metadata: persistedImages.length > 0 ? { images: persistedImages } : {},
+        metadata: {
+          ...(persistedImages.length > 0 ? { images: persistedImages } : {}),
+          ...(noteRangeTarget ? { noteRangeTarget } : {}),
+        },
       },
     );
     if (!afterUser) throw httpError("Conversation not found.", 404, "not_found");
@@ -350,6 +388,7 @@ async function handleWorkspaceMessage(
         message,
         modelId,
         context,
+        noteRangeTarget,
         history,
         catalog: workspaceCatalogSvc,
         intentService: workspaceIntentSvc,
@@ -519,6 +558,21 @@ function rejectClientAuthorizationInputs(
         "invalid_input",
       );
     }
+  }
+}
+
+function rejectUnknownRequestFields(
+  body: Record<string, unknown>,
+  allowed: readonly string[],
+  httpError: CodaScopeRouteContext["httpError"],
+): void {
+  const fields = new Set(allowed);
+  if (Object.keys(body).some((field) => !fields.has(field))) {
+    throw httpError(
+      "Workspace message request contains unsupported fields.",
+      400,
+      "invalid_input",
+    );
   }
 }
 

@@ -701,6 +701,208 @@
   background: var(--color-bg-secondary);
 }
 
+.codascope-note-range-target-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border-primary));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-primary));
+  box-shadow: var(--shadow-sm);
+  animation: codascope-note-range-target-enter var(--transition-fast) ease-out;
+}
+
+.codascope-note-range-target-card-in-flight {
+  border-color: var(--color-accent);
+}
+
+.codascope-note-range-target-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.codascope-note-range-target-icon {
+  display: inline-flex;
+  color: var(--color-accent);
+  margin-top: 2px;
+}
+
+.codascope-note-range-target-heading > div {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.codascope-note-range-target-heading strong {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.codascope-note-range-target-heading span {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.codascope-note-range-target-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-text-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.codascope-note-range-target-remove:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.codascope-note-range-target-remove:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.codascope-note-range-target-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.codascope-note-range-target-note > svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.codascope-note-range-target-note > span:first-of-type {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.codascope-note-range-target-note strong,
+.codascope-note-range-target-note small {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.codascope-note-range-target-note strong {
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+}
+
+.codascope-note-range-target-note small,
+.codascope-note-range-target-lines {
+  font-size: var(--text-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.codascope-note-range-target-lines {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.codascope-note-range-target-preview {
+  max-height: 112px;
+  margin: 0;
+  padding: var(--space-2);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 2px solid var(--color-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+.codascope-note-range-target-limit {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.codascope-note-range-target-quick {
+  align-self: flex-end;
+}
+
+.codascope-note-range-message-reference {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--color-bg-secondary));
+}
+
+.codascope-note-range-message-reference-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.codascope-note-range-message-reference-heading strong {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+}
+
+.codascope-note-range-message-reference-heading span,
+.codascope-note-range-message-reference small {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.codascope-note-range-message-reference small {
+  overflow-wrap: anywhere;
+}
+
+.codascope-note-range-message-reference blockquote {
+  max-height: 72px;
+  margin: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.45;
+}
+
+@keyframes codascope-note-range-target-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codascope-note-range-target-card {
+    animation: none;
+  }
+}
+
 .codascope-assistant-input-controls {
   display: flex;
   align-items: center;

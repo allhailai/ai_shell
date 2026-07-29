@@ -20,9 +20,11 @@ import type { CodaScopeBuildStateService } from "./codaScopeBuildStateService.js
 import type { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import type { CodaScopeEpicService } from "./codaScopeEpicService.js";
 import { CodaScopeCodeMapService } from "./codaScopeCodeMapService.js";
-import { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences, formatSelectionContext, type ManifestInput, type ViewContext, type EpicContextInput, type ReferenceItem, type SelectionContext } from "./codaScopeChatPromptHelpers.js";
+import { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences, formatSelectionContext, formatProjectNoteRangeTarget, type ManifestInput, type ViewContext, type EpicContextInput, type ReferenceItem, type SelectionContext } from "./codaScopeChatPromptHelpers.js";
 import { loadCommandTemplate, substituteVars } from "./codaScopeCommandLoader.js";
 import { extractActions, type CodaScopeAction } from "./codaScopeActionParser.js";
+import type { CanonicalProjectNoteRangeTarget } from "../../src/apps/codascope/projectNoteRangeTargetValidation.js";
+import { PROJECT_NOTE_RANGE_OPERATION } from "../../src/apps/codascope/projectNoteRangeMutationActionValidation.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -40,6 +42,7 @@ export interface ChatServices {
 export interface StreamResult {
   fullResponse: string;
   actions: CodaScopeAction[];
+  trustedMutationActions: CodaScopeAction[];
   agentResult: unknown;
 }
 
@@ -131,9 +134,20 @@ export async function streamAssistantResponse(options: {
   systemPrompt: string;
   agentSvc: CodaScopeAgentService;
   images?: Array<{ data: string; mimeType: string }>;
+  noteRangeTarget?: CanonicalProjectNoteRangeTarget;
   onMessage: (msg: unknown) => void;
 }): Promise<StreamResult> {
-  const { projectId, actorId, message, modelId, systemPrompt, agentSvc, images, onMessage } = options;
+  const {
+    projectId,
+    actorId,
+    message,
+    modelId,
+    systemPrompt,
+    agentSvc,
+    images,
+    noteRangeTarget,
+    onMessage,
+  } = options;
 
   let fullResponse = "";
   let toolResultText = "";
@@ -146,6 +160,7 @@ export async function streamAssistantResponse(options: {
       modelId,
       systemPrompt,
       images,
+      projectNoteRangeTarget: noteRangeTarget,
       purpose: "assistant",
       onMessage: (msg) => {
         // Accumulate text from model responses
@@ -161,10 +176,15 @@ export async function streamAssistantResponse(options: {
         }
         onMessage(msg);
       },
-      onDone: async (result) => {
+      onDone: async (result, _retrievedSources, trustedActions = []) => {
         // Extract actions from both model text and tool results
-        const textActions = extractActions(fullResponse);
-        const toolActions = extractActions(toolResultText);
+        const isModelAuthoredRangeReceipt = (action: CodaScopeAction) =>
+          action.type === "operation_completed"
+          && action.attributes.operation === PROJECT_NOTE_RANGE_OPERATION;
+        const textActions = extractActions(fullResponse)
+          .filter((action) => !isModelAuthoredRangeReceipt(action));
+        const toolActions = extractActions(toolResultText)
+          .filter((action) => !isModelAuthoredRangeReceipt(action));
         // Merge while retaining distinct completed mutations in the same run.
         // A document ID is insufficient for notes, wiki pages, and generic
         // completion cards, which otherwise collapse into one card.
@@ -187,10 +207,25 @@ export async function streamAssistantResponse(options: {
             seen.add(key);
           }
         }
-        resolve({ fullResponse, actions: merged, agentResult: result });
+        for (const trusted of trustedActions) {
+          const key = actionKey(trusted);
+          if (!seen.has(key)) {
+            merged.push(trusted);
+            seen.add(key);
+          }
+        }
+        resolve({
+          fullResponse,
+          actions: merged,
+          trustedMutationActions: trustedActions,
+          agentResult: result,
+        });
       },
-      onError: async (err) => {
-        reject(Object.assign(err, { fullResponse }));
+      onError: async (err, trustedActions = []) => {
+        reject(Object.assign(err, {
+          fullResponse,
+          trustedMutationActions: trustedActions,
+        }));
       },
     });
   });
@@ -198,5 +233,5 @@ export async function streamAssistantResponse(options: {
 
 // ── Re-exports for Route Convenience ────────────────────────────────
 
-export { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences, formatSelectionContext };
+export { buildProjectManifest, formatConversationHistory, formatViewContext, buildEpicContext, formatReferences, formatSelectionContext, formatProjectNoteRangeTarget };
 export type { ViewContext, EpicContextInput, ReferenceItem, SelectionContext };

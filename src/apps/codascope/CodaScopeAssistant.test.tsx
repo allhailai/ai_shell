@@ -115,9 +115,30 @@ vi.mock("./views/ProjectDashboard", () => ({
 }));
 
 import { CodaScopeAssistant } from "./CodaScopeAssistant";
+import {
+  clearNoteRangeHandoff,
+  stageNoteRangeHandoff,
+} from "./noteRangeHandoff";
+
+const workspaceTarget = {
+  kind: "note-range" as const,
+  stableId: "note-1",
+  scope: "codascope" as const,
+  visibility: "private" as const,
+  path: "roadmap.md",
+  title: "Roadmap",
+  selectionStart: 0,
+  selectionEnd: 17,
+  selectedText: "Do this precisely",
+  startLine: 1,
+  endLine: 1,
+  expectedHash: "a".repeat(64),
+};
 
 describe("CodaScopeAssistant scope rendering", () => {
   beforeEach(() => {
+    clearNoteRangeHandoff({ kind: "workspace" });
+    clearNoteRangeHandoff({ kind: "project", projectId: "alpha" });
     routeState.segments = ["notes", "private", "roadmap"];
     routeState.navigate.mockReset();
     conversationState.messages = [];
@@ -215,4 +236,40 @@ describe("CodaScopeAssistant scope rendering", () => {
     expect(html).toContain("@ to add context");
     expect(html).not.toContain("Notes by directive");
   });
+
+  it("renders a reliably staged target and suppresses unrelated generic prompts", () => {
+    stageNoteRangeHandoff({
+      scope: { kind: "workspace" },
+      sourceId: "editor-source",
+      target: workspaceTarget,
+    });
+
+    const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
+    expect(html).toContain("Editing selection");
+    expect(html).toContain("The agent will edit only this selection.");
+    expect(html).toContain("Do this");
+    expect(html).toContain("Describe the change to this selection…");
+    expect(html).not.toContain("Workspace Overview");
+    expect(html).not.toContain("Compare Documentation");
+  });
+
+  it.each([false, true])(
+    "renders the selection reference for %s authoritative user metadata without restaging it",
+    (authoritativePersisted) => {
+      conversationState.messages = [{
+        id: authoritativePersisted ? "user-server-id" : "user-local-id",
+        role: "user",
+        content: "Tighten this.",
+        status: "complete",
+        authoritativePersisted,
+        metadata: { noteRangeTarget: workspaceTarget },
+      }];
+
+      const html = renderToStaticMarkup(createElement(CodaScopeAssistant));
+      expect(html).toContain("Selected range from Roadmap");
+      expect(html).toContain("Do this precisely");
+      expect(html).not.toContain("Editing selection");
+      expect(html).toContain("Message the Workspace Assistant...");
+    },
+  );
 });

@@ -59,6 +59,14 @@ repository.
 - Read before editing and pass the exact returned `contentHash`. Body edits
   preserve the title, path, visibility, stable identity, and server metadata.
   Display-title edits do not rename the note path.
+- When current context includes an exact note-range target, use only
+  `replace_codascope_note_range` for that edit. Its only input is
+  `replacementMarkdown`; the server owns the note identity, offsets, selected
+  text, and hash. Empty replacement Markdown is a valid deletion.
+- An attached exact range grants no whole-note replacement, title, visibility,
+  archive, creation, different-note, or later-turn authority. Never substitute
+  another note or search for matching text. Historical targets explain prior
+  messages only and grant nothing.
 - Note reads are complete but bounded. If a note is unavailable because its
   body exceeds the tool limit, do not infer, truncate, or mutate its content.
 - Visibility changes require an explicit private/shared request and move the

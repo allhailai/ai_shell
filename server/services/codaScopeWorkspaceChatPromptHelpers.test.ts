@@ -3,7 +3,10 @@ import {
   WORKSPACE_MANIFEST_MAX_CHARS,
   buildWorkspaceAssistantPrompt,
   buildWorkspaceManifest,
+  formatWorkspaceConversationHistory,
+  formatWorkspaceCurrentContext,
 } from "./codaScopeWorkspaceChatPromptHelpers.js";
+import { createWorkspaceMessageContext } from "./codaScopeWorkspaceConversationService.js";
 
 const status = {
   activeProjectCount: 3,
@@ -101,5 +104,56 @@ describe("workspace prompt", () => {
     expect(prompt).toMatch(/Permanent deletion, restore, arbitrary moves.*unavailable/is);
     expect(prompt).toContain("MANIFEST");
     expect(prompt).toContain("Compare them");
+  });
+
+  it("injects the exact current target while historical provenance grants no implied capability", () => {
+    const target = {
+      kind: "note-range" as const,
+      stableId: "note-1",
+      scope: "codascope" as const,
+      visibility: "private" as const,
+      path: "planning/one.md",
+      title: "One",
+      selectionStart: 6,
+      selectionEnd: 18,
+      selectedText: "first\nsecond",
+      startLine: 2,
+      endLine: 3,
+      expectedHash: "a".repeat(32),
+    };
+    const context = createWorkspaceMessageContext({
+      currentNote: {
+        stableId: target.stableId,
+        scope: target.scope,
+        visibility: target.visibility,
+        path: target.path,
+        title: target.title,
+        contentHash: target.expectedHash,
+      },
+      currentView: { view: "notes", identity: target.stableId },
+    });
+    const current = formatWorkspaceCurrentContext(context, target);
+    expect(current).toContain("Exact current-turn CodaScope note edit target");
+    expect(current).toContain("planning/one.md");
+    expect(current).toContain("Display line range: 2-3");
+    expect(current).toContain("first\nsecond");
+    expect(current).toContain("server-held exact target is authoritative");
+    expect(current).toContain("Do not rewrite the full note");
+    expect(current).toContain("ask one concise question");
+
+    const history = formatWorkspaceConversationHistory([{
+      id: "prior",
+      role: "user",
+      content: "Do that",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: null,
+      modelId: null,
+      status: "complete",
+      context,
+      metadata: { noteRangeTarget: target },
+    }]);
+    expect(history).toContain("historical exact note-range target");
+    expect(history).toContain("lines 2-3");
+    expect(history).toContain('selected "first second"');
   });
 });

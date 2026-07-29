@@ -11,8 +11,19 @@ import type {
 } from "./codaScopeTypes";
 import { getAssistantScopeKey } from "./assistantScope";
 import {
+  isCanonicalNotePath,
   normalizeCanonicalWorkspaceMutationActions,
 } from "./workspaceMutationActionValidation";
+import {
+  isProjectNoteRangeActionCandidate,
+  normalizeCanonicalProjectNoteRangeAction,
+} from "./projectNoteRangeMutationActionValidation";
+import {
+  normalizeCanonicalProjectNoteRangeTarget,
+} from "./projectNoteRangeTargetValidation";
+import {
+  normalizeCanonicalWorkspaceNoteRangeTarget,
+} from "./workspaceNoteRangeTargetValidation";
 
 export const ASSISTANT_RECORD_ID_MAX_LENGTH = 255;
 
@@ -343,8 +354,17 @@ function normalizeConversationMessage(
     : normalizeProjectMessageContext(value.context);
   if (context === undefined) return null;
   const metadata = expectedScope.kind === "workspace"
-    ? normalizeWorkspaceMessageMetadata(value.metadata)
-    : { ...value.metadata };
+    ? normalizeWorkspaceMessageMetadata(
+        value.metadata,
+        value.role,
+        context as WorkspaceMessageContext,
+      )
+    : normalizeProjectMessageMetadata(
+        value.metadata,
+        value.role,
+        context as MessageContext | null,
+        expectedScope.projectId,
+      );
   if (metadata === null) return null;
 
   return {
@@ -362,11 +382,81 @@ function normalizeConversationMessage(
 
 function normalizeWorkspaceMessageMetadata(
   value: Record<string, unknown>,
+  role: ConversationMessage["role"],
+  context: WorkspaceMessageContext,
 ): Record<string, unknown> | null {
-  if (value.actions === undefined) return { ...value };
-  const actions = normalizeCanonicalWorkspaceMutationActions(value.actions);
-  if (!actions) return null;
-  return { ...value, actions };
+  const metadata = { ...value };
+  if (value.noteRangeTarget !== undefined) {
+    const target = normalizeCanonicalWorkspaceNoteRangeTarget(
+      value.noteRangeTarget,
+    );
+    if (role !== "user"
+      || !target
+      || !context.currentNote
+      || context.currentNote.stableId !== target.stableId
+      || context.currentNote.scope !== target.scope
+      || context.currentNote.visibility !== target.visibility
+      || context.currentNote.path !== target.path
+      || context.currentNote.contentHash !== target.expectedHash) {
+      return null;
+    }
+    metadata.noteRangeTarget = target;
+  }
+  if (value.actions !== undefined) {
+    const actions = normalizeCanonicalWorkspaceMutationActions(value.actions);
+    if (!actions) return null;
+    metadata.actions = actions;
+  }
+  return metadata;
+}
+
+function normalizeProjectMessageMetadata(
+  value: Record<string, unknown>,
+  role: ConversationMessage["role"],
+  context: MessageContext | null,
+  expectedProjectId: string,
+): Record<string, unknown> | null {
+  const metadata = { ...value };
+  if (value.noteRangeTarget !== undefined) {
+    const target = normalizeCanonicalProjectNoteRangeTarget(
+      value.noteRangeTarget,
+    );
+    if (!target
+      || role !== "user"
+      || !context
+      || target.projectId !== expectedProjectId
+      || context.projectId !== target.projectId
+      || context.noteScope !== target.scope
+      || context.noteVisibility !== target.visibility
+      || canonicalProjectRouteNotePath(context.notePath) !== target.path
+      || (target.scope === "epic" && context.epicId !== target.epicId)) {
+      return null;
+    }
+    metadata.noteRangeTarget = target;
+  }
+  if (value.actions !== undefined) {
+    if (!Array.isArray(value.actions)) return null;
+    const actions: unknown[] = [];
+    for (const candidate of value.actions) {
+      if (!isProjectNoteRangeActionCandidate(candidate)) {
+        actions.push(candidate);
+        continue;
+      }
+      const action = normalizeCanonicalProjectNoteRangeAction(candidate);
+      if (!action || action.attributes.projectId !== expectedProjectId) {
+        return null;
+      }
+      actions.push(action);
+    }
+    metadata.actions = actions;
+  }
+  return metadata;
+}
+
+function canonicalProjectRouteNotePath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const canonical = value.endsWith(".md") ? value : `${value}.md`;
+  return isCanonicalNotePath(canonical) ? canonical : null;
 }
 
 function normalizeConversationSummary(

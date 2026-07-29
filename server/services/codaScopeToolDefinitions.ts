@@ -19,6 +19,10 @@ import { buildEpicTools } from "./tools/codaScopeEpicTools.js";
 import { buildWriteTools } from "./tools/codaScopeWriteTools.js";
 import { buildArtifactTools } from "./tools/codaScopeArtifactTools.js";
 import { buildNoteReadTools, buildNoteWriteTools } from "./tools/codaScopeNoteTools.js";
+import { buildProjectNoteRangeTools } from "./tools/codaScopeProjectNoteRangeTools.js";
+import type { CodaScopeProjectNoteRangeService } from "./codaScopeProjectNoteRangeService.js";
+import type { ProjectNoteRangeGrantHolder } from "./codaScopeProjectNoteRangeGrant.js";
+import type { ProjectNoteRangeActionCollectorHolder } from "./codaScopeProjectNoteRangeMutationActions.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -93,6 +97,11 @@ export function getToolsForPurpose(
   purpose: ProjectAgentPurpose | string,
   collectorHolder?: ToolResultCollectorHolder,
   actorId?: string,
+  projectNoteRange?: {
+    service: CodaScopeProjectNoteRangeService;
+    grantHolder: ProjectNoteRangeGrantHolder;
+    actionHolder: ProjectNoteRangeActionCollectorHolder;
+  },
 ): Record<string, SDKCustomTool> {
   const services = createToolServices(projectsRoot);
 
@@ -119,8 +128,30 @@ export function getToolsForPurpose(
     const epicTools = buildEpicTools(projectId, services, collectorHolder, actorId);
     const write = buildWriteTools(projectId, services, collectorHolder);
     const artifactTools = buildArtifactTools(projectId, services, collectorHolder);
-    const noteWrite = buildNoteWriteTools(projectId, services, collectorHolder, actorId);
-    return { ...readOnly, ...noteRead, ...epicTools, ...write, ...artifactTools, ...noteWrite };
+    const noteWrite = buildNoteWriteTools(
+      projectId,
+      services,
+      collectorHolder,
+      actorId,
+      projectNoteRange?.grantHolder,
+    );
+    const noteRange = actorId && projectNoteRange
+      ? buildProjectNoteRangeTools({
+          actorId,
+          service: projectNoteRange.service,
+          grantHolder: projectNoteRange.grantHolder,
+          actionHolder: projectNoteRange.actionHolder,
+        })
+      : {};
+    return {
+      ...readOnly,
+      ...noteRead,
+      ...epicTools,
+      ...write,
+      ...artifactTools,
+      ...noteWrite,
+      ...noteRange,
+    };
   }
 
   // Purpose controls mutation capability. A typo or unexpected caller must

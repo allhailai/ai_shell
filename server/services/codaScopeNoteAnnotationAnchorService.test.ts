@@ -5,6 +5,7 @@ import {
   insertInlineAnnotationAnchors,
   parseInlineAnnotationAnchors,
   removeInlineAnnotationAnchors,
+  replaceExactNoteRange,
   stripInlineAnnotationMarkers,
 } from "./codaScopeNoteAnnotationAnchorService.js";
 
@@ -56,6 +57,39 @@ describe("CodaScopeNoteAnnotationAnchorService", () => {
     expect(parseInlineAnnotationAnchors(anchored).ranges).toHaveLength(1);
     expect(removeInlineAnnotationAnchors(anchored, idA)).toBe(source);
     expect(() => insertInlineAnnotationAnchors(source, { id: idA, from, to: from + 5, selectedText: "wrong" })).toThrow(/no longer matches/i);
+  });
+
+  it("rejects an exact-selection start boundary that splits a surrogate pair", () => {
+    const source = "A😀B";
+
+    expect(() => replaceExactNoteRange(source, {
+      from: 2,
+      to: 3,
+      selectedText: source.slice(2, 3),
+      replacementMarkdown: "changed",
+    })).toThrow(/positions are invalid/i);
+  });
+
+  it("rejects an exact-selection end boundary that splits a surrogate pair", () => {
+    const source = "A😀B";
+
+    expect(() => replaceExactNoteRange(source, {
+      from: 1,
+      to: 2,
+      selectedText: source.slice(1, 2),
+      replacementMarkdown: "changed",
+    })).toThrow(/positions are invalid/i);
+  });
+
+  it("accepts UTF-16 offsets enclosing a complete surrogate pair", () => {
+    const source = "A😀B";
+
+    expect(replaceExactNoteRange(source, {
+      from: 1,
+      to: 3,
+      selectedText: "😀",
+      replacementMarkdown: "🚀",
+    })).toBe("A🚀B");
   });
 
   it("strips control syntax for search and word-count helpers without touching code examples", () => {

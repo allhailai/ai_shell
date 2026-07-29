@@ -695,6 +695,319 @@ describe("assistant conversation API boundary", () => {
     }
   });
 
+  it("strictly restores note-range references without making them live state", async () => {
+    const workspaceTarget = {
+      kind: "note-range",
+      stableId: "note-1",
+      scope: "codascope",
+      visibility: "private",
+      path: "notes/one.md",
+      title: "One",
+      selectionStart: 0,
+      selectionEnd: 5,
+      selectedText: "first",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "a".repeat(64),
+    };
+    const workspaceApi = createAssistantConversationApi(
+      workspaceScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: workspaceConversation({
+          messages: [workspaceMessage({
+            context: {
+              assistantScope: workspaceScope,
+              explicitlyReferencedProjectIds: [],
+              currentView: { view: "notes" },
+              currentNote: {
+                stableId: "note-1",
+                scope: "codascope",
+                path: "notes/one.md",
+                title: "One",
+                visibility: "private",
+                contentHash: "a".repeat(64),
+              },
+            },
+            metadata: { noteRangeTarget: workspaceTarget },
+          })],
+        }),
+      })),
+    );
+    await expect(workspaceApi.readConversation("conv-1")).resolves.toMatchObject({
+      messages: [{ metadata: { noteRangeTarget: workspaceTarget } }],
+    });
+
+    const projectTarget = {
+      ...workspaceTarget,
+      stableId: "note-2",
+      scope: "project",
+      visibility: "shared",
+      projectId: "alpha",
+      path: "notes/two.md",
+      title: "Two",
+    };
+    const projectApi = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation({
+          messages: [projectMessage({
+            context: {
+              view: "notes",
+              projectName: "Alpha",
+              projectId: "alpha",
+              epicId: null,
+              noteScope: "project",
+              noteVisibility: "shared",
+              notePath: "notes/two.md",
+            },
+            metadata: { noteRangeTarget: projectTarget },
+          })],
+        }),
+      })),
+    );
+    await expect(projectApi.readConversation("conv-1")).resolves.toMatchObject({
+      messages: [{ metadata: { noteRangeTarget: projectTarget } }],
+    });
+  });
+
+  it.each([
+    {
+      label: "extensionless project",
+      target: {
+        kind: "note-range",
+        stableId: "note-project",
+        scope: "project",
+        visibility: "shared",
+        projectId: "alpha",
+        path: "plans/current.md",
+        title: "Current plan",
+        selectionStart: 0,
+        selectionEnd: 5,
+        selectedText: "first",
+        startLine: 1,
+        endLine: 1,
+        expectedHash: "a".repeat(64),
+      },
+      context: {
+        view: "notes",
+        projectName: "Alpha",
+        projectId: "alpha",
+        epicId: null,
+        noteScope: "project",
+        noteVisibility: "shared",
+        notePath: "plans/current",
+      },
+    },
+    {
+      label: "extensionless epic",
+      target: {
+        kind: "note-range",
+        stableId: "note-epic",
+        scope: "epic",
+        visibility: "shared",
+        projectId: "alpha",
+        epicId: "epic-1",
+        path: "plans/epic.md",
+        title: "Epic plan",
+        selectionStart: 0,
+        selectionEnd: 5,
+        selectedText: "first",
+        startLine: 1,
+        endLine: 1,
+        expectedHash: "b".repeat(64),
+      },
+      context: {
+        view: "notes",
+        projectName: "Alpha",
+        projectId: "alpha",
+        epicId: "epic-1",
+        noteScope: "epic",
+        noteVisibility: "shared",
+        notePath: "plans/epic",
+      },
+    },
+    {
+      label: "canonical .md project",
+      target: {
+        kind: "note-range",
+        stableId: "note-canonical",
+        scope: "project",
+        visibility: "private",
+        projectId: "alpha",
+        path: "plans/canonical.md",
+        title: "Canonical plan",
+        selectionStart: 0,
+        selectionEnd: 5,
+        selectedText: "first",
+        startLine: 1,
+        endLine: 1,
+        expectedHash: "c".repeat(64),
+      },
+      context: {
+        view: "notes",
+        projectName: "Alpha",
+        projectId: "alpha",
+        epicId: null,
+        noteScope: "project",
+        noteVisibility: "private",
+        notePath: "plans/canonical.md",
+      },
+    },
+  ])("restores a valid targeted message with a $label route path", async ({
+    target,
+    context,
+  }) => {
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation({
+          messages: [projectMessage({
+            context,
+            metadata: { noteRangeTarget: target },
+          })],
+        }),
+      })),
+    );
+
+    await expect(api.readConversation("conv-1")).resolves.toMatchObject({
+      messages: [{ metadata: { noteRangeTarget: target } }],
+    });
+  });
+
+  it.each([
+    {
+      label: "different canonical path",
+      targetProjectId: "alpha",
+      contextProjectId: "alpha",
+      targetEpicId: undefined,
+      contextEpicId: null,
+      scope: "project",
+      targetPath: "plans/current.md",
+      contextPath: "plans/other",
+    },
+    {
+      label: "cross-project custody",
+      targetProjectId: "beta",
+      contextProjectId: "beta",
+      targetEpicId: undefined,
+      contextEpicId: null,
+      scope: "project",
+      targetPath: "plans/current.md",
+      contextPath: "plans/current",
+    },
+    {
+      label: "wrong epic custody",
+      targetProjectId: "alpha",
+      contextProjectId: "alpha",
+      targetEpicId: "epic-1",
+      contextEpicId: "epic-2",
+      scope: "epic",
+      targetPath: "plans/epic.md",
+      contextPath: "plans/epic",
+    },
+  ] as const)("rejects targeted restoration with $label", async ({
+    targetProjectId,
+    contextProjectId,
+    targetEpicId,
+    contextEpicId,
+    scope,
+    targetPath,
+    contextPath,
+  }) => {
+    const target = {
+      kind: "note-range",
+      stableId: "note-2",
+      scope,
+      visibility: "shared",
+      projectId: targetProjectId,
+      ...(targetEpicId ? { epicId: targetEpicId } : {}),
+      path: targetPath,
+      title: "Two",
+      selectionStart: 0,
+      selectionEnd: 5,
+      selectedText: "first",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "d".repeat(64),
+    };
+    const api = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation({
+          messages: [projectMessage({
+            context: {
+              view: "notes",
+              projectName: "Project",
+              projectId: contextProjectId,
+              epicId: contextEpicId,
+              noteScope: scope,
+              noteVisibility: "shared",
+              notePath: contextPath,
+            },
+            metadata: { noteRangeTarget: target },
+          })],
+        }),
+      })),
+    );
+
+    await expect(api.readConversation("conv-1")).resolves.toBeNull();
+  });
+
+  it("rejects malformed, assistant-authored, and cross-project note-range metadata", async () => {
+    const baseTarget = {
+      kind: "note-range",
+      stableId: "note-2",
+      scope: "project",
+      visibility: "shared",
+      projectId: "alpha",
+      path: "notes/two.md",
+      title: "Two",
+      selectionStart: 0,
+      selectionEnd: 5,
+      selectedText: "first",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "a".repeat(64),
+    };
+    for (const target of [
+      { ...baseTarget, projectId: "beta" },
+      { ...baseTarget, selectionEnd: 4 },
+    ]) {
+      const api = createAssistantConversationApi(
+        projectScope,
+        vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+          conversation: projectConversation({
+            messages: [projectMessage({
+              context: {
+                view: "notes",
+                projectName: "Alpha",
+                projectId: "alpha",
+                epicId: null,
+                noteScope: "project",
+                noteVisibility: "shared",
+                notePath: "notes/two.md",
+              },
+              metadata: { noteRangeTarget: target },
+            })],
+          }),
+        })),
+      );
+      await expect(api.readConversation("conv-1")).resolves.toBeNull();
+    }
+    const assistantApi = createAssistantConversationApi(
+      projectScope,
+      vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        conversation: projectConversation({
+          messages: [projectMessage({
+            role: "assistant",
+            metadata: { noteRangeTarget: baseTarget },
+          })],
+        }),
+      })),
+    );
+    await expect(assistantApi.readConversation("conv-1")).resolves.toBeNull();
+  });
+
   it("rejects duplicate message IDs", async () => {
     const api = createAssistantConversationApi(
       projectScope,

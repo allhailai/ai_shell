@@ -45,6 +45,13 @@ export interface InsertInlineAnnotationAnchorOptions {
   selectedText: string;
 }
 
+export interface ReplaceExactNoteRangeOptions {
+  from: number;
+  to: number;
+  selectedText: string;
+  replacementMarkdown: string;
+}
+
 const STRICT_MARKER_RE = /<!--\s*codascope:ann-(start|end)\s+id="([^"]+)"\s*-->/g;
 const ANNOTATION_COMMENT_RE = /<!--\s*codascope:ann-(start|end)\b[\s\S]*?-->/g;
 
@@ -173,24 +180,32 @@ export function insertInlineAnnotationAnchors(
   options: InsertInlineAnnotationAnchorOptions,
 ): string {
   if (!INLINE_ANNOTATION_ID_RE.test(options.id)) throw new Error("Invalid annotation marker ID.");
-  if (!Number.isInteger(options.from) || !Number.isInteger(options.to) || options.from < 0 || options.to <= options.from || options.to > markdown.length) {
-    throw new Error("Annotation selection positions are invalid.");
-  }
-  if (!options.selectedText || markdown.slice(options.from, options.to) !== options.selectedText) {
-    throw new Error("The selected text no longer matches the note content. Reload and try again.");
-  }
+  assertExactSelection(markdown, options, "Annotation selection positions are invalid.");
   if (isCodeSyntax(markdown, options.from) || isCodeSyntax(markdown, options.to - 1)) {
     throw new Error("Annotations cannot be placed inside Markdown code syntax.");
   }
-
-  const parsed = parseInlineAnnotationAnchors(markdown);
-  if (parsed.markers.some((marker) => rangesIntersect(options.from, options.to, marker.from, marker.to))) {
-    throw new Error("The selected text crosses an existing annotation marker. Select a visible range instead.");
-  }
+  assertSelectionDoesNotCrossAnnotationMarker(markdown, options);
 
   const start = annotationStartMarker(options.id);
   const end = annotationEndMarker(options.id);
   return `${markdown.slice(0, options.from)}${start}${markdown.slice(options.from, options.to)}${end}${markdown.slice(options.to)}`;
+}
+
+/**
+ * Replace one explicit source range without searching for another occurrence.
+ * JavaScript string offsets are UTF-16 code-unit positions, matching
+ * CodeMirror's document-position convention.
+ */
+export function replaceExactNoteRange(
+  markdown: string,
+  options: ReplaceExactNoteRangeOptions,
+): string {
+  assertExactSelection(markdown, options, "Note selection positions are invalid.");
+  if (typeof options.replacementMarkdown !== "string") {
+    throw new Error("Replacement Markdown is invalid.");
+  }
+  assertSelectionDoesNotCrossAnnotationMarker(markdown, options);
+  return `${markdown.slice(0, options.from)}${options.replacementMarkdown}${markdown.slice(options.to)}`;
 }
 
 /** Remove every well-formed marker for an annotation outside code syntax. */
@@ -241,6 +256,47 @@ function markerCommentMatches(markdown: string): RegExpExecArray[] {
 
 function rangesIntersect(from: number, to: number, otherFrom: number, otherTo: number): boolean {
   return from < otherTo && otherFrom < to;
+}
+
+function assertExactSelection(
+  markdown: string,
+  selection: Pick<ReplaceExactNoteRangeOptions, "from" | "to" | "selectedText">,
+  invalidPositionsMessage: string,
+): void {
+  if (!Number.isInteger(selection.from)
+    || !Number.isInteger(selection.to)
+    || selection.from < 0
+    || selection.to <= selection.from
+    || selection.to > markdown.length
+    || !isUnicodeCodePointBoundary(markdown, selection.from)
+    || !isUnicodeCodePointBoundary(markdown, selection.to)) {
+    throw new Error(invalidPositionsMessage);
+  }
+  if (typeof selection.selectedText !== "string"
+    || !selection.selectedText
+    || markdown.slice(selection.from, selection.to) !== selection.selectedText) {
+    throw new Error("The selected text no longer matches the note content. Reload and try again.");
+  }
+}
+
+function isUnicodeCodePointBoundary(markdown: string, offset: number): boolean {
+  if (offset <= 0 || offset >= markdown.length) return true;
+  const preceding = markdown.charCodeAt(offset - 1);
+  const following = markdown.charCodeAt(offset);
+  const followsHighSurrogate = preceding >= 0xD800 && preceding <= 0xDBFF;
+  const precedesLowSurrogate = following >= 0xDC00 && following <= 0xDFFF;
+  return !(followsHighSurrogate && precedesLowSurrogate);
+}
+
+function assertSelectionDoesNotCrossAnnotationMarker(
+  markdown: string,
+  selection: Pick<ReplaceExactNoteRangeOptions, "from" | "to">,
+): void {
+  const parsed = parseInlineAnnotationAnchors(markdown);
+  if (parsed.markers.some((marker) =>
+    rangesIntersect(selection.from, selection.to, marker.from, marker.to))) {
+    throw new Error("The selected text crosses an existing annotation marker. Select a visible range instead.");
+  }
 }
 
 function isCodeSyntax(markdown: string, offset: number): boolean {

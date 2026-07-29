@@ -213,11 +213,67 @@ describe("workspace note grants", () => {
     expect(holder.current).toBe(EMPTY_WORKSPACE_TURN_NOTE_GRANT);
   });
 
+  it("treats an attached target as only consumable exact-range read/edit authority", async () => {
+    const current = await create("current.md", "Current");
+    const target = {
+      kind: "note-range" as const,
+      stableId: current.stableId,
+      scope: "codascope" as const,
+      visibility: current.visibility,
+      path: current.path,
+      title: current.title,
+      selectionStart: 0,
+      selectionEnd: 4,
+      selectedText: "body",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: current.contentHash,
+    };
+    const grant = await deriveWorkspaceTurnNoteGrant({
+      actorId: "alice",
+      message: "Do that",
+      currentNote: current,
+      noteRangeTarget: target,
+      noteService: service,
+    });
+
+    expect(grant).toMatchObject({
+      create: null,
+      readStableIds: [current.stableId],
+      editRangeTarget: target,
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [],
+    });
+    const holder = new WorkspaceTurnNoteGrantHolder();
+    holder.replace(grant);
+    const reservation = holder.reserveRangeMutation();
+    expect(reservation?.target).toEqual(target);
+    expect(holder.reserveRangeMutation()).toBeNull();
+    reservation?.release();
+    expect(holder.reserveRangeMutation()).not.toBeNull();
+    await expect(validateWorkspaceTurnNoteGrant(
+      {
+        ...grant,
+        editBodyStableIds: [current.stableId],
+      },
+      "alice",
+      service,
+    )).rejects.toThrow("Invalid workspace note grant");
+
+    // Persisted historical metadata is not an input to grant derivation.
+    expect(await derive("Do that", current)).toEqual(
+      EMPTY_WORKSPACE_TURN_NOTE_GRANT,
+    );
+  });
+
   it("strictly revalidates active stable IDs and rejects budget expansion fields", async () => {
     const current = await create("current.md", "Current");
     const candidate = {
       create: { maxSuccesses: 2, visibility: "private" },
       readStableIds: [current.stableId],
+      editRangeTarget: null,
       editBodyStableIds: [current.stableId],
       editTitleStableIds: [],
       visibilityChanges: [],

@@ -14,6 +14,8 @@ import type {
   AssistantScope,
   CodaScopeAction,
 } from "../codaScopeTypes";
+import type { CanonicalProjectNoteRangeTarget } from "../projectNoteRangeTargetValidation";
+import type { CanonicalWorkspaceNoteRangeTarget } from "../workspaceNoteRangeTargetValidation";
 import {
   createAssistantConversationApi,
   createAssistantEndpointAdapter,
@@ -29,6 +31,16 @@ import {
 import {
   normalizeCanonicalWorkspaceMutationActions,
 } from "../workspaceMutationActionValidation";
+import {
+  isProjectNoteRangeActionCandidate,
+  normalizeCanonicalProjectNoteRangeAction,
+} from "../projectNoteRangeMutationActionValidation";
+import {
+  normalizeCanonicalProjectNoteRangeTarget,
+} from "../projectNoteRangeTargetValidation";
+import {
+  normalizeCanonicalWorkspaceNoteRangeTarget,
+} from "../workspaceNoteRangeTargetValidation";
 
 export interface StreamOptions {
   conversationId: string;
@@ -45,6 +57,9 @@ export interface StreamOptions {
     docId: string;
     epicId: string;
   };
+  noteRangeTarget?:
+    | CanonicalWorkspaceNoteRangeTarget
+    | CanonicalProjectNoteRangeTarget;
   /** UI-only reconciliation input. It is never included in the HTTP payload. */
   knownMessageIds?: string[];
 }
@@ -55,6 +70,8 @@ interface StreamResult {
   liveWorkspaceActions?: CodaScopeAction[];
   newTitle?: string;
   conversationId?: string;
+  terminalStatus?: "complete" | "error" | "cancelled";
+  terminalActions?: CodaScopeAction[];
   discarded?: boolean;
 }
 
@@ -150,6 +167,19 @@ export function createAssistantMessagePayload(
       payload.selectionContext = options.selectionContext;
     }
   }
+  if (options.noteRangeTarget) {
+    const target = scope.kind === "workspace"
+      ? normalizeCanonicalWorkspaceNoteRangeTarget(options.noteRangeTarget)
+      : normalizeCanonicalProjectNoteRangeTarget(options.noteRangeTarget);
+    if (!target
+      || (scope.kind === "workspace" && target.scope !== "codascope")
+      || (scope.kind === "project"
+        && (target.scope === "codascope"
+          || target.projectId !== scope.projectId))) {
+      throw new Error("The selected note range does not match this assistant.");
+    }
+    payload.noteRangeTarget = target;
+  }
   return payload;
 }
 
@@ -204,11 +234,31 @@ export async function consumeAssistantStreamResponse(
         }
         actions = trusted;
       }
-    } else if (terminal.type === "done") {
+    } else {
       if (rawActions !== undefined && !Array.isArray(rawActions)) {
-        throw new SseProtocolError("Malformed done terminal event payload.");
+        throw new SseProtocolError(
+          `Malformed ${terminal.type} terminal event payload.`,
+        );
       }
-      actions = (rawActions ?? []) as CodaScopeAction[];
+      for (const candidate of rawActions ?? []) {
+        if (isProjectNoteRangeActionCandidate(candidate)) {
+          const action = normalizeCanonicalProjectNoteRangeAction(candidate);
+          if (!action) {
+            throw new SseProtocolError(
+              `Malformed ${terminal.type} terminal event payload.`,
+            );
+          }
+          if (action.attributes.projectId !== scope.projectId) {
+            throw new SseProtocolError(
+              `Malformed ${terminal.type} terminal event payload.`,
+            );
+          }
+          actions.push(action);
+        } else if (terminal.type === "done") {
+          // Preserve the historical successful project-action behavior.
+          actions.push(candidate as CodaScopeAction);
+        }
+      }
     }
 
     const identity = {
@@ -554,13 +604,31 @@ export function useAssistantStream(
             ? `${outcome.content}\n\n${failureText}`
             : failureText,
           status: "error",
+          metadata: outcome.actions.length > 0
+            ? { actions: outcome.actions }
+            : undefined,
         };
-      } else if (outcome.status === "complete" && outcome.content) {
+      } else if (outcome.status === "cancelled") {
+        assistantMessage = outcome.content || outcome.actions.length > 0
+          ? {
+              id: `cancelled-${Date.now()}`,
+              role: "assistant",
+              content: outcome.content
+                ? `${outcome.content}\n\n**Generation cancelled.**`
+                : "**Generation cancelled.**",
+              status: "error",
+              metadata: outcome.actions.length > 0
+                ? { actions: outcome.actions }
+                : undefined,
+            }
+          : null;
+      } else if (outcome.status === "complete"
+        && (outcome.content || outcome.actions.length > 0)) {
         const actions = outcome.actions;
         assistantMessage = {
           id: `assistant-${Date.now()}`,
           role: "assistant",
-          content: outcome.content,
+          content: outcome.content || "Selected edit completed.",
           status: "complete",
           metadata: actions.length > 0 ? { actions } : undefined,
         };
@@ -581,6 +649,10 @@ export function useAssistantStream(
         conversationId: runScope.kind === "workspace"
           ? options.conversationId
           : outcome.conversationId,
+        terminalStatus: outcome.status,
+        terminalActions: runScope.kind === "workspace"
+          ? liveWorkspaceActions ?? []
+          : outcome.actions,
       };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -622,6 +694,8 @@ export function useAssistantStream(
             ? `${firstLine.slice(0, 69)}...`
             : firstLine,
           conversationId: options.conversationId,
+          terminalStatus: "error",
+          terminalActions: resolution.liveWorkspaceActions,
         };
       }
       return {
@@ -633,6 +707,8 @@ export function useAssistantStream(
           }`,
           status: "error",
         },
+        terminalStatus: "error",
+        terminalActions: [],
       };
     } finally {
       if (activeRunRef.current === run) {
@@ -651,27 +727,20 @@ export function useAssistantStream(
       await pendingCancellationRef.current;
       return;
     }
-    if (run.scope.kind === "workspace") {
-      if (run.cancellationRequested) {
-        await pendingCancellationRef.current;
-        return;
-      }
-      run.cancellationRequested = true;
-      const pending = requestAssistantCancellation(run.scope);
-      pendingCancellationRef.current = pending;
-      await pending;
-      if (pendingCancellationRef.current === pending) {
-        pendingCancellationRef.current = null;
-      }
+    if (run.cancellationRequested) {
+      await pendingCancellationRef.current;
       return;
     }
-    const pending = cancelRun(run, true);
+    // Keep the transport attached so a server-confirmed mutation receipt on
+    // the cancelled terminal cannot be lost.
+    run.cancellationRequested = true;
+    const pending = requestAssistantCancellation(run.scope);
     pendingCancellationRef.current = pending;
     await pending;
     if (pendingCancellationRef.current === pending) {
       pendingCancellationRef.current = null;
     }
-  }, [cancelRun]);
+  }, []);
 
   const runIsInCurrentScope =
     activeRunRef.current?.scopeKey === scopeKey;

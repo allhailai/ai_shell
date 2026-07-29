@@ -52,7 +52,7 @@ function fixture() {
     }]),
   };
   const intentService = {
-    resolveTurn: vi.fn(async () => ({
+    resolveTurn: vi.fn(async (): Promise<any> => ({
       intent: "wiki_first",
       resolvedProjectIds: ["alpha"],
       grant: EMPTY_WORKSPACE_TURN_READ_GRANT,
@@ -124,6 +124,78 @@ describe("workspace chat orchestrator", () => {
       agentService: { send } as any,
       onMessage: vi.fn(),
     })).rejects.toBeInstanceOf(WorkspaceAssistantCancelledError);
+  });
+
+  it("passes only the newly attached target into prompt and one-turn grant derivation", async () => {
+    const { send, catalog, intentService } = fixture();
+    const target = {
+      kind: "note-range" as const,
+      stableId: "note-1",
+      scope: "codascope" as const,
+      visibility: "private" as const,
+      path: "one.md",
+      title: "One",
+      selectionStart: 0,
+      selectionEnd: 4,
+      selectedText: "body",
+      startLine: 1,
+      endLine: 1,
+      expectedHash: "a".repeat(32),
+    };
+    const noteGrant = {
+      create: null,
+      readStableIds: ["note-1"],
+      editRangeTarget: target,
+      editBodyStableIds: [],
+      editTitleStableIds: [],
+      visibilityChanges: [],
+      archiveStableIds: [],
+    };
+    intentService.resolveTurn.mockResolvedValueOnce({
+      intent: "wiki_first",
+      resolvedProjectIds: [],
+      grant: EMPTY_WORKSPACE_TURN_READ_GRANT,
+      noteGrant,
+    });
+    const context = createWorkspaceMessageContext({
+      currentNote: {
+        stableId: target.stableId,
+        scope: target.scope,
+        visibility: target.visibility,
+        path: target.path,
+        title: target.title,
+        contentHash: target.expectedHash,
+      },
+    });
+
+    await streamWorkspaceAssistantResponse({
+      actorId: "alice",
+      message: "Do that",
+      modelId: "model",
+      context,
+      noteRangeTarget: target,
+      history: [],
+      catalog: catalog as any,
+      intentService: intentService as any,
+      agentService: { send } as any,
+      onMessage: vi.fn(),
+    });
+
+    expect(intentService.resolveTurn).toHaveBeenCalledWith(
+      "Do that",
+      [],
+      {
+        actorId: "alice",
+        currentNote: context.currentNote,
+        noteRangeTarget: target,
+      },
+    );
+    expect(send.mock.calls[0][0]).toMatchObject({
+      workspaceNoteGrant: noteGrant,
+    });
+    expect(send.mock.calls[0][0].systemPrompt).toContain(
+      "Exact current-turn CodaScope note edit target",
+    );
   });
 
   it("sanitizes workspace agent failures", async () => {

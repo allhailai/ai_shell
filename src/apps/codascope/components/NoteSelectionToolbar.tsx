@@ -7,8 +7,6 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useRef, useState, useLayoutEffect } from "react";
-import { useShellStore } from "../../../shell/store";
-import { useCommandBus } from "../../../shell/hooks";
 import { IconSparkle, IconAnnotation } from "../components/CodaScopeIcons";
 
 /* ── Types ───────────────────────────────────────────────────────────── */
@@ -31,10 +29,9 @@ export interface NoteSelectionInfo {
 
 interface NoteSelectionToolbarProps {
   selectionInfo: NoteSelectionInfo;
-  notePath: string;
-  noteScope: string;
-  noteVisibility: string;
   onDismiss: () => void;
+  onEditWithAgent: (selectionInfo: NoteSelectionInfo) => void;
+  preparingAgentEdit?: boolean;
   /** Called when user clicks "Comment" — creates an annotation at the selection's block */
   onComment?: (selectionInfo: NoteSelectionInfo) => void;
 }
@@ -48,13 +45,11 @@ const VIEWPORT_PAD = 8;
 
 export function NoteSelectionToolbar({
   selectionInfo,
-  notePath,
-  noteScope,
-  noteVisibility,
   onDismiss,
+  onEditWithAgent,
+  preparingAgentEdit = false,
   onComment,
 }: NoteSelectionToolbarProps) {
-  const commandBus = useCommandBus();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -80,21 +75,8 @@ export function NoteSelectionToolbar({
   }, [selectionInfo]);
 
   const handleEditWithAgent = useCallback(() => {
-    // Package selection context and emit to chat
-    commandBus?.emit("codascope:note-selection-to-chat", {
-      text: selectionInfo.text,
-      startLine: selectionInfo.startLine,
-      endLine: selectionInfo.endLine,
-      notePath,
-      noteScope,
-      noteVisibility,
-    });
-    // Open the right panel to the assistant
-    useShellStore.getState().openRightPanel("assistant");
-    // Clear selection
-    onDismiss();
-    window.getSelection()?.removeAllRanges();
-  }, [selectionInfo, commandBus, notePath, noteScope, noteVisibility, onDismiss]);
+    onEditWithAgent(selectionInfo);
+  }, [selectionInfo, onEditWithAgent]);
 
   const handleComment = useCallback(() => {
     if (onComment) {
@@ -113,15 +95,19 @@ export function NoteSelectionToolbar({
       <button
         className="codascope-btn codascope-btn-xs codascope-notes-selection-toolbar-btn codascope-notes-selection-toolbar-btn--primary"
         onClick={handleEditWithAgent}
+        disabled={preparingAgentEdit}
         type="button"
-        aria-label="Edit selected text with Agent"
-        title="Edit with Agent"
+        aria-label={preparingAgentEdit
+          ? "Preparing selected text for Agent"
+          : "Edit selected text with Agent"}
+        title={preparingAgentEdit ? "Preparing selection…" : "Edit with Agent"}
       >
         <IconSparkle size={13} />
       </button>
       <button
         className="codascope-btn codascope-btn-xs codascope-notes-selection-toolbar-btn"
         onClick={handleComment}
+        disabled={preparingAgentEdit}
         type="button"
         aria-label="Add annotation to selected text"
         title="Add annotation"

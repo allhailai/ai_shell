@@ -14,6 +14,7 @@ import {
   formatViewContext,
   formatReferences,
   formatSelectionContext,
+  formatProjectNoteRangeTarget,
   streamAssistantResponse,
   type ViewContext,
   type ReferenceItem,
@@ -24,6 +25,11 @@ import {
   createSseTerminalWriter,
   type SseTerminalWriter,
 } from "./utils/ssePipelineHelper.js";
+import {
+  ProjectNoteRangeInvalidError,
+} from "../services/codaScopeProjectNoteRangeService.js";
+import type { CanonicalProjectNoteRangeTarget } from "../../src/apps/codascope/projectNoteRangeTargetValidation.js";
+import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 
 function parseMessageContext(value: Record<string, unknown> | undefined): MessageContext | null {
   if (!value || typeof value.view !== "string" || !value.view.trim()) return null;
@@ -32,6 +38,7 @@ function parseMessageContext(value: Record<string, unknown> | undefined): Messag
     ...(typeof value.topicId === "string" || value.topicId === null ? { topicId: value.topicId } : {}),
     ...(typeof value.projectName === "string" ? { projectName: value.projectName } : {}),
     ...(typeof value.projectId === "string" ? { projectId: value.projectId } : {}),
+    ...(typeof value.epicId === "string" || value.epicId === null ? { epicId: value.epicId } : {}),
     ...(typeof value.noteScope === "string" || value.noteScope === null ? { noteScope: value.noteScope } : {}),
     ...(typeof value.noteVisibility === "string" || value.noteVisibility === null ? { noteVisibility: value.noteVisibility } : {}),
     ...(typeof value.notePath === "string" || value.notePath === null ? { notePath: value.notePath } : {}),
@@ -193,17 +200,32 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
   app.post("/api/codascope/projects/:id/conversations/:convId/messages", (req: Request, res: Response, next: NextFunction) => {
     (async () => {
       const svcs = await ensureServices();
-      const { agentSvc, chatSvc, epicSvc, imageSvc } = svcs;
+      const {
+        agentSvc,
+        chatSvc,
+        epicSvc,
+        imageSvc,
+        projectNoteRangeSvc,
+      } = svcs;
       const id = param(req, "id");
       const actorId = principal(req).username;
       const convId = param(req, "convId");
-      const { message, modelId, context, attachments, references, selectionContext } = req.body as {
+      const {
+        message,
+        modelId,
+        context,
+        attachments,
+        references,
+        selectionContext,
+        noteRangeTarget: rawNoteRangeTarget,
+      } = req.body as {
         message?: string;
         modelId?: string;
         context?: Record<string, unknown>;
         attachments?: Array<{ type: string; path: string }>;
         references?: Array<{ category: string; id: string; label?: string }>;
         selectionContext?: { blockId: string; text: string; startLine: number; endLine: number; docId: string; epicId?: string };
+        noteRangeTarget?: unknown;
       };
 
       if (!message || typeof message !== "string" || !message.trim()) {
@@ -225,6 +247,23 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       // looks identical to an unknown conversation.
       const ownedConversation = await chatSvc.readConversation(id, convId, actorId);
       if (!ownedConversation) throw httpError("Conversation not found.", 404, "not_found");
+
+      let noteRangeTarget: CanonicalProjectNoteRangeTarget | undefined;
+      if (rawNoteRangeTarget !== undefined) {
+        try {
+          noteRangeTarget = await projectNoteRangeSvc.canonicalizeTarget({
+            actorId,
+            routeProjectId: id,
+            currentContext: persistedContext,
+            target: rawNoteRangeTarget,
+          });
+        } catch (error) {
+          if (error instanceof ProjectNoteRangeInvalidError) {
+            throw httpError(error.message, 400, "invalid_input");
+          }
+          throw error;
+        }
+      }
 
       // Resolve image attachments: read from disk and base64-encode for the SDK
       const imageAttachmentPaths: Array<{ path: string; filename: string }> = [];
@@ -253,6 +292,10 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
 
       // Persist user message (with image metadata if present)
       const userMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const userMetadata = {
+        ...(imageAttachmentPaths.length > 0 ? { images: imageAttachmentPaths } : {}),
+        ...(noteRangeTarget ? { noteRangeTarget } : {}),
+      };
       const afterUserMessage = await chatSvc.appendMessage(id, convId, actorId, {
         id: userMsgId,
         role: "user",
@@ -260,7 +303,9 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
         modelId: null,
         status: "complete",
         context: persistedContext,
-        ...(imageAttachmentPaths.length > 0 ? { metadata: { images: imageAttachmentPaths } } : {}),
+        ...(Object.keys(userMetadata).length > 0
+          ? { metadata: userMetadata }
+          : {}),
       });
       if (!afterUserMessage) throw httpError("Conversation not found.", 404, "not_found");
 
@@ -284,7 +329,12 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       const priorMessages = (conversation?.messages ?? [])
         .filter((m) => m.id !== userMsgId && m.id !== assistantMsgId)
         .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "system")
-        .map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt }));
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+          metadata: m.metadata,
+        }));
       const historyStr = formatConversationHistory(priorMessages);
 
       // Format view context (enriched with topicTitle, filePath, recentViews, epicId, epicTab)
@@ -371,9 +421,17 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       const selectionStr = selectionContext && selectionContext.text
         ? "\n\n" + formatSelectionContext(selectionContext as SelectionContext)
         : "";
+      const noteRangeStr = noteRangeTarget
+        ? "\n\n" + formatProjectNoteRangeTarget(noteRangeTarget)
+        : "";
 
       // Build the full system prompt with all context injected
-      const systemPrompt = buildAssistantPrompt(manifestStr, historyStr, viewStr + epicContextStr + referencesStr + selectionStr, message.trim());
+      const systemPrompt = buildAssistantPrompt(
+        manifestStr,
+        historyStr,
+        viewStr + epicContextStr + referencesStr + selectionStr + noteRangeStr,
+        message.trim(),
+      );
 
       // Set up SSE headers
       res.writeHead(200, {
@@ -390,13 +448,19 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
       });
 
       try {
-        const { fullResponse, actions, agentResult } = await streamAssistantResponse({
+        const {
+          fullResponse,
+          actions,
+          trustedMutationActions = [],
+          agentResult,
+        } = await streamAssistantResponse({
           projectId: id,
           actorId,
           message: message.trim(),
           modelId,
           systemPrompt,
           agentSvc,
+          noteRangeTarget,
           ...(sdkImages.length > 0 ? { images: sdkImages } : {}),
           onMessage: (msg) => {
             if (aborted || terminal.terminalEvent()) return;
@@ -432,12 +496,24 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
                 id: assistantMsgId,
                 content: fullResponse || `Error: ${message}`,
                 modelId,
+                ...(trustedMutationActions.length > 0
+                  ? { trustedMutationActions }
+                  : {}),
               },
             );
           },
+          errorPayload: (message) => ({
+            error: message,
+            ...(trustedMutationActions.length > 0
+              ? { actions: trustedMutationActions }
+              : {}),
+          }),
         });
       } catch (err) {
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
+        const trustedMutationActions =
+          (err as { trustedMutationActions?: CodaScopeAction[] })
+            .trustedMutationActions ?? [];
         await publishChatFailure({
           terminal,
           error: err,
@@ -450,9 +526,18 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
                 id: assistantMsgId,
                 content: partialResponse || `Error: ${message}`,
                 modelId,
+                ...(trustedMutationActions.length > 0
+                  ? { trustedMutationActions }
+                  : {}),
               },
             );
           },
+          errorPayload: (message) => ({
+            error: message,
+            ...(trustedMutationActions.length > 0
+              ? { actions: trustedMutationActions }
+              : {}),
+          }),
         });
       }
     })().catch(next);
@@ -533,7 +618,12 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
 
       const assistantMsgId = `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       try {
-        const { fullResponse, actions, agentResult } = await streamAssistantResponse({
+        const {
+          fullResponse,
+          actions,
+          trustedMutationActions = [],
+          agentResult,
+        } = await streamAssistantResponse({
           projectId: id,
           actorId,
           message: message.trim(),
@@ -568,12 +658,24 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
               id: assistantMsgId,
               content: fullResponse || `Error: ${message}`,
               modelId,
+              ...(trustedMutationActions.length > 0
+                ? { trustedMutationActions }
+                : {}),
             }, { appendIfMissing: true });
           },
-          errorPayload: (message) => ({ error: message, conversationId: convId }),
+          errorPayload: (message) => ({
+            error: message,
+            conversationId: convId,
+            ...(trustedMutationActions.length > 0
+              ? { actions: trustedMutationActions }
+              : {}),
+          }),
         });
       } catch (err) {
         const partialResponse = (err as { fullResponse?: string }).fullResponse ?? "";
+        const trustedMutationActions =
+          (err as { trustedMutationActions?: CodaScopeAction[] })
+            .trustedMutationActions ?? [];
         await publishChatFailure({
           terminal,
           error: err,
@@ -582,9 +684,18 @@ export function registerChatRoutes(ctx: CodaScopeRouteContext): void {
               id: assistantMsgId,
               content: partialResponse || `Error: ${message}`,
               modelId,
+              ...(trustedMutationActions.length > 0
+                ? { trustedMutationActions }
+                : {}),
             }, { appendIfMissing: true });
           },
-          errorPayload: (message) => ({ error: message, conversationId: convId }),
+          errorPayload: (message) => ({
+            error: message,
+            conversationId: convId,
+            ...(trustedMutationActions.length > 0
+              ? { actions: trustedMutationActions }
+              : {}),
+          }),
         });
       }
     })().catch(next);

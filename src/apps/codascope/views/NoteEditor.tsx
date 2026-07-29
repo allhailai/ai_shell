@@ -10,10 +10,16 @@
    ──────────────────────────────────────────────────────────────────── */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { MarkdownEditor, type InlineAnnotationAnchorItem } from "../../../shared/markdown";
+import {
+  buildPinnedRangeExtension,
+  MarkdownEditor,
+  setPinnedEditorRange,
+  type InlineAnnotationAnchorItem,
+} from "../../../shared/markdown";
 import { getAnnotationAnchorById, getRelativeAnnotationAnchor } from "../annotationNavigation";
 import { useAuth } from "../../../shell/authContext";
 import { useAppSubRoute } from "../../../shell/useAppSubRoute";
+import { useShellStore } from "../../../shell/store";
 import { IconArrowLeft, IconClose, IconWarning, IconComment, IconClock, IconMove, IconArchive, IconLink, IconUser, IconActivity, IconDraft, IconCheckCircle, IconEye, IconCopy, IconFile } from "../components/CodaScopeIcons";
 import { NoteInsertionPrompt } from "../components/NoteInsertionPrompt";
 import { NoteAnnotationPanel } from "../components/NoteAnnotationPanel";
@@ -23,7 +29,7 @@ import { canCreateRangeAnnotation } from "../components/noteSelectionPolicy";
 import { NoteFormattingToolbar } from "../components/NoteFormattingToolbar";
 import { NoteMoveDialog } from "../components/NoteMoveDialog";
 import { NoteExportDialog } from "../components/NoteExportDialog";
-import type { NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
+import type { AssistantScope, NoteScope, NoteVisibility, NoteAnnotation, NoteBacklink, NoteActivityEntry, NoteReaderInfo } from "../codaScopeTypes";
 import { EditorView } from "@codemirror/view";
 import { EditorSelection } from "@codemirror/state";
 import {
@@ -32,6 +38,26 @@ import {
   publishRootNoteContext,
   updateRootNoteContext,
 } from "../assistantNoteContext";
+import { resolveAssistantScope } from "../assistantScope";
+import {
+  clearNoteRangeHandoff,
+  clearNoteRangeHandoffBySource,
+  createNoteRangeHandoffSource,
+  getNoteRangeHandoff,
+  stageNoteRangeHandoff,
+  useNoteRangeHandoff,
+} from "../noteRangeHandoff";
+import {
+  createSerializedTaskQueue,
+  NOTE_RANGE_STAGED_STATUS_MESSAGE,
+  saveAndPrepareNoteRangeTarget,
+  sameSaveSnapshot,
+  statusAfterClearedNoteRangeHandoff,
+  type NoteRangeSelectionStatus,
+  type NoteSaveResult,
+  type NoteSaveSnapshot,
+} from "../noteRangeEditorPreparation";
+import { isCanonicalContentHash } from "../workspaceMutationActionValidation";
 
 /* ── Visibility label helpers ────────────────────────────────────────── */
 
@@ -68,7 +94,12 @@ interface NoteEditorProps {
 
 export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }: NoteEditorProps) {
   const { user } = useAuth();
-  const { getParam, setParam } = useAppSubRoute("codascope");
+  const { segments, getParam, setParam } = useAppSubRoute("codascope");
+  const assistantScope = useMemo<AssistantScope>(
+    () => resolveAssistantScope(segments),
+    [segments[0], segments[1]],
+  );
+  const noteRangeHandoff = useNoteRangeHandoff(assistantScope);
   const annotationsOpenFromUrl = getParam("annotations") === "open";
   const documentsOpenFromUrl = getParam("documents") === "open";
   // ── State ──────────────────────────────────────────────────────────
@@ -106,6 +137,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const [showDocuments, setShowDocuments] = useState(documentsOpenFromUrl);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [selectionInfo, setSelectionInfo] = useState<NoteSelectionInfo | null>(null);
+  const [selectionStatus, setSelectionStatus] =
+    useState<NoteRangeSelectionStatus | null>(null);
+  const [preparingAgentEdit, setPreparingAgentEdit] = useState(false);
   const [multipleSelections, setMultipleSelections] = useState(false);
   const [pendingAnnotation, setPendingAnnotation] = useState<NoteSelectionInfo | null>(null);
 
@@ -171,13 +205,34 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(content);
   const hashRef = useRef(contentHash);
+  const titleRef = useRef(title);
+  const tagsRef = useRef(tags);
+  const noteStatusRef = useRef(noteStatus);
+  const noteIdRef = useRef(noteId);
+  const durableSnapshotRef = useRef<(NoteSaveSnapshot & { hash: string }) | null>(null);
+  const saveQueueRef = useRef(createSerializedTaskQueue());
+  const localRevisionRef = useRef(0);
   const editorViewRef = useRef<EditorView | null>(null);
   const annotationFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assistantContextOwnerRef = useRef(createRootNoteContextOwner());
+  const handoffSourceRef = useRef(createNoteRangeHandoffSource());
+  const handledTerminalHandoffRef = useRef<string | null>(null);
+  const observedLiveHandoffRef = useRef<{
+    handoffId: string;
+    noteIdentity: string;
+  } | null>(null);
+  const pinnedRangeExtensions = useMemo(
+    () => [buildPinnedRangeExtension()],
+    [],
+  );
 
   // Keep refs in sync
   useEffect(() => { contentRef.current = content; }, [content]);
   useEffect(() => { hashRef.current = contentHash; }, [contentHash]);
+  useEffect(() => { titleRef.current = title; }, [title]);
+  useEffect(() => { tagsRef.current = tags; }, [tags]);
+  useEffect(() => { noteStatusRef.current = noteStatus; }, [noteStatus]);
+  useEffect(() => { noteIdRef.current = noteId; }, [noteId]);
 
   // Ensure the notePath ends with .md for API calls
   const apiPath = useMemo(() => {
@@ -194,17 +249,121 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   const queryString = useMemo(() => {
     return new URLSearchParams(queryParams).toString();
   }, [queryParams.projectId, queryParams.epicId]);
+  const noteIdentity = `${scope}\u0000${visibility}\u0000${apiPath}\u0000${queryString}`;
+  const noteIdentityRef = useRef(noteIdentity);
+  noteIdentityRef.current = noteIdentity;
+
+  const sourceHandoff = noteRangeHandoff?.sourceId === handoffSourceRef.current
+    ? noteRangeHandoff
+    : null;
+  const liveSourceHandoff = sourceHandoff
+    && (sourceHandoff.status === "staged"
+      || sourceHandoff.status === "in-flight")
+    ? sourceHandoff
+    : null;
+  const targetInFlight = liveSourceHandoff?.status === "in-flight";
+
+  useEffect(() => {
+    if (liveSourceHandoff) {
+      observedLiveHandoffRef.current = {
+        handoffId: liveSourceHandoff.handoffId,
+        noteIdentity,
+      };
+      return;
+    }
+    const observed = observedLiveHandoffRef.current;
+    if (!sourceHandoff && observed) {
+      observedLiveHandoffRef.current = null;
+      if (observed.noteIdentity === noteIdentity) {
+        setSelectionStatus(statusAfterClearedNoteRangeHandoff);
+      }
+    }
+  }, [liveSourceHandoff, noteIdentity, sourceHandoff]);
+
+  const invalidateStagedHandoff = useCallback(() => {
+    const current = getNoteRangeHandoff(assistantScope);
+    if (current?.sourceId === handoffSourceRef.current
+      && current.status === "staged") {
+      clearNoteRangeHandoff(assistantScope, current.handoffId);
+      setSelectionStatus({
+        kind: "status",
+        message: "The selected range was cleared because the note changed.",
+      });
+    }
+  }, [assistantScope]);
+
+  useEffect(() => {
+    clearNoteRangeHandoffBySource(handoffSourceRef.current);
+    handledTerminalHandoffRef.current = null;
+  }, [apiPath, queryString, scope, visibility]);
+
+  useEffect(() => () => {
+    clearNoteRangeHandoffBySource(handoffSourceRef.current);
+  }, []);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const target = liveSourceHandoff?.target;
+    const matchesMountedNote = Boolean(
+      target
+      && target.stableId === noteIdRef.current
+      && target.scope === scope
+      && target.visibility === visibility
+      && target.path === apiPath,
+    );
+    view.dispatch({
+      effects: setPinnedEditorRange.of(matchesMountedNote && target
+        ? {
+            from: target.selectionStart,
+            to: target.selectionEnd,
+          }
+        : null),
+    });
+  }, [
+    apiPath,
+    liveSourceHandoff?.handoffId,
+    liveSourceHandoff?.status,
+    scope,
+    visibility,
+  ]);
+
+  useEffect(() => {
+    if (!targetInFlight) return;
+    setInsertionPoint(null);
+    setPendingAnnotation(null);
+    setSelectionInfo(null);
+    setAnnotationsPanelOpen(false);
+    setDocumentsPanelOpen(false);
+    setShowMoveDialog(false);
+    setShowArchiveConfirm(false);
+    setShowVersions(false);
+    setSelectedVersion(null);
+  }, [setAnnotationsPanelOpen, setDocumentsPanelOpen, targetInFlight]);
 
   // ── Load note ──────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const assistantContextOwner = assistantContextOwnerRef.current;
     clearRootNoteContext(assistantContextOwner);
+    clearNoteRangeHandoffBySource(handoffSourceRef.current);
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     setLoading(true);
     setError(null);
+    setSaveStatus("idle");
+    setSelectionInfo(null);
+    setSelectionStatus(null);
+    setPreparingAgentEdit(false);
     setLastEditor(null);
     setLastEditorDismissed(false);
     setReaders([]);
+    setNoteId(null);
+    noteIdRef.current = null;
+    durableSnapshotRef.current = null;
+    localRevisionRef.current += 1;
 
     void (async () => {
       try {
@@ -212,16 +371,43 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
-          setContent(data.content ?? "");
-          setContentHash(data.contentHash ?? null);
+          const loadedContent = typeof data.content === "string"
+            ? data.content
+            : "";
+          const loadedHash = typeof data.contentHash === "string"
+            ? data.contentHash
+            : null;
+          setContent(loadedContent);
+          contentRef.current = loadedContent;
+          setContentHash(loadedHash);
+          hashRef.current = loadedHash;
 
           // Metadata is supplied separately from the editable note body.
           const fm = data.frontmatter;
           if (fm) {
-            setTitle(fm.title ?? "Untitled");
-            setTags(fm.tags ?? []);
-            setNoteId(fm.id ?? null);
-            setNoteStatus(fm.status ?? undefined);
+            const loadedTitle = fm.title ?? "Untitled";
+            const loadedTags = Array.isArray(fm.tags) ? fm.tags : [];
+            const loadedStatus = fm.status ?? undefined;
+            const loadedNoteId = fm.id ?? null;
+            setTitle(loadedTitle);
+            titleRef.current = loadedTitle;
+            setTags(loadedTags);
+            tagsRef.current = loadedTags;
+            setNoteId(loadedNoteId);
+            noteIdRef.current = loadedNoteId;
+            setNoteStatus(loadedStatus);
+            noteStatusRef.current = loadedStatus;
+            if (loadedHash && isCanonicalContentHash(loadedHash)) {
+              durableSnapshotRef.current = {
+                content: loadedContent,
+                title: loadedTitle.trim() || "Untitled",
+                tags: [...loadedTags],
+                status: loadedStatus,
+                hash: loadedHash,
+              };
+            } else {
+              durableSnapshotRef.current = null;
+            }
             if (scope === "codascope" && typeof fm.id === "string") {
               publishRootNoteContext(assistantContextOwner, {
                 stableId: fm.id,
@@ -301,64 +487,207 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     };
   }, [content, fetchAnnotations]);
 
+  const refreshNoteAfterAgent = useCallback(async (
+    expectedStableId: string,
+  ): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    await saveQueueRef.current.drain();
+    try {
+      const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`);
+      if (!res.ok) return false;
+      const data = await res.json();
+      const fm = data.frontmatter;
+      if (!fm
+        || fm.id !== expectedStableId
+        || typeof data.content !== "string"
+        || !isCanonicalContentHash(data.contentHash)) {
+        return false;
+      }
+      const refreshedTitle = fm.title ?? "Untitled";
+      const refreshedTags = Array.isArray(fm.tags) ? fm.tags : [];
+      const refreshedStatus = fm.status ?? undefined;
+      setContent(data.content);
+      contentRef.current = data.content;
+      setContentHash(data.contentHash);
+      hashRef.current = data.contentHash;
+      setTitle(refreshedTitle);
+      titleRef.current = refreshedTitle;
+      setTags(refreshedTags);
+      tagsRef.current = refreshedTags;
+      setNoteStatus(refreshedStatus);
+      noteStatusRef.current = refreshedStatus;
+      durableSnapshotRef.current = {
+        content: data.content,
+        title: refreshedTitle.trim() || "Untitled",
+        tags: [...refreshedTags],
+        status: refreshedStatus,
+        hash: data.contentHash,
+      };
+      localRevisionRef.current += 1;
+      if (data.lastEditor && data.lastEditedAt) {
+        setLastEditor({
+          username: data.lastEditor,
+          editedAt: data.lastEditedAt,
+        });
+      }
+      await fetchAnnotations();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiBase, apiPath, fetchAnnotations, queryString]);
+
+  useEffect(() => {
+    if (!sourceHandoff
+      || (sourceHandoff.status !== "completed"
+        && sourceHandoff.status !== "failed")
+      || handledTerminalHandoffRef.current === sourceHandoff.handoffId) {
+      return;
+    }
+    handledTerminalHandoffRef.current = sourceHandoff.handoffId;
+    if (!sourceHandoff.completionAction) {
+      setSelectionStatus({
+        kind: sourceHandoff.status === "failed" ? "error" : "status",
+        message: sourceHandoff.status === "failed"
+          ? "The agent did not complete this selected edit."
+          : "The selected edit turn is complete.",
+      });
+      return;
+    }
+    void refreshNoteAfterAgent(sourceHandoff.target.stableId).then((refreshed) => {
+      setSelectionStatus({
+        kind: refreshed ? "status" : "error",
+        message: refreshed
+          ? "The agent edit was applied and the note was refreshed."
+          : "The agent edit was confirmed, but the note could not be refreshed.",
+      });
+    });
+  }, [refreshNoteAfterAgent, sourceHandoff]);
+
   // ── Open annotation count for header badge ────────────────────────
   const openAnnotationCount = useMemo(() => {
     return annotations.filter((a) => a.status === "open" && !a.parentId).length;
   }, [annotations]);
 
   // ── Auto-save (debounced) ──────────────────────────────────────────
-  const saveNote = useCallback(async (
-    newContent: string,
-    expectedHash: string | null,
-    metadata: { title?: string; tags?: string[]; status?: "draft" | "ready" } = {},
-  ) => {
-    setSaveStatus("saving");
+  const performSave = useCallback(async (
+    snapshot: NoteSaveSnapshot,
+  ): Promise<NoteSaveResult> => {
+    const saveIdentity = noteIdentity;
+    if (noteIdentityRef.current !== saveIdentity) {
+      return { ok: false, reason: "error" };
+    }
+    const durable = durableSnapshotRef.current;
+    if (noteIdentityRef.current === saveIdentity
+      && durable
+      && sameSaveSnapshot(durable, snapshot)) {
+      return { ok: true, hash: durable.hash, snapshot };
+    }
+    if (noteIdentityRef.current === saveIdentity) setSaveStatus("saving");
     try {
       const res = await fetch(`${apiBase}/note/${apiPath}?${queryString}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: newContent,
-          title: (metadata.title ?? title.trim()) || "Untitled",
-          tags: metadata.tags ?? tags,
-          status: metadata.status ?? noteStatus,
-          expectedHash: expectedHash ?? undefined,
+          content: snapshot.content,
+          title: snapshot.title,
+          tags: snapshot.tags,
+          status: snapshot.status,
+          expectedHash: hashRef.current ?? undefined,
         }),
       });
 
       if (res.status === 409) {
         const data = await res.json();
-        setConflictData({
-          currentContent: data.currentContent,
-          currentHash: data.currentHash,
-          currentFrontmatter: data.currentFrontmatter,
-        });
-        setSaveStatus("error");
-        return;
+        if (noteIdentityRef.current === saveIdentity) {
+          setConflictData({
+            currentContent: data.currentContent,
+            currentHash: data.currentHash,
+            currentFrontmatter: data.currentFrontmatter,
+          });
+          setSaveStatus("error");
+        }
+        return { ok: false, reason: "conflict" };
       }
 
       if (res.ok) {
         const data = await res.json();
-        setContentHash(data.contentHash);
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus((s) => s === "saved" ? "idle" : s), 2000);
+        if (!isCanonicalContentHash(data.contentHash)) {
+          if (noteIdentityRef.current === saveIdentity) setSaveStatus("error");
+          return { ok: false, reason: "error" };
+        }
+        const hash = data.contentHash;
+        if (noteIdentityRef.current === saveIdentity) {
+          hashRef.current = hash;
+          durableSnapshotRef.current = {
+            ...snapshot,
+            tags: [...snapshot.tags],
+            hash,
+          };
+          setContentHash(hash);
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus((s) => s === "saved" ? "idle" : s), 2000);
+        }
+        return { ok: true, hash, snapshot };
       } else {
-        setSaveStatus("error");
+        if (noteIdentityRef.current === saveIdentity) setSaveStatus("error");
+        return { ok: false, reason: "error" };
       }
     } catch {
-      setSaveStatus("error");
+      if (noteIdentityRef.current === saveIdentity) setSaveStatus("error");
+      return { ok: false, reason: "error" };
     }
-  }, [apiBase, apiPath, queryString, title, tags, noteStatus]);
+  }, [apiBase, apiPath, noteIdentity, queryString]);
+
+  const enqueueSave = useCallback((
+    snapshot: NoteSaveSnapshot,
+  ): Promise<NoteSaveResult> => {
+    return saveQueueRef.current.enqueue(() => performSave(snapshot));
+  }, [performSave]);
+
+  const snapshotForSave = useCallback((
+    nextContent = contentRef.current,
+    metadata: {
+      title?: string;
+      tags?: string[];
+      status?: "draft" | "ready";
+    } = {},
+  ): NoteSaveSnapshot => ({
+    content: nextContent,
+    title: (metadata.title ?? titleRef.current.trim()) || "Untitled",
+    tags: [...(metadata.tags ?? tagsRef.current)],
+    status: metadata.status ?? noteStatusRef.current,
+  }), []);
+
+  const saveNote = useCallback((
+    newContent: string,
+    _expectedHash: string | null,
+    metadata: {
+      title?: string;
+      tags?: string[];
+      status?: "draft" | "ready";
+    } = {},
+  ) => enqueueSave(snapshotForSave(newContent, metadata)), [
+    enqueueSave,
+    snapshotForSave,
+  ]);
 
   const handleContentChange = useCallback((newContent: string) => {
+    if (targetInFlight) return;
+    invalidateStagedHandoff();
     setContent(newContent);
+    contentRef.current = newContent;
+    localRevisionRef.current += 1;
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     saveTimerRef.current = setTimeout(() => {
       void saveNote(newContent, hashRef.current);
     }, 1500);
-  }, [saveNote]);
+  }, [invalidateStagedHandoff, saveNote, targetInFlight]);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -368,17 +697,29 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   }, []);
 
   // ── Editable presentation metadata ─────────────────────────────────
+  const handleTitleChange = useCallback((nextTitle: string) => {
+    if (targetInFlight) return;
+    invalidateStagedHandoff();
+    setTitle(nextTitle);
+    titleRef.current = nextTitle;
+    localRevisionRef.current += 1;
+  }, [invalidateStagedHandoff, targetInFlight]);
+
   const handleTitleBlur = useCallback(() => {
-    if (!title.trim()) return;
+    if (targetInFlight || !title.trim()) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     void saveNote(contentRef.current, hashRef.current, { title: title.trim() });
-  }, [title, saveNote]);
+  }, [targetInFlight, title, saveNote]);
 
   const saveTags = useCallback((nextTags: string[]) => {
+    if (targetInFlight) return;
+    invalidateStagedHandoff();
     setTags(nextTags);
+    tagsRef.current = nextTags;
+    localRevisionRef.current += 1;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     void saveNote(contentRef.current, hashRef.current, { tags: nextTags });
-  }, [saveNote]);
+  }, [invalidateStagedHandoff, saveNote, targetInFlight]);
 
   const addTags = useCallback((value: string) => {
     const additions = value.split(",").map((tag) => tag.trim()).filter(Boolean);
@@ -389,6 +730,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
 
   // ── Archive note ───────────────────────────────────────────────────
   const handleArchive = useCallback(async () => {
+    if (targetInFlight) return;
     setArchiving(true);
     try {
       const res = await fetch(`${apiBase}/note/${apiPath}/archive?${queryString}`, {
@@ -405,17 +747,39 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     setArchiving(false);
     setShowArchiveConfirm(false);
     setArchiveReason("");
-  }, [apiBase, apiPath, queryString, onBack, archiveReason]);
+  }, [
+    apiBase,
+    apiPath,
+    queryString,
+    onBack,
+    archiveReason,
+    targetInFlight,
+  ]);
 
   // ── Conflict resolution ────────────────────────────────────────────
   const handleConflictReload = useCallback(() => {
     if (!conflictData) return;
     setContent(conflictData.currentContent);
+    contentRef.current = conflictData.currentContent;
     setContentHash(conflictData.currentHash);
+    hashRef.current = conflictData.currentHash;
     if (conflictData.currentFrontmatter) {
-      setTitle(conflictData.currentFrontmatter.title ?? "Untitled");
-      setTags(conflictData.currentFrontmatter.tags ?? []);
-      setNoteStatus(conflictData.currentFrontmatter.status);
+      const currentTitle = conflictData.currentFrontmatter.title ?? "Untitled";
+      const currentTags = conflictData.currentFrontmatter.tags ?? [];
+      const currentStatus = conflictData.currentFrontmatter.status;
+      setTitle(currentTitle);
+      titleRef.current = currentTitle;
+      setTags(currentTags);
+      tagsRef.current = currentTags;
+      setNoteStatus(currentStatus);
+      noteStatusRef.current = currentStatus;
+      durableSnapshotRef.current = {
+        content: conflictData.currentContent,
+        title: currentTitle.trim() || "Untitled",
+        tags: [...currentTags],
+        status: currentStatus,
+        hash: conflictData.currentHash,
+      };
     }
     setConflictData(null);
     setSaveStatus("idle");
@@ -434,6 +798,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       if (res.ok) {
         const data = await res.json();
         setContentHash(data.contentHash);
+        hashRef.current = data.contentHash;
+        durableSnapshotRef.current = {
+          ...snapshotForSave(),
+          hash: data.contentHash,
+        };
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus((s) => s === "saved" ? "idle" : s), 2000);
       } else {
@@ -442,7 +811,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     } catch {
       setSaveStatus("error");
     }
-  }, [conflictData, apiBase, apiPath, queryString]);
+  }, [conflictData, apiBase, apiPath, queryString, snapshotForSave]);
 
   // Save as copy (conflict resolution)
   const handleConflictSaveAsCopy = useCallback(async () => {
@@ -458,11 +827,26 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       if (res.ok) {
         // Reload the server version into the current editor
         setContent(conflictData.currentContent);
+        contentRef.current = conflictData.currentContent;
         setContentHash(conflictData.currentHash);
+        hashRef.current = conflictData.currentHash;
         if (conflictData.currentFrontmatter) {
-          setTitle(conflictData.currentFrontmatter.title ?? "Untitled");
-          setTags(conflictData.currentFrontmatter.tags ?? []);
-          setNoteStatus(conflictData.currentFrontmatter.status);
+          const currentTitle = conflictData.currentFrontmatter.title ?? "Untitled";
+          const currentTags = conflictData.currentFrontmatter.tags ?? [];
+          const currentStatus = conflictData.currentFrontmatter.status;
+          setTitle(currentTitle);
+          titleRef.current = currentTitle;
+          setTags(currentTags);
+          tagsRef.current = currentTags;
+          setNoteStatus(currentStatus);
+          noteStatusRef.current = currentStatus;
+          durableSnapshotRef.current = {
+            content: conflictData.currentContent,
+            title: currentTitle.trim() || "Untitled",
+            tags: [...currentTags],
+            status: currentStatus,
+            hash: conflictData.currentHash,
+          };
         }
         setConflictData(null);
         setSaveStatus("idle");
@@ -602,6 +986,104 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
     });
   }, []);
 
+  const handleEditWithAgent = useCallback(async (
+    selection: NoteSelectionInfo,
+  ) => {
+    if (preparingAgentEdit || targetInFlight) return;
+    setPreparingAgentEdit(true);
+    setSelectionStatus({
+      kind: "status",
+      message: "Saving the exact note state for this selection…",
+    });
+
+    const fail = (message: string) => {
+      setSelectionStatus({ kind: "error", message });
+      setPreparingAgentEdit(false);
+      setSelectionInfo(null);
+    };
+    const view = editorViewRef.current;
+    const stableId = noteIdRef.current;
+    const projectId = queryParams.projectId;
+    const epicId = queryParams.epicId;
+    if (!view || !stableId) {
+      fail("This selection is not available to the current assistant.");
+      return;
+    }
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const capturedContent = view.state.doc.toString();
+    const capturedSnapshot = snapshotForSave(capturedContent);
+    const prepared = await saveAndPrepareNoteRangeTarget({
+      captured: {
+        identity: noteIdentity,
+        revision: localRevisionRef.current,
+        stableId,
+        scope,
+        visibility,
+        path: apiPath,
+        assistantScope,
+        projectId,
+        epicId,
+        snapshot: capturedSnapshot,
+        selection,
+      },
+      save: enqueueSave,
+      readCurrent: () => {
+        const currentView = editorViewRef.current;
+        return {
+          identity: noteIdentityRef.current,
+          revision: localRevisionRef.current,
+          stableId: currentView ? noteIdRef.current : null,
+          snapshot: snapshotForSave(
+            currentView?.state.doc.toString() ?? contentRef.current,
+          ),
+        };
+      },
+    });
+    if (!prepared.ok) {
+      fail(prepared.reason === "conflict"
+        ? "The note changed while preparing the selection. Select it again."
+        : prepared.reason === "save"
+          ? "The selection could not be saved. Select it again."
+          : prepared.reason === "changed"
+            ? "The note changed while preparing the selection. Select it again."
+            : "This exact selection cannot be sent to the assistant.");
+      return;
+    }
+    const handoff = stageNoteRangeHandoff({
+      scope: assistantScope,
+      sourceId: handoffSourceRef.current,
+      target: prepared.target,
+    });
+    if (!handoff) {
+      fail("This selection is not available to the current assistant.");
+      return;
+    }
+
+    setPreparingAgentEdit(false);
+    setSelectionInfo(null);
+    setSelectionStatus({
+      kind: "status",
+      message: NOTE_RANGE_STAGED_STATUS_MESSAGE,
+    });
+    useShellStore.getState().openRightPanel("assistant");
+  }, [
+    apiPath,
+    assistantScope,
+    enqueueSave,
+    noteIdentity,
+    preparingAgentEdit,
+    queryParams.epicId,
+    queryParams.projectId,
+    scope,
+    snapshotForSave,
+    targetInFlight,
+    visibility,
+  ]);
+
   const handleCommentFromSelection = useCallback((selection: NoteSelectionInfo) => {
     if (!editorViewRef.current || !canCreateRangeAnnotation(editorViewRef.current.state.selection)) return;
     // The source range itself, not a block hash or a quoted-text search, is
@@ -611,18 +1093,27 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   }, [setAnnotationsPanelOpen]);
 
   const handleAnnotationMutation = useCallback((result: { content?: string; contentHash?: string }) => {
+    invalidateStagedHandoff();
     if (typeof result.content === "string") {
       setContent(result.content);
       contentRef.current = result.content;
+      localRevisionRef.current += 1;
     }
     if (result.contentHash) {
       setContentHash(result.contentHash);
       hashRef.current = result.contentHash;
+      if (typeof result.content === "string"
+        && isCanonicalContentHash(result.contentHash)) {
+        durableSnapshotRef.current = {
+          ...snapshotForSave(result.content),
+          hash: result.contentHash,
+        };
+      }
     }
     setSelectionInfo(null);
     setPendingAnnotation(null);
     void fetchAnnotations();
-  }, [fetchAnnotations]);
+  }, [fetchAnnotations, invalidateStagedHandoff, snapshotForSave]);
 
   // ── Version history ────────────────────────────────────────────────
   const fetchVersions = useCallback(async () => {
@@ -655,13 +1146,17 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
   }, [apiBase, apiPath, queryString]);
 
   const handleRestoreVersion = useCallback((versionContent: string) => {
+    if (targetInFlight) return;
+    invalidateStagedHandoff();
     setContent(versionContent);
+    contentRef.current = versionContent;
+    localRevisionRef.current += 1;
     setSelectedVersion(null);
     setShowVersions(false);
     // Trigger save
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     void saveNote(versionContent, hashRef.current);
-  }, [saveNote]);
+  }, [invalidateStagedHandoff, saveNote, targetInFlight]);
 
   const parentFolderName = useMemo(() => {
     const pathParts = notePath.replace(/\.md$/, "").split("/").filter(Boolean);
@@ -717,11 +1212,15 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
 
   // ── Draft/Ready toggle ─────────────────────────────────────────────
   const handleStatusToggle = useCallback(() => {
+    if (targetInFlight) return;
+    invalidateStagedHandoff();
     const newStatus = noteStatus === "ready" ? "draft" : "ready";
     setNoteStatus(newStatus);
+    noteStatusRef.current = newStatus;
+    localRevisionRef.current += 1;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     void saveNote(contentRef.current, hashRef.current, { status: newStatus });
-  }, [noteStatus, saveNote]);
+  }, [invalidateStagedHandoff, noteStatus, saveNote, targetInFlight]);
 
   // ── Last editor banner logic ───────────────────────────────────────
   const showLastEditorBanner = useMemo(() => {
@@ -778,8 +1277,9 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           className="codascope-notes-editor-title-input"
           type="text"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => handleTitleChange(e.target.value)}
           onBlur={handleTitleBlur}
+          disabled={targetInFlight}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -798,6 +1298,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
                 aria-label={`Remove tag ${tag}`}
                 title={`Remove ${tag}`}
                 onClick={() => saveTags(tags.filter((current) => current !== tag))}
+                disabled={targetInFlight}
               >
                 <IconClose size={10} />
               </button>
@@ -817,6 +1318,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             }}
             placeholder={tags.length === 0 ? "Add tags…" : "+ tag"}
             aria-label="Add tags"
+            disabled={targetInFlight}
           />
         </div>
 
@@ -830,6 +1332,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
           <button
             className={`codascope-notes-status-toggle codascope-notes-status-toggle--${noteStatus ?? "draft"}`}
             onClick={handleStatusToggle}
+            disabled={targetInFlight}
             type="button"
             title={noteStatus === "ready" ? "Revert to draft" : "Mark as ready"}
           >
@@ -862,6 +1365,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             type="button"
             title={showAnnotations ? "Hide annotations" : "Show annotations"}
             aria-pressed={showAnnotations}
+            disabled={targetInFlight}
           >
             <IconComment size={14} />
             <span>Annotations</span>
@@ -876,6 +1380,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             type="button"
             title={showDocuments ? "Hide documents" : "Show documents"}
             aria-pressed={showDocuments}
+            disabled={targetInFlight}
           >
             <IconFile size={14} />
             <span>Documents</span>
@@ -947,10 +1452,13 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       {/* Formatting toolbar */}
       <NoteFormattingToolbar
         editorView={editorViewRef.current}
-        disabled={showVersions && !!selectedVersion}
+        disabled={(showVersions && !!selectedVersion) || targetInFlight}
         multipleSelections={multipleSelections}
         onShowVersions={handleShowVersions}
-        onMoveNote={() => setShowMoveDialog(true)}
+        onMoveNote={() => {
+          invalidateStagedHandoff();
+          setShowMoveDialog(true);
+        }}
         onToggleActivity={() => {
           const opening = !showActivity;
           setShowActivity(opening);
@@ -962,9 +1470,24 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
         }}
         activityOpen={showActivity}
         onExportNote={() => setShowExport(true)}
-        onArchiveNote={() => setShowArchiveConfirm(true)}
-        archiveDisabled={archiving}
+        onArchiveNote={() => {
+          invalidateStagedHandoff();
+          setShowArchiveConfirm(true);
+        }}
+        archiveDisabled={archiving || targetInFlight}
       />
+
+      {selectionStatus && (
+        <p
+          className={`codascope-notes-selection-status${selectionStatus.kind === "error"
+            ? " codascope-notes-selection-status-error"
+            : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {selectionStatus.message}
+        </p>
+      )}
 
       {multipleSelections && !showVersions && (
         <p className="codascope-notes-multi-selection-notice" role="status">
@@ -1052,7 +1575,8 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
             <MarkdownEditor
               value={content}
               onChange={handleContentChange}
-              editable
+              editable={!targetInFlight}
+              additionalExtensions={pinnedRangeExtensions}
               selectedPath={apiPath}
               onImagePaste={handleImagePaste}
               resolveImageUrl={resolveImageUrl}
@@ -1065,8 +1589,24 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
               inlineAnnotationAnchors={inlineAnnotationAnchors.length > 0 ? inlineAnnotationAnchors : undefined}
               inlineAnnotationMarkerRanges={inlineAnnotationMarkerRanges.length > 0 ? inlineAnnotationMarkerRanges : undefined}
               onAnnotationClick={handleAnnotationClick}
-              onEditorView={(view) => { editorViewRef.current = view; }}
-              onSelectionChange={handleSelectionChange}
+              onEditorView={(view) => {
+                editorViewRef.current = view;
+                const target = liveSourceHandoff?.target;
+                view.dispatch({
+                  effects: setPinnedEditorRange.of(target
+                    && target.stableId === noteIdRef.current
+                    && (liveSourceHandoff.status === "staged"
+                      || liveSourceHandoff.status === "in-flight")
+                    ? {
+                        from: target.selectionStart,
+                        to: target.selectionEnd,
+                      }
+                    : null),
+                });
+              }}
+              onSelectionChange={targetInFlight
+                ? undefined
+                : handleSelectionChange}
             />
           )}
 
@@ -1165,10 +1705,11 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
       {selectionInfo && !showVersions && (
         <NoteSelectionToolbar
           selectionInfo={selectionInfo}
-          notePath={apiPath}
-          noteScope={scope}
-          noteVisibility={visibility}
           onDismiss={() => setSelectionInfo(null)}
+          onEditWithAgent={(selected) => {
+            void handleEditWithAgent(selected);
+          }}
+          preparingAgentEdit={preparingAgentEdit}
           onComment={handleCommentFromSelection}
         />
       )}
@@ -1249,7 +1790,7 @@ export function NoteEditor({ scope, visibility, notePath, queryParams, onBack }:
               <button
                 className="codascope-btn codascope-btn-primary codascope-btn-sm"
                 onClick={handleArchive}
-                disabled={archiving}
+                disabled={archiving || targetInFlight}
                 type="button"
               >
                 {archiving ? "Archiving…" : "Archive"}

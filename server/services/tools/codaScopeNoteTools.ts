@@ -11,6 +11,7 @@ import type { SDKCustomTool } from "@cursor/sdk";
 import type { ToolServices } from "../codaScopeToolServiceFactory.js";
 import type { NoteScope, NoteVisibility } from "../../../src/apps/codascope/codaScopeTypes.js";
 import type { ToolResultCollectorHolder } from "../codaScopeToolDefinitions.js";
+import type { ProjectNoteRangeGrantHolder } from "../codaScopeProjectNoteRangeGrant.js";
 import { formatCompletedAction } from "../codaScopeActionParser.js";
 import { stripInlineAnnotationMarkers } from "../codaScopeNoteAnnotationAnchorService.js";
 
@@ -336,6 +337,7 @@ export function buildNoteWriteTools(
   services: ToolServices,
   collector?: ToolResultCollectorHolder,
   actorId?: string,
+  projectNoteRangeGrantHolder?: ProjectNoteRangeGrantHolder,
 ): Record<string, SDKCustomTool> {
   const { note: noteService } = services;
   const noteOpts = (epicId?: string) => ({ projectId, epicId, ...(actorId ? { userId: actorId } : {}) });
@@ -375,6 +377,9 @@ export function buildNoteWriteTools(
         required: ["scope", "visibility", "path"],
       },
       execute: async (args) => {
+        if (projectNoteRangeGrantHolder?.hasActiveTarget()) {
+          return "Whole-note creation is unavailable while an exact note-range target is active.";
+        }
         const scope = args.scope as NoteScope;
         const visibility = args.visibility as NoteVisibility;
         const notePath = args.path as string;
@@ -429,6 +434,9 @@ export function buildNoteWriteTools(
         required: ["scope", "visibility", "path", "content"],
       },
       execute: async (args) => {
+        if (projectNoteRangeGrantHolder?.hasActiveTarget()) {
+          return "Whole-note editing is unavailable while an exact note-range target is active.";
+        }
         const scope = args.scope as NoteScope;
         const visibility = args.visibility as NoteVisibility;
         const notePath = args.path as string;
