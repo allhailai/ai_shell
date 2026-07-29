@@ -12,6 +12,10 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 
 // ── Table block parser ──────────────────────────────────────────────
 
+const TABLE_SCROLL_EDGE_TOLERANCE = 2;
+const TABLE_PAN_MINIMUM = 160;
+const TABLE_PAN_VIEWPORT_FRACTION = 0.75;
+
 export type TableBlock = {
   from: number;
   to: number;
@@ -88,7 +92,66 @@ export function parseMarkdownTableBlock(doc: Text, lineNumber: number): TableBlo
   };
 }
 
+export type TableOverflowState = {
+  overflowing: boolean;
+  canScrollLeft: boolean;
+  canScrollRight: boolean;
+  maxScrollLeft: number;
+};
+
+/**
+ * Resolve scroll affordance state with a small tolerance for fractional
+ * layout pixels and browser scroll rounding.
+ */
+export function resolveTableOverflowState(
+  clientWidth: number,
+  scrollWidth: number,
+  scrollLeft: number,
+): TableOverflowState {
+  const safeClientWidth = Math.max(0, clientWidth);
+  const safeScrollWidth = Math.max(0, scrollWidth);
+  const maxScrollLeft = Math.max(0, safeScrollWidth - safeClientWidth);
+  const overflowing = maxScrollLeft > TABLE_SCROLL_EDGE_TOLERANCE;
+  const normalizedScrollLeft = Math.min(maxScrollLeft, Math.max(0, scrollLeft));
+
+  return {
+    overflowing,
+    canScrollLeft: overflowing && normalizedScrollLeft > TABLE_SCROLL_EDGE_TOLERANCE,
+    canScrollRight: overflowing
+      && normalizedScrollLeft < maxScrollLeft - TABLE_SCROLL_EDGE_TOLERANCE,
+    maxScrollLeft,
+  };
+}
+
+export function tablePanDistance(clientWidth: number): number {
+  return Math.max(
+    TABLE_PAN_MINIMUM,
+    Math.round(Math.max(0, clientWidth) * TABLE_PAN_VIEWPORT_FRACTION),
+  );
+}
+
 // ── Table widget ────────────────────────────────────────────────────
+
+const tableWidgetCleanup = new WeakMap<HTMLElement, () => void>();
+
+function createPanIcon(direction: "left" | "right"): SVGSVGElement {
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.5");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+
+  const shaft = document.createElementNS(namespace, "path");
+  shaft.setAttribute("d", direction === "left" ? "M13 8H3" : "M3 8h10");
+  const point = document.createElementNS(namespace, "path");
+  point.setAttribute("d", direction === "left" ? "M7 4 3 8l4 4" : "M9 4l4 4-4 4");
+  svg.append(shaft, point);
+  return svg;
+}
 
 class TableWidget extends WidgetType {
   constructor(
@@ -117,11 +180,48 @@ class TableWidget extends WidgetType {
   }
 
   toDOM() {
+    const container = document.createElement("div");
+    container.className = "shared-md-table-container";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "shared-md-table-toolbar";
+    toolbar.hidden = true;
+
+    const toolbarHint = document.createElement("span");
+    toolbarHint.className = "shared-md-table-toolbar-hint";
+    toolbarHint.textContent = "Wide table · Scroll horizontally";
+    toolbar.appendChild(toolbarHint);
+
+    const navigation = document.createElement("div");
+    navigation.className = "shared-md-table-navigation";
+    navigation.setAttribute("role", "group");
+    navigation.setAttribute("aria-label", "Table navigation");
+
+    const previousButton = document.createElement("button");
+    previousButton.type = "button";
+    previousButton.className = "shared-md-table-pan-button";
+    previousButton.setAttribute("aria-label", "Scroll table left");
+    previousButton.title = "Scroll table left";
+    previousButton.appendChild(createPanIcon("left"));
+
+    const nextButton = document.createElement("button");
+    nextButton.type = "button";
+    nextButton.className = "shared-md-table-pan-button";
+    nextButton.setAttribute("aria-label", "Scroll table right");
+    nextButton.title = "Scroll table right";
+    nextButton.appendChild(createPanIcon("right"));
+
+    navigation.append(previousButton, nextButton);
+    toolbar.appendChild(navigation);
+
     const wrapper = document.createElement("div");
     wrapper.className = "shared-md-table-wrapper";
     wrapper.tabIndex = 0;
     wrapper.setAttribute("role", "region");
-    wrapper.setAttribute("aria-label", "Scrollable table");
+    wrapper.setAttribute(
+      "aria-label",
+      "Scrollable table. Use the table navigation buttons or scroll horizontally to view more columns.",
+    );
 
     const table = document.createElement("table");
     table.className = "shared-md-table";
@@ -155,7 +255,59 @@ class TableWidget extends WidgetType {
     table.appendChild(tbody);
     wrapper.appendChild(table);
 
-    return wrapper;
+    const updateOverflowState = () => {
+      const state = resolveTableOverflowState(
+        wrapper.clientWidth,
+        wrapper.scrollWidth,
+        wrapper.scrollLeft,
+      );
+
+      toolbar.hidden = !state.overflowing;
+      previousButton.disabled = !state.canScrollLeft;
+      nextButton.disabled = !state.canScrollRight;
+      container.classList.toggle("shared-md-table-container--overflowing", state.overflowing);
+      container.classList.toggle("shared-md-table-container--can-scroll-left", state.canScrollLeft);
+      container.classList.toggle("shared-md-table-container--can-scroll-right", state.canScrollRight);
+    };
+
+    const pan = (direction: -1 | 1) => {
+      wrapper.scrollBy({
+        left: direction * tablePanDistance(wrapper.clientWidth),
+        behavior: "smooth",
+      });
+    };
+    const panLeft = () => pan(-1);
+    const panRight = () => pan(1);
+
+    previousButton.addEventListener("click", panLeft);
+    nextButton.addEventListener("click", panRight);
+    wrapper.addEventListener("scroll", updateOverflowState, { passive: true });
+
+    const ownerWindow = container.ownerDocument.defaultView;
+    const resizeObserver = ownerWindow?.ResizeObserver
+      ? new ownerWindow.ResizeObserver(updateOverflowState)
+      : null;
+    resizeObserver?.observe(wrapper);
+    resizeObserver?.observe(table);
+
+    const animationFrame = ownerWindow?.requestAnimationFrame(updateOverflowState);
+    updateOverflowState();
+
+    container.append(toolbar, wrapper);
+    tableWidgetCleanup.set(container, () => {
+      previousButton.removeEventListener("click", panLeft);
+      nextButton.removeEventListener("click", panRight);
+      wrapper.removeEventListener("scroll", updateOverflowState);
+      resizeObserver?.disconnect();
+      if (animationFrame !== undefined) ownerWindow?.cancelAnimationFrame(animationFrame);
+    });
+
+    return container;
+  }
+
+  destroy(dom: HTMLElement) {
+    tableWidgetCleanup.get(dom)?.();
+    tableWidgetCleanup.delete(dom);
   }
 
   ignoreEvent() { return true; }

@@ -2,18 +2,165 @@
    Styles for the rich table rendering in the shared markdown editor.
    ──────────────────────────────────────────────────────────────────── */
 
-.shared-md-table-wrapper {
+.shared-md-table-container {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   margin: var(--space-2) 0;
+  position: relative;
+}
+
+.shared-md-table-container::before,
+.shared-md-table-container::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: var(--space-5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.shared-md-table-container::before {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    var(--color-bg-secondary),
+    transparent
+  );
+}
+
+.shared-md-table-container::after {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    var(--color-bg-secondary),
+    transparent
+  );
+}
+
+.shared-md-table-container--can-scroll-left::before,
+.shared-md-table-container--can-scroll-right::after {
+  opacity: 1;
+}
+
+.shared-md-table-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-primary);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--color-bg-tertiary);
+}
+
+.shared-md-table-toolbar[hidden] {
+  display: none;
+}
+
+.shared-md-table-toolbar-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-md-table-navigation {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.shared-md-table-pan-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.shared-md-table-pan-button:hover:not(:disabled) {
+  border-color: var(--color-border-secondary);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.shared-md-table-pan-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.shared-md-table-pan-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.shared-md-table-pan-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.shared-md-table-wrapper {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--color-border-primary);
   border-radius: var(--radius-lg);
   background: var(--color-bg-secondary);
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.shared-md-table-container--overflowing .shared-md-table-wrapper {
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.shared-md-table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.shared-md-table-wrapper::-webkit-scrollbar-track {
+  background: var(--color-bg-primary);
+}
+
+.shared-md-table-wrapper::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-full);
+  background: var(--color-border-secondary);
+}
+
+.shared-md-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
 }
 
 .shared-md-table {
@@ -27,12 +174,17 @@
 
 .shared-md-table th,
 .shared-md-table td {
-  min-width: 120px;
+  box-sizing: border-box;
+  width: min(22rem, 70vw);
+  min-width: min(12rem, 45vw);
+  max-width: min(22rem, 70vw);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border-primary);
   border-right: 1px solid var(--color-border-primary);
+  overflow-wrap: anywhere;
   text-align: left;
   vertical-align: top;
+  white-space: normal;
 }
 
 .shared-md-table th {
