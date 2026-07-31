@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   WORKSPACE_MANIFEST_MAX_CHARS,
   buildWorkspaceAssistantPrompt,
   buildWorkspaceManifest,
+  buildWorkspaceManifestFromCatalog,
   formatWorkspaceConversationHistory,
   formatWorkspaceCurrentContext,
 } from "./codaScopeWorkspaceChatPromptHelpers.js";
@@ -34,6 +35,20 @@ function project(projectId: string, name: string, description = "Description") {
 }
 
 describe("workspace manifest", () => {
+  it("loads one catalog snapshot instead of scanning every project twice", async () => {
+    const getWorkspaceManifestSnapshot = vi.fn(async () => ({
+      status,
+      projects: [project("alpha", "Alpha")],
+    }));
+
+    const manifest = await buildWorkspaceManifestFromCatalog({
+      getWorkspaceManifestSnapshot,
+    } as any);
+
+    expect(getWorkspaceManifestSnapshot).toHaveBeenCalledTimes(1);
+    expect(manifest).toContain("Alpha [alpha]");
+  });
+
   it("is deterministic, bounded, progressive, and path-free", () => {
     const projects = [
       project("zeta", "Zeta", "Checkout /opt/company/zeta and C:\\repos\\zeta"),

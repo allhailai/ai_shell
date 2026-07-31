@@ -5,6 +5,12 @@ import {
 } from "./codaScopeWorkspaceChatOrchestrator.js";
 import { EMPTY_WORKSPACE_TURN_READ_GRANT } from "./codaScopeWorkspaceReadGrant.js";
 import { createWorkspaceMessageContext } from "./codaScopeWorkspaceConversationService.js";
+import {
+  CodaScopeWorkspaceManifestReadError,
+} from "./codaScopeWorkspaceCatalogService.js";
+import {
+  CodaScopePersistenceCorruptError,
+} from "./codaScopePersistence.js";
 
 function fixture() {
   const send = vi.fn((options: any) => {
@@ -28,15 +34,14 @@ function fixture() {
       }],
     );
   });
-  const catalog = {
-    getWorkspaceStatus: vi.fn(async () => ({
+  const status = {
       activeProjectCount: 1,
       projectsWithWiki: 1,
       projectsBuilding: 0,
       lastWikiBuildAt: null,
       lastDeepRunAt: null,
-    })),
-    listActiveProjects: vi.fn(async () => [{
+  };
+  const projects = [{
       projectId: "alpha",
       name: "Alpha",
       description: "",
@@ -49,7 +54,12 @@ function fixture() {
       lastBuildAttemptAt: null,
       lastBuildAttemptStatus: null,
       lastBuildError: null,
-    }]),
+  }];
+  const catalog = {
+    getWorkspaceManifestSnapshot: vi.fn(async () => ({
+      status,
+      projects,
+    })),
   };
   const intentService = {
     resolveTurn: vi.fn(async (): Promise<any> => ({
@@ -246,8 +256,15 @@ describe("workspace chat orchestrator", () => {
     const diagnostic = vi.spyOn(console, "error").mockImplementation(
       () => undefined,
     );
-    catalog.listActiveProjects.mockRejectedValueOnce(
-      new Error("/private/projects/Core/wiki-state.json"),
+    catalog.getWorkspaceManifestSnapshot.mockRejectedValueOnce(
+      new CodaScopeWorkspaceManifestReadError(
+        "wiki_state",
+        new CodaScopePersistenceCorruptError({
+          storage: "wiki_state",
+          path: "/private/projects/Core/wiki-state.json",
+        }),
+        "alpha",
+      ),
     );
 
     try {
@@ -263,17 +280,29 @@ describe("workspace chat orchestrator", () => {
         onMessage: vi.fn(),
       })).rejects.toMatchObject({
         message: expect.stringMatching(
-          /^Workspace assistant could not load the all-project manifest\. Diagnostic ID: wsdiag_/,
+          /^Workspace assistant could not load the all-project manifest\. Failure point: wiki_state\. Failure category: persistence_corrupt\. Project ID: alpha\. Diagnostic ID: wsdiag_/,
         ),
         stage: "manifest_load",
         diagnosticId: expect.stringMatching(/^wsdiag_/),
+        safeDetails: {
+          operation: "wiki_state",
+          failureCategory: "persistence_corrupt",
+          projectId: "alpha",
+        },
       });
       expect(send).not.toHaveBeenCalled();
       expect(diagnostic).toHaveBeenCalledWith(
         "[CodaScope] workspace assistant diagnostic.",
-        expect.objectContaining({ stage: "manifest_load" }),
         expect.objectContaining({
-          message: "/private/projects/Core/wiki-state.json",
+          stage: "manifest_load",
+          safeDetails: {
+            operation: "wiki_state",
+            failureCategory: "persistence_corrupt",
+            projectId: "alpha",
+          },
+        }),
+        expect.objectContaining({
+          code: "persistence_corrupt",
         }),
       );
     } finally {

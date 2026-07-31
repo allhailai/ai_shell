@@ -17,6 +17,9 @@ import type { CodaScopeRouteContext } from "./codaScopeServiceContext.js";
 import {
   WorkspaceAssistantCancelledError,
 } from "../services/codaScopeWorkspaceChatOrchestrator.js";
+import {
+  WorkspaceAssistantDiagnosticError,
+} from "../services/codaScopeWorkspaceAssistantDiagnostics.js";
 import { createWorkspaceMessageContext } from "../services/codaScopeWorkspaceConversationService.js";
 
 type Registration = {
@@ -764,6 +767,89 @@ describe("workspace chat routes", () => {
       expect.objectContaining({ message: "/private/repository/sdk-token" }),
     );
     diagnostic.mockRestore();
+  });
+
+  it("returns only allowlisted manifest details to the authenticated conversation owner", async () => {
+    const state = statefulConversationService();
+    orchestrator.stream.mockRejectedValueOnce(
+      new WorkspaceAssistantDiagnosticError({
+        diagnosticId: "wsdiag_safe",
+        stage: "manifest_load",
+        safeDetails: {
+          operation: "build_history",
+          failureCategory: "persistence_corrupt",
+          projectId: "project-active",
+        },
+      }),
+    );
+    const routes = registeredRoutes({
+      services: streamingServices(state.service),
+      principal: () => ({ username: "alice", isAdmin: false }),
+    });
+    const res = response();
+
+    route(routes, "post", messagePath)(
+      messageRequest as any,
+      res as any,
+      vi.fn(),
+    );
+    await waitForEnd(res);
+
+    expect(terminalPayload(terminals(res)[0])).toMatchObject({
+      error: "Workspace assistant could not load the all-project manifest. "
+        + "Failure point: build_history. "
+        + "Failure category: persistence_corrupt. "
+        + "Project ID: project-active. Diagnostic ID: wsdiag_safe.",
+      diagnosticId: "wsdiag_safe",
+      failureStage: "manifest_load",
+      safeDetails: {
+        operation: "build_history",
+        failureCategory: "persistence_corrupt",
+        projectId: "project-active",
+      },
+      conversationId: "conv-workspace",
+    });
+    const assistant = state.get().messages.find(
+      (message: any) => message.role === "assistant",
+    );
+    expect(assistant).toMatchObject({
+      status: "error",
+      content: expect.stringContaining(
+        "Failure point: build_history. Failure category: persistence_corrupt. "
+        + "Project ID: project-active.",
+      ),
+    });
+    const payload = terminalPayload(terminals(res)[0]);
+    expect(payload).not.toHaveProperty("actorId");
+    expect(payload).not.toHaveProperty("owner");
+    expect(payload).not.toHaveProperty("path");
+    expect(payload).not.toHaveProperty("content");
+    expect(payload).not.toHaveProperty("stack");
+  });
+
+  it("does not disclose workspace diagnostics through another actor's conversation", async () => {
+    const state = statefulConversationService();
+    const routes = registeredRoutes({
+      services: streamingServices(state.service),
+      principal: () => ({ username: "bob", isAdmin: false }),
+    });
+    const res = response();
+    const next = vi.fn();
+
+    route(routes, "post", messagePath)(
+      messageRequest as any,
+      res as any,
+      next,
+    );
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+
+    expect(next.mock.calls[0][0]).toMatchObject({
+      message: "Conversation not found.",
+      status: 404,
+      code: "not_found",
+    });
+    expect(orchestrator.stream).not.toHaveBeenCalled();
+    expect(res.frames).toEqual([]);
   });
 
   it("persists cancellation before one cancelled terminal and never emits done", async () => {

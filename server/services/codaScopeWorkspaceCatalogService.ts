@@ -14,8 +14,15 @@ import {
   CodaScopeActiveEntityResolver,
   type ActiveProjectRecord,
 } from "./codaScopeActiveEntityResolver.js";
-import { CodaScopePathValidationError, assertSafePathSegment } from "./codaScopePathSafety.js";
-import { CodaScopePersistenceCorruptError } from "./codaScopePersistence.js";
+import {
+  CodaScopePathValidationError,
+  assertSafePathSegment,
+  isSafePathSegment,
+} from "./codaScopePathSafety.js";
+import {
+  CodaScopePersistenceCorruptError,
+  CodaScopePersistenceError,
+} from "./codaScopePersistence.js";
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import {
@@ -56,6 +63,60 @@ export interface WorkspaceStatus {
   projectsBuilding: number;
   lastWikiBuildAt: string | null;
   lastDeepRunAt: string | null;
+}
+
+export type WorkspaceManifestReadOperation =
+  | "active_project_catalog"
+  | "active_project_resolution"
+  | "wiki_topic_catalog"
+  | "wiki_topic_content"
+  | "build_history"
+  | "wiki_state";
+
+export type WorkspaceManifestFailureCategory =
+  | "persistence_corrupt"
+  | "persistence_failed"
+  | "invalid_identifier"
+  | "permission_denied"
+  | "required_data_missing"
+  | "storage_shape_invalid"
+  | "resource_unavailable"
+  | "read_failed";
+
+/**
+ * Carries only allowlisted, path-free manifest failure metadata across the
+ * workspace assistant boundary. The original cause remains server-only.
+ */
+export class CodaScopeWorkspaceManifestReadError extends Error {
+  readonly operation: WorkspaceManifestReadOperation;
+  readonly failureCategory: WorkspaceManifestFailureCategory;
+  readonly projectId: string | null;
+  readonly originalCause: unknown;
+
+  constructor(
+    operation: WorkspaceManifestReadOperation,
+    cause: unknown,
+    projectId: string | null = null,
+  ) {
+    super("Workspace manifest catalog read failed.");
+    this.name = "CodaScopeWorkspaceManifestReadError";
+    this.operation = operation;
+    this.failureCategory = manifestFailureCategory(cause);
+    this.projectId = projectId && isSafePathSegment(projectId)
+      ? projectId
+      : null;
+    Object.defineProperty(this, "originalCause", {
+      value: cause,
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+}
+
+export interface WorkspaceManifestSnapshot {
+  status: WorkspaceStatus;
+  projects: WorkspaceProjectOverview[];
 }
 
 export interface WorkspaceWikiTopicSummary {
@@ -203,12 +264,19 @@ export class CodaScopeWorkspaceCatalogService {
 
   async getWorkspaceStatus(): Promise<WorkspaceStatus> {
     const projects = await this.listActiveProjects();
+    return workspaceStatus(projects);
+  }
+
+  /**
+   * Load the assistant's complete manifest input once. This avoids the prior
+   * duplicate concurrent workspace scan and adds only allowlisted diagnostics
+   * for the authenticated workspace-assistant response.
+   */
+  async getWorkspaceManifestSnapshot(): Promise<WorkspaceManifestSnapshot> {
+    const projects = await this.loadActiveProjectOverviews(true);
     return {
-      activeProjectCount: projects.length,
-      projectsWithWiki: projects.filter((project) => project.hasWiki).length,
-      projectsBuilding: projects.filter((project) => project.currentBuildStatus === "building").length,
-      lastWikiBuildAt: latestOf(projects.map((project) => project.lastWikiBuildAt)),
-      lastDeepRunAt: latestOf(projects.map((project) => project.lastDeepRunAt)),
+      status: workspaceStatus(projects),
+      projects,
     };
   }
 
@@ -245,13 +313,44 @@ export class CodaScopeWorkspaceCatalogService {
   }
 
   async listActiveProjects(): Promise<WorkspaceProjectOverview[]> {
-    const initial = await this.activeResolver.listActiveProjects();
+    return this.loadActiveProjectOverviews(false);
+  }
+
+  private async loadActiveProjectOverviews(
+    manifestDiagnostics: boolean,
+  ): Promise<WorkspaceProjectOverview[]> {
+    let initial: ActiveProjectRecord[];
+    try {
+      initial = await this.activeResolver.listActiveProjects();
+    } catch (error) {
+      if (manifestDiagnostics) {
+        throw new CodaScopeWorkspaceManifestReadError(
+          "active_project_catalog",
+          error,
+        );
+      }
+      throw error;
+    }
     const overviews: WorkspaceProjectOverview[] = [];
     for (const candidate of initial) {
       // Re-resolve at execution time instead of trusting a prior scan/cache.
-      const project = await this.activeResolver.resolveActiveProject(candidate.projectId);
+      let project: ActiveProjectRecord | null;
+      try {
+        project = await this.activeResolver.resolveActiveProject(candidate.projectId);
+      } catch (error) {
+        if (manifestDiagnostics) {
+          throw new CodaScopeWorkspaceManifestReadError(
+            "active_project_resolution",
+            error,
+            candidate.projectId,
+          );
+        }
+        throw error;
+      }
       if (!project) continue;
-      overviews.push((await this.loadProjectSnapshot(project)).overview);
+      overviews.push((
+        await this.loadProjectSnapshot(project, manifestDiagnostics)
+      ).overview);
     }
     return overviews.sort((a, b) => (
       a.name.localeCompare(b.name)
@@ -489,13 +588,43 @@ export class CodaScopeWorkspaceCatalogService {
     ));
   }
 
-  private async loadWikiTopics(project: ActiveProjectRecord): Promise<InternalWikiTopic[]> {
-    const listed = await this.wikiService.listTopics(project.projectId);
+  private async loadWikiTopics(
+    project: ActiveProjectRecord,
+    manifestDiagnostics = false,
+  ): Promise<InternalWikiTopic[]> {
+    let listed;
+    try {
+      listed = await this.wikiService.listTopics(project.projectId);
+    } catch (error) {
+      if (manifestDiagnostics) {
+        throw new CodaScopeWorkspaceManifestReadError(
+          "wiki_topic_catalog",
+          error,
+          project.projectId,
+        );
+      }
+      throw error;
+    }
     const topics: InternalWikiTopic[] = [];
     const sensitivePaths = this.sensitivePaths(project);
     for (const topic of listed) {
       if (isSystemWikiTopicId(topic.id)) continue;
-      const content = await this.wikiService.getTopicContent(project.projectId, topic.id);
+      let content: string | null;
+      try {
+        content = await this.wikiService.getTopicContent(
+          project.projectId,
+          topic.id,
+        );
+      } catch (error) {
+        if (manifestDiagnostics) {
+          throw new CodaScopeWorkspaceManifestReadError(
+            "wiki_topic_content",
+            error,
+            project.projectId,
+          );
+        }
+        throw error;
+      }
       if (content === null) continue;
       topics.push({
         topicId: topic.id,
@@ -513,15 +642,42 @@ export class CodaScopeWorkspaceCatalogService {
     ));
   }
 
-  private async loadProjectSnapshot(project: ActiveProjectRecord): Promise<ProjectSnapshot> {
-    const topics = await this.loadWikiTopics(project);
+  private async loadProjectSnapshot(
+    project: ActiveProjectRecord,
+    manifestDiagnostics = false,
+  ): Promise<ProjectSnapshot> {
+    const topics = await this.loadWikiTopics(project, manifestDiagnostics);
     const substantiveWikiTopicCount = topics.filter((topic) => topic.substantive).length;
-    this.buildStateService.registerProjectDir(project.projectId, project.projectDir);
-    const history = this.buildStateService.readWorkspaceBuildHistory(
-      project.projectId,
-      WORKSPACE_BUILD_HISTORY_MAX_LIMIT,
-    );
-    const wikiState = await this.wikiStateService.getWorkspaceWikiState(project.projectDir);
+    let history;
+    try {
+      this.buildStateService.registerProjectDir(project.projectId, project.projectDir);
+      history = this.buildStateService.readWorkspaceBuildHistory(
+        project.projectId,
+        WORKSPACE_BUILD_HISTORY_MAX_LIMIT,
+      );
+    } catch (error) {
+      if (manifestDiagnostics) {
+        throw new CodaScopeWorkspaceManifestReadError(
+          "build_history",
+          error,
+          project.projectId,
+        );
+      }
+      throw error;
+    }
+    let wikiState;
+    try {
+      wikiState = await this.wikiStateService.getWorkspaceWikiState(project.projectDir);
+    } catch (error) {
+      if (manifestDiagnostics) {
+        throw new CodaScopeWorkspaceManifestReadError(
+          "wiki_state",
+          error,
+          project.projectId,
+        );
+      }
+      throw error;
+    }
     const latestAttempt = history.latestAttempt;
     const lastWikiBuildAt = latestOf([
       wikiState?.lastBuildAt ?? null,
@@ -712,6 +868,47 @@ function latestOf(values: Array<string | null>): string | null {
     if (value && (!latest || Date.parse(value) > Date.parse(latest))) latest = value;
   }
   return latest;
+}
+
+function workspaceStatus(
+  projects: readonly WorkspaceProjectOverview[],
+): WorkspaceStatus {
+  return {
+    activeProjectCount: projects.length,
+    projectsWithWiki: projects.filter((project) => project.hasWiki).length,
+    projectsBuilding: projects.filter(
+      (project) => project.currentBuildStatus === "building",
+    ).length,
+    lastWikiBuildAt: latestOf(projects.map((project) => project.lastWikiBuildAt)),
+    lastDeepRunAt: latestOf(projects.map((project) => project.lastDeepRunAt)),
+  };
+}
+
+function manifestFailureCategory(
+  error: unknown,
+): WorkspaceManifestFailureCategory {
+  if (error instanceof CodaScopePersistenceCorruptError) {
+    return "persistence_corrupt";
+  }
+  if (error instanceof CodaScopePersistenceError) return "persistence_failed";
+  if (error instanceof CodaScopePathValidationError) return "invalid_identifier";
+
+  const code = errorCode(error);
+  if (code === "EACCES" || code === "EPERM") return "permission_denied";
+  if (code === "ENOENT") return "required_data_missing";
+  if (code === "EISDIR" || code === "ENOTDIR") return "storage_shape_invalid";
+  if (code === "EMFILE"
+    || code === "ENFILE"
+    || code === "ENOMEM"
+    || code === "ENOSPC") {
+    return "resource_unavailable";
+  }
+  return "read_failed";
+}
+
+function errorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return typeof error.code === "string" ? error.code : null;
 }
 
 function scrubConfiguredPaths(content: string, configuredPaths: string[]): string {

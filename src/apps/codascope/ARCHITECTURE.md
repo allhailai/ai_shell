@@ -571,6 +571,15 @@ The authenticated route family is:
 | `GET` | `/api/codascope/workspace/conversations/:convId/images/:filename` | Read an owned conversation image |
 | `POST` | `/api/codascope/workspace/assistant/cancel` | Cancel only this actor's workspace run |
 
+Workspace-assistant failures use an authenticated, owner-bound diagnostic
+envelope. Browser-visible details are restricted to a correlation ID, an
+allowlisted lifecycle stage, and—only for manifest reads—an allowlisted
+operation, failure category, and validated active project ID. Raw exceptions,
+stack traces, filesystem paths, prompts, note/wiki content, actor IDs, and
+repository metadata remain server-only. The manifest snapshot scans each
+active project once; one corrupt or unreadable project still fails the complete
+manifest rather than returning a partial catalog.
+
 The frontend uses the same explicit assistant-scope union as this server
 boundary: `{ kind: "workspace" }` or `{ kind: "project", projectId }`.
 `assistantScope.ts` derives it only from the current CodaScope route. Every

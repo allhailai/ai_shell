@@ -37,11 +37,7 @@ export interface WorkspaceManifestInput {
 export async function buildWorkspaceManifestFromCatalog(
   catalog: CodaScopeWorkspaceCatalogService,
 ): Promise<string> {
-  const [status, projects] = await Promise.all([
-    catalog.getWorkspaceStatus(),
-    catalog.listActiveProjects(),
-  ]);
-  return buildWorkspaceManifest({ status, projects });
+  return buildWorkspaceManifest(await catalog.getWorkspaceManifestSnapshot());
 }
 
 export function buildWorkspaceManifest(input: WorkspaceManifestInput): string {

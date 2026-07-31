@@ -14,6 +14,7 @@ import { CodaScopeDesignDocService } from "./codaScopeDesignDocService.js";
 import { CodaScopeWikiService } from "./codaScopeWikiService.js";
 import { CodaScopeWikiStateService } from "./codaScopeWikiStateService.js";
 import {
+  CodaScopeWorkspaceManifestReadError,
   CodaScopeWorkspaceCatalogService,
   WORKSPACE_PROJECT_REFERENCE_LIMIT,
   WORKSPACE_PROJECT_FILTER_MAX,
@@ -143,6 +144,48 @@ describe("CodaScopeWorkspaceCatalogService project overviews", () => {
       error: expect.stringContaining("[redacted location]"),
     });
     expect(JSON.stringify(history)).not.toContain(secretRepoOne);
+  });
+
+  it("reports only allowlisted manifest diagnostics for corrupt project state", async () => {
+    const fixture = makeCatalog();
+    const projectDir = writeProject(fixture.root, "active-dir", {
+      id: "project-active",
+      name: "Active Project",
+      description: "",
+      repositories: [],
+    });
+    writeWiki(projectDir, "runtime", "# Runtime\n\nRequests are serialized.");
+    const statePath = path.join(projectDir, "wiki-state.json");
+    writeFileSync(statePath, "{ invalid", "utf-8");
+
+    let captured: unknown;
+    try {
+      await fixture.catalog.getWorkspaceManifestSnapshot();
+    } catch (error) {
+      captured = error;
+    }
+
+    expect(captured).toMatchObject({
+      name: "CodaScopeWorkspaceManifestReadError",
+      message: "Workspace manifest catalog read failed.",
+      operation: "wiki_state",
+      failureCategory: "persistence_corrupt",
+      projectId: "project-active",
+    });
+    expect(Object.keys(captured as object)).not.toContain("originalCause");
+    expect(JSON.stringify(captured)).not.toContain(statePath);
+    expect(JSON.stringify(captured)).not.toContain("{ invalid");
+  });
+
+  it("drops an unsafe project identifier from manifest diagnostics", () => {
+    const diagnostic = new CodaScopeWorkspaceManifestReadError(
+      "wiki_topic_content",
+      new Error("/private/projects/secret/wiki/topic.md"),
+      "../secret",
+    );
+
+    expect(diagnostic.projectId).toBeNull();
+    expect(JSON.stringify(diagnostic)).not.toContain("secret");
   });
 
   it("does not treat malformed wiki state as missing freshness", async () => {

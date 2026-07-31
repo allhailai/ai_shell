@@ -5,6 +5,11 @@
 
 import { randomUUID } from "node:crypto";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
+import {
+  CodaScopeWorkspaceManifestReadError,
+  type WorkspaceManifestFailureCategory,
+  type WorkspaceManifestReadOperation,
+} from "./codaScopeWorkspaceCatalogService.js";
 
 export type WorkspaceAssistantFailureStage =
   | "manifest_load"
@@ -38,20 +43,31 @@ const PUBLIC_STAGE_MESSAGES: Record<WorkspaceAssistantFailureStage, string> = {
     "Workspace assistant failure state could not be finalized.",
 };
 
+export interface WorkspaceAssistantSafeDiagnosticDetails {
+  operation: WorkspaceManifestReadOperation;
+  failureCategory: WorkspaceManifestFailureCategory;
+  projectId: string | null;
+}
+
 export class WorkspaceAssistantDiagnosticError extends Error {
   readonly diagnosticId: string;
   readonly stage: WorkspaceAssistantFailureStage;
   readonly fullResponse: string;
   readonly actions: CodaScopeAction[];
+  readonly safeDetails: WorkspaceAssistantSafeDiagnosticDetails | null;
 
   constructor(options: {
     diagnosticId: string;
     stage: WorkspaceAssistantFailureStage;
     fullResponse?: string;
     actions?: readonly CodaScopeAction[];
+    safeDetails?: WorkspaceAssistantSafeDiagnosticDetails | null;
   }) {
+    const safeDetails = options.safeDetails ?? null;
     super(
-      `${PUBLIC_STAGE_MESSAGES[options.stage]} `
+      `${PUBLIC_STAGE_MESSAGES[options.stage]}`
+      + publicDiagnosticDetails(safeDetails)
+      + " "
       + `Diagnostic ID: ${options.diagnosticId}.`,
     );
     this.name = "WorkspaceAssistantDiagnosticError";
@@ -59,6 +75,7 @@ export class WorkspaceAssistantDiagnosticError extends Error {
     this.stage = options.stage;
     this.fullResponse = options.fullResponse ?? "";
     this.actions = [...(options.actions ?? [])];
+    this.safeDetails = safeDetails;
   }
 }
 
@@ -79,15 +96,26 @@ export function reportWorkspaceAssistantFailure(
   }
 
   const diagnosticId = `wsdiag_${randomUUID()}`;
-  const error = cause instanceof Error ? cause : new Error(String(cause));
+  const safeDetails = safeManifestDetails(cause);
+  const originalCause = cause instanceof CodaScopeWorkspaceManifestReadError
+    ? cause.originalCause
+    : cause;
+  const error = originalCause instanceof Error
+    ? originalCause
+    : new Error(String(originalCause));
   console.error(
     "[CodaScope] workspace assistant diagnostic.",
-    { diagnosticId, stage },
+    {
+      diagnosticId,
+      stage,
+      ...(safeDetails ? { safeDetails } : {}),
+    },
     error,
   );
   return new WorkspaceAssistantDiagnosticError({
     diagnosticId,
     stage,
+    safeDetails,
     ...context,
   });
 }
@@ -104,6 +132,7 @@ export function contextualizeWorkspaceAssistantFailure(
     stage: error.stage,
     fullResponse: context.fullResponse ?? error.fullResponse,
     actions: context.actions ?? error.actions,
+    safeDetails: error.safeDetails,
   });
 }
 
@@ -112,9 +141,34 @@ export function workspaceAssistantFailureMetadata(
 ): {
   diagnosticId: string;
   failureStage: WorkspaceAssistantFailureStage;
+  safeDetails?: WorkspaceAssistantSafeDiagnosticDetails;
 } {
   return {
     diagnosticId: error.diagnosticId,
     failureStage: error.stage,
+    ...(error.safeDetails ? { safeDetails: error.safeDetails } : {}),
   };
+}
+
+function safeManifestDetails(
+  cause: unknown,
+): WorkspaceAssistantSafeDiagnosticDetails | null {
+  if (!(cause instanceof CodaScopeWorkspaceManifestReadError)) return null;
+  return {
+    operation: cause.operation,
+    failureCategory: cause.failureCategory,
+    projectId: cause.projectId,
+  };
+}
+
+function publicDiagnosticDetails(
+  details: WorkspaceAssistantSafeDiagnosticDetails | null,
+): string {
+  if (!details) return "";
+  const project = details.projectId
+    ? ` Project ID: ${details.projectId}.`
+    : "";
+  return ` Failure point: ${details.operation}.`
+    + ` Failure category: ${details.failureCategory}.`
+    + project;
 }
