@@ -35,15 +35,28 @@ export interface TopicDepthMetrics {
   hasHistoricalContext: boolean;
 }
 
-export interface TopicState {
+interface TopicStateBase {
   depth: TopicDepth;
   builtAt: string;
   lastDeepenedAt?: string;
+}
+
+/**
+ * Version-1 state written before dependency and quality enrichment existed.
+ * Both enrichment fields must be absent; partially populated records remain
+ * corruption.
+ */
+export interface LegacyTopicState extends TopicStateBase {
+  deps?: never;
+  metrics?: never;
+}
+
+export interface EnrichedTopicState extends TopicStateBase {
   deps: string[];
   metrics: TopicDepthMetrics;
 }
 
-
+export type TopicState = LegacyTopicState | EnrichedTopicState;
 
 export interface WikiState {
   version: number;
@@ -175,7 +188,7 @@ export class CodaScopeWikiStateService {
 
     for (const [topicId, topicState] of Object.entries(state.topics)) {
       // Layer 1: Direct dependency match
-      for (const dep of topicState.deps) {
+      for (const dep of topicState.deps ?? []) {
         const isMatch = sourceFiles.some((file) => {
           if (file === dep) return true;
           if (dep.endsWith("/") && file.startsWith(dep)) return true;
@@ -404,18 +417,30 @@ function validateWikiState(value: unknown): WikiState {
 
   for (const [topicId, rawTopic] of Object.entries(value.topics)) {
     assertSafePathSegment(topicId, "wiki topic ID");
-    if (!isRecord(rawTopic)
-      || !new Set(["outline", "developed", "deep"]).has(String(rawTopic.depth))
-      || !isTimestamp(rawTopic.builtAt)
-      || (rawTopic.lastDeepenedAt !== undefined && !isTimestamp(rawTopic.lastDeepenedAt))
-      || !Array.isArray(rawTopic.deps)
-      || !rawTopic.deps.every((dependency) => typeof dependency === "string")
-      || !isTopicMetrics(rawTopic.metrics)) {
+    if (!isTopicState(rawTopic)) {
       throw new Error("invalid wiki topic state");
     }
   }
 
   return value as unknown as WikiState;
+}
+
+function isTopicState(value: unknown): value is TopicState {
+  if (!isRecord(value)
+    || !new Set(["outline", "developed", "deep"]).has(String(value.depth))
+    || !isTimestamp(value.builtAt)
+    || (value.lastDeepenedAt !== undefined && !isTimestamp(value.lastDeepenedAt))) {
+    return false;
+  }
+
+  const hasDeps = value.deps !== undefined;
+  const hasMetrics = value.metrics !== undefined;
+  if (!hasDeps && !hasMetrics) return true;
+  return hasDeps
+    && hasMetrics
+    && Array.isArray(value.deps)
+    && value.deps.every((dependency) => typeof dependency === "string")
+    && isTopicMetrics(value.metrics);
 }
 
 function isTopicMetrics(value: unknown): value is TopicDepthMetrics {

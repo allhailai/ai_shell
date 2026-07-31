@@ -177,6 +177,45 @@ describe("CodaScopeWorkspaceCatalogService project overviews", () => {
     expect(JSON.stringify(captured)).not.toContain("{ invalid");
   });
 
+  it("loads recognized legacy topic state into the workspace manifest", async () => {
+    const fixture = makeCatalog();
+    const projectDir = writeProject(fixture.root, "legacy-dir", {
+      id: "project-legacy",
+      name: "Legacy Project",
+      description: "",
+      repositories: [],
+    });
+    writeWiki(projectDir, "architecture", "# Architecture\n\nLegacy project.");
+    writeJson(path.join(projectDir, "wiki-state.json"), {
+      version: 1,
+      lastBuildAt: "2026-07-20T09:00:00.000Z",
+      lastBuildMode: "outline",
+      gitHeads: {},
+      topics: {
+        index: {
+          depth: "outline",
+          builtAt: "2026-07-20T09:00:00.000Z",
+        },
+        architecture: {
+          depth: "developed",
+          builtAt: "2026-07-20T09:00:00.000Z",
+        },
+      },
+    });
+
+    const snapshot = await fixture.catalog.getWorkspaceManifestSnapshot();
+
+    expect(snapshot.status).toMatchObject({
+      activeProjectCount: 1,
+      projectsWithWiki: 1,
+      lastWikiBuildAt: "2026-07-20T09:00:00.000Z",
+    });
+    expect(snapshot.projects[0]).toMatchObject({
+      projectId: "project-legacy",
+      substantiveWikiTopicCount: 1,
+    });
+  });
+
   it("drops an unsafe project identifier from manifest diagnostics", () => {
     const diagnostic = new CodaScopeWorkspaceManifestReadError(
       "wiki_topic_content",

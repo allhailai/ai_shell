@@ -1139,6 +1139,15 @@ Each wiki topic is evaluated against a rubric producing `TopicDepthMetrics`:
 
 Topics are classified as: **outline** → **developed** → **deep**
 
+Version-1 wiki state has two recognized topic-record variants. Current records
+contain both `deps` and `metrics`; legacy records contain neither. The strict
+workspace reader accepts the legacy pair only when both fields are absent,
+while partial enrichment, invalid types, unsafe topic IDs, and malformed
+timestamps remain persistence corruption. Legacy records are not rewritten or
+given invented metrics during reads. Delta matching treats their missing
+dependency list as empty and continues with its path-segment heuristic; a
+subsequent topic rebuild naturally publishes the current enriched shape.
+
 ### File Dependency Tracking
 
 Wiki pages reference source files. The service extracts these dependencies so that when files change, affected topics can be identified for re-generation.
