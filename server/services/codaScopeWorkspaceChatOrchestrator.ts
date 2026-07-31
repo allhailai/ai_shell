@@ -9,10 +9,18 @@ import type {
   WorkspaceConversationMessage,
   WorkspaceMessageContext,
 } from "./codaScopeWorkspaceConversationService.js";
-import type { CodaScopeWorkspaceIntentService } from "./codaScopeWorkspaceIntentService.js";
+import type {
+  CodaScopeWorkspaceIntentService,
+  WorkspaceIntentResolution,
+} from "./codaScopeWorkspaceIntentService.js";
 import type { WorkspaceRetrievedSourceReference } from "./codaScopeWorkspaceProvenance.js";
 import type { CodaScopeAction } from "../../src/apps/codascope/codaScopeTypes.js";
 import type { CanonicalWorkspaceNoteRangeTarget } from "../../src/apps/codascope/workspaceNoteRangeTargetValidation.js";
+import {
+  contextualizeWorkspaceAssistantFailure,
+  reportWorkspaceAssistantFailure,
+  WorkspaceAssistantDiagnosticError,
+} from "./codaScopeWorkspaceAssistantDiagnostics.js";
 import {
   buildWorkspaceAssistantPrompt,
   buildWorkspaceManifestFromCatalog,
@@ -53,26 +61,57 @@ export async function streamWorkspaceAssistantResponse(options: {
   images?: Array<{ data: string; mimeType: string }>;
   onMessage: (message: unknown) => void;
 }): Promise<WorkspaceStreamResult> {
-  const manifest = await buildWorkspaceManifestFromCatalog(options.catalog);
+  let manifest: string;
+  try {
+    manifest = await buildWorkspaceManifestFromCatalog(options.catalog);
+  } catch (error) {
+    throw reportWorkspaceAssistantFailure("manifest_load", error);
+  }
   const history = formatWorkspaceConversationHistory(options.history);
   const currentContext = formatWorkspaceCurrentContext(
     options.context,
     options.noteRangeTarget,
   );
   const prompt = buildWorkspaceAssistantPrompt(manifest, history, currentContext);
-  const resolution = await options.intentService.resolveTurn(
-    options.message,
-    options.context.explicitlyReferencedProjectIds,
-    {
-      actorId: options.actorId,
-      currentNote: options.context.currentNote,
-      noteRangeTarget: options.noteRangeTarget,
-    },
-  );
+  let resolution: WorkspaceIntentResolution;
+  try {
+    resolution = await options.intentService.resolveTurn(
+      options.message,
+      options.context.explicitlyReferencedProjectIds,
+      {
+        actorId: options.actorId,
+        currentNote: options.context.currentNote,
+        noteRangeTarget: options.noteRangeTarget,
+      },
+    );
+  } catch (error) {
+    throw reportWorkspaceAssistantFailure("intent_resolution", error);
+  }
 
   let fullResponse = "";
   return new Promise<WorkspaceStreamResult>((resolve, reject) => {
-    options.agentService.send({
+    const rejectAgentFailure = (
+      error: unknown,
+      actions: CodaScopeAction[] = [],
+    ) => {
+      if (error instanceof Error
+        && error.message === "Agent cancelled by user.") {
+        reject(new WorkspaceAssistantCancelledError(fullResponse, actions));
+        return;
+      }
+      const diagnostic = error instanceof WorkspaceAssistantDiagnosticError
+        ? contextualizeWorkspaceAssistantFailure(error, {
+            fullResponse,
+            actions,
+          })
+        : reportWorkspaceAssistantFailure("agent_execution", error, {
+            fullResponse,
+            actions,
+          });
+      reject(diagnostic);
+    };
+
+    void options.agentService.send({
       scope: { kind: "workspace" },
       purpose: "workspace-assistant",
       actorId: options.actorId,
@@ -94,15 +133,8 @@ export async function streamWorkspaceAssistantResponse(options: {
         resolve({ fullResponse, agentResult, retrievedSources, actions });
       },
       onError: (error, actions = []) => {
-        if (error.message === "Agent cancelled by user.") {
-          reject(new WorkspaceAssistantCancelledError(fullResponse, actions));
-          return;
-        }
-        reject(Object.assign(
-          new Error("Workspace assistant run failed."),
-          { fullResponse, actions },
-        ));
+        rejectAgentFailure(error, actions);
       },
-    });
+    }).catch(rejectAgentFailure);
   });
 }

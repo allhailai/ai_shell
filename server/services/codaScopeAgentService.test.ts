@@ -334,6 +334,9 @@ describe("CodaScopeAgentService actor isolation", () => {
 
   it("fails workspace actor and invalid scope/purpose pairs before agent creation", async () => {
     const root = tmpDir();
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
     try {
       const service = new CodaScopeAgentService({} as any, root, {
         activeResolver: {} as any,
@@ -355,8 +358,19 @@ describe("CodaScopeAgentService actor isolation", () => {
         onError: missingActorError,
       });
       expect(missingActorError).toHaveBeenCalledWith(expect.objectContaining({
-        message: expect.stringContaining("authenticated initiating actor"),
+        message: expect.stringMatching(
+          /^Workspace assistant runtime prerequisites are unavailable\. Diagnostic ID: wsdiag_/,
+        ),
+        stage: "agent_prerequisites",
+        diagnosticId: expect.stringMatching(/^wsdiag_/),
       }));
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({ stage: "agent_prerequisites" }),
+        expect.objectContaining({
+          message: expect.stringContaining("authenticated initiating actor"),
+        }),
+      );
 
       const invalidPairError = vi.fn();
       await service.send({
@@ -370,11 +384,25 @@ describe("CodaScopeAgentService actor isolation", () => {
         onError: invalidPairError,
       } as any);
       expect(invalidPairError).toHaveBeenCalledWith(expect.objectContaining({
-        message: expect.stringContaining("Invalid CodaScope purpose/scope combination"),
+        message: expect.stringMatching(
+          /^Workspace assistant runtime prerequisites are unavailable\. Diagnostic ID: wsdiag_/,
+        ),
+        stage: "agent_prerequisites",
+        diagnosticId: expect.stringMatching(/^wsdiag_/),
       }));
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({ stage: "agent_prerequisites" }),
+        expect.objectContaining({
+          message: expect.stringContaining(
+            "Invalid CodaScope purpose/scope combination",
+          ),
+        }),
+      );
       expect(createAgent).not.toHaveBeenCalled();
       await service.shutdown();
     } finally {
+      diagnostic.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -493,6 +521,9 @@ describe("CodaScopeAgentService actor isolation", () => {
 
   it("returns trusted workspace mutation actions when a later SDK failure occurs", async () => {
     const root = tmpDir();
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
     try {
       const mutationHolder = new WorkspaceMutationActionCollectorHolder();
       const fakeAgent = {
@@ -570,14 +601,26 @@ describe("CodaScopeAgentService actor isolation", () => {
       });
 
       expect(onError).toHaveBeenCalledWith(
-        expect.objectContaining({ message: "Workspace assistant run failed." }),
+        expect.objectContaining({
+          message: expect.stringMatching(
+            /^Workspace assistant model execution failed\. Diagnostic ID: wsdiag_/,
+          ),
+          stage: "agent_execution",
+          diagnosticId: expect.stringMatching(/^wsdiag_/),
+        }),
         [expect.objectContaining({
           type: "note_created",
           attributes: expect.objectContaining({ stableId: "note-1" }),
         })],
       );
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({ stage: "agent_execution" }),
+        expect.objectContaining({ message: "later SDK failure" }),
+      );
       await service.shutdown();
     } finally {
+      diagnostic.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -66,6 +66,10 @@ import {
   ProjectNoteRangeActionCollector,
   ProjectNoteRangeActionCollectorHolder,
 } from "./codaScopeProjectNoteRangeMutationActions.js";
+import {
+  reportWorkspaceAssistantFailure,
+  type WorkspaceAssistantFailureStage,
+} from "./codaScopeWorkspaceAssistantDiagnostics.js";
 
 /* ── Types ──────────────────────────────────────────────────────────── */
 
@@ -620,19 +624,30 @@ export class CodaScopeAgentService {
     } = options;
 
     if (this.disposed) {
-      onError(new Error("CodaScope agent service has been disposed."));
+      const error = new Error("CodaScope agent service has been disposed.");
+      onError(scope.kind === "workspace"
+        ? reportWorkspaceAssistantFailure("agent_prerequisites", error)
+        : error);
       return;
     }
     try {
       assertAgentPurposeScope(scope, purpose);
     } catch (error) {
-      onError(error instanceof Error ? error : new Error(String(error)));
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      onError(scope.kind === "workspace"
+        ? reportWorkspaceAssistantFailure("agent_prerequisites", normalized)
+        : normalized);
       return;
     }
     if ((purpose === "workspace-assistant"
       || EPIC_MUTATION_PURPOSES.has(purpose as ProjectAgentPurpose))
       && !actorId?.trim()) {
-      onError(new Error(`An authenticated initiating actor is required for ${purpose} agent tools.`));
+      const error = new Error(
+        `An authenticated initiating actor is required for ${purpose} agent tools.`,
+      );
+      onError(purpose === "workspace-assistant"
+        ? reportWorkspaceAssistantFailure("agent_prerequisites", error)
+        : error);
       return;
     }
 
@@ -641,7 +656,10 @@ export class CodaScopeAgentService {
     let projectNoteRangeTarget: CanonicalProjectNoteRangeTarget | null = null;
     if (scope.kind === "workspace") {
       if (!this.workspaceTools) {
-        onError(new Error("CodaScope workspace tool dependencies are unavailable."));
+        onError(reportWorkspaceAssistantFailure(
+          "agent_prerequisites",
+          new Error("CodaScope workspace tool dependencies are unavailable."),
+        ));
         return;
       }
       try {
@@ -658,8 +676,11 @@ export class CodaScopeAgentService {
         } else if (options.workspaceNoteGrant !== undefined) {
           throw new Error("Workspace note grant is unavailable.");
         }
-      } catch {
-        onError(new Error("Workspace turn grant is invalid or inactive."));
+      } catch (error) {
+        onError(reportWorkspaceAssistantFailure(
+          "agent_grant_validation",
+          error,
+        ));
         return;
       }
     }
@@ -708,6 +729,8 @@ export class CodaScopeAgentService {
       new ProjectNoteRangeActionCollector();
     let activeEntry: PoolEntry | undefined;
     let startedRun: Run | undefined;
+    let workspaceFailureStage: WorkspaceAssistantFailureStage =
+      "agent_creation";
 
     try {
       const agent = await this.getOrCreateAgent({
@@ -762,6 +785,7 @@ export class CodaScopeAgentService {
           }
         : fullMessage;
 
+      workspaceFailureStage = "agent_start";
       const startRun = async (currentAgent: SDKAgent) => {
         // Deltas arrive after send() resolves in the SDK, but retaining the id
         // separately also keeps the retry path free of a temporal-dead-zone
@@ -859,7 +883,18 @@ export class CodaScopeAgentService {
       this.activeRuns.set(chatKey, scopedRuns);
 
       // Wait for completion
+      workspaceFailureStage = "agent_execution";
       const result = await run.wait();
+      const terminalStatus = "status" in result
+        ? String(result.status)
+        : "";
+      if (terminalStatus
+        && terminalStatus !== "finished"
+        && terminalStatus !== "completed") {
+        throw new Error(
+          `Cursor SDK run ended with terminal status "${terminalStatus}".`,
+        );
+      }
       this.removeActiveRun(chatKey, run);
 
       if (activeEntry) {
@@ -941,10 +976,10 @@ export class CodaScopeAgentService {
         workspaceProvenanceCollector.clear();
         const mutationActions = workspaceMutationActionCollector.drain();
         activeEntry?.workspaceMutationActionHolder?.clear();
-        // SDK/native errors may contain machine-local details. Workspace
-        // callers receive a stable path-free failure instead.
         onError(
-          new Error("Workspace assistant run failed."),
+          reportWorkspaceAssistantFailure(workspaceFailureStage, err, {
+            actions: mutationActions,
+          }),
           mutationActions,
         );
       } else {

@@ -200,23 +200,84 @@ describe("workspace chat orchestrator", () => {
 
   it("sanitizes workspace agent failures", async () => {
     const { catalog, intentService } = fixture();
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
     const send = vi.fn((options: any) => {
       options.onError(new Error("/private/repository/sdk-secret"));
     });
 
-    await expect(streamWorkspaceAssistantResponse({
-      actorId: "alice",
-      message: "Question",
-      modelId: "model",
-      context: createWorkspaceMessageContext(undefined),
-      history: [],
-      catalog: catalog as any,
-      intentService: intentService as any,
-      agentService: { send } as any,
-      onMessage: vi.fn(),
-    })).rejects.toMatchObject({
-      message: "Workspace assistant run failed.",
-      fullResponse: "",
-    });
+    try {
+      await expect(streamWorkspaceAssistantResponse({
+        actorId: "alice",
+        message: "Question",
+        modelId: "model",
+        context: createWorkspaceMessageContext(undefined),
+        history: [],
+        catalog: catalog as any,
+        intentService: intentService as any,
+        agentService: { send } as any,
+        onMessage: vi.fn(),
+      })).rejects.toMatchObject({
+        message: expect.stringMatching(
+          /^Workspace assistant model execution failed\. Diagnostic ID: wsdiag_/,
+        ),
+        stage: "agent_execution",
+        diagnosticId: expect.stringMatching(/^wsdiag_/),
+        fullResponse: "",
+      });
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({
+          diagnosticId: expect.stringMatching(/^wsdiag_/),
+          stage: "agent_execution",
+        }),
+        expect.objectContaining({
+          message: "/private/repository/sdk-secret",
+        }),
+      );
+    } finally {
+      diagnostic.mockRestore();
+    }
+  });
+
+  it("identifies all-project manifest failures before agent creation", async () => {
+    const { send, catalog, intentService } = fixture();
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
+    catalog.listActiveProjects.mockRejectedValueOnce(
+      new Error("/private/projects/Core/wiki-state.json"),
+    );
+
+    try {
+      await expect(streamWorkspaceAssistantResponse({
+        actorId: "alice",
+        message: "Say ok",
+        modelId: "model",
+        context: createWorkspaceMessageContext(undefined),
+        history: [],
+        catalog: catalog as any,
+        intentService: intentService as any,
+        agentService: { send } as any,
+        onMessage: vi.fn(),
+      })).rejects.toMatchObject({
+        message: expect.stringMatching(
+          /^Workspace assistant could not load the all-project manifest\. Diagnostic ID: wsdiag_/,
+        ),
+        stage: "manifest_load",
+        diagnosticId: expect.stringMatching(/^wsdiag_/),
+      });
+      expect(send).not.toHaveBeenCalled();
+      expect(diagnostic).toHaveBeenCalledWith(
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({ stage: "manifest_load" }),
+        expect.objectContaining({
+          message: "/private/projects/Core/wiki-state.json",
+        }),
+      );
+    } finally {
+      diagnostic.mockRestore();
+    }
   });
 });

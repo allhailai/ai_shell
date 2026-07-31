@@ -101,6 +101,10 @@ function terminals(res: ReturnType<typeof response>): string[] {
   );
 }
 
+function terminalPayload(frame: string): Record<string, any> {
+  return JSON.parse(frame.split("data: ")[1]) as Record<string, any>;
+}
+
 function conversation(messages: any[] = []) {
   return {
     version: 1,
@@ -706,6 +710,9 @@ describe("workspace chat routes", () => {
   it("persists sanitized failure before one error terminal without path leakage", async () => {
     const timeline: string[] = [];
     const state = statefulConversationService(timeline);
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
     orchestrator.stream.mockRejectedValueOnce(Object.assign(
       new Error("/private/repository/sdk-token"),
       { fullResponse: "Partial answer" },
@@ -732,12 +739,31 @@ describe("workspace chat routes", () => {
       "persist:error",
       "terminal:error",
     ]);
-    expect(terminals(res)).toEqual([
-      'event: error\ndata: {"error":"Workspace assistant run failed."}\n\n',
-    ]);
+    expect(terminals(res)).toHaveLength(1);
+    expect(terminalPayload(terminals(res)[0])).toMatchObject({
+      error: expect.stringMatching(
+        /^Workspace assistant response could not be finalized\. Diagnostic ID: wsdiag_/,
+      ),
+      diagnosticId: expect.stringMatching(/^wsdiag_/),
+      failureStage: "response_finalization",
+      conversationId: "conv-workspace",
+      assistantMessageId: expect.stringMatching(/^msg_/),
+    });
     expect(res.frames.join("")).not.toContain("/private/repository");
-    expect(state.get().messages.find((message: any) => message.role === "assistant"))
-      .toMatchObject({ status: "error", content: "Partial answer" });
+    const assistant = state.get().messages.find(
+      (message: any) => message.role === "assistant",
+    );
+    expect(assistant).toMatchObject({ status: "error" });
+    expect(assistant.content).toMatch(
+      /^Partial answer\n\nWorkspace assistant response could not be finalized\. Diagnostic ID: wsdiag_/,
+    );
+    expect(assistant.content).not.toContain("/private/repository");
+    expect(diagnostic).toHaveBeenCalledWith(
+      "[CodaScope] workspace assistant diagnostic.",
+      expect.objectContaining({ stage: "response_finalization" }),
+      expect.objectContaining({ message: "/private/repository/sdk-token" }),
+    );
+    diagnostic.mockRestore();
   });
 
   it("persists cancellation before one cancelled terminal and never emits done", async () => {
@@ -812,6 +838,9 @@ describe("workspace chat routes", () => {
   it("emits one sanitized error when completion persistence fails but error persistence succeeds", async () => {
     const timeline: string[] = [];
     const state = statefulConversationService(timeline);
+    const diagnostic = vi.spyOn(console, "error").mockImplementation(
+      () => undefined,
+    );
     state.service.completeAssistantMessage.mockRejectedValueOnce(
       new Error("/private/storage/completion-write-failed"),
     );
@@ -832,15 +861,35 @@ describe("workspace chat routes", () => {
     );
     await waitForEnd(res);
 
-    expect(terminals(res)).toEqual([
-      'event: error\ndata: {"error":"Workspace assistant run failed."}\n\n',
-    ]);
+    expect(terminals(res)).toHaveLength(1);
+    expect(terminalPayload(terminals(res)[0])).toMatchObject({
+      error: expect.stringMatching(
+        /^Workspace assistant response could not be finalized\. Diagnostic ID: wsdiag_/,
+      ),
+      diagnosticId: expect.stringMatching(/^wsdiag_/),
+      failureStage: "response_finalization",
+      conversationId: "conv-workspace",
+      assistantMessageId: expect.stringMatching(/^msg_/),
+    });
     expect(res.frames.join("")).not.toContain("/private/storage");
     expect(state.service.completeAssistantMessage).toHaveBeenCalledTimes(1);
     expect(state.service.recordAssistantMessageError).toHaveBeenCalledTimes(1);
-    expect(state.get().messages.find((message: any) => message.role === "assistant"))
-      .toMatchObject({ status: "error", content: "Generated answer" });
+    const assistant = state.get().messages.find(
+      (message: any) => message.role === "assistant",
+    );
+    expect(assistant).toMatchObject({ status: "error" });
+    expect(assistant.content).toMatch(
+      /^Generated answer\n\nWorkspace assistant response could not be finalized\. Diagnostic ID: wsdiag_/,
+    );
     expect(state.service.endConversationRun).toHaveBeenCalledTimes(1);
+    expect(diagnostic).toHaveBeenCalledWith(
+      "[CodaScope] workspace assistant diagnostic.",
+      expect.objectContaining({ stage: "response_finalization" }),
+      expect.objectContaining({
+        message: "/private/storage/completion-write-failed",
+      }),
+    );
+    diagnostic.mockRestore();
   });
 
   it.each([
@@ -880,9 +929,14 @@ describe("workspace chat routes", () => {
       );
       await waitForEnd(res);
 
-      expect(terminals(res)).toEqual([
-        "event: error\ndata: {\"error\":\"Workspace assistant run could not be finalized.\"}\n\n",
-      ]);
+      expect(terminals(res)).toHaveLength(1);
+      expect(terminalPayload(terminals(res)[0])).toMatchObject({
+        error: expect.stringMatching(
+          /^Workspace assistant failure state could not be finalized\. Diagnostic ID: wsdiag_/,
+        ),
+        diagnosticId: expect.stringMatching(/^wsdiag_/),
+        failureStage: "failure_persistence",
+      });
       expect(res.frames.join("")).not.toContain("/private/");
       expect(res.frames.join("")).not.toContain("event: done");
       expect(res.frames.join("")).not.toContain("event: cancelled");
@@ -890,8 +944,11 @@ describe("workspace chat routes", () => {
       expect(state.service.recordAssistantMessageError).toHaveBeenCalledTimes(1);
       expect(state.service.endConversationRun).toHaveBeenCalledTimes(1);
       expect(diagnostic).toHaveBeenCalledWith(
-        "[CodaScope] workspace assistant failure state could not be persisted.",
+        "[CodaScope] workspace assistant diagnostic.",
+        expect.objectContaining({ stage: "failure_persistence" }),
+        expect.any(Error),
       );
+      diagnostic.mockRestore();
     },
   );
 

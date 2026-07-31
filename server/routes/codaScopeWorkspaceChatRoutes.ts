@@ -23,6 +23,12 @@ import {
   canonicalizeWorkspaceNoteRangeTarget,
   WorkspaceNoteRangeTargetInvalidError,
 } from "../services/codaScopeWorkspaceNoteRangeTarget.js";
+import {
+  contextualizeWorkspaceAssistantFailure,
+  reportWorkspaceAssistantFailure,
+  workspaceAssistantFailureMetadata,
+  WorkspaceAssistantDiagnosticError,
+} from "../services/codaScopeWorkspaceAssistantDiagnostics.js";
 
 const MAX_ATTACHMENTS = 10;
 const MODEL_ID_MAX = 255;
@@ -424,37 +430,52 @@ async function handleWorkspaceMessage(
     } catch (error) {
       const partial = partialResponse(error) || generatedResponse;
       const actions = mutationActions(error);
-      const failurePersisted = await persistWorkspaceFailure(
+      const cancelled = error instanceof WorkspaceAssistantCancelledError;
+      const diagnostic = cancelled
+        ? null
+        : error instanceof WorkspaceAssistantDiagnosticError
+          ? contextualizeWorkspaceAssistantFailure(error, {
+              fullResponse: partial,
+              actions,
+            })
+          : reportWorkspaceAssistantFailure("response_finalization", error, {
+              fullResponse: partial,
+              actions,
+            });
+      const failureContent = cancelled
+        ? partial || "[Workspace assistant response cancelled.]"
+        : partial
+          ? `${partial}\n\n${diagnostic!.message}`
+          : diagnostic!.message;
+      const persistenceFailure = await persistWorkspaceFailure(
         workspaceConversationSvc,
         actorId,
         conversationId,
         assistantMessageId,
-        error instanceof WorkspaceAssistantCancelledError
-          ? partial || "[Workspace assistant response cancelled.]"
-          : partial || "Workspace assistant run failed.",
+        failureContent,
         actions,
       );
-      if (!failurePersisted) {
-        terminal.error("Workspace assistant run could not be finalized.");
+      if (persistenceFailure) {
+        terminal.sendEvent("error", {
+          error: persistenceFailure.message,
+          ...workspaceAssistantFailureMetadata(persistenceFailure),
+        });
         return;
       }
-      if (error instanceof WorkspaceAssistantCancelledError) {
+      if (cancelled) {
         terminal.cancelled({
           conversationId,
           assistantMessageId,
           ...(actions.length > 0 ? { actions } : {}),
         });
       } else {
-        if (actions.length > 0) {
-          terminal.sendEvent("error", {
-            error: "Workspace assistant run failed.",
-            conversationId,
-            assistantMessageId,
-            actions,
-          });
-        } else {
-          terminal.error("Workspace assistant run failed.");
-        }
+        terminal.sendEvent("error", {
+          error: diagnostic!.message,
+          ...workspaceAssistantFailureMetadata(diagnostic!),
+          conversationId,
+          assistantMessageId,
+          ...(actions.length > 0 ? { actions } : {}),
+        });
       }
     }
   } finally {
@@ -477,10 +498,12 @@ async function persistWorkspaceFailure(
   messageId: string,
   content: string,
   actions: readonly CodaScopeAction[],
-): Promise<boolean> {
+): Promise<WorkspaceAssistantDiagnosticError | null> {
   if (!messageId) {
-    logWorkspaceFailurePersistenceDiagnostic();
-    return false;
+    return reportWorkspaceAssistantFailure(
+      "failure_persistence",
+      new Error("Workspace assistant message identity was unavailable."),
+    );
   }
   try {
     const persisted = await service.recordAssistantMessageError(
@@ -490,18 +513,14 @@ async function persistWorkspaceFailure(
       content,
       actions,
     );
-    if (persisted) return true;
-  } catch {
-    // The diagnostic below is deliberately fixed and path-free.
+    if (persisted) return null;
+    return reportWorkspaceAssistantFailure(
+      "failure_persistence",
+      new Error("Workspace assistant failure transition returned no record."),
+    );
+  } catch (error) {
+    return reportWorkspaceAssistantFailure("failure_persistence", error);
   }
-  logWorkspaceFailurePersistenceDiagnostic();
-  return false;
-}
-
-function logWorkspaceFailurePersistenceDiagnostic(): void {
-  console.error(
-    "[CodaScope] workspace assistant failure state could not be persisted.",
-  );
 }
 
 function validateAttachments(
