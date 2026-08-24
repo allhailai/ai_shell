@@ -21,7 +21,7 @@ Mock/local UI state is allowed only to demonstrate navigation. PR 2 will add rea
 
 Work **one internal phase at a time**. Stop after each phase for review.
 
-**Progress:** Phase 1 implemented (registered placeholder canvas). Phases 2–5 not started.
+**Progress:** Phases 1–2 implemented (scaffold + routing/nav shells). Phases 3–5 not started.
 
 ---
 
@@ -208,9 +208,9 @@ Stop after each phase unless asked to continue.
 
 App card opens from `/` to `/market-access` with a placeholder canvas. No list/create/workspace yet.
 
-### Phase 2 — Routing and nav
+### Phase 2 — Routing and nav — done
 
-`useAppSubRoute` table, left nav `nav-item`s, unknown-route handling, list/create/workspace **shells** (minimal headings, no form yet).
+`useAppSubRoute` table, left nav `nav-item`s, unknown-route handling, list/create/workspace **shells** (minimal headings, no form yet). The list includes a Create assessment button so routing can be exercised without typing URLs.
 
 ### Phase 3 — List + create form
 

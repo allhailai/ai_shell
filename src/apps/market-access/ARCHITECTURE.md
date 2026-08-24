@@ -22,7 +22,7 @@ structured or extracted project knowledge
 generated synthesis / assessment
 ```
 
-**Implementation status:** registered placeholder canvas only (PR 1 Phase 1). No assessment list, create form, or workspace yet. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+**Implementation status:** PR 1 Phase 2 — URL routing and left nav with list/create/workspace shells. No create form, file picker, or persistence. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
 ## Level 1 — File map
 
@@ -31,22 +31,42 @@ src/apps/market-access/
 ├── DEVELOPMENT.md              # Collaboration / workflow conventions
 ├── ARCHITECTURE.md             # ← You are here (implemented system)
 ├── AGENTS.md                   # How to modify the current implementation
-├── manifest.tsx                # AppManifest — id market-access, mainContent only
-├── MarketAccessContent.tsx     # Placeholder canvas
+├── manifest.tsx                # AppManifest — mainContent + leftNav
+├── MarketAccessContent.tsx     # URL router (useAppSubRoute)
+├── MarketAccessNav.tsx         # URL-only left nav
 ├── market-access.css           # Namespaced .market-access-* styles
+├── components/
+│   └── MarketAccessIcons.tsx   # SVG icons
+├── views/
+│   ├── AssessmentList.tsx      # List shell
+│   ├── CreateAssessment.tsx    # Create-route shell (no form yet)
+│   └── AssessmentWorkspace.tsx # Workspace overview shell
 └── plans/
-    ├── README.md               # Roadmap and which plan is active
-    └── pr-01-ui-foundation.md  # Canonical PR 1 plan (active)
+    ├── README.md
+    └── pr-01-ui-foundation.md
 ```
 
 Shell wiring: imported from [`src/apps/registry.ts`](../../apps/registry.ts); CSS imported from [`src/styles.css`](../../styles.css).
 
 ## Level 2 — Shell wiring
 
-`marketAccessApp` exports `id: "market-access"`, display name **Market Access**, and `mainContent: MarketAccessContent`. No `leftNav`, panels, commands, or secrets.
+`marketAccessApp` exports `id: "market-access"`, `mainContent`, and `leftNav`. No panels, commands, or secrets.
 
-`MarketAccessContent` is a static region. Sub-routes and in-memory assessments are not implemented.
+## Level 3 — Routing
 
-## Level 3+
+`MarketAccessContent` owns sub-routes via `useAppSubRoute("market-access")`. Nav reads the same URL; it does not share React state with the canvas.
 
-Omitted until later PR 1 phases land. Do not treat the active plan as implemented architecture.
+| URL | View |
+| --- | --- |
+| `/market-access` | `replace("assessments")` |
+| `/market-access/assessments` | List shell |
+| `/market-access/assessments/new` | Create shell (`new` reserved) |
+| `/market-access/assessments/:id` | Workspace overview shell |
+| Other first segments | List + flash; URL replaced to `assessments` |
+| `/assessments/:id/...` extra | Stripped to overview |
+
+In-memory assessments and unknown-id handling are not implemented.
+
+## Level 4+
+
+Omitted until later PR 1 phases land.

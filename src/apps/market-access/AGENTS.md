@@ -4,7 +4,7 @@ Operational rules for safely modifying **this app as it exists**. Workflow lives
 
 ## Current status
 
-PR 1 Phase 1 is implemented: the app is registered and opens a placeholder canvas at `/market-access`. There is no left nav, sub-routing, or assessment state.
+PR 1 Phase 2 is implemented: URL routing, left nav, and list/create/workspace shells. There is no create form, file picker, or assessment persistence.
 
 Do not implement further phases until asked.
 
@@ -46,9 +46,21 @@ After any implementation phase:
 - [ ] CSS classes are prefixed `market-access-` and use tokens
 - [ ] No emoji in TSX
 - [ ] No nested app `<main>`
-- [ ] Sub-routes preserve shell query params (`?nav=`, `?rp=`, and similar) — not applicable until Phase 2
+- [ ] Sub-routes preserve shell query params (`?nav=`, `?rp=`, and similar)
 
 **Phase 1 manual checks**
 
 - [x] Shell landing page shows a **Market Access** card
-- [x] Opening the card navigates to `/market-access` and shows the placeholder heading
+- [x] Opening the card navigates to `/market-access`
+
+**Phase 2 manual checks**
+
+- [x] `/market-access` redirects to `/market-access/assessments`
+- [x] Create assessment → `/market-access/assessments/new`; Cancel returns to the list
+- [x] `/market-access/assessments/<id>` shows the workspace shell; All assessments returns to the list
+- [x] Unknown path (e.g. `/market-access/nope`) returns to the list with a dismissible banner
+- [x] Extra workspace segment (e.g. `/market-access/assessments/demo/analogs`) strips to overview
+- [x] Browser back/forward restores the matching view
+- [x] Collapsed left nav still shows icons; Analogs / Evidence / Knowledge are disabled
+- [x] `?nav=collapsed` is preserved when navigating inside the app
+- [x] No nested app `<main>`

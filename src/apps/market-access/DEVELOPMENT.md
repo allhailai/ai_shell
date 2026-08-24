@@ -31,7 +31,7 @@ Completed PR plans are historical context and do not need to be reread by defaul
 After each implementation phase:
 
 - summarize behavior changed
-- list files created or modified
+- list files created or modified, with a brief reason for each change
 - call out meaningful routing/state/data-flow impact
 - identify deferred work
 - report validation performed and remaining manual checks

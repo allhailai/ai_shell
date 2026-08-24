@@ -1,5 +1,6 @@
 import type { AppManifest } from "../../types/app";
 import { MarketAccessContent } from "./MarketAccessContent";
+import { MarketAccessNav } from "./MarketAccessNav";
 
 function MarketAccessIcon({ size = 18 }: { size?: number }) {
   return (
@@ -28,5 +29,6 @@ export const marketAccessApp: AppManifest = {
   icon: MarketAccessIcon,
   description: "Research pharmaceutical analogs and build evidence-backed assessments",
   accentColor: "hsl(172, 55%, 42%)",
+  leftNav: MarketAccessNav,
   mainContent: MarketAccessContent,
 };
