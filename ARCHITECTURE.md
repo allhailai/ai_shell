@@ -73,7 +73,10 @@ ai_shell/
         ├── admin/                # User/system administration
         ├── db-helper/            # Database exploration tools
         │   └── ARCHITECTURE.md
-        └── codascope/            # AI-powered codebase documentation & analysis
+        ├── codascope/            # AI-powered codebase documentation & analysis
+        │    ├── ARCHITECTURE.md   # ← App-specific architecture (progressive disclosure)
+        │    └── AGENTS.md         # ← App-specific agent development rules
+        └── music-creator/        # Compact browser-based drum and melody sequencer
             ├── ARCHITECTURE.md   # ← App-specific architecture (progressive disclosure)
             └── AGENTS.md         # ← App-specific agent development rules
 ```
@@ -120,9 +123,10 @@ import { arcadeApp }     from "./arcade/manifest";
 import { adminApp }      from "./admin/manifest";
 import { dbHelperApp }   from "./db-helper/manifest";
 import { codaScopeApp }  from "./codascope/manifest";
+import { musicCreatorApp } from "./music-creator/manifest";
 
 export const apps: AppManifest[] = [
-  helloWorldApp, arcadeApp, dbHelperApp, codaScopeApp, adminApp,
+  helloWorldApp, arcadeApp, dbHelperApp, codaScopeApp, musicCreatorApp, adminApp
 ];
 ```
 

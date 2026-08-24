@@ -506,11 +506,13 @@
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   text-align: center;
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 
 .music-creator-transport-tempo-number::-webkit-outer-spin-button,
 .music-creator-transport-tempo-number::-webkit-inner-spin-button {
+  appearance: none;
   -webkit-appearance: none;
   margin: 0;
 }

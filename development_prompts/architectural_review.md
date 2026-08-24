@@ -81,7 +81,8 @@ ai_shell/
         ├── arcade/                   # Retro game arcade
         ├── admin/                    # User/system administration
         ├── db-helper/                # Database exploration tools
-        └── codascope/                # AI-powered codebase documentation & analysis
+        ├── codascope/                # AI-powered codebase documentation & analysis
+        └── music-creator/            # Compact browser-based drum and melody sequencer
 ```
 
 **Out of scope**: Individual application internals. Each app is reviewed by its own architectural review prompt. This review covers the shell framework AND cross-app concerns (e.g., do apps respect boundaries, does the registry match reality).
@@ -152,7 +153,7 @@ Read `src/apps/registry.ts` and verify:
 - Every import in the registry resolves to a valid `manifest.tsx`
 - The registry array order is intentional (affects landing page order)
 
-Current registered apps: `helloWorldApp`, `arcadeApp`, `dbHelperApp`, `codaScopeApp`, `adminApp`
+Current registered apps: `helloWorldApp`, `arcadeApp`, `dbHelperApp`, `codaScopeApp`, `musicCreatorApp`, `adminApp`
 
 ### 2.2 Manifest Contract Adherence
 
@@ -164,9 +165,12 @@ For each registered app, verify the manifest satisfies `AppManifest` from `src/t
 | arcade | | | | | | |
 | db-helper | | | | | | |
 | codascope | | | | | | |
+| music-creator | | | | | | |
 | admin | | | | | | |
 
 Fill in the table and verify each field type-checks against the interface.
+
+**Apps with `headerItems`:** `arcade` and `music-creator` inject controls into the shell topbar — a separate React tree from `mainContent`. Verify they bridge state via module-level store + `useSyncExternalStore` (see `src/apps/arcade/ArcadeHeaderItems.tsx`, `src/apps/music-creator/routing/studioSession.ts`) rather than prop drilling across manifest regions.
 
 ### 2.3 CSS Registration
 
@@ -183,6 +187,7 @@ Current CSS imports for apps:
 ./apps/db-helper/db-helper.css
 ./apps/codascope/codascope.css
 ./apps/codascope/CodaScopeAssistant.css
+./apps/music-creator/music-creator.css
 ```
 
 - CodaScope has two CSS files imported. Is this appropriate or should they be consolidated?
@@ -207,6 +212,7 @@ Current status (verify):
 - `admin/` — has ARCHITECTURE.md? AGENTS.md?
 - `db-helper/` — has ARCHITECTURE.md? AGENTS.md?
 - `codascope/` — has ARCHITECTURE.md ✓, AGENTS.md ✓
+- `music-creator/` — has ARCHITECTURE.md ✓, AGENTS.md ✓
 
 ---
 
@@ -225,6 +231,7 @@ Sample-check each app's CSS file for hard-coded values that should use design to
 | `db-helper/explorer/explorer.css` | 829 | |
 | `codascope.css` | 2152 | |
 | `CodaScopeAssistant.css` | 732 | |
+| `music-creator.css` | 988 | |
 
 For each, grep for:
 - Hard-coded hex colors (`#xxx`)
@@ -241,6 +248,7 @@ Verify every app prefixes its CSS classes correctly:
 - `admin-*` for admin
 - `db-helper-*` or `dbhelper-*` for db-helper
 - `codascope-*` for codascope
+- `music-creator-*` for music-creator
 - `shell-*` for shell framework
 - `shared-*` for shared components
 
