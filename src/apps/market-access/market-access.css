@@ -1,0 +1,23 @@
+/* ── Market Access ────────────────────────────────────────────────────
+   Namespaced .market-access-* styles. Design tokens only.
+   ──────────────────────────────────────────────────────────────────── */
+
+.market-access-page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+.market-access-title {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--color-text-primary);
+  letter-spacing: -0.02em;
+}
+
+.market-access-subtitle {
+  margin-top: var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+}

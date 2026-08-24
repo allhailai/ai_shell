@@ -4,7 +4,9 @@ Operational rules for safely modifying **this app as it exists**. Workflow lives
 
 ## Current status
 
-No application code is registered yet. Do not implement until asked, and then only the requested plan phase.
+PR 1 Phase 1 is implemented: the app is registered and opens a placeholder canvas at `/market-access`. There is no left nav, sub-routing, or assessment state.
+
+Do not implement further phases until asked.
 
 Active plan: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
@@ -37,13 +39,16 @@ Do not add `server/` routes, shared FolderPicker usage, or agent/Cursor modules 
 
 ## Verification checklist
 
-Fill in as views land. Until then, after any implementation phase:
+After any implementation phase:
 
 - [ ] `npm run check` passes
 - [ ] Targeted Vitest tests pass when pure helpers exist (`npm test -- src/apps/market-access`)
 - [ ] CSS classes are prefixed `market-access-` and use tokens
 - [ ] No emoji in TSX
 - [ ] No nested app `<main>`
-- [ ] Sub-routes preserve shell query params (`?nav=`, `?rp=`, and similar)
+- [ ] Sub-routes preserve shell query params (`?nav=`, `?rp=`, and similar) — not applicable until Phase 2
 
-Phase-specific manual checks belong in the active plan until they describe implemented UI; then move the durable ones here.
+**Phase 1 manual checks**
+
+- [x] Shell landing page shows a **Market Access** card
+- [x] Opening the card navigates to `/market-access` and shows the placeholder heading

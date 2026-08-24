@@ -22,7 +22,7 @@ structured or extracted project knowledge
 generated synthesis / assessment
 ```
 
-**Implementation status:** documentation and planning only. No application UI is registered yet. The active design is [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+**Implementation status:** registered placeholder canvas only (PR 1 Phase 1). No assessment list, create form, or workspace yet. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
 ## Level 1 — File map
 
@@ -31,13 +31,22 @@ src/apps/market-access/
 ├── DEVELOPMENT.md              # Collaboration / workflow conventions
 ├── ARCHITECTURE.md             # ← You are here (implemented system)
 ├── AGENTS.md                   # How to modify the current implementation
+├── manifest.tsx                # AppManifest — id market-access, mainContent only
+├── MarketAccessContent.tsx     # Placeholder canvas
+├── market-access.css           # Namespaced .market-access-* styles
 └── plans/
     ├── README.md               # Roadmap and which plan is active
     └── pr-01-ui-foundation.md  # Canonical PR 1 plan (active)
 ```
 
-Shell wiring (`manifest.tsx`, registry, CSS, views) does not exist until PR 1 Phase 1.
+Shell wiring: imported from [`src/apps/registry.ts`](../../apps/registry.ts); CSS imported from [`src/styles.css`](../../styles.css).
 
-## Level 2+
+## Level 2 — Shell wiring
 
-Omitted until implementation exists. Do not treat the active plan as implemented architecture.
+`marketAccessApp` exports `id: "market-access"`, display name **Market Access**, and `mainContent: MarketAccessContent`. No `leftNav`, panels, commands, or secrets.
+
+`MarketAccessContent` is a static region. Sub-routes and in-memory assessments are not implemented.
+
+## Level 3+
+
+Omitted until later PR 1 phases land. Do not treat the active plan as implemented architecture.

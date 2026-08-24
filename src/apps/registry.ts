@@ -14,6 +14,7 @@ import { adminApp } from "./admin/manifest";
 import { dbHelperApp } from "./db-helper/manifest";
 import { codaScopeApp } from "./codascope/manifest";
 import { musicCreatorApp } from "./music-creator/manifest";
+import { marketAccessApp } from "./market-access/manifest";
 
 /** All registered applications. Add new app imports here. */
 export const apps: AppManifest[] = [
@@ -22,5 +23,6 @@ export const apps: AppManifest[] = [
   dbHelperApp,
   codaScopeApp,
   musicCreatorApp,
+  marketAccessApp,
   adminApp,
 ];

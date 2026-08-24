@@ -21,6 +21,8 @@ Mock/local UI state is allowed only to demonstrate navigation. PR 2 will add rea
 
 Work **one internal phase at a time**. Stop after each phase for review.
 
+**Progress:** Phase 1 implemented (registered placeholder canvas). Phases 2–5 not started.
+
 ---
 
 ## 2. Repository findings and reference implementations
@@ -202,7 +204,7 @@ No `server/` or `src/shared/` changes.
 
 Stop after each phase unless asked to continue.
 
-### Phase 1 — Scaffold
+### Phase 1 — Scaffold — done
 
 App card opens from `/` to `/market-access` with a placeholder canvas. No list/create/workspace yet.
 
@@ -325,9 +327,7 @@ If several phases land in one human commit, prefer one message that reflects the
 
 ---
 
-## Phase 1 only (next implementation slice)
-
-**Do not implement until approved.**
+## Phase 1 only (implemented)
 
 Scope: the app appears on the shell landing page and opens a placeholder canvas. No list, form, file picker, or workspace.
 
