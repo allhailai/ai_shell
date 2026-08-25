@@ -4,7 +4,7 @@ Operational rules for safely modifying **this app as it exists**. Workflow lives
 
 ## Current status
 
-PR 1 Phase 3 is implemented: empty-state list, create form with product name and package file picker, colocated validation. Create navigates to the workspace with a stub id — in-memory assessment storage lands in Phase 4.
+PR 1 Phase 4 is implemented: in-memory assessments in `MarketAccessContent`, session list cards, workspace overview with package metadata and placeholder sections, unknown-id banner. Phase 5 (hardening + doc sync) remains.
 
 Do not implement further phases until asked.
 
@@ -73,3 +73,11 @@ After any implementation phase:
 - [x] Invalid file type on drop/select shows rejection message
 - [x] Valid submit navigates to `/market-access/assessments/<id>` (stub — workspace has no stored metadata yet)
 - [x] Cancel returns to list
+
+**Phase 4 manual checks**
+
+- [x] Create → workspace shows product name, package metadata (name/size/format)
+- [x] Workspace placeholder cards for Analogs, Evidence, Knowledge do not claim generated output is authoritative
+- [x] All assessments → list shows session cards; clicking a card reopens workspace
+- [x] Refresh clears in-memory assessments; deep link to old id shows “not saved yet” banner
+- [x] Unknown id (e.g. `/market-access/assessments/missing-id`) redirects to list with dismissible banner

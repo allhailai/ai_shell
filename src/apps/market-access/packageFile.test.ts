@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatPackageFileSize,
   getPackageFileExtension,
   getPackageFileKind,
   isAcceptedPackageFile,
+  packageFileKindLabel,
   packageFileRejectionMessage,
 } from "./packageFile";
 
@@ -50,5 +52,20 @@ describe("packageFileRejectionMessage", () => {
   it("mentions supported types", () => {
     expect(packageFileRejectionMessage("x.pdf")).toMatch(/not supported/i);
     expect(packageFileRejectionMessage("README")).toMatch(/no file extension/i);
+  });
+});
+
+describe("packageFileKindLabel", () => {
+  it("maps kinds to display labels", () => {
+    expect(packageFileKindLabel("markdown")).toBe("Markdown");
+    expect(packageFileKindLabel("docx")).toBe("Word document");
+  });
+});
+
+describe("formatPackageFileSize", () => {
+  it("formats bytes and larger units", () => {
+    expect(formatPackageFileSize(512)).toBe("512 B");
+    expect(formatPackageFileSize(2048)).toBe("2 KB");
+    expect(formatPackageFileSize(1_572_864)).toBe("1.5 MB");
   });
 });

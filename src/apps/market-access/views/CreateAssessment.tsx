@@ -1,21 +1,11 @@
 import { useCallback, useState, type SubmitEventHandler } from "react";
 import { PackageFilePicker } from "../components/PackageFilePicker";
 import { getPackageFileKind, isAcceptedPackageFile } from "../packageFile";
-import type { PackageFileKind } from "../packageFile";
-
-export interface CreateAssessmentPayload {
-  productName: string;
-  packageFile: {
-    fileName: string;
-    fileSize: number;
-    kind: PackageFileKind;
-  };
-}
+import type { CreateAssessmentInput } from "../types";
 
 interface CreateAssessmentProps {
   onCancel: () => void;
-  /** Stub in Phase 3 — full in-memory list lands in Phase 4. */
-  onCreate: (payload: CreateAssessmentPayload) => void;
+  onCreate: (input: CreateAssessmentInput) => void;
 }
 
 interface FieldErrors {

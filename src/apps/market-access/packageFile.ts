@@ -36,3 +36,21 @@ export function packageFileRejectionMessage(fileName: string): string {
   }
   return `"${fileName}" is not supported. Use Markdown (.md, .markdown) or Word (.docx) only.`;
 }
+
+/** Display label for stored package metadata. */
+export function packageFileKindLabel(kind: PackageFileKind): string {
+  return kind === "markdown" ? "Markdown" : "Word document";
+}
+
+/** Compact human-readable file size for UI metadata. */
+export function formatPackageFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) {
+    return Number.isInteger(kb) || kb >= 10
+      ? `${Math.round(kb)} KB`
+      : `${kb.toFixed(1)} KB`;
+  }
+  const mb = bytes / (1024 * 1024);
+  return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
+}

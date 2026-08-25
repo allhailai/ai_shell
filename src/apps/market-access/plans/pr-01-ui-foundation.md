@@ -21,7 +21,7 @@ Mock/local UI state is allowed only to demonstrate navigation. PR 2 will add rea
 
 Work **one internal phase at a time**. Stop after each phase for review.
 
-**Progress:** Phases 1–3 implemented (scaffold + routing/nav + list/create form). Phases 4–5 not started.
+**Progress:** Phases 1–4 implemented. Phase 5 (hardening) not started.
 
 ---
 
@@ -216,7 +216,7 @@ App card opens from `/` to `/market-access` with a placeholder canvas. No list/c
 
 Empty state, product name, `PackageFilePicker`, colocated create validation, Cancel / Create. Create navigates with stub id (full in-memory state in Phase 4).
 
-### Phase 4 — Workspace overview
+### Phase 4 — Workspace overview — done
 
 In-memory assessments in `MarketAccessContent`, workspace metadata + placeholder cards (Analogs / Evidence / Knowledge), session list cards, honest “not persisted” copy.
 
