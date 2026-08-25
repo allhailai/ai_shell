@@ -105,3 +105,188 @@
   background: transparent;
   color: var(--color-text-secondary);
 }
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+
+.market-access-empty {
+  margin-top: var(--space-4);
+  padding: var(--space-8);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--color-border-primary);
+  background: var(--color-bg-elevated);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.market-access-empty-icon {
+  color: var(--color-text-tertiary);
+}
+
+.market-access-empty-title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.market-access-empty-text {
+  margin: 0;
+  max-width: 28rem;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+}
+
+/* ── Form ────────────────────────────────────────────────────────────── */
+
+.market-access-page-form {
+  max-width: 36rem;
+}
+
+.market-access-form-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.market-access-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-top: var(--space-2);
+}
+
+.market-access-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.market-access-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+}
+
+.market-access-input {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  outline: none;
+}
+
+.market-access-input:focus {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 3px hsla(172, 55%, 42%, 0.15);
+}
+
+.market-access-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.market-access-input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.market-access-field-error {
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
+
+.market-access-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* ── Package file picker ───────────────────────────────────────────────── */
+
+.market-access-file-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.market-access-file-picker-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 2px dashed var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  position: relative;
+}
+
+.market-access-file-picker-zone:hover {
+  border-color: var(--color-accent-text);
+  background: hsla(172, 55%, 42%, 0.04);
+  color: var(--color-text-secondary);
+}
+
+.market-access-file-picker-zone:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.market-access-file-picker-zone-dragover {
+  border-color: var(--color-accent-text);
+  background: hsla(172, 55%, 42%, 0.08);
+  color: var(--color-accent-text);
+}
+
+.market-access-file-picker-zone-selected {
+  border-style: solid;
+  color: var(--color-text-secondary);
+}
+
+.market-access-file-picker-text {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.market-access-file-picker-selected {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+  word-break: break-all;
+  text-align: center;
+}
+
+.market-access-file-picker-hint {
+  font-size: var(--text-2xs);
+  color: var(--color-text-quaternary);
+}
+
+.market-access-file-picker-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.market-access-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

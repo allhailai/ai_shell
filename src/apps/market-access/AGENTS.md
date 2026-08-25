@@ -4,7 +4,7 @@ Operational rules for safely modifying **this app as it exists**. Workflow lives
 
 ## Current status
 
-PR 1 Phase 2 is implemented: URL routing, left nav, and list/create/workspace shells. There is no create form, file picker, or assessment persistence.
+PR 1 Phase 3 is implemented: empty-state list, create form with product name and package file picker, colocated validation. Create navigates to the workspace with a stub id — in-memory assessment storage lands in Phase 4.
 
 Do not implement further phases until asked.
 
@@ -64,3 +64,12 @@ After any implementation phase:
 - [x] Collapsed left nav still shows icons; Analogs / Evidence / Knowledge are disabled
 - [x] `?nav=collapsed` is preserved when navigating inside the app
 - [x] No nested app `<main>`
+
+**Phase 3 manual checks**
+
+- [x] Empty state shows icon, title, honest session-only copy, and Create assessment CTA
+- [x] Create form: product name auto-focused; package picker click + drop; Markdown/DOCX hint visible
+- [x] Submit with empty fields shows `role="alert"` errors; `aria-invalid` on product name
+- [x] Invalid file type on drop/select shows rejection message
+- [x] Valid submit navigates to `/market-access/assessments/<id>` (stub — workspace has no stored metadata yet)
+- [x] Cancel returns to list

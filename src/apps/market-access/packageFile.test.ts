@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import {
+  getPackageFileExtension,
+  getPackageFileKind,
+  isAcceptedPackageFile,
+  packageFileRejectionMessage,
+} from "./packageFile";
+
+describe("getPackageFileExtension", () => {
+  it("returns lowercase extension without dot", () => {
+    expect(getPackageFileExtension("brief.MD")).toBe("md");
+    expect(getPackageFileExtension("package.markdown")).toBe("markdown");
+    expect(getPackageFileExtension("report.docx")).toBe("docx");
+  });
+
+  it("returns null for missing or trailing dot", () => {
+    expect(getPackageFileExtension("README")).toBeNull();
+    expect(getPackageFileExtension("file.")).toBeNull();
+  });
+});
+
+describe("isAcceptedPackageFile", () => {
+  it("accepts markdown and docx extensions", () => {
+    expect(isAcceptedPackageFile("brief.md")).toBe(true);
+    expect(isAcceptedPackageFile("brief.markdown")).toBe(true);
+    expect(isAcceptedPackageFile("brief.docx")).toBe(true);
+  });
+
+  it("rejects other extensions", () => {
+    expect(isAcceptedPackageFile("brief.pdf")).toBe(false);
+    expect(isAcceptedPackageFile("brief.doc")).toBe(false);
+    expect(isAcceptedPackageFile("brief.txt")).toBe(false);
+    expect(isAcceptedPackageFile("README")).toBe(false);
+  });
+});
+
+describe("getPackageFileKind", () => {
+  it("maps extensions to kind", () => {
+    expect(getPackageFileKind("a.md")).toBe("markdown");
+    expect(getPackageFileKind("a.markdown")).toBe("markdown");
+    expect(getPackageFileKind("a.docx")).toBe("docx");
+  });
+
+  it("returns null for unsupported files", () => {
+    expect(getPackageFileKind("a.pdf")).toBeNull();
+  });
+});
+
+describe("packageFileRejectionMessage", () => {
+  it("mentions supported types", () => {
+    expect(packageFileRejectionMessage("x.pdf")).toMatch(/not supported/i);
+    expect(packageFileRejectionMessage("README")).toMatch(/no file extension/i);
+  });
+});

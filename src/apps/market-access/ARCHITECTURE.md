@@ -22,7 +22,7 @@ structured or extracted project knowledge
 generated synthesis / assessment
 ```
 
-**Implementation status:** PR 1 Phase 2 — URL routing and left nav with list/create/workspace shells. No create form, file picker, or persistence. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+**Implementation status:** PR 1 Phase 3 — empty-state list, create form (product name + package file picker), colocated validation. Create uses stub navigation to workspace; in-memory assessments and list cards land in Phase 4. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
 ## Level 1 — File map
 
@@ -35,11 +35,14 @@ src/apps/market-access/
 ├── MarketAccessContent.tsx     # URL router (useAppSubRoute)
 ├── MarketAccessNav.tsx         # URL-only left nav
 ├── market-access.css           # Namespaced .market-access-* styles
+├── packageFile.ts              # Package extension/kind helpers
+├── packageFile.test.ts
 ├── components/
-│   └── MarketAccessIcons.tsx   # SVG icons
+│   ├── MarketAccessIcons.tsx   # SVG icons
+│   └── PackageFilePicker.tsx   # Click + drop file selection (no upload)
 ├── views/
-│   ├── AssessmentList.tsx      # List shell
-│   ├── CreateAssessment.tsx    # Create-route shell (no form yet)
+│   ├── AssessmentList.tsx      # List + empty state
+│   ├── CreateAssessment.tsx    # Create form + colocated validate()
 │   └── AssessmentWorkspace.tsx # Workspace overview shell
 └── plans/
     ├── README.md
@@ -59,13 +62,13 @@ Shell wiring: imported from [`src/apps/registry.ts`](../../apps/registry.ts); CS
 | URL | View |
 | --- | --- |
 | `/market-access` | `replace("assessments")` |
-| `/market-access/assessments` | List shell |
-| `/market-access/assessments/new` | Create shell (`new` reserved) |
+| `/market-access/assessments` | List + empty state |
+| `/market-access/assessments/new` | Create form |
 | `/market-access/assessments/:id` | Workspace overview shell |
 | Other first segments | List + flash; URL replaced to `assessments` |
 | `/assessments/:id/...` extra | Stripped to overview |
 
-In-memory assessments and unknown-id handling are not implemented.
+Create submits validate product name and one Markdown/DOCX package file, then navigate to a new workspace id (stub — payload not stored until Phase 4). In-memory list cards and unknown-id handling are not implemented.
 
 ## Level 4+
 

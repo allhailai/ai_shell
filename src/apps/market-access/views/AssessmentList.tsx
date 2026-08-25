@@ -1,10 +1,12 @@
+import { IconAssessments } from "../components/MarketAccessIcons";
+
 interface AssessmentListProps {
   flashMessage: string | null;
   onDismissFlash: () => void;
   onCreate: () => void;
 }
 
-/** List shell — empty-state copy and cards land in later PR 1 phases. */
+/** Assessments hub — empty state until in-memory cards land in Phase 4. */
 export function AssessmentList({
   flashMessage,
   onDismissFlash,
@@ -32,11 +34,22 @@ export function AssessmentList({
       <h1 id="market-access-list-heading" className="market-access-title">
         Assessments
       </h1>
-      <p className="market-access-subtitle">
-        Create an assessment for one product or asset. Nothing is saved to disk
-        yet.
-      </p>
-      <div className="market-access-actions">
+
+      <section
+        className="market-access-empty"
+        aria-labelledby="market-access-empty-heading"
+      >
+        <div className="market-access-empty-icon" aria-hidden>
+          <IconAssessments size={48} />
+        </div>
+        <h2 id="market-access-empty-heading" className="market-access-empty-title">
+          No assessments yet
+        </h2>
+        <p className="market-access-empty-text">
+          Create an assessment for one product or asset. Attach a Markdown or
+          Word package to research pharmaceutical analogs. Nothing is saved to
+          disk yet — assessments exist only for this browser session.
+        </p>
         <button
           type="button"
           className="market-access-btn market-access-btn-primary"
@@ -44,7 +57,7 @@ export function AssessmentList({
         >
           Create assessment
         </button>
-      </div>
+      </section>
     </div>
   );
 }

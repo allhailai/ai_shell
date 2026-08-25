@@ -64,6 +64,17 @@ export function IconEvidence({ size = 18, style, className }: IconProps) {
   );
 }
 
+/** Upload arrow — package file picker */
+export function IconUpload({ size = 18, style, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" {...defaults} style={style} className={className}>
+      <path d="M8 11V3" />
+      <path d="M4.5 6.5L8 3l3.5 3.5" />
+      <path d="M3 13h10" />
+    </svg>
+  );
+}
+
 /** Book — structured knowledge (future) */
 export function IconKnowledge({ size = 18, style, className }: IconProps) {
   return (

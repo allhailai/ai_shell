@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAppSubRoute } from "../../shell/useAppSubRoute";
 import { AssessmentList } from "./views/AssessmentList";
 import { AssessmentWorkspace } from "./views/AssessmentWorkspace";
-import { CreateAssessment } from "./views/CreateAssessment";
+import { CreateAssessment, type CreateAssessmentPayload } from "./views/CreateAssessment";
 
 const APP_ID = "market-access";
 
@@ -64,6 +64,11 @@ export function MarketAccessContent() {
         onCancel={() => {
           setFlashMessage(null);
           navigate("assessments");
+        }}
+        onCreate={(_payload: CreateAssessmentPayload) => {
+          // Phase 4 will store payload in root state; stub navigates to workspace.
+          setFlashMessage(null);
+          navigate(`assessments/${crypto.randomUUID()}`);
         }}
       />
     );

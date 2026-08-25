@@ -21,7 +21,7 @@ Mock/local UI state is allowed only to demonstrate navigation. PR 2 will add rea
 
 Work **one internal phase at a time**. Stop after each phase for review.
 
-**Progress:** Phases 1–2 implemented (scaffold + routing/nav shells). Phases 3–5 not started.
+**Progress:** Phases 1–3 implemented (scaffold + routing/nav + list/create form). Phases 4–5 not started.
 
 ---
 
@@ -212,9 +212,9 @@ App card opens from `/` to `/market-access` with a placeholder canvas. No list/c
 
 `useAppSubRoute` table, left nav `nav-item`s, unknown-route handling, list/create/workspace **shells** (minimal headings, no form yet). The list includes a Create assessment button so routing can be exercised without typing URLs.
 
-### Phase 3 — List + create form
+### Phase 3 — List + create form — done
 
-Empty state, product name, `PackageFilePicker`, colocated create validation, Cancel / Create. Create may navigate using in-memory state (wired fully in Phase 4 if still a stub).
+Empty state, product name, `PackageFilePicker`, colocated create validation, Cancel / Create. Create navigates with stub id (full in-memory state in Phase 4).
 
 ### Phase 4 — Workspace overview
 
