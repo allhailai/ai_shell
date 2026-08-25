@@ -4,80 +4,47 @@ Operational rules for safely modifying **this app as it exists**. Workflow lives
 
 ## Current status
 
-PR 1 Phase 4 is implemented: in-memory assessments in `MarketAccessContent`, session list cards, workspace overview with package metadata and placeholder sections, unknown-id banner. Phase 5 (hardening + doc sync) remains.
+**PR 1 (UI foundation) is complete.** Session-only create → list → workspace with product name and package file metadata. No disk persistence, parsing, or agent work yet.
 
-Do not implement further phases until asked.
+Next: **PR 2 — local persistence** (not started). Historical design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
-Active plan: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+## Conventions
 
-## Conventions (apply as soon as code exists)
+See [`APP_DEVELOPMENT_GUIDE.md`](../../../APP_DEVELOPMENT_GUIDE.md) and [`.agents/AGENTS.md`](../../../.agents/AGENTS.md). App-specific highlights:
 
-These match AIShell app norms. Details and examples: [`APP_DEVELOPMENT_GUIDE.md`](../../../APP_DEVELOPMENT_GUIDE.md), [`.agents/AGENTS.md`](../../../.agents/AGENTS.md).
-
-- **App ID / CSS prefix:** `market-access` / `.market-access-*`
-- **Design tokens only** — no hard-coded colors, spacing, or fonts
-- **URL is the router** — `useAppSubRoute("market-access")`; do not hand-roll `pushState` without preserving shell query params
-- **SVG icons only** — no emoji, no icon fonts; keep icons in `components/MarketAccessIcons.tsx` once that file exists
-- **No nested `<main>`** — shell already owns document `main`; views use `role="region"` + `aria-labelledby`
-- **Left nav** — shell `nav-item` / `nav-item-icon` / `nav-item-label` so collapsed mode works
-- **No app Zustand** in PR 1; no `/api/*` calls in PR 1
+- **App ID / CSS:** `market-access` / `.market-access-*` (design tokens only)
+- **Routing:** `useAppSubRoute("market-access")` — preserve shell query params
+- **Icons:** SVG in `components/MarketAccessIcons.tsx` only; no emoji
+- **Layout:** no nested `<main>`; views use `role="region"` + `aria-labelledby`
+- **Left nav:** shell `nav-item` / `nav-item-icon` / `nav-item-label`
 - **Spelling:** `analog` / `analogs` / `Analog` / `AnalogAssessment` — never “analogue”
+- **PR 1 data:** store package `{ fileName, fileSize, kind }` only — not the `File` blob or a path
 
-## File organization (once code exists)
+## File organization
 
 | What | Where |
 | --- | --- |
-| Manifest | `manifest.tsx` |
-| Router | `MarketAccessContent.tsx` |
-| Left nav | `MarketAccessNav.tsx` |
-| Views | `views/` |
-| Reusable UI | `components/` |
-| Styles | `market-access.css` (imported from `src/styles.css`) |
-| Shared types | `types.ts` when more than one module needs them |
+| Router + session state | `MarketAccessContent.tsx` |
+| Views / components | `views/` / `components/` |
+| Types | `types.ts` |
+| Package helpers | `packageFile.ts` (+ `packageFile.test.ts`) |
+| Styles | `market-access.css` |
 
-Do not add `server/` routes, shared FolderPicker usage, or agent/Cursor modules unless the active plan says so.
+No `server/` routes, FolderPicker, or agent modules unless the active plan says so.
 
-## Verification checklist
+## Verification
 
-After any implementation phase:
+**Automated (every change):** `npm run check`; `npm test market-access` when touching pure helpers.
 
-- [ ] `npm run check` passes
-- [ ] Targeted Vitest tests pass when pure helpers exist (`npm test -- src/apps/market-access`)
-- [ ] CSS classes are prefixed `market-access-` and use tokens
-- [ ] No emoji in TSX
-- [ ] No nested app `<main>`
-- [ ] Sub-routes preserve shell query params (`?nav=`, `?rp=`, and similar)
+**Manual smoke (after routing, create, list, or workspace changes):**
 
-**Phase 1 manual checks**
+1. Create assessment (name + package) → workspace shows metadata → **All assessments** → reopen from list card
+2. Refresh clears session assessments; unknown `/assessments/<id>` → list + “not saved yet” banner
+3. `?nav=collapsed` preserved when navigating; collapsed nav still shows icons
 
-- [x] Shell landing page shows a **Market Access** card
-- [x] Opening the card navigates to `/market-access`
+## Common mistakes
 
-**Phase 2 manual checks**
-
-- [x] `/market-access` redirects to `/market-access/assessments`
-- [x] Create assessment → `/market-access/assessments/new`; Cancel returns to the list
-- [x] `/market-access/assessments/<id>` shows the workspace shell; All assessments returns to the list
-- [x] Unknown path (e.g. `/market-access/nope`) returns to the list with a dismissible banner
-- [x] Extra workspace segment (e.g. `/market-access/assessments/demo/analogs`) strips to overview
-- [x] Browser back/forward restores the matching view
-- [x] Collapsed left nav still shows icons; Analogs / Evidence / Knowledge are disabled
-- [x] `?nav=collapsed` is preserved when navigating inside the app
-- [x] No nested app `<main>`
-
-**Phase 3 manual checks**
-
-- [x] Empty state shows icon, title, honest session-only copy, and Create assessment CTA
-- [x] Create form: product name auto-focused; package picker click + drop; Markdown/DOCX hint visible
-- [x] Submit with empty fields shows `role="alert"` errors; `aria-invalid` on product name
-- [x] Invalid file type on drop/select shows rejection message
-- [x] Valid submit navigates to `/market-access/assessments/<id>` (stub — workspace has no stored metadata yet)
-- [x] Cancel returns to list
-
-**Phase 4 manual checks**
-
-- [x] Create → workspace shows product name, package metadata (name/size/format)
-- [x] Workspace placeholder cards for Analogs, Evidence, Knowledge do not claim generated output is authoritative
-- [x] All assessments → list shows session cards; clicking a card reopens workspace
-- [x] Refresh clears in-memory assessments; deep link to old id shows “not saved yet” banner
-- [x] Unknown id (e.g. `/market-access/assessments/missing-id`) redirects to list with dismissible banner
+1. Hand-rolled `pushState` — use `useAppSubRoute`
+2. Hard-coded colors or custom nav blocks (breaks collapsed mode)
+3. Storing `File` blobs or filesystem paths in assessment state
+4. Inline SVG / emoji outside `MarketAccessIcons.tsx`

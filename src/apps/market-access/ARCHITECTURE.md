@@ -22,7 +22,7 @@ structured or extracted project knowledge
 generated synthesis / assessment
 ```
 
-**Implementation status:** PR 1 Phase 4 — in-memory assessments, session list cards, workspace overview with package metadata and placeholder sections. Active design: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+**Implementation status:** PR 1 complete — session-only create → list → workspace flow with package metadata and placeholder sections. Next: PR 2 (local persistence). Design record: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
 
 ## Level 1 — File map
 
@@ -82,3 +82,20 @@ Create validates product name and one Markdown/DOCX package file, appends an `As
 | Current view | URL via `useAppSubRoute` |
 
 No `localStorage`, Zustand, or `/api/*` in PR 1.
+
+## Level 5 — PR 1 boundaries
+
+Implemented in PR 1:
+
+- Shell registration, URL routing, left nav
+- Create form (product name + one Markdown/DOCX package file)
+- In-memory session assessments and list cards
+- Workspace overview with package metadata and non-authoritative placeholders
+
+Explicitly deferred to later PRs:
+
+- Disk / project-directory persistence (PR 2)
+- Package parsing and file copy (PR 2+)
+- Agent harness and analog research (PR 3+)
+- Knowledge repository generation (PR 4+)
+- Rename, delete, routed sub-pages, right-panel assistant

@@ -4,6 +4,7 @@ import {
   getPackageFileExtension,
   getPackageFileKind,
   isAcceptedPackageFile,
+  PACKAGE_FILE_ACCEPT,
   packageFileKindLabel,
   packageFileRejectionMessage,
 } from "./packageFile";
@@ -41,10 +42,20 @@ describe("getPackageFileKind", () => {
     expect(getPackageFileKind("a.md")).toBe("markdown");
     expect(getPackageFileKind("a.markdown")).toBe("markdown");
     expect(getPackageFileKind("a.docx")).toBe("docx");
+    expect(getPackageFileKind("Brief.MD")).toBe("markdown");
   });
 
-  it("returns null for unsupported files", () => {
+  it("returns null for unsupported or extensionless files", () => {
     expect(getPackageFileKind("a.pdf")).toBeNull();
+    expect(getPackageFileKind("a.doc")).toBeNull();
+    expect(getPackageFileKind("a.txt")).toBeNull();
+    expect(getPackageFileKind("README")).toBeNull();
+  });
+});
+
+describe("PACKAGE_FILE_ACCEPT", () => {
+  it("lists PR 1 package extensions for the file input", () => {
+    expect(PACKAGE_FILE_ACCEPT).toBe(".md,.markdown,.docx");
   });
 });
 

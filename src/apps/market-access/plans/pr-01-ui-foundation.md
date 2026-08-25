@@ -4,6 +4,8 @@ Canonical PR 1 plan. Do not maintain a second evolving copy elsewhere.
 
 **Goal:** register a Market Access app in AIShell and establish the guided create → workspace UX. **UI foundation only.**
 
+**Status:** **Complete** (Phases 1–5). PR 2 planning is separate.
+
 **Not this PR:** filesystem or project-directory creation, real persistence, package parsing, backend/server routes, Cursor CLI or other agent invocation, internet research, analog generation, knowledge-repository generation, Navlin, presentation generation, confidential Alnylam data, SaaS/auth/cloud infrastructure.
 
 ---
@@ -21,7 +23,7 @@ Mock/local UI state is allowed only to demonstrate navigation. PR 2 will add rea
 
 Work **one internal phase at a time**. Stop after each phase for review.
 
-**Progress:** Phases 1–4 implemented. Phase 5 (hardening) not started.
+**Progress:** Phases 1–5 implemented. PR 1 UI foundation complete.
 
 ---
 
@@ -220,9 +222,9 @@ Empty state, product name, `PackageFilePicker`, colocated create validation, Can
 
 In-memory assessments in `MarketAccessContent`, workspace metadata + placeholder cards (Analogs / Evidence / Knowledge), session list cards, honest “not persisted” copy.
 
-### Phase 5 — Hardening
+### Phase 5 — Hardening — done
 
-`packageFile` tests, `npm run check`, move durable manual checks into `AGENTS.md`, sync `ARCHITECTURE.md` Level 1 file map to match implemented files.
+`packageFile` tests, `npm run check`, durable manual checks in `AGENTS.md`, `ARCHITECTURE.md` Level 1 file map synced to implemented files.
 
 ---
 
