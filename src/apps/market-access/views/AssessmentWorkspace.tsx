@@ -6,7 +6,7 @@ import {
 } from "../components/MarketAccessIcons";
 import {
   formatPackageFileSize,
-  packageFileKindLabel,
+  packageFormatLabel,
 } from "../packageFile";
 import type { Assessment } from "../types";
 
@@ -55,7 +55,7 @@ export function AssessmentWorkspace({ assessment }: AssessmentWorkspaceProps) {
           <div className="market-access-meta-row">
             <dt className="market-access-meta-label">Format</dt>
             <dd className="market-access-meta-value">
-              {packageFileKindLabel(packageFile.kind)}
+              {packageFormatLabel(packageFile.format)}
             </dd>
           </div>
         </dl>

@@ -1,13 +1,20 @@
-/** Accepted package document kinds for PR 1 (Markdown or DOCX only). */
-export type PackageFileKind = "markdown" | "docx";
+/** Accepted package document formats. Extensions map to these values — do not store raw extensions or MIME types. */
+export type PackageFormat = "markdown" | "docx" | "pptx";
 
 /** Browser `accept` attribute for the hidden file input. */
-export const PACKAGE_FILE_ACCEPT = ".md,.markdown,.docx";
+export const PACKAGE_FILE_ACCEPT = ".md,.markdown,.docx,.pptx";
 
-const EXTENSION_KIND: Record<string, PackageFileKind> = {
+/** Product name character cap (client UX; server will enforce the same). */
+export const MAX_PRODUCT_NAME_LENGTH = 200;
+
+/** Package file size cap in bytes (20 MiB). */
+export const MAX_PACKAGE_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
+const EXTENSION_FORMAT: Record<string, PackageFormat> = {
   md: "markdown",
   markdown: "markdown",
   docx: "docx",
+  pptx: "pptx",
 };
 
 /** Lowercase extension without a leading dot, or null when none. */
@@ -19,27 +26,42 @@ export function getPackageFileExtension(fileName: string): string | null {
 
 export function isAcceptedPackageFile(fileName: string): boolean {
   const ext = getPackageFileExtension(fileName);
-  return ext !== null && ext in EXTENSION_KIND;
+  return ext !== null && ext in EXTENSION_FORMAT;
 }
 
-export function getPackageFileKind(fileName: string): PackageFileKind | null {
+export function getPackageFormat(fileName: string): PackageFormat | null {
   const ext = getPackageFileExtension(fileName);
   if (!ext) return null;
-  return EXTENSION_KIND[ext] ?? null;
+  return EXTENSION_FORMAT[ext] ?? null;
+}
+
+export function isProductNameTooLong(name: string): boolean {
+  return name.length > MAX_PRODUCT_NAME_LENGTH;
+}
+
+export function isPackageFileTooLarge(sizeBytes: number): boolean {
+  return sizeBytes > MAX_PACKAGE_FILE_SIZE_BYTES;
 }
 
 /** User-facing rejection when an extension is not allowed. */
 export function packageFileRejectionMessage(fileName: string): string {
   const ext = getPackageFileExtension(fileName);
   if (!ext) {
-    return `"${fileName}" has no file extension. Use Markdown (.md) or Word (.docx).`;
+    return `"${fileName}" has no file extension. Use Markdown (.md), Word (.docx), or PowerPoint (.pptx).`;
   }
-  return `"${fileName}" is not supported. Use Markdown (.md, .markdown) or Word (.docx) only.`;
+  return `"${fileName}" is not supported. Use Markdown (.md, .markdown), Word (.docx), or PowerPoint (.pptx) only.`;
 }
 
 /** Display label for stored package metadata. */
-export function packageFileKindLabel(kind: PackageFileKind): string {
-  return kind === "markdown" ? "Markdown" : "Word document";
+export function packageFormatLabel(format: PackageFormat): string {
+  switch (format) {
+    case "markdown":
+      return "Markdown";
+    case "docx":
+      return "Word document";
+    case "pptx":
+      return "PowerPoint";
+  }
 }
 
 /** Compact human-readable file size for UI metadata. */

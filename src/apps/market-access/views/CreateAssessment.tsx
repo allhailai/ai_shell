@@ -1,6 +1,11 @@
 import { useCallback, useState, type SubmitEventHandler } from "react";
 import { PackageFilePicker } from "../components/PackageFilePicker";
-import { getPackageFileKind, isAcceptedPackageFile } from "../packageFile";
+import {
+  getPackageFormat,
+  isAcceptedPackageFile,
+  isPackageFileTooLarge,
+  isProductNameTooLong,
+} from "../packageFile";
 import type { CreateAssessmentInput } from "../types";
 
 interface CreateAssessmentProps {
@@ -26,14 +31,20 @@ export function CreateAssessment({ onCancel, onCreate }: CreateAssessmentProps) 
 
   function validate(): FieldErrors | null {
     const errors: FieldErrors = {};
-    if (!productName.trim()) {
+    const trimmedName = productName.trim();
+    if (!trimmedName) {
       errors.productName = "Product or drug name is required.";
+    } else if (isProductNameTooLong(trimmedName)) {
+      errors.productName =
+        "Product or drug name must be 200 characters or fewer.";
     }
     if (!packageFile) {
       errors.packageFile = "A package file is required.";
     } else if (!isAcceptedPackageFile(packageFile.name)) {
       errors.packageFile =
-        "Use a Markdown (.md, .markdown) or Word (.docx) package file.";
+        "Use a Markdown (.md, .markdown), Word (.docx), or PowerPoint (.pptx) package file.";
+    } else if (isPackageFileTooLarge(packageFile.size)) {
+      errors.packageFile = "Package file must be 20 MiB or smaller.";
     }
     return Object.keys(errors).length > 0 ? errors : null;
   }
@@ -47,11 +58,11 @@ export function CreateAssessment({ onCancel, onCreate }: CreateAssessmentProps) 
         return;
       }
 
-      const kind = getPackageFileKind(packageFile!.name);
-      if (!kind) {
+      const format = getPackageFormat(packageFile!.name);
+      if (!format) {
         setFieldErrors({
           packageFile:
-            "Use a Markdown (.md, .markdown) or Word (.docx) package file.",
+            "Use a Markdown (.md, .markdown), Word (.docx), or PowerPoint (.pptx) package file.",
         });
         return;
       }
@@ -62,7 +73,7 @@ export function CreateAssessment({ onCancel, onCreate }: CreateAssessmentProps) 
         packageFile: {
           fileName: packageFile!.name,
           fileSize: packageFile!.size,
-          kind,
+          format,
         },
       });
     },

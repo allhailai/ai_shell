@@ -1,10 +1,10 @@
-import type { PackageFileKind } from "./packageFile";
+import type { PackageFormat } from "./packageFile";
 
 /** Package document metadata stored on create — not the File blob or a filesystem path. */
 export interface PackageFileMetadata {
   fileName: string;
   fileSize: number;
-  kind: PackageFileKind;
+  format: PackageFormat;
 }
 
 /** In-memory assessment view-model for one product/asset workspace. */

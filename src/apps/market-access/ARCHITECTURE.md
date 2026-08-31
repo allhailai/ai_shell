@@ -22,7 +22,7 @@ structured or extracted project knowledge
 generated synthesis / assessment
 ```
 
-**Implementation status:** PR 1 complete — session-only create → list → workspace flow with package metadata and placeholder sections. Next: PR 2 (local persistence). Design record: [`plans/pr-01-ui-foundation.md`](plans/pr-01-ui-foundation.md).
+**Implementation status:** PR 1 complete — session-only create → list → workspace. PR 2 Phase 1 complete — `PackageFormat` (`markdown` | `docx` | `pptx`) and client 200-character / 20 MiB checks. Persistence is still session-only. Next: PR 2 Phase 2 (service and API).
 
 ## Level 1 — File map
 
@@ -36,7 +36,7 @@ src/apps/market-access/
 ├── MarketAccessNav.tsx         # URL-only left nav
 ├── market-access.css           # Namespaced .market-access-* styles
 ├── types.ts                    # Assessment view-model
-├── packageFile.ts              # Package extension/kind helpers
+├── packageFile.ts              # Package extension/format helpers
 ├── packageFile.test.ts
 ├── components/
 │   ├── MarketAccessIcons.tsx   # SVG icons
@@ -47,7 +47,8 @@ src/apps/market-access/
 │   └── AssessmentWorkspace.tsx # Overview + placeholder sections
 └── plans/
     ├── README.md
-    └── pr-01-ui-foundation.md
+    ├── pr-01-ui-foundation.md  # Historical
+    └── pr-02-local-persistence.md
 ```
 
 Shell wiring: imported from [`src/apps/registry.ts`](../../apps/registry.ts); CSS imported from [`src/styles.css`](../../styles.css).
@@ -70,7 +71,7 @@ Shell wiring: imported from [`src/apps/registry.ts`](../../apps/registry.ts); CS
 | `/assessments/:id/...` extra | Stripped to overview |
 | Unknown `:id` | List + “not saved yet” flash |
 
-Create validates product name and one Markdown/DOCX package file, appends an `Assessment` to root state, and navigates to the new workspace. Refresh clears assessments; unknown ids redirect to the list.
+Create validates product name (required, max 200 characters) and one Markdown/DOCX/PPTX package file (accepted extension, 20 MiB cap), appends an `Assessment` to root state, and navigates to the new workspace. Refresh clears assessments; unknown ids redirect to the list.
 
 ## Level 4 — State
 
@@ -78,23 +79,24 @@ Create validates product name and one Markdown/DOCX package file, appends an `As
 | --- | --- |
 | In-memory assessments | `useState<Assessment[]>` in `MarketAccessContent` |
 | Create-form fields / errors | Local `useState` in `CreateAssessment` |
-| Package on disk | Not stored — metadata `{ fileName, fileSize, kind }` only |
+| Package on disk | Not stored — metadata `{ fileName, fileSize, format }` only |
 | Current view | URL via `useAppSubRoute` |
 
-No `localStorage`, Zustand, or `/api/*` in PR 1.
+No `localStorage`, Zustand, or `/api/*` yet. Persistence remains session-only.
 
-## Level 5 — PR 1 boundaries
+## Level 5 — Current boundaries
 
-Implemented in PR 1:
+Implemented:
 
 - Shell registration, URL routing, left nav
-- Create form (product name + one Markdown/DOCX package file)
+- Create form (product name + one Markdown/DOCX/PPTX package file)
+- Client submit checks: name required and ≤ 200 characters; file required; accepted extension; 20 MiB size cap
 - In-memory session assessments and list cards
 - Workspace overview with package metadata and non-authoritative placeholders
 
-Explicitly deferred to later PRs:
+Explicitly deferred:
 
-- Disk / project-directory persistence (PR 2)
+- Disk / project-directory persistence (PR 2 Phase 2+)
 - Package parsing and file copy (PR 2+)
 - Agent harness and analog research (PR 3+)
 - Knowledge repository generation (PR 4+)

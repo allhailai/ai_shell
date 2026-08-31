@@ -1,5 +1,5 @@
 import { IconAssessments } from "../components/MarketAccessIcons";
-import { packageFileKindLabel } from "../packageFile";
+import { packageFormatLabel } from "../packageFile";
 import type { Assessment } from "../types";
 
 interface AssessmentListProps {
@@ -82,7 +82,7 @@ export function AssessmentList({
                     </span>
                     <span className="market-access-assessment-card-meta">
                       {assessment.packageFile.fileName} ·{" "}
-                      {packageFileKindLabel(assessment.packageFile.kind)}
+                      {packageFormatLabel(assessment.packageFile.format)}
                     </span>
                   </button>
                 </article>
@@ -102,8 +102,8 @@ export function AssessmentList({
             No assessments yet
           </h2>
           <p className="market-access-empty-text">
-            Create an assessment for one product or asset. Attach a Markdown or
-            Word package to research pharmaceutical analogs.
+            Create an assessment for one product or asset. Attach a Markdown,
+            Word, or PowerPoint package to research pharmaceutical analogs.
           </p>
         </section>
       )}
